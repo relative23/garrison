@@ -3,8 +3,13 @@
   "extends": ["config:recommended", ":semanticCommitsDisabled", "helpers:pinGitHubActionDigests"],
   "minimumReleaseAge": "14 days",
   "internalChecksFilter": "strict",
-  "rangeStrategy": "pin",
   "packageRules": [
+    {
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["dependencies", "devDependencies"],
+      "rangeStrategy": "pin",
+      "description": "Exact versions for npm packages only. Cargo keeps its ranges and updates Cargo.lock, and the engines range stays open (Renovate's default for both)."
+    },
     {
       "matchManagers": ["npm"],
       "matchUpdateTypes": ["minor", "patch"],

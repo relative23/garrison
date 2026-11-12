@@ -399,9 +399,10 @@ Every dependency is code that runs on a mail host, so the bar is high.
 4. Install npm packages with `--ignore-scripts`; a package that needs an
    install script needs a review.
 
-Renovate (`renovate.json`) proposes updates once a release is 14 days old and
-keeps the GitHub Actions pinned to commit digests; review its pull requests
-like any other change.
+Renovate (`renovate.json`) proposes updates once a release is 14 days old,
+keeps npm packages at exact versions, moves Rust crates through `Cargo.lock`
+and keeps the GitHub Actions pinned to commit digests; review its pull
+requests like any other change.
 
 ## Releases
 
