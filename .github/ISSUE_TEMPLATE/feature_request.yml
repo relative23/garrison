@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose something Garrison should show or do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Garrison shows only what it adds to Stalwart: health, history and reviewed
+        maintenance. Changes to accounts, domains and other Stalwart settings belong
+        in the Stalwart WebUI.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does it solve?
+      description: What do you need to see or do, and how do you manage today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Where does the information come from?
+      description: >
+        A Stalwart API, a file, a command, a metric? Garrison shows only what it can
+        observe, and says how it was obtained.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

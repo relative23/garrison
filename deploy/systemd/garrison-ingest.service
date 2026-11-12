@@ -1,0 +1,46 @@
+[Unit]
+Description=Garrison - Stalwart event receiver
+After=network.target
+
+[Service]
+# Started once the service is listening: a release that cannot come up
+# fails its start, and the installer switches back.
+Type=notify
+TimeoutStartSec=30
+User=garrison-ingest
+Group=garrison
+ExecStart=/opt/garrison/current/bin/garrison ingest
+LoadCredential=webhook-signature-key:/etc/garrison/credentials/webhook-signature-key
+Restart=on-failure
+RestartSec=2
+StateDirectory=garrison/ingest
+StateDirectoryMode=0750
+UMask=0027
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+MemoryMax=256M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

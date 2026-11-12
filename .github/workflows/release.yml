@@ -1,0 +1,64 @@
+name: Release
+
+# Builds the archives of a tag twice, requires both builds to be identical and
+# attests where they came from. It publishes and signs nothing: the maintainer
+# rebuilds locally, compares the checksums with these, and signs with the key
+# only they hold (CONTRIBUTING.md, "Signing releases"). GitHub keeps
+# attestations for public repositories only, so a private one skips that step
+# and still keeps the archives and their checksums.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # The build provenance attestation.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the toolchain from rust-toolchain.toml and the musl targets
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+      - name: Install Zig 0.17.0, checked against ziglang.org's checksum
+        run: |
+          curl -fsSLO https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz
+          echo "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026  zig-x86_64-linux-0.17.0.tar.xz" | sha256sum -c -
+          tar xf zig-x86_64-linux-0.17.0.tar.xz
+          echo "$PWD/zig-x86_64-linux-0.17.0" >> "$GITHUB_PATH"
+      - name: Install cargo-zigbuild 0.23.4
+        run: cargo install --locked cargo-zigbuild --version 0.23.4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Build both archives
+        run: cargo xtask release
+      - name: Build again; both builds must be identical
+        run: |
+          mkdir first
+          mv dist/garrison-*.tar.gz first/
+          rm -rf dist
+          cargo xtask release
+          for archive in first/*.tar.gz; do cmp "$archive" "dist/${archive#first/}"; done
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: ${{ !github.event.repository.private }}
+        with:
+          subject-path: dist/garrison-*.tar.gz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            dist/garrison-*.tar.gz
+            dist/garrison-*.tar.gz.sha256
+            dist/garrison-*.cdx.json
+          if-no-files-found: error

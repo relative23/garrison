@@ -1,0 +1,6 @@
+# Generated files and build output; package.json and the lockfile belong to npm.
+api/
+coverage/
+dist/
+src/api/schema.gen.ts
+package-lock.json

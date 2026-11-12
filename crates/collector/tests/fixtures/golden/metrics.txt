@@ -1,0 +1,10 @@
+# HELP x
+stalwart_queue_message_queued_total 7
+stalwart_delivery_completed_total 5
+stalwart_server_memory_bytes 314572800
+stalwart_smtp_active_connections 2
+stalwart_imap_active_connections 1
+stalwart_http_active_connections 4
+stalwart_http_request_time_seconds_bucket{le="0.1"} 4
+stalwart_auth_failed_total 9
+broken value

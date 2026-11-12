@@ -1,0 +1,530 @@
+{
+  "account": {
+    "access": "Access is granted by your Stalwart roles and the Garrison access policy. Administrators manage it with <code>garrison access</code> on the server.",
+    "account": "Account",
+    "none": "None",
+    "profiles": "Profiles",
+    "sessionEnds": "Session ends",
+    "signOut": "Sign out",
+    "signOutFailed": "Sign-out did not complete, so this browser is still signed in. Check the connection and try again.",
+    "title": "Signed in",
+    "version": "Garrison version"
+  },
+  "actions": {
+    "cancel": "Cancel",
+    "confirm": "Type <phrase/> to confirm.",
+    "cooldown": "Cooldown {{duration}}",
+    "empty": "No jobs in the retained audit.",
+    "intro": "Each action starts or restarts one reviewed system service. Closing this page does not stop a running job, and a timed-out observation is reported as \"uncertain\" rather than retried.",
+    "job": "Job {{id}}: {{status}} — {{message}}",
+    "noActions": "Your profile grants no maintenance actions.",
+    "notSent": "The request could not be sent.",
+    "recentJobs": "Recent jobs",
+    "run": "Run…",
+    "start": "Start",
+    "starting": "Starting…",
+    "column": {
+      "action": "Action",
+      "message": "Message",
+      "requestedBy": "Requested by",
+      "result": "Result",
+      "started": "Started"
+    },
+    "status": {
+      "failed": "Failed",
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "uncertain": "Result uncertain"
+    }
+  },
+  "app": {
+    "loading": "Loading Garrison…",
+    "viewFailed": "This page could not be shown. Reload the page; the other pages may still work."
+  },
+  "attacks": {
+    "accounts": "Accounts under attack",
+    "accountsNote": "A name someone tried is shown only where an account of that name exists. Other names are not recorded: they may be passwords typed into the wrong field.",
+    "bans": "Stalwart's bans",
+    "footer": "From recorded events between {{from}} and {{to}}. Each list shows at most 50 rows.",
+    "networks": "Networks with several addresses",
+    "sources": "Addresses",
+    "truncated": "More events were recorded in this period than are counted here; the figures are those of the newest events.",
+    "column": {
+      "account": "Account",
+      "accounts": "Accounts tried",
+      "address": "Address",
+      "addresses": "Addresses",
+      "banned": "Banned",
+      "bans": "Bans",
+      "failedSignIns": "Failed sign-ins",
+      "lastAttempt": "Last attempt",
+      "lastSeen": "Last seen",
+      "network": "Network",
+      "reason": "Reason",
+      "tlsErrors": "TLS errors"
+    },
+    "empty": {
+      "accounts": "No failed sign-in named an existing account.",
+      "bans": "Stalwart banned no address in this period.",
+      "networks": "No network was seen with more than one address.",
+      "sources": "No failed sign-in, ban or TLS error was recorded in this period."
+    },
+    "figure": {
+      "bans": "Bans",
+      "failedSignIns": "Failed sign-ins",
+      "sources": "Addresses",
+      "tlsErrors": "TLS handshake errors",
+      "unknownAccounts": "For no existing account"
+    },
+    "reason": {
+      "abuse": "Abuse, such as guessing recipients",
+      "authentication": "Too many failed sign-ins",
+      "loiter": "Loitering: connections that do nothing",
+      "scan": "Scanning for exploits"
+    }
+  },
+  "charts": {
+    "empty": "No samples were recorded for this period.",
+    "totals": "In this period: {{totals}}"
+  },
+  "common": {
+    "labelValue": "{{label}}: {{value}}",
+    "loading": "Loading…",
+    "reference": "Reference {{reference}} in the journal of garrison-web",
+    "refresh": "Refresh",
+    "requestFailed": "The request failed.",
+    "search": "Search",
+    "tryAgain": "Try again"
+  },
+  "dashboard": {
+    "attention": " · {{count}} need attention",
+    "checks_one": "{{count}} check",
+    "checks_other": "{{count}} checks",
+    "counterResets_one": " {{count}} counter reset (service restart) was accounted for.",
+    "counterResets_other": " {{count}} counter resets (service restarts) were accounted for.",
+    "dashboardOnly": "Your profile grants only the dashboard. Ask an administrator for more modules.",
+    "gaps": "Gaps in the charts are periods without samples; they are not zero.",
+    "health": "Health",
+    "history": "History",
+    "loadingCharts": "Loading charts…",
+    "noSamples": "No samples were recorded in this period.",
+    "period": "Period",
+    "periodDays_one": "{{count}} day",
+    "periodDays_other": "{{count}} days",
+    "periodHours_one": "{{count}} hour",
+    "periodHours_other": "{{count}} hours",
+    "samples": "Samples from {{from}} to {{to}}.",
+    "stale": " · {{count}} stale",
+    "chart": {
+      "classification": "Classification",
+      "connections": "Connections",
+      "mailFlow": "Mail flow",
+      "queue": "Queue",
+      "resources": "Resources",
+      "security": "Security"
+    },
+    "figure": {
+      "diskFree": "Disk free",
+      "healthyServices": "Healthy services",
+      "memoryUsed": "Memory used",
+      "queuedMessages": "Queued messages",
+      "shortestCertificate": "Shortest certificate validity",
+      "signatureAge": "Signature age"
+    },
+    "series": {
+      "authFailed": "Failed sign-ins",
+      "bans": "Bans",
+      "delivered": "Delivered",
+      "diskFree": "Disk free (GiB)",
+      "ham": "Ham",
+      "http": "HTTP",
+      "imap": "IMAP",
+      "load": "Load",
+      "memoryUsed": "Memory used (GiB)",
+      "milterRejected": "Milter rejected",
+      "queuedMessages": "Queued messages",
+      "received": "Received",
+      "smtp": "SMTP",
+      "spam": "Spam",
+      "submitted": "Submitted"
+    }
+  },
+  "deliveries": {
+    "all": "All deliveries",
+    "delivered": "\"Delivered\" means the receiving server accepted the message, not that it reached an inbox.",
+    "empty": "No recorded deliveries match.",
+    "evidenceComplete": "Every recipient's outcome was recorded",
+    "evidenceIncomplete": "Not every recipient's outcome was recorded",
+    "incomplete": " (incomplete)",
+    "queue": "Queue {{id}}",
+    "search": "Search by address, domain or queue ID",
+    "truncated": "Only the first events of this queue are shown.",
+    "views": "View",
+    "column": {
+      "from": "From",
+      "lastActivity": "Last activity",
+      "queue": "Queue",
+      "status": "Status",
+      "to": "To"
+    },
+    "field": {
+      "firstSeen": "First seen",
+      "from": "From",
+      "lastSeen": "Last seen",
+      "outcome": "Recorded outcome",
+      "recipient": "Recipient",
+      "recordedEvents": "Recorded events"
+    },
+    "status": {
+      "completed": "Completed",
+      "deferred": "Deferred",
+      "delivered": "Delivered",
+      "failed": "Failed",
+      "in-progress": "In progress",
+      "partial": "Partial",
+      "queued": "Queued",
+      "unknown": "Unknown"
+    },
+    "view": {
+      "messages": "Messages",
+      "problems": "Problems by destination"
+    }
+  },
+  "events": {
+    "newest": "Newest",
+    "older": "Older",
+    "queue": "Queue {{id}}",
+    "session": "Session {{id}}",
+    "showing_one": "Showing {{count}} entry",
+    "showing_other": "Showing {{count}} entries",
+    "showingNewest_one": "Showing {{count}} entry, newest first",
+    "showingNewest_other": "Showing {{count}} entries, newest first",
+    "coverage": {
+      "canShow": "What this history can show",
+      "count_one": "{{value}} event",
+      "count_other": "{{value}} events",
+      "gap": "{{start}} – {{end}}: {{reason}}",
+      "gaps": "Recording gaps",
+      "gapsFound_one": "{{count}} recording gap. Events in this period may be missing.",
+      "gapsFound_other": "{{count}} recording gaps. Events in these periods may be missing.",
+      "received": "last received {{when}}",
+      "receivedNever": "nothing received yet",
+      "receiverQuiet": "The event receiver has not reported recently; recording may have stopped.",
+      "receiverQuietSince": "The event receiver has not reported since {{time}}; recording may have stopped.",
+      "retentionUnknown": "retention unknown",
+      "retention_one": "retention {{count}} day",
+      "retention_other": "retention {{count}} days",
+      "summary": "Recording since {{since}} · {{events}} · {{received}} · {{retention}}.",
+      "trimmed": {
+        "bytes": "Events before {{time}} were removed to stay within the storage budget, so the history is shorter than its retention.",
+        "events": "Events before {{time}} were removed to stay within the event limit, so the history is shorter than its retention.",
+        "other": "Events before {{time}} were removed to stay within a size limit, so the history is shorter than its retention."
+      },
+      "unavailable": "The event history is not available yet. Check the receiver service."
+    },
+    "gapReason": {
+      "receiver-offline": "The event receiver was offline for longer than Stalwart buffers events."
+    }
+  },
+  "evidence": {
+    "configuration": {
+      "explanation": "A file or API setting was read. It does not prove that a running process uses it.",
+      "label": "Configuration"
+    },
+    "inventory": {
+      "explanation": "Installed files, versions or directory entries were listed.",
+      "label": "Inventory"
+    },
+    "metric": {
+      "explanation": "A value exported by a running service.",
+      "label": "Metric"
+    },
+    "probe": {
+      "explanation": "The collector performed an active check, such as a TLS handshake.",
+      "label": "Probe"
+    },
+    "process": {
+      "explanation": "A service or endpoint responded. It does not prove that mail was handled.",
+      "label": "Process"
+    },
+    "receipt": {
+      "explanation": "A dated result reported by another job. It is not a current test.",
+      "label": "Receipt"
+    }
+  },
+  "format": {
+    "ago": "{{duration}} ago",
+    "days": "{{value}} d",
+    "gib": "{{value}} GiB",
+    "hours": "{{value}} h",
+    "inFuture": "in {{duration}}",
+    "justNow": "just now",
+    "milliseconds": "{{value}} ms",
+    "minutes": "{{value}} min",
+    "no": "No",
+    "seconds": "{{value}} s",
+    "unknown": "Unknown",
+    "wholeDays_one": "{{value}} day",
+    "wholeDays_other": "{{value}} days",
+    "yes": "Yes"
+  },
+  "layout": {
+    "account": "Account",
+    "closeMenu": "Close menu",
+    "darkTheme": "Use the dark theme",
+    "lightTheme": "Use the light theme",
+    "openMenu": "Open menu",
+    "skip": "Skip to content",
+    "link": {
+      "alarms": "Alerts channel",
+      "webmail": "Webmail"
+    }
+  },
+  "logs": {
+    "category": "Category",
+    "empty": "No recorded events match.",
+    "search": "Search events (address, host, IP, type)",
+    "categories": {
+      "all": "All categories",
+      "auth": "Authentication",
+      "delivery": "Delivery",
+      "message-ingest": "Message ingest",
+      "milter": "Milter",
+      "mta-hook": "MTA hook",
+      "queue": "Queue",
+      "security": "Security",
+      "server": "Server",
+      "smtp": "SMTP sessions",
+      "spam": "Spam",
+      "telemetry": "Telemetry",
+      "tls": "TLS"
+    },
+    "column": {
+      "details": "Details",
+      "event": "Event",
+      "related": "Related",
+      "time": "Time"
+    }
+  },
+  "modules": {
+    "actions": {
+      "description": "Reviewed maintenance operations with confirmation and audit.",
+      "intro": "Reviewed maintenance operations. Each run needs confirmation and is audited.",
+      "label": "Maintenance"
+    },
+    "alerts": {
+      "description": "Notifications when a check fails or warns, and monitor receipts.",
+      "intro": "The notification channel and the latest monitor run.",
+      "label": "Alerts"
+    },
+    "antivirus": {
+      "description": "Scanner configuration, signature files and test messages through the mail server.",
+      "intro": "Scanner configuration, signature databases and dated test messages through the mail server.",
+      "label": "Antivirus"
+    },
+    "attacks": {
+      "description": "Failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account; accounts that send unusually much.",
+      "intro": "Who fails to sign in, whom Stalwart banned, whose TLS handshakes fail and which accounts send unusually much, from the recorded events.",
+      "label": "Attacks & bans"
+    },
+    "backups": {
+      "description": "Backup jobs with their last run, schedules, receipts and restore tests.",
+      "intro": "Backup jobs with their last run, schedules, the latest results and restore tests.",
+      "label": "Backups"
+    },
+    "dashboard": {
+      "description": "Health summary, mailbox storage and recorded metric history.",
+      "intro": "Health of every module you can access, mailbox storage and recorded metric history.",
+      "label": "Dashboard"
+    },
+    "deliveries": {
+      "description": "Queue lifecycles correlated from recorded events.",
+      "intro": "Every message's way through the queue, from the recorded events: where it went, what delayed or bounced it, and which destinations cause problems.",
+      "label": "Deliveries"
+    },
+    "dns_tls": {
+      "description": "DNS records of each domain, blocklists and reverse names, resolver process and TLS certificate checks.",
+      "intro": "The DNS records of your domains, the blocklists and reverse names of the addresses you send from, the resolver process and the certificates your mail listeners present.",
+      "label": "DNS & TLS"
+    },
+    "logs": {
+      "description": "Recorded Stalwart events with privacy filtering.",
+      "intro": "Recorded Stalwart events. Message contents and raw protocol data are never stored.",
+      "label": "Event history"
+    },
+    "services": {
+      "description": "Process states, schedules, installed versions and newer releases.",
+      "intro": "Process and schedule states, installed versions, newer releases and collector health.",
+      "label": "Services"
+    },
+    "sessions": {
+      "description": "Protocol sessions reconstructed from recorded events.",
+      "intro": "SMTP sessions: who connected, what was announced, which checks passed or failed.",
+      "label": "Sessions"
+    },
+    "spam": {
+      "description": "Native spam filter, classifier, test messages and webmail plugin observations.",
+      "intro": "Native spam filter and classifier settings, rule updates, test messages and webmail plugins.",
+      "label": "Spam filter"
+    }
+  },
+  "nav": {
+    "mailFlow": "Mail flow",
+    "protection": "Protection",
+    "switchToStalwart": "Switch to Stalwart WebUI"
+  },
+  "observation": {
+    "checked": "Checked {{when}}",
+    "processHint": "A running process does not prove that it handled mail correctly.",
+    "processes": "Processes and schedules",
+    "showAll_one": "Show all {{count}} row",
+    "showAll_other": "Show all {{count}} rows",
+    "versions": "Versions",
+    "column": {
+      "details": "Details",
+      "service": "Service",
+      "state": "State",
+      "unit": "Unit"
+    }
+  },
+  "pageSearch": {
+    "accountDescription": "Your session and sign-out",
+    "button": "Search pages…",
+    "empty": "No page matches.",
+    "input": "Page name",
+    "placeholder": "Type a page name…",
+    "settingsDescription": "Appearance and menu",
+    "shortcut": "Ctrl K",
+    "title": "Search pages"
+  },
+  "preferences": {
+    "appearance": "Appearance",
+    "appearanceHint": "The header button switches between light and dark as well.",
+    "menu": "Menu",
+    "menuHint": "Hidden modules stay accessible by link and keep running.",
+    "notSaved": "Settings could not be saved.",
+    "save": "Save settings",
+    "saved": "Settings saved.",
+    "showSwitch": "Show “Switch to Stalwart WebUI” here and “Switch to Garrison WebUI” in the Stalwart WebUI",
+    "switch": "Switch rows",
+    "switchHint": "In the Stalwart WebUI this applies while you are signed in to Garrison.",
+    "theme": {
+      "dark": "Dark",
+      "light": "Light",
+      "system": "Follow the system"
+    }
+  },
+  "problems": {
+    "causes": "Causes",
+    "destinations": "Destinations with problems",
+    "footer": "From recorded events between {{from}} and {{to}}, without mail for this server's own mailboxes. Each list shows at most 50 rows.",
+    "truncated": "More events were recorded in this period than are counted here; the figures are those of the newest events.",
+    "waiting": "Messages that wait",
+    "waitingNote": "Queued in the last seven days, with no recorded end. The Stalwart WebUI shows the queue itself.",
+    "column": {
+      "bounces": "Bounces",
+      "cause": "Most frequent cause",
+      "delays": "Delayed attempts",
+      "delivered": "Delivered",
+      "domain": "Domain",
+      "domains": "Domains",
+      "lastEvent": "Last event",
+      "lastProblem": "Last problem",
+      "lastSeen": "Last seen",
+      "queue": "Queue",
+      "queued": "Queued",
+      "waiting": "Waiting for"
+    },
+    "empty": {
+      "causes": "No delay or bounce was recorded in this period.",
+      "destinations": "No destination had a delay or a bounce in this period.",
+      "waiting": "No message waits."
+    },
+    "figure": {
+      "bounces": "Bounces",
+      "delays": "Delayed attempts",
+      "delivered": "Delivered",
+      "destinations": "Destinations with problems",
+      "waiting": "Messages that wait"
+    }
+  },
+  "sections": {
+    "account": "Account",
+    "management": "Management",
+    "settings": "Settings"
+  },
+  "sessions": {
+    "all": "All sessions",
+    "empty": "No recorded sessions match.",
+    "footer": "Native timestamps have one-second resolution. Only recorded milestones are shown.",
+    "incomplete": "Incomplete",
+    "noneAccepted": "None accepted",
+    "noneRecorded": "None recorded",
+    "noRecipients": "none",
+    "queuedAs": "Queued as",
+    "search": "Search by IP, EHLO name or address",
+    "title": "SMTP session from {{ip}}",
+    "truncated": "Only the first events of this session are shown.",
+    "check": {
+      "arc": "ARC",
+      "dkim": "DKIM",
+      "dmarc": "DMARC",
+      "iprev": "Reverse DNS",
+      "spf-ehlo": "SPF (EHLO)",
+      "spf-from": "SPF"
+    },
+    "column": {
+      "checks": "Checks",
+      "client": "Client",
+      "rejections": "Rejections",
+      "route": "Sender → recipients",
+      "started": "Started"
+    },
+    "field": {
+      "authentication": "Authentication checks",
+      "duration": "Duration",
+      "ehlo": "EHLO",
+      "listener": "Listener",
+      "none": "None",
+      "recipients": "Recipients",
+      "recordedEvents": "Recorded events",
+      "rejections": "Rejections",
+      "sender": "Envelope sender",
+      "started": "Started"
+    }
+  },
+  "signIn": {
+    "askAdministrator": "Ask your administrator if you need access.",
+    "button": "Sign in with Stalwart",
+    "expired": "Your session has ended. Sign in again to continue.",
+    "intro": "Status, history and maintenance for Stalwart. Sign in with your Stalwart account.",
+    "error": {
+      "crossSite": "Sign-in must start from this page.",
+      "failed": "Sign-in could not be completed. Your account may not have Garrison access, or the sign-in expired.",
+      "rate": "Too many sign-ins from your network in the last minute. Wait a minute and try again."
+    }
+  },
+  "state": {
+    "failed": "Failed",
+    "ok": "OK",
+    "partial": "Partial",
+    "stale": "Stale",
+    "staleHint": "The observation is older than expected",
+    "unknown": "Unknown",
+    "warning": "Warning"
+  },
+  "statusPage": {
+    "collected": "Status collected {{date}}.",
+    "noObservations": "No provider reports observations for this module on this host.",
+    "noSnapshot": "The collector has not produced a status snapshot yet.",
+    "providerErrors": "Providers failed in the last run: {{providers}}. See the collector journal."
+  },
+  "summary": {
+    "period": "Period",
+    "periodDays_one": "{{count}} day",
+    "periodDays_other": "{{count}} days",
+    "periodHours_one": "{{count}} hour",
+    "periodHours_other": "{{count}} hours"
+  }
+}

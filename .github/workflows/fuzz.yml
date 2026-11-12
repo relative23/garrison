@@ -1,0 +1,48 @@
+name: Fuzz
+
+# Feeds arbitrary input to the code that reads what Garrison did not write
+# (fuzz/, see "Fuzzing" in CONTRIBUTING.md): every week, on request, and when
+# the targets change. An input that breaks a target fails the run and is kept.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["fuzz/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          [json, broker_request, prometheus, dns_answer, events, web_request, milter_scan, milter_session]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The fuzzer's instrumentation needs a nightly compiler; a dated one, so
+      # that a run can be repeated.
+      - name: Install the nightly compiler and cargo-fuzz 0.13.2
+        run: |
+          rustup toolchain install nightly-2026-11-07 --profile minimal
+          cargo install --locked cargo-fuzz --version 0.13.2
+      - name: Fuzz ${{ matrix.target }} for five minutes
+        working-directory: fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p "corpus/$TARGET"
+          cargo +nightly-2026-11-07 fuzz run "$TARGET" "corpus/$TARGET" "seeds/$TARGET" -- \
+            -max_total_time=300 -rss_limit_mb=2048 -timeout=20
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: fuzz/artifacts
+          if-no-files-found: ignore

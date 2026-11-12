@@ -1,0 +1,10 @@
+[Unit]
+Description=Garrison - look every five minutes whether the collector runs
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

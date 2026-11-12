@@ -1,0 +1,48 @@
+[Unit]
+Description=Garrison - macro milter
+After=network.target
+
+[Service]
+# Started once the service is listening. The installer enables this unit
+# only where the configuration has a [milter] section.
+Type=notify
+TimeoutStartSec=30
+User=garrison-milter
+Group=garrison-milter
+ExecStart=/opt/garrison/current/bin/garrison milter
+Restart=on-failure
+RestartSec=2
+UMask=0077
+# The filter reads the configuration and speaks with the mail server on
+# loopback; it keeps nothing and reaches nothing else.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+# Messages are held in memory while they arrive, 256 MiB for all of them
+# together, and one at a time is unpacked there to be scanned. A message that
+# finds no room is deferred; this limit is above what the filter takes.
+MemoryMax=1G
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

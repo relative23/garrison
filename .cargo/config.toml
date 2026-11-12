@@ -1,0 +1,17 @@
+[alias]
+# Project checks and build tasks written in Rust: `cargo xtask --help`.
+xtask = "run --quiet --package xtask --"
+# The tests once more, counting the lines they run (cargo-llvm-cov); fails
+# below 90 % of the lines. Left out is what .cargo/mutants.toml leaves out as
+# well: build tooling, test fixtures, and the installer and the Stalwart
+# setup, which change a real host and are tested there. `cargo coverage --html`
+# writes a report to target/llvm-cov/html.
+coverage = [
+  "llvm-cov",
+  "--workspace",
+  "--locked",
+  "--ignore-filename-regex",
+  "(^|/)(xtask|crates/testing)/|crates/garrison/src/(install|setup)/",
+  "--fail-under-lines",
+  "90",
+]

@@ -1,0 +1,1355 @@
+{
+ "answers": [
+  [
+   200,
+   {
+    "status": "stored",
+    "stored": 27,
+    "skipped": 11
+   }
+  ],
+  [
+   200,
+   {
+    "status": "stored",
+    "stored": 0,
+    "skipped": 38
+   }
+  ]
+ ],
+ "rows": {
+  "events": [
+   {
+    "seq": 1,
+    "event_id": "17932310300001",
+    "created_at": 1793231030,
+    "received_at": 1793000100,
+    "type": "smtp.connection-start",
+    "category": "smtp",
+    "span_id": "337538776114949120",
+    "queue_id": null,
+    "fields": "{\"spanId\":\"337538776114949120\",\"listenerId\":\"smtp\",\"remoteIp\":\"192.0.2.1\",\"localIp\":\"192.0.2.25\",\"remotePort\":51234,\"localPort\":25}"
+   },
+   {
+    "seq": 2,
+    "event_id": "17932310300002",
+    "created_at": 1793231031,
+    "received_at": 1793000100,
+    "type": "smtp.ehlo",
+    "category": "smtp",
+    "span_id": "337538776114949120",
+    "queue_id": null,
+    "fields": "{\"spanId\":\"337538776114949120\",\"domain\":\"client.example.net\"}"
+   },
+   {
+    "seq": 3,
+    "event_id": "17932310300003",
+    "created_at": 1793231031,
+    "received_at": 1793000100,
+    "type": "smtp.spf-ehlo-pass",
+    "category": "smtp",
+    "span_id": "337538776114949120",
+    "queue_id": null,
+    "fields": "{\"spanId\":\"337538776114949120\"}"
+   },
+   {
+    "seq": 4,
+    "event_id": "17932310300004",
+    "created_at": 1793231032,
+    "received_at": 1793000100,
+    "type": "smtp.mail-from",
+    "category": "smtp",
+    "span_id": "337538776114949120",
+    "queue_id": null,
+    "fields": "{\"spanId\":\"337538776114949120\",\"from\":\"sender@example.net\"}"
+   },
+   {
+    "seq": 5,
+    "event_id": "17932310300005",
+    "created_at": 1793231032,
+    "received_at": 1793000100,
+    "type": "smtp.rcpt-to",
+    "category": "smtp",
+    "span_id": "337538776114949120",
+    "queue_id": null,
+    "fields": "{\"spanId\":\"337538776114949120\",\"to\":[\"a@example.test\",\"b@example.org\"]}"
+   },
+   {
+    "seq": 6,
+    "event_id": "17932310300006",
+    "created_at": 1793231033,
+    "received_at": 1793000100,
+    "type": "smtp.dkim-fail",
+    "category": "smtp",
+    "span_id": "337538776114949120",
+    "queue_id": null,
+    "fields": "{\"spanId\":\"337538776114949120\"}"
+   },
+   {
+    "seq": 7,
+    "event_id": "17932310300007",
+    "created_at": 1793231033,
+    "received_at": 1793000100,
+    "type": "smtp.mailbox-does-not-exist",
+    "category": "smtp",
+    "span_id": "337538776114949120",
+    "queue_id": null,
+    "fields": "{\"spanId\":\"337538776114949120\",\"to\":\"nobody@example.test\"}"
+   },
+   {
+    "seq": 8,
+    "event_id": "17932310300008",
+    "created_at": 1793231034,
+    "received_at": 1793000100,
+    "type": "queue.message-queued",
+    "category": "queue",
+    "span_id": "337538776114949120",
+    "queue_id": "337538776689541120",
+    "fields": "{\"spanId\":\"337538776114949120\",\"queueId\":\"337538776689541120\",\"to\":[\"a@example.test\",\"b@example.org\"],\"from\":\"sender@example.net\",\"size\":12345,\"queueName\":\"local\"}"
+   },
+   {
+    "seq": 9,
+    "event_id": "17932310300009",
+    "created_at": 1793231035,
+    "received_at": 1793000100,
+    "type": "smtp.connection-end",
+    "category": "smtp",
+    "span_id": "337538776114949120",
+    "queue_id": null,
+    "fields": "{\"spanId\":\"337538776114949120\",\"elapsed\":5021}"
+   },
+   {
+    "seq": 10,
+    "event_id": "17932310300010",
+    "created_at": 1793231036,
+    "received_at": 1793000100,
+    "type": "delivery.attempt-start",
+    "category": "delivery",
+    "span_id": "337538776114949121",
+    "queue_id": "337538776689541120",
+    "fields": "{\"queueId\":\"337538776689541120\",\"spanId\":\"337538776114949121\"}"
+   },
+   {
+    "seq": 11,
+    "event_id": "17932310300011",
+    "created_at": 1793231037,
+    "received_at": 1793000100,
+    "type": "delivery.dsn-success",
+    "category": "delivery",
+    "span_id": "337538776114949121",
+    "queue_id": "337538776689541120",
+    "fields": "{\"queueId\":\"337538776689541120\",\"spanId\":\"337538776114949121\",\"to\":\"a@example.test\",\"code\":250,\"details\":\"250 2.0.0 OK xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}"
+   },
+   {
+    "seq": 12,
+    "event_id": "17932310300012",
+    "created_at": 1793231038,
+    "received_at": 1793000100,
+    "type": "delivery.rcpt-to-rejected",
+    "category": "delivery",
+    "span_id": null,
+    "queue_id": "337538776689541120",
+    "fields": "{\"queueId\":\"337538776689541120\",\"to\":\"b@example.org\",\"code\":451,\"details\":\"greylisted, try again\"}"
+   },
+   {
+    "seq": 13,
+    "event_id": "17932310300013",
+    "created_at": 1793231039,
+    "received_at": 1793000100,
+    "type": "smtp.connection-start",
+    "category": "smtp",
+    "span_id": "337538776114949121",
+    "queue_id": null,
+    "fields": "{\"spanId\":\"337538776114949121\",\"listenerId\":\"submission\"}"
+   },
+   {
+    "seq": 14,
+    "event_id": "17932310300014",
+    "created_at": 1793231040,
+    "received_at": 1793000100,
+    "type": "queue.rescheduled",
+    "category": "queue",
+    "span_id": null,
+    "queue_id": "337538776689541120",
+    "fields": "{\"queueId\":\"337538776689541120\",\"nextRetry\":1793000000,\"retryNum\":1}"
+   },
+   {
+    "seq": 15,
+    "event_id": "17932310300015",
+    "created_at": 1793231100,
+    "received_at": 1793000100,
+    "type": "delivery.dsn-perm-fail",
+    "category": "delivery",
+    "span_id": null,
+    "queue_id": "337538776689541120",
+    "fields": "{\"queueId\":\"337538776689541120\",\"to\":\"b@example.org\",\"code\":550,\"reason\":\"mailbox full ü ✓ \\\"quoted\\\"\\n\\ttab\"}"
+   },
+   {
+    "seq": 16,
+    "event_id": "17932310300016",
+    "created_at": 1793231160,
+    "received_at": 1793000100,
+    "type": "queue.message-queued",
+    "category": "queue",
+    "span_id": null,
+    "queue_id": "337538776689541121",
+    "fields": "{\"queueId\":\"337538776689541121\",\"to\":\"single@example.test\",\"total\":1.5,\"totalRecipients\":1}"
+   },
+   {
+    "seq": 17,
+    "event_id": "17932310300017",
+    "created_at": 1793231161,
+    "received_at": 1793000100,
+    "type": "delivery.failed",
+    "category": "delivery",
+    "span_id": null,
+    "queue_id": "337538776689541121",
+    "fields": "{\"queueId\":\"337538776689541121\",\"causedBy\":false}"
+   },
+   {
+    "seq": 18,
+    "event_id": "17932310300018",
+    "created_at": 1793231220,
+    "received_at": 1793000100,
+    "type": "auth.failed",
+    "category": "auth",
+    "span_id": null,
+    "queue_id": null,
+    "fields": "{\"remoteIp\":\"198.51.100.7\",\"accountId\":\"18446744073709551615\"}"
+   },
+   {
+    "seq": 19,
+    "event_id": "17932310300019",
+    "created_at": 1793231221,
+    "received_at": 1793000100,
+    "type": "security.authentication-ban",
+    "category": "security",
+    "span_id": null,
+    "queue_id": null,
+    "fields": "{\"remoteIp\":\"198.51.100.7\",\"expires\":\"9007199254740993\"}"
+   },
+   {
+    "seq": 20,
+    "event_id": "17932310300020",
+    "created_at": 1793230800,
+    "received_at": 1793000100,
+    "type": "server.startup",
+    "category": "server",
+    "span_id": null,
+    "queue_id": null,
+    "fields": "{\"version\":\"1.1.0\",\"details\":\"kept for server\"}"
+   },
+   {
+    "seq": 21,
+    "event_id": "17932310300021",
+    "created_at": 1793231280,
+    "received_at": 1793000100,
+    "type": "telemetry.events-dropped",
+    "category": "telemetry",
+    "span_id": null,
+    "queue_id": null,
+    "fields": "{\"total\":\"-9007199254740993\"}"
+   },
+   {
+    "seq": 22,
+    "event_id": "17932310300022",
+    "created_at": 1793231281,
+    "received_at": 1793000100,
+    "type": "milter.action-reject",
+    "category": "milter",
+    "span_id": "007",
+    "queue_id": null,
+    "fields": "{\"spanId\":\"007\",\"reason\":\"rejected by milter\"}"
+   },
+   {
+    "seq": 23,
+    "event_id": "17932310300023",
+    "created_at": 1793231282,
+    "received_at": 1793000100,
+    "type": "message-ingest.spam",
+    "category": "message-ingest",
+    "span_id": null,
+    "queue_id": null,
+    "fields": "{\"accountId\":7,\"size\":1024.0}"
+   },
+   {
+    "seq": 24,
+    "event_id": "17932310300024",
+    "created_at": 1793231283,
+    "received_at": 1793000100,
+    "type": "tls.handshake-error",
+    "category": "tls",
+    "span_id": null,
+    "queue_id": null,
+    "fields": "{\"remoteIp\":\"203.0.113.5\"}"
+   },
+   {
+    "seq": 25,
+    "event_id": "17932310300025",
+    "created_at": 1793231284,
+    "received_at": 1793000100,
+    "type": "delivery.connect",
+    "category": "delivery",
+    "span_id": null,
+    "queue_id": "337538776689541120",
+    "fields": "{\"queueId\":\"337538776689541120\",\"hostname\":\"mx.example.org\",\"remoteIp\":\"192.0.2.80\"}"
+   },
+   {
+    "seq": 26,
+    "event_id": "17932310300026",
+    "created_at": 1793231285,
+    "received_at": 1793000100,
+    "type": "delivery.ehlo",
+    "category": "delivery",
+    "span_id": null,
+    "queue_id": null,
+    "fields": "{}"
+   },
+   {
+    "seq": 27,
+    "event_id": "17932310300027",
+    "created_at": 1793231286,
+    "received_at": 1793000100,
+    "type": "server.shutdown",
+    "category": "server",
+    "span_id": null,
+    "queue_id": null,
+    "fields": "{}"
+   }
+  ],
+  "queues": [
+   {
+    "queue_id": "337538776689541120",
+    "first_seen": 1793231034,
+    "last_seen": 1793231284,
+    "event_count": 7
+   },
+   {
+    "queue_id": "337538776689541121",
+    "first_seen": 1793231160,
+    "last_seen": 1793231161,
+    "event_count": 2
+   }
+  ],
+  "spans": [
+   {
+    "span_id": "007",
+    "first_seen": 1793231281,
+    "last_seen": 1793231281,
+    "event_count": 1,
+    "protocol": "milter"
+   },
+   {
+    "span_id": "337538776114949120",
+    "first_seen": 1793231030,
+    "last_seen": 1793231035,
+    "event_count": 9,
+    "protocol": "smtp"
+   },
+   {
+    "span_id": "337538776114949121",
+    "first_seen": 1793231036,
+    "last_seen": 1793231039,
+    "event_count": 3,
+    "protocol": "smtp"
+   }
+  ],
+  "gaps": [],
+  "metadata": [
+   {
+    "key": "heartbeatAt",
+    "value": "1793000100"
+   },
+   {
+    "key": "lastBatchAt",
+    "value": "1793000100"
+   },
+   {
+    "key": "recordingSince",
+    "value": "1793000000"
+   },
+   {
+    "key": "retentionDays",
+    "value": "30"
+   }
+  ]
+ },
+ "queries": {
+  "events": {
+   "items": [
+    {
+     "seq": 27,
+     "id": "17932310300027",
+     "createdAt": 1793231286,
+     "type": "server.shutdown",
+     "label": "Shutting down Stalwart Server",
+     "category": "server",
+     "spanId": null,
+     "queueId": null,
+     "fields": {}
+    },
+    {
+     "seq": 26,
+     "id": "17932310300026",
+     "createdAt": 1793231285,
+     "type": "delivery.ehlo",
+     "label": "SMTP EHLO command",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": null,
+     "fields": {}
+    },
+    {
+     "seq": 25,
+     "id": "17932310300025",
+     "createdAt": 1793231284,
+     "type": "delivery.connect",
+     "label": "Connecting to remote server",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "hostname": "mx.example.org",
+      "remoteIp": "192.0.2.80"
+     }
+    },
+    {
+     "seq": 24,
+     "id": "17932310300024",
+     "createdAt": 1793231283,
+     "type": "tls.handshake-error",
+     "label": "TLS handshake error",
+     "category": "tls",
+     "spanId": null,
+     "queueId": null,
+     "fields": {
+      "remoteIp": "203.0.113.5"
+     }
+    },
+    {
+     "seq": 23,
+     "id": "17932310300023",
+     "createdAt": 1793231282,
+     "type": "message-ingest.spam",
+     "label": "Possible spam message ingested",
+     "category": "message-ingest",
+     "spanId": null,
+     "queueId": null,
+     "fields": {
+      "accountId": 7,
+      "size": 1024.0
+     }
+    },
+    {
+     "seq": 22,
+     "id": "17932310300022",
+     "createdAt": 1793231281,
+     "type": "milter.action-reject",
+     "label": "Milter action: Reject",
+     "category": "milter",
+     "spanId": "007",
+     "queueId": null,
+     "fields": {
+      "spanId": "007",
+      "reason": "rejected by milter"
+     }
+    },
+    {
+     "seq": 21,
+     "id": "17932310300021",
+     "createdAt": 1793231280,
+     "type": "telemetry.events-dropped",
+     "label": "Telemetry events dropped",
+     "category": "telemetry",
+     "spanId": null,
+     "queueId": null,
+     "fields": {
+      "total": "-9007199254740993"
+     }
+    },
+    {
+     "seq": 20,
+     "id": "17932310300020",
+     "createdAt": 1793230800,
+     "type": "server.startup",
+     "label": "Starting Stalwart Server",
+     "category": "server",
+     "spanId": null,
+     "queueId": null,
+     "fields": {
+      "version": "1.1.0",
+      "details": "kept for server"
+     }
+    },
+    {
+     "seq": 19,
+     "id": "17932310300019",
+     "createdAt": 1793231221,
+     "type": "security.authentication-ban",
+     "label": "Banned due to authentication errors",
+     "category": "security",
+     "spanId": null,
+     "queueId": null,
+     "fields": {
+      "remoteIp": "198.51.100.7",
+      "expires": "9007199254740993"
+     }
+    },
+    {
+     "seq": 18,
+     "id": "17932310300018",
+     "createdAt": 1793231220,
+     "type": "auth.failed",
+     "label": "Authentication failed",
+     "category": "auth",
+     "spanId": null,
+     "queueId": null,
+     "fields": {
+      "remoteIp": "198.51.100.7",
+      "accountId": "18446744073709551615"
+     }
+    },
+    {
+     "seq": 17,
+     "id": "17932310300017",
+     "createdAt": 1793231161,
+     "type": "delivery.failed",
+     "label": "Delivery failed",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541121",
+     "fields": {
+      "queueId": "337538776689541121",
+      "causedBy": false
+     }
+    },
+    {
+     "seq": 16,
+     "id": "17932310300016",
+     "createdAt": 1793231160,
+     "type": "queue.message-queued",
+     "label": "Queued message for delivery",
+     "category": "queue",
+     "spanId": null,
+     "queueId": "337538776689541121",
+     "fields": {
+      "queueId": "337538776689541121",
+      "to": "single@example.test",
+      "total": 1.5,
+      "totalRecipients": 1
+     }
+    },
+    {
+     "seq": 15,
+     "id": "17932310300015",
+     "createdAt": 1793231100,
+     "type": "delivery.dsn-perm-fail",
+     "label": "DSN permanent failure notification",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "to": "b@example.org",
+      "code": 550,
+      "reason": "mailbox full ü ✓ \"quoted\"\n\ttab"
+     }
+    },
+    {
+     "seq": 14,
+     "id": "17932310300014",
+     "createdAt": 1793231040,
+     "type": "queue.rescheduled",
+     "label": "Message rescheduled for delivery",
+     "category": "queue",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "nextRetry": 1793000000,
+      "retryNum": 1
+     }
+    },
+    {
+     "seq": 13,
+     "id": "17932310300013",
+     "createdAt": 1793231039,
+     "type": "smtp.connection-start",
+     "label": "SMTP connection started",
+     "category": "smtp",
+     "spanId": "337538776114949121",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949121",
+      "listenerId": "submission"
+     }
+    },
+    {
+     "seq": 12,
+     "id": "17932310300012",
+     "createdAt": 1793231038,
+     "type": "delivery.rcpt-to-rejected",
+     "label": "SMTP RCPT TO rejected",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "to": "b@example.org",
+      "code": 451,
+      "details": "greylisted, try again"
+     }
+    },
+    {
+     "seq": 11,
+     "id": "17932310300011",
+     "createdAt": 1793231037,
+     "type": "delivery.dsn-success",
+     "label": "DSN success notification",
+     "category": "delivery",
+     "spanId": "337538776114949121",
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "spanId": "337538776114949121",
+      "to": "a@example.test",
+      "code": 250,
+      "details": "250 2.0.0 OK xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     }
+    },
+    {
+     "seq": 10,
+     "id": "17932310300010",
+     "createdAt": 1793231036,
+     "type": "delivery.attempt-start",
+     "label": "Delivery attempt started",
+     "category": "delivery",
+     "spanId": "337538776114949121",
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "spanId": "337538776114949121"
+     }
+    },
+    {
+     "seq": 9,
+     "id": "17932310300009",
+     "createdAt": 1793231035,
+     "type": "smtp.connection-end",
+     "label": "SMTP connection ended",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "elapsed": 5021
+     }
+    },
+    {
+     "seq": 8,
+     "id": "17932310300008",
+     "createdAt": 1793231034,
+     "type": "queue.message-queued",
+     "label": "Queued message for delivery",
+     "category": "queue",
+     "spanId": "337538776114949120",
+     "queueId": "337538776689541120",
+     "fields": {
+      "spanId": "337538776114949120",
+      "queueId": "337538776689541120",
+      "to": [
+       "a@example.test",
+       "b@example.org"
+      ],
+      "from": "sender@example.net",
+      "size": 12345,
+      "queueName": "local"
+     }
+    },
+    {
+     "seq": 7,
+     "id": "17932310300007",
+     "createdAt": 1793231033,
+     "type": "smtp.mailbox-does-not-exist",
+     "label": "Mailbox does not exist",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "to": "nobody@example.test"
+     }
+    },
+    {
+     "seq": 6,
+     "id": "17932310300006",
+     "createdAt": 1793231033,
+     "type": "smtp.dkim-fail",
+     "label": "DKIM verification failed",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120"
+     }
+    },
+    {
+     "seq": 5,
+     "id": "17932310300005",
+     "createdAt": 1793231032,
+     "type": "smtp.rcpt-to",
+     "label": "SMTP RCPT TO command",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "to": [
+       "a@example.test",
+       "b@example.org"
+      ]
+     }
+    },
+    {
+     "seq": 4,
+     "id": "17932310300004",
+     "createdAt": 1793231032,
+     "type": "smtp.mail-from",
+     "label": "SMTP MAIL FROM command",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "from": "sender@example.net"
+     }
+    },
+    {
+     "seq": 3,
+     "id": "17932310300003",
+     "createdAt": 1793231031,
+     "type": "smtp.spf-ehlo-pass",
+     "label": "SPF EHLO check passed",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120"
+     }
+    },
+    {
+     "seq": 2,
+     "id": "17932310300002",
+     "createdAt": 1793231031,
+     "type": "smtp.ehlo",
+     "label": "SMTP EHLO command",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "domain": "client.example.net"
+     }
+    },
+    {
+     "seq": 1,
+     "id": "17932310300001",
+     "createdAt": 1793231030,
+     "type": "smtp.connection-start",
+     "label": "SMTP connection started",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "listenerId": "smtp",
+      "remoteIp": "192.0.2.1",
+      "localIp": "192.0.2.25",
+      "remotePort": 51234,
+      "localPort": 25
+     }
+    }
+   ],
+   "next": null
+  },
+  "eventsPage": {
+   "items": [
+    {
+     "seq": 27,
+     "id": "17932310300027",
+     "createdAt": 1793231286,
+     "type": "server.shutdown",
+     "label": "Shutting down Stalwart Server",
+     "category": "server",
+     "spanId": null,
+     "queueId": null,
+     "fields": {}
+    },
+    {
+     "seq": 26,
+     "id": "17932310300026",
+     "createdAt": 1793231285,
+     "type": "delivery.ehlo",
+     "label": "SMTP EHLO command",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": null,
+     "fields": {}
+    },
+    {
+     "seq": 25,
+     "id": "17932310300025",
+     "createdAt": 1793231284,
+     "type": "delivery.connect",
+     "label": "Connecting to remote server",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "hostname": "mx.example.org",
+      "remoteIp": "192.0.2.80"
+     }
+    },
+    {
+     "seq": 24,
+     "id": "17932310300024",
+     "createdAt": 1793231283,
+     "type": "tls.handshake-error",
+     "label": "TLS handshake error",
+     "category": "tls",
+     "spanId": null,
+     "queueId": null,
+     "fields": {
+      "remoteIp": "203.0.113.5"
+     }
+    },
+    {
+     "seq": 23,
+     "id": "17932310300023",
+     "createdAt": 1793231282,
+     "type": "message-ingest.spam",
+     "label": "Possible spam message ingested",
+     "category": "message-ingest",
+     "spanId": null,
+     "queueId": null,
+     "fields": {
+      "accountId": 7,
+      "size": 1024.0
+     }
+    }
+   ],
+   "next": "23"
+  },
+  "eventsSearch": {
+   "items": [
+    {
+     "seq": 25,
+     "id": "17932310300025",
+     "createdAt": 1793231284,
+     "type": "delivery.connect",
+     "label": "Connecting to remote server",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "hostname": "mx.example.org",
+      "remoteIp": "192.0.2.80"
+     }
+    },
+    {
+     "seq": 15,
+     "id": "17932310300015",
+     "createdAt": 1793231100,
+     "type": "delivery.dsn-perm-fail",
+     "label": "DSN permanent failure notification",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "to": "b@example.org",
+      "code": 550,
+      "reason": "mailbox full ü ✓ \"quoted\"\n\ttab"
+     }
+    },
+    {
+     "seq": 12,
+     "id": "17932310300012",
+     "createdAt": 1793231038,
+     "type": "delivery.rcpt-to-rejected",
+     "label": "SMTP RCPT TO rejected",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "to": "b@example.org",
+      "code": 451,
+      "details": "greylisted, try again"
+     }
+    },
+    {
+     "seq": 8,
+     "id": "17932310300008",
+     "createdAt": 1793231034,
+     "type": "queue.message-queued",
+     "label": "Queued message for delivery",
+     "category": "queue",
+     "spanId": "337538776114949120",
+     "queueId": "337538776689541120",
+     "fields": {
+      "spanId": "337538776114949120",
+      "queueId": "337538776689541120",
+      "to": [
+       "a@example.test",
+       "b@example.org"
+      ],
+      "from": "sender@example.net",
+      "size": 12345,
+      "queueName": "local"
+     }
+    },
+    {
+     "seq": 5,
+     "id": "17932310300005",
+     "createdAt": 1793231032,
+     "type": "smtp.rcpt-to",
+     "label": "SMTP RCPT TO command",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "to": [
+       "a@example.test",
+       "b@example.org"
+      ]
+     }
+    }
+   ],
+   "next": null
+  },
+  "deliveries": {
+   "items": [
+    {
+     "queueId": "337538776689541120",
+     "firstSeen": 1793231034,
+     "lastSeen": 1793231284,
+     "eventCount": 7,
+     "from": "sender@example.net",
+     "to": [
+      "a@example.test",
+      "b@example.org"
+     ],
+     "status": "partial",
+     "recipientOutcomes": {
+      "a@example.test": "delivered",
+      "b@example.org": "failed"
+     },
+     "recipientEvidenceComplete": true
+    },
+    {
+     "queueId": "337538776689541121",
+     "firstSeen": 1793231160,
+     "lastSeen": 1793231161,
+     "eventCount": 2,
+     "from": "",
+     "to": [
+      "single@example.test"
+     ],
+     "status": "failed",
+     "recipientOutcomes": {},
+     "recipientEvidenceComplete": false
+    }
+   ],
+   "next": null
+  },
+  "deliveriesAfter": {
+   "items": [
+    {
+     "queueId": "337538776689541121",
+     "firstSeen": 1793231160,
+     "lastSeen": 1793231161,
+     "eventCount": 2,
+     "from": "",
+     "to": [
+      "single@example.test"
+     ],
+     "status": "failed",
+     "recipientOutcomes": {},
+     "recipientEvidenceComplete": false
+    }
+   ],
+   "next": null
+  },
+  "delivery": {
+   "summary": {
+    "queueId": "337538776689541120",
+    "firstSeen": 1793231034,
+    "lastSeen": 1793231284,
+    "eventCount": 7,
+    "from": "sender@example.net",
+    "to": [
+     "a@example.test",
+     "b@example.org"
+    ],
+    "status": "partial",
+    "recipientOutcomes": {
+     "a@example.test": "delivered",
+     "b@example.org": "failed"
+    },
+    "recipientEvidenceComplete": true
+   },
+   "events": [
+    {
+     "seq": 8,
+     "id": "17932310300008",
+     "createdAt": 1793231034,
+     "type": "queue.message-queued",
+     "label": "Queued message for delivery",
+     "category": "queue",
+     "spanId": "337538776114949120",
+     "queueId": "337538776689541120",
+     "fields": {
+      "spanId": "337538776114949120",
+      "queueId": "337538776689541120",
+      "to": [
+       "a@example.test",
+       "b@example.org"
+      ],
+      "from": "sender@example.net",
+      "size": 12345,
+      "queueName": "local"
+     }
+    },
+    {
+     "seq": 10,
+     "id": "17932310300010",
+     "createdAt": 1793231036,
+     "type": "delivery.attempt-start",
+     "label": "Delivery attempt started",
+     "category": "delivery",
+     "spanId": "337538776114949121",
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "spanId": "337538776114949121"
+     }
+    },
+    {
+     "seq": 11,
+     "id": "17932310300011",
+     "createdAt": 1793231037,
+     "type": "delivery.dsn-success",
+     "label": "DSN success notification",
+     "category": "delivery",
+     "spanId": "337538776114949121",
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "spanId": "337538776114949121",
+      "to": "a@example.test",
+      "code": 250,
+      "details": "250 2.0.0 OK xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     }
+    },
+    {
+     "seq": 12,
+     "id": "17932310300012",
+     "createdAt": 1793231038,
+     "type": "delivery.rcpt-to-rejected",
+     "label": "SMTP RCPT TO rejected",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "to": "b@example.org",
+      "code": 451,
+      "details": "greylisted, try again"
+     }
+    },
+    {
+     "seq": 14,
+     "id": "17932310300014",
+     "createdAt": 1793231040,
+     "type": "queue.rescheduled",
+     "label": "Message rescheduled for delivery",
+     "category": "queue",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "nextRetry": 1793000000,
+      "retryNum": 1
+     }
+    },
+    {
+     "seq": 15,
+     "id": "17932310300015",
+     "createdAt": 1793231100,
+     "type": "delivery.dsn-perm-fail",
+     "label": "DSN permanent failure notification",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "to": "b@example.org",
+      "code": 550,
+      "reason": "mailbox full ü ✓ \"quoted\"\n\ttab"
+     }
+    },
+    {
+     "seq": 25,
+     "id": "17932310300025",
+     "createdAt": 1793231284,
+     "type": "delivery.connect",
+     "label": "Connecting to remote server",
+     "category": "delivery",
+     "spanId": null,
+     "queueId": "337538776689541120",
+     "fields": {
+      "queueId": "337538776689541120",
+      "hostname": "mx.example.org",
+      "remoteIp": "192.0.2.80"
+     }
+    }
+   ],
+   "truncated": false
+  },
+  "sessions": {
+   "items": [
+    {
+     "spanId": "337538776114949121",
+     "firstSeen": 1793231036,
+     "lastSeen": 1793231039,
+     "eventCount": 3,
+     "listener": "submission",
+     "remoteIp": null,
+     "ehlo": null,
+     "from": null,
+     "to": [],
+     "authentication": {},
+     "rejections": [],
+     "queueIds": [],
+     "complete": false
+    },
+    {
+     "spanId": "337538776114949120",
+     "firstSeen": 1793231030,
+     "lastSeen": 1793231035,
+     "eventCount": 9,
+     "listener": "smtp",
+     "remoteIp": "192.0.2.1",
+     "ehlo": "client.example.net",
+     "from": "sender@example.net",
+     "to": [
+      "a@example.test",
+      "b@example.org"
+     ],
+     "authentication": {
+      "spf-ehlo": "pass",
+      "dkim": "fail"
+     },
+     "rejections": [
+      "Mailbox does not exist"
+     ],
+     "queueIds": [
+      "337538776689541120"
+     ],
+     "complete": true
+    }
+   ],
+   "next": null
+  },
+  "session": {
+   "summary": {
+    "spanId": "337538776114949120",
+    "firstSeen": 1793231030,
+    "lastSeen": 1793231035,
+    "eventCount": 9,
+    "listener": "smtp",
+    "remoteIp": "192.0.2.1",
+    "ehlo": "client.example.net",
+    "from": "sender@example.net",
+    "to": [
+     "a@example.test",
+     "b@example.org"
+    ],
+    "authentication": {
+     "spf-ehlo": "pass",
+     "dkim": "fail"
+    },
+    "rejections": [
+     "Mailbox does not exist"
+    ],
+    "queueIds": [
+     "337538776689541120"
+    ],
+    "complete": true
+   },
+   "events": [
+    {
+     "seq": 1,
+     "id": "17932310300001",
+     "createdAt": 1793231030,
+     "type": "smtp.connection-start",
+     "label": "SMTP connection started",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "listenerId": "smtp",
+      "remoteIp": "192.0.2.1",
+      "localIp": "192.0.2.25",
+      "remotePort": 51234,
+      "localPort": 25
+     }
+    },
+    {
+     "seq": 2,
+     "id": "17932310300002",
+     "createdAt": 1793231031,
+     "type": "smtp.ehlo",
+     "label": "SMTP EHLO command",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "domain": "client.example.net"
+     }
+    },
+    {
+     "seq": 3,
+     "id": "17932310300003",
+     "createdAt": 1793231031,
+     "type": "smtp.spf-ehlo-pass",
+     "label": "SPF EHLO check passed",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120"
+     }
+    },
+    {
+     "seq": 4,
+     "id": "17932310300004",
+     "createdAt": 1793231032,
+     "type": "smtp.mail-from",
+     "label": "SMTP MAIL FROM command",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "from": "sender@example.net"
+     }
+    },
+    {
+     "seq": 5,
+     "id": "17932310300005",
+     "createdAt": 1793231032,
+     "type": "smtp.rcpt-to",
+     "label": "SMTP RCPT TO command",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "to": [
+       "a@example.test",
+       "b@example.org"
+      ]
+     }
+    },
+    {
+     "seq": 6,
+     "id": "17932310300006",
+     "createdAt": 1793231033,
+     "type": "smtp.dkim-fail",
+     "label": "DKIM verification failed",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120"
+     }
+    },
+    {
+     "seq": 7,
+     "id": "17932310300007",
+     "createdAt": 1793231033,
+     "type": "smtp.mailbox-does-not-exist",
+     "label": "Mailbox does not exist",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "to": "nobody@example.test"
+     }
+    },
+    {
+     "seq": 8,
+     "id": "17932310300008",
+     "createdAt": 1793231034,
+     "type": "queue.message-queued",
+     "label": "Queued message for delivery",
+     "category": "queue",
+     "spanId": "337538776114949120",
+     "queueId": "337538776689541120",
+     "fields": {
+      "spanId": "337538776114949120",
+      "queueId": "337538776689541120",
+      "to": [
+       "a@example.test",
+       "b@example.org"
+      ],
+      "from": "sender@example.net",
+      "size": 12345,
+      "queueName": "local"
+     }
+    },
+    {
+     "seq": 9,
+     "id": "17932310300009",
+     "createdAt": 1793231035,
+     "type": "smtp.connection-end",
+     "label": "SMTP connection ended",
+     "category": "smtp",
+     "spanId": "337538776114949120",
+     "queueId": null,
+     "fields": {
+      "spanId": "337538776114949120",
+      "elapsed": 5021
+     }
+    }
+   ],
+   "truncated": false
+  },
+  "coverage": {
+   "available": true,
+   "receiver": "running",
+   "heartbeatAt": 1793000100,
+   "recordingSince": 1793000000,
+   "lastBatchAt": 1793000100,
+   "retentionDays": 30,
+   "eventCount": 27,
+   "trimmed": null,
+   "gapCount": 0,
+   "gaps": [],
+   "limitations": [
+    "Only events recorded after the webhook was enabled are available; earlier activity cannot be reconstructed.",
+    "Queue completion means a receiving server accepted the message, not inbox placement.",
+    "Sessions group events by Stalwart's span ID; only SMTP session milestones are recorded."
+   ]
+  }
+ }
+}

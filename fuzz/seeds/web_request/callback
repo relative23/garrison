@@ -1,0 +1,2 @@
+G /auth/callback?code=code&state=state&iss=https%3A%2F%2Fmail.example.test
+cookie: __Host-garrison_login=state.verifier

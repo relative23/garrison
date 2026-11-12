@@ -1,0 +1,30 @@
+[package]
+name = "garrison-broker"
+description = "The maintenance broker: token-derived authorization, the job audit and reviewed systemd operations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+garrison-authz.workspace = true
+garrison-core.workspace = true
+getrandom.workspace = true
+listenfd.workspace = true
+log.workspace = true
+rusqlite.workspace = true
+rustix.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+garrison-testing.workspace = true
+rustix.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

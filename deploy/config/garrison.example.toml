@@ -1,0 +1,178 @@
+# Garrison configuration: /etc/garrison/garrison.toml
+#
+# Unknown keys are rejected. Secrets never go into this file: settings that start
+# with "credential:" name a file in credentials_directory, which systemd loads
+# into each service with LoadCredential=. Check with:
+#     garrison check-config
+schema = 1
+credentials_directory = "/etc/garrison/credentials"
+# The modules this installation offers; without this line, all of them. The
+# dashboard and services are always on, and nobody is granted another module.
+# modules = ["antivirus", "spam", "dns_tls", "backups", "alerts",
+#            "logs", "deliveries", "sessions", "actions"]
+
+[deployment]
+# Garrison's own host name; users open /admin/ on it. It must not
+# be Stalwart's: check-config refuses an origin shared with the Stalwart WebUI.
+public_origin = "https://garrison.example.org"
+# Stalwart's public OAuth issuer (see /.well-known/openid-configuration).
+issuer = "https://mail.example.org"
+# Stalwart's HTTP listener on this host. Must be a loopback address.
+stalwart_url = "http://127.0.0.1:8080"
+# Native Stalwart administration, linked from Garrison (default: the
+# issuer's /admin/).
+admin_url = "https://mail.example.org/admin/"
+# Optional links shown in Garrison header.
+links = { webmail = "https://mail.example.org/" }
+
+[web]
+port = 8091
+session_minutes = 30
+# Ending sessions when the client IP changes breaks mobile users; off by default.
+bind_client_ip = false
+
+[ingest]
+port = 8094
+signature_key = "credential:webhook-signature-key"
+retention_days = 30
+max_events = 1000000
+max_database_mib = 256
+
+[collector]
+native_key = "credential:collector-native-key"
+metrics_credential = "credential:metrics-credential"
+history_days = 90
+
+[broker]
+native_key = "credential:broker-native-key"
+policy = "/etc/garrison/access-policy.json"
+allowed_peers = ["garrison"]
+
+# Send a message when one of Garrison's checks fails or warns in two runs in
+# a row, when it is in order again, when a newer release exists and when the
+# collector itself stops: to an ntfy topic, to a webhook, by mail, or to
+# several of them. Secrets are files in /etc/garrison/credentials (mode
+# 0600), never written here: ntfy-token, notify-webhook-token and
+# notify-mail-password. `garrison notify-test` sends a test message.
+# [notifications]
+# ntfy_url = "https://ntfy.example.org/mailserver"
+# webhook_url = "https://hooks.example.org/garrison"
+# mail_to = "admin@example.org"
+# mail_from = "garrison@example.org"
+# mail_host = "mail.example.org"
+
+# The one part that acts on mail: a filter Stalwart shows each incoming
+# message, which has mail with Office macros refused ("reject") or marked with
+# the header X-Garrison-Macro ("tag"). Add the section, then run
+# `garrison stalwart setup`; to switch it off, remove the section and run
+# setup again, in that order.
+# [milter]
+# on_macro = "reject"
+
+# Maintenance actions: each starts or restarts one existing systemd unit.
+# `garrison polkit-rule` turns this list into the polkit rule that lets
+# the broker run exactly these operations. Regenerate it after every change.
+[[actions]]
+id = "restart_resolver"
+title = "Restart DNS resolver"
+description = "Briefly restart the local resolver. Deliveries may wait for DNS meanwhile."
+confirmation = "RESTART RESOLVER"
+unit = "unbound.service"
+operation = "restart"
+cooldown_seconds = 60
+timeout_seconds = 90
+
+# The distribution's update job as an action: pending updates are installed
+# from the Maintenance page, with a confirmation and an entry in the audit.
+# On Debian and Ubuntu the unit is apt-daily-upgrade.service.
+# [[actions]]
+# id = "install_updates"
+# title = "Install system updates"
+# description = "Installs the pending package updates now, as the nightly job would."
+# confirmation = "INSTALL UPDATES"
+# unit = "dnf-automatic-install.service"
+# operation = "start"
+# cooldown_seconds = 3600
+# timeout_seconds = 3600
+
+# Status providers. Each table produces observations for the named modules.
+# Asks GitHub once a day whether a newer release of Garrison or Stalwart
+# exists. Remove this entry and no such request is made.
+[[providers]]
+type = "releases"
+
+# Asks this host's resolver for the DNS records Stalwart names for each
+# domain: MX, SPF, DKIM and DMARC, and the optional ones.
+[[providers]]
+type = "dns"
+
+# Whether an address this server sends from stands on a blocklist (IPv4 and
+# IPv6), and whether its reverse name fits. The lists learn the addresses
+# they are asked about, through this host's resolver; Spamhaus gives no
+# verdict to public resolvers. Off until you remove the two "#": nothing is
+# asked of anyone outside before you decide so.
+# [[providers]]
+# type = "reputation"
+
+# Hands the antivirus test file (EICAR) and the spam test text (GTUBE) to the
+# local SMTP listener once a day, the way a stranger would. Name a mailbox
+# made for it: a test that goes wrong leaves a harmless message there.
+# With the [milter] section above, `macro_document = true` adds a harmless
+# document that the macro filter must refuse.
+# [[providers]]
+# type = "mail-test"
+# recipient = "garrison-test@example.org"
+
+[[providers]]
+type = "host"
+
+# What the host needs from its operator: pending security updates, a restart
+# that is due, the clock, a disk that fills up and a firewall service.
+# `checks = ["updates", "restart", "clock", "disk"]` leaves one out.
+[[providers]]
+type = "host-care"
+
+# A restic or borg repository as `garrison backup-check` reported it: the
+# newest snapshot, the stored size, the last integrity check and the last
+# test restore. The backup job calls the command as root; see the
+# configuration reference.
+# [[providers]]
+# type = "backup-check"
+# tool = "restic"
+# verify_days = 8
+# restore_days = 35
+
+# What each signed-in account sent in the last day against its own usual
+# volume: an account that was taken over shows there. Nothing is blocked.
+[[providers]]
+type = "senders"
+
+[[providers]]
+type = "stalwart"
+
+[[providers]]
+type = "prometheus"
+
+[[providers]]
+type = "systemd"
+units = [
+  { unit = "nginx.service", label = "Reverse proxy", modules = ["services"] },
+  { unit = "unbound.service", label = "DNS resolver", modules = ["dns_tls", "services"] },
+  { unit = "garrison-web.service", label = "Garrison web service", modules = ["services"] },
+  { unit = "garrison-ingest.service", label = "Garrison event receiver", modules = ["services", "logs"] },
+  { unit = "garrison-broker.socket", label = "Garrison maintenance broker", modules = ["services", "actions"] },
+  { unit = "garrison-collect.timer", label = "Garrison collector schedule", modules = ["services"] },
+  { unit = "garrison-watch.timer", label = "Garrison collector watch", modules = ["services"] },
+]
+
+# The certificate of every listener of Stalwart that speaks TLS, under each
+# mail host's name. To check other endpoints instead, list them:
+# endpoints = [{ host = "mail.example.org", port = 443 },
+#              { host = "mail.example.org", port = 25, starttls = true }]
+[[providers]]
+type = "tls"
+
+# A week of the recorded events in numbers: spam and ham, the milter's
+# verdicts, the checks of incoming senders and TLS in transit.
+[[providers]]
+type = "mail-flow"

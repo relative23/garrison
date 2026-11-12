@@ -1,0 +1,4 @@
+swP /api/actions
+content-type: application/json
+
+{"action": "run_monitor", "requestId": "0b3f1a6e-4f9d-4c1e-9a2b-1c3d5e7f9a0b", "confirmation": "RUN MONITOR"}

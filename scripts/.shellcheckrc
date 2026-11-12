@@ -1,0 +1,4 @@
+# The acceptance scripts hand commands to the host under test in single
+# quotes (`inside '...'`, `check "..." '...'`): what looks like a missing
+# expansion is meant to expand there.
+disable=SC2016

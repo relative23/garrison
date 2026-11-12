@@ -1,0 +1,163 @@
+@import "tailwindcss";
+
+/* Design tokens. The layout follows the Stalwart WebUI: its radius, and tiles
+   that float on the page with a soft shadow instead of a border. The colours
+   are Garrison's own: warm paper and graphite. The page is warm grey, what
+   acts or is open is dark graphite (light graphite in the dark theme), and
+   colour is left to the status of things, so a failure is the loudest thing
+   on a page. Every pair of text and surface used here has a contrast of 4.5:1
+   or more and the focus ring 3:1 against every surface (WCAG AA); check a
+   change with the numbers, not by eye. No Stalwart code is used. The theme
+   follows the `dark` class on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: oklch(0.985 0.005 85);
+  --foreground: oklch(0.2 0.012 60);
+  /* Tiles are pure white on the warm paper. Lighthouse's speed index takes a
+     surface for empty only from 249 of 255 in every channel; a tinted tile
+     makes every page measure 0.15 s slower without loading any slower. */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.012 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.012 60);
+  --content-background: oklch(0.963 0.007 82);
+  --primary: oklch(0.24 0.01 60);
+  --primary-foreground: oklch(0.985 0.004 85);
+  --secondary: oklch(0.945 0.008 82);
+  --secondary-foreground: oklch(0.22 0.012 60);
+  --muted: oklch(0.93 0.01 82);
+  --muted-foreground: oklch(0.45 0.015 65);
+  --accent: oklch(0.915 0.012 82);
+  --accent-foreground: oklch(0.2 0.012 60);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0.002 285.823);
+  --border: oklch(0.895 0.01 80);
+  --input: oklch(0.895 0.01 80);
+  --ring: oklch(0.5 0.012 65);
+  --radius: 0.75rem;
+  /* A tile's shadow: a light upper edge (dark theme only), a hairline and a
+     wide soft drop. */
+  --tile-edge: oklch(1 0 0 / 0);
+  --tile-line: oklch(0.25 0.02 60 / 0.07);
+  --tile-drop: oklch(0.25 0.03 60 / 0.22);
+  --chart-1: hsl(220 70% 50%);
+  --chart-2: hsl(160 60% 45%);
+  --chart-3: hsl(30 80% 55%);
+  --chart-4: hsl(280 65% 60%);
+  --chart-5: hsl(340 75% 55%);
+  --ok: oklch(0.52 0.13 150);
+  --ok-background: oklch(0.95 0.05 150);
+  --warning: oklch(0.53 0.13 70);
+  --warning-background: oklch(0.96 0.06 85);
+  --failed: oklch(0.55 0.22 27);
+  --failed-background: oklch(0.95 0.04 27);
+  --unknown: oklch(0.48 0.012 65);
+  --unknown-background: oklch(0.94 0.008 82);
+  color-scheme: light;
+}
+
+.dark {
+  --background: oklch(0.195 0.004 70);
+  --foreground: oklch(0.955 0.004 85);
+  --card: oklch(0.225 0.005 70);
+  --card-foreground: oklch(0.955 0.004 85);
+  --popover: oklch(0.225 0.005 70);
+  --popover-foreground: oklch(0.955 0.004 85);
+  --content-background: oklch(0.165 0.004 70);
+  --primary: oklch(0.93 0.006 85);
+  --primary-foreground: oklch(0.19 0.004 70);
+  --secondary: oklch(0.285 0.006 70);
+  --secondary-foreground: oklch(0.955 0.004 85);
+  --muted: oklch(0.285 0.006 70);
+  --muted-foreground: oklch(0.75 0.008 80);
+  --accent: oklch(0.3 0.007 70);
+  --accent-foreground: oklch(0.96 0.004 85);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0.002 285.823);
+  --border: oklch(0.31 0.006 70);
+  --input: oklch(0.31 0.006 70);
+  --ring: oklch(0.68 0.008 80);
+  --tile-edge: oklch(1 0 0 / 0.05);
+  --tile-line: oklch(0 0 0 / 0.3);
+  --tile-drop: oklch(0 0 0 / 0.55);
+  --chart-1: hsl(220 70% 60%);
+  --chart-2: hsl(160 60% 55%);
+  --chart-3: hsl(30 80% 60%);
+  --chart-4: hsl(280 65% 65%);
+  --chart-5: hsl(340 75% 60%);
+  --ok: oklch(0.75 0.14 150);
+  --ok-background: oklch(0.3 0.06 150);
+  --warning: oklch(0.82 0.13 85);
+  --warning-background: oklch(0.32 0.06 70);
+  --failed: oklch(0.72 0.17 27);
+  --failed-background: oklch(0.3 0.08 27);
+  --unknown: oklch(0.76 0.008 80);
+  --unknown-background: oklch(0.285 0.006 70);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-content-background: var(--content-background);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-ok: var(--ok);
+  --color-ok-background: var(--ok-background);
+  --color-warning: var(--warning);
+  --color-warning-background: var(--warning-background);
+  --color-failed: var(--failed);
+  --color-failed-background: var(--failed-background);
+  --color-unknown: var(--unknown);
+  --color-unknown-background: var(--unknown-background);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --shadow-tile: inset 0 1px 0 var(--tile-edge), 0 1px 2px var(--tile-line), 0 12px 28px -20px var(--tile-drop);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  /* Native <dialog> instead of a script-driven modal: it needs no injected styles,
+     so the strict Content-Security-Policy stays intact. */
+  dialog::backdrop {
+    background: oklch(0 0 0 / 0.5);
+  }
+
+  :focus-visible {
+    @apply outline-none ring-1 ring-ring;
+  }
+}

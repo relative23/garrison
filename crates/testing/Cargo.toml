@@ -1,0 +1,21 @@
+[package]
+name = "garrison-testing"
+description = "Test fixtures shared by the crates' tests: configuration, policy, a loopback HTTP server, the Stalwart lab client. Never shipped."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+flate2.workspace = true
+garrison-core.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+ureq.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

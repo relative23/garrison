@@ -1,0 +1,30 @@
+{
+ "plugins": [
+  {
+   "id": "spam-report",
+   "version": "1.4.0",
+   "enabled": true,
+   "bundleHash": "4750aa62e68e064ffdfd5837708cb73869987d6f2e0026b0648498f1f6ac48d9"
+  },
+  {
+   "id": "tampered",
+   "version": "2.0.0-beta.1",
+   "enabled": false,
+   "bundleHash": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "id": "odd",
+   "version": "v3",
+   "enabled": "yes",
+   "bundleHash": "not-a-hash"
+  },
+  {
+   "id": "twice",
+   "version": "1.0.0"
+  },
+  {
+   "id": "twice",
+   "version": "1.0.1"
+  }
+ ]
+}

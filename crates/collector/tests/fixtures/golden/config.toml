@@ -1,0 +1,128 @@
+# The configuration of the collector's golden test (tests/golden.rs).
+# @FIXTURES@, @WORK@ and @STALWART@ are replaced with this directory, a
+# temporary directory and the stub server's URL.
+schema = 1
+credentials_directory = "@WORK@/credentials"
+
+[deployment]
+public_origin = "https://admin.example.test"
+issuer = "https://mail.example.test"
+stalwart_url = "@STALWART@"
+
+[web]
+state_directory = "@WORK@/web"
+
+[ingest]
+state_directory = "@WORK@/ingest"
+
+[collector]
+state_directory = "@WORK@/collector"
+
+[broker]
+socket = "@WORK@/broker.sock"
+state_directory = "@WORK@/broker"
+policy = "@WORK@/policy.json"
+
+# The stub server answers in this order: management API, exporter, health.
+[[providers]]
+type = "stalwart"
+milter_host = "127.0.0.1"
+milter_port = 7357
+max_accounts = 3
+
+[[providers]]
+type = "prometheus"
+
+[[providers]]
+type = "http"
+id = "health"
+title = "Health endpoint"
+url = "@STALWART@/health"
+
+[[providers]]
+type = "host"
+proc = "@FIXTURES@/proc"
+disk_path = "@FIXTURES@"
+
+[[providers]]
+type = "systemd"
+units = [
+  { unit = "stalwart.service", label = "Mail server", modules = ["services", "dashboard"] },
+  { unit = "garrison-collect.timer", label = "Collection schedule", modules = ["services"] },
+  { unit = "backup.service", label = "Backup job", modules = ["backups"], expect = "idle" },
+  { unit = "clamav-milter.service", label = "Milter", modules = ["antivirus"], expect = "idle" },
+  { unit = "gone.service", label = "Removed", modules = ["services"] },
+  { unit = "missing.service", label = "Missing", modules = ["services"] },
+]
+
+[[providers]]
+type = "clamav"
+milter_config = "@FIXTURES@/clamav/milter.conf"
+clamd_config = "@FIXTURES@/clamav/scan.conf"
+database_directory = "@FIXTURES@/clamav"
+fangfrisch_database = "@WORK@/fangfrisch.sqlite"
+
+[[providers]]
+type = "receipt"
+id = "restore"
+title = "Restore test"
+path = "@FIXTURES@/restore.json"
+modules = ["backups"]
+max_age_hours = 30
+ok_when = { key = "result", equals = ["passed"] }
+fields = [
+  { key = "accounts", label = "Accounts", format = "number" },
+  { key = ["checks", "mail", "count"], label = "Mail checks", format = "number" },
+  { key = "list", label = "Items" },
+  { key = "long", label = "Long text" },
+  { key = "ratio", label = "Ratio", format = "number" },
+  { key = "flag", label = "Flag", format = "boolean" },
+  { key = "secretless", label = "Absent" },
+]
+
+[[providers]]
+type = "receipt"
+id = "mail-tests"
+title = "Mail tests"
+path = "@FIXTURES@/tests.json"
+modules = ["antivirus", "spam"]
+rows = []
+row_date = "date"
+ok_rows = { key = "ok", equals = [true] }
+columns = [
+  { key = "test", label = "Test" },
+  { key = "ok", label = "Passed", format = "boolean" },
+  { key = "ms", label = "Duration", format = "number" },
+]
+
+[[providers]]
+type = "receipt"
+id = "backup"
+title = "Backup"
+path = "@FIXTURES@/backup.json"
+modules = ["backups"]
+date = "finishedAt"
+max_age_hours = 24
+scope = "Custom scope text."
+
+[[providers]]
+type = "receipt"
+id = "missing"
+title = "Missing receipt"
+path = "@FIXTURES@/none.json"
+modules = ["backups"]
+
+[[providers]]
+type = "version-command"
+component = "ClamAV"
+command = ["/usr/bin/clamdscan", "--version"]
+pattern = "^ClamAV (\\d+\\.\\d+\\.\\d+)"
+
+[[providers]]
+type = "bulwark"
+admin_directory = "@FIXTURES@/bulwark"
+plugins = ["spam-report", "tampered", "odd", "twice", "absent"]
+
+[[providers]]
+type = "tls"
+endpoints = [{ host = "localhost", port = 1 }]

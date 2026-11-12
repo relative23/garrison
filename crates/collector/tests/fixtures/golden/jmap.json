@@ -1,0 +1,138 @@
+{
+ "methodResponses": [
+  [
+   "x:SpamSettings/get",
+   {
+    "list": [
+     {
+      "id": "singleton",
+      "enable": {
+       "match": {},
+       "else": "true"
+      },
+      "scoreSpam": 5.0,
+      "scoreReject": 15,
+      "scoreDiscard": 10000000000000.0
+     }
+    ],
+    "notFound": []
+   },
+   "0"
+  ],
+  [
+   "x:SpamClassifier/get",
+   {
+    "list": [
+     {
+      "id": "singleton",
+      "model": {
+       "@type": "FtrlProximal"
+      },
+      "minHamSamples": 10,
+      "minSpamSamples": 10,
+      "trainInterval": 86400000
+     }
+    ],
+    "notFound": []
+   },
+   "1"
+  ],
+  [
+   "x:SpamRule/query",
+   {
+    "ids": [
+     "a"
+    ],
+    "total": 412
+   },
+   "2"
+  ],
+  [
+   "error",
+   {
+    "type": "forbidden"
+   },
+   "3"
+  ],
+  [
+   "x:QueuedMessage/query",
+   {
+    "ids": [],
+    "total": 3
+   },
+   "4"
+  ],
+  [
+   "x:MtaMilter/get",
+   {
+    "list": [
+     {
+      "id": "m",
+      "host": "127.0.0.1",
+      "port": 7357,
+      "enable": true,
+      "stages": {
+       "data": true
+      },
+      "tempFailOnError": false
+     },
+     {
+      "id": "n",
+      "host": "10.0.0.9",
+      "port": 7357,
+      "enable": false
+     }
+    ],
+    "notFound": []
+   },
+   "5"
+  ],
+  [
+   "x:Account/get",
+   {
+    "list": [
+     {
+      "id": "a",
+      "@type": "User",
+      "emailAddress": "full@example.test",
+      "quotas": {
+       "maxDiskQuota": 1000
+      },
+      "usedDiskQuota": 955
+     },
+     {
+      "id": "b",
+      "@type": "User",
+      "emailAddress": "half@example.test",
+      "quotas": {
+       "maxDiskQuota": 2000
+      },
+      "usedDiskQuota": 1000
+     },
+     {
+      "id": "c",
+      "@type": "User",
+      "emailAddress": "unlimited@example.test",
+      "usedDiskQuota": 5000
+     },
+     {
+      "id": "d",
+      "@type": "User",
+      "emailAddress": null,
+      "usedDiskQuota": 0,
+      "quotas": {
+       "maxDiskQuota": 0
+      }
+     },
+     {
+      "id": "e",
+      "@type": "Group",
+      "emailAddress": "team@example.test"
+     }
+    ],
+    "notFound": []
+   },
+   "6"
+  ]
+ ]
+}

@@ -1,0 +1,32 @@
+Id=stalwart.service
+LoadState=loaded
+ActiveState=active
+SubState=running
+Result=success
+
+Id=garrison-collect.timer
+LoadState=loaded
+ActiveState=active
+SubState=waiting
+Result=success
+TimersCalendar={ OnCalendar=*:0/1 ; next_elapse=Thu 2026-10-29 12:01:00 UTC }
+NextElapseUSecRealtime=Thu 2026-10-29 12:01:00 UTC
+LastTriggerUSec=Thu 2026-10-29 12:00:00 UTC
+
+Id=backup.service
+LoadState=loaded
+ActiveState=inactive
+SubState=dead
+Result=exit-code
+
+Id=clamav-milter.service
+LoadState=loaded
+ActiveState=activating
+SubState=start
+Result=success
+
+Id=gone.service
+LoadState=not-found
+ActiveState=inactive
+SubState=dead
+Result=success

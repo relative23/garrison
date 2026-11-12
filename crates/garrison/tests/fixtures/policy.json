@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "administrator": {
+      "modules": [
+        "dashboard",
+        "services",
+        "antivirus",
+        "spam",
+        "attacks",
+        "deliveries",
+        "sessions",
+        "logs",
+        "backups",
+        "alerts",
+        "dns_tls",
+        "actions"
+      ],
+      "actions": [
+        "run_backup",
+        "run_monitor"
+      ],
+      "requiredNativePermissions": [
+        "authenticate",
+        "sysActionCreate",
+        "sysRoleUpdate"
+      ]
+    },
+    "viewer": {
+      "modules": [
+        "dashboard",
+        "services",
+        "antivirus",
+        "spam",
+        "attacks",
+        "deliveries",
+        "sessions",
+        "logs",
+        "backups",
+        "alerts",
+        "dns_tls"
+      ],
+      "actions": [],
+      "requiredNativePermissions": [
+        "authenticate",
+        "sysAccountGet"
+      ]
+    }
+  },
+  "roleBindings": {
+    "e": "administrator"
+  },
+  "subjects": {},
+  "deniedSubjects": [
+    "42",
+    "7"
+  ]
+}

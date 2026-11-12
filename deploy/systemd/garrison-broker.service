@@ -1,0 +1,47 @@
+[Unit]
+Description=Garrison - action broker
+Requires=garrison-broker.socket
+After=garrison-broker.socket network.target
+
+[Service]
+# Started once it serves its socket, so a broker that cannot come up fails
+# its start.
+Type=notify
+TimeoutStartSec=30
+User=garrison-broker
+Group=garrison-broker
+ExecStart=/opt/garrison/current/bin/garrison broker
+LoadCredential=broker-native-key:/etc/garrison/credentials/broker-native-key
+Restart=on-failure
+RestartSec=5
+StateDirectory=garrison/broker
+StateDirectoryMode=0700
+UMask=0077
+# Starting units is authorized by polkit (50-garrison.rules) for the
+# configured unit/verb pairs only. The broker itself has no privileges.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+# Inherited by systemctl; its show/start calls and the polkit answer work with it.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+MemoryMax=128M
+TasksMax=32

@@ -1,0 +1,2204 @@
+{
+  "components": {
+    "schemas": {
+      "ActionInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": {
+            "type": "string"
+          },
+          "cooldownSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "confirmation",
+          "cooldownSeconds"
+        ],
+        "type": "object"
+      },
+      "ActionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ActionInfo"
+            },
+            "type": "array"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "actions",
+          "jobs"
+        ],
+        "type": "object"
+      },
+      "AttackNetwork": {
+        "additionalProperties": false,
+        "description": "A network from which more than one address was seen.",
+        "properties": {
+          "bans": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failedSignIns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "lastSeen": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "network": {
+            "type": "string"
+          },
+          "sources": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tlsErrors": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "network",
+          "sources",
+          "failedSignIns",
+          "tlsErrors",
+          "bans",
+          "lastSeen"
+        ],
+        "type": "object"
+      },
+      "AttackSource": {
+        "additionalProperties": false,
+        "description": "One address that failed to sign in, was banned or failed a TLS handshake.",
+        "properties": {
+          "accounts": {
+            "description": "The existing accounts it tried.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "address": {
+            "type": "string"
+          },
+          "bans": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failedSignIns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "firstSeen": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "lastSeen": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "listeners": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "network": {
+            "description": "The /24 of an IPv4 address, the /64 of an IPv6 address.",
+            "type": "string"
+          },
+          "tlsErrors": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "address",
+          "network",
+          "failedSignIns",
+          "accounts",
+          "tlsErrors",
+          "bans",
+          "firstSeen",
+          "lastSeen",
+          "listeners"
+        ],
+        "type": "object"
+      },
+      "AttackTotals": {
+        "additionalProperties": false,
+        "properties": {
+          "bans": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failedSignIns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sources": {
+            "description": "Every address seen, also beyond the rows of the list.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "tlsErrors": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "unknownAccounts": {
+            "description": "Failed sign-ins that named no existing account.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "failedSignIns",
+          "unknownAccounts",
+          "tlsErrors",
+          "bans",
+          "sources"
+        ],
+        "type": "object"
+      },
+      "AttackedAccount": {
+        "additionalProperties": false,
+        "description": "An existing account that someone failed to sign in to.",
+        "properties": {
+          "failedSignIns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "lastSeen": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sources": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "failedSignIns",
+          "sources",
+          "lastSeen"
+        ],
+        "type": "object"
+      },
+      "Attacks": {
+        "additionalProperties": false,
+        "description": "Failed sign-ins, bans and TLS handshake errors of a stretch of the event\nhistory. Each list has at most 50 rows, the busiest first; the bans are\nthe newest.",
+        "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/components/schemas/AttackedAccount"
+            },
+            "type": "array"
+          },
+          "bans": {
+            "items": {
+              "$ref": "#/components/schemas/Ban"
+            },
+            "type": "array"
+          },
+          "networks": {
+            "items": {
+              "$ref": "#/components/schemas/AttackNetwork"
+            },
+            "type": "array"
+          },
+          "since": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/AttackSource"
+            },
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/AttackTotals"
+          },
+          "truncated": {
+            "description": "More events were recorded in the stretch than were read.",
+            "type": "boolean"
+          },
+          "until": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "truncated",
+          "totals",
+          "sources",
+          "networks",
+          "accounts",
+          "bans"
+        ],
+        "type": "object"
+      },
+      "Ban": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/BanReason"
+          }
+        },
+        "required": [
+          "at",
+          "address",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "BanReason": {
+        "description": "Why Stalwart banned an address.",
+        "enum": [
+          "authentication",
+          "abuse",
+          "scan",
+          "loiter"
+        ],
+        "type": "string"
+      },
+      "Column": {
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "enum": [
+              "text",
+              "number",
+              "bytes",
+              "datetime",
+              "duration",
+              "boolean",
+              "url"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "format"
+        ],
+        "type": "object"
+      },
+      "Coverage": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "eventCount": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          },
+          "gapCount": {
+            "default": 0,
+            "description": "Windows inside the history in which events may be missing.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/Gap"
+            },
+            "type": "array"
+          },
+          "heartbeatAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "lastBatchAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "receiver": {
+            "type": "string"
+          },
+          "recordingSince": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "retentionDays": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "trimmed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Trimmed"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "receiver",
+          "gaps",
+          "limitations"
+        ],
+        "type": "object"
+      },
+      "DeliveriesPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeliverySummary"
+            },
+            "type": "array"
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      },
+      "DeliveryCause": {
+        "additionalProperties": false,
+        "description": "One cause of delays or bounces, without what differs between messages.",
+        "properties": {
+          "bounces": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "delays": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "domains": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "lastSeen": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cause",
+          "delays",
+          "bounces",
+          "domains",
+          "lastSeen"
+        ],
+        "type": "object"
+      },
+      "DeliveryDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/EventItem"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DeliverySummary"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "summary",
+          "events",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "DeliverySummary": {
+        "additionalProperties": false,
+        "properties": {
+          "eventCount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "firstSeen": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "from": {
+            "type": "string"
+          },
+          "lastSeen": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "queueId": {
+            "type": "string"
+          },
+          "recipientEvidenceComplete": {
+            "type": "boolean"
+          },
+          "recipientOutcomes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "status": {
+            "type": "string"
+          },
+          "to": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "queueId",
+          "firstSeen",
+          "lastSeen",
+          "eventCount",
+          "from",
+          "to",
+          "status",
+          "recipientOutcomes",
+          "recipientEvidenceComplete"
+        ],
+        "type": "object"
+      },
+      "Destination": {
+        "additionalProperties": false,
+        "description": "One domain mail was sent to and had a problem with.",
+        "properties": {
+          "bounces": {
+            "description": "Recipients that failed for good.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "cause": {
+            "description": "The cause named most often, shortened.",
+            "type": "string"
+          },
+          "delays": {
+            "description": "Attempts that ended with a temporary failure.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "delivered": {
+            "description": "Recipients a server of the domain accepted.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "lastProblem": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "domain",
+          "delivered",
+          "delays",
+          "bounces",
+          "lastProblem",
+          "cause",
+          "hosts"
+        ],
+        "type": "object"
+      },
+      "DestinationTotals": {
+        "additionalProperties": false,
+        "properties": {
+          "bounces": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "delays": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "delivered": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "destinations": {
+            "description": "Domains with a delay or a bounce, also beyond the rows of the list.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "waiting": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "delivered",
+          "delays",
+          "bounces",
+          "destinations",
+          "waiting"
+        ],
+        "type": "object"
+      },
+      "Destinations": {
+        "additionalProperties": false,
+        "description": "Outgoing deliveries of a stretch of the event history by the domain they\nwent to and by the cause of their problems, and the messages that still\nwait. Each list has at most 50 rows. Mail for this server's own mailboxes\nis left out.",
+        "properties": {
+          "causes": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryCause"
+            },
+            "type": "array"
+          },
+          "destinations": {
+            "items": {
+              "$ref": "#/components/schemas/Destination"
+            },
+            "type": "array"
+          },
+          "since": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/DestinationTotals"
+          },
+          "truncated": {
+            "description": "More events were recorded in the stretch than were read.",
+            "type": "boolean"
+          },
+          "until": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "waiting": {
+            "description": "The messages that wait longest first.",
+            "items": {
+              "$ref": "#/components/schemas/WaitingMessage"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "truncated",
+          "totals",
+          "destinations",
+          "causes",
+          "waiting"
+        ],
+        "type": "object"
+      },
+      "EventItem": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "fields": {
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "queueId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seq": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "spanId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "id",
+          "createdAt",
+          "type",
+          "label",
+          "category",
+          "spanId",
+          "queueId",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "EventsPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EventItem"
+            },
+            "type": "array"
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      },
+      "Gap": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "start": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "Job": {
+        "additionalProperties": false,
+        "properties": {
+          "actionId": {
+            "type": "string"
+          },
+          "actor": {
+            "description": "The OIDC subject that asked for the job.",
+            "type": "string"
+          },
+          "actorEmail": {
+            "description": "The subject's address when it asked; empty in older jobs.",
+            "type": "string"
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "uncertain"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "actionId",
+          "actor",
+          "actorEmail",
+          "requestId",
+          "status",
+          "createdAt",
+          "startedAt",
+          "finishedAt",
+          "message"
+        ],
+        "type": "object"
+      },
+      "Links": {
+        "additionalProperties": false,
+        "properties": {
+          "admin": {
+            "type": "string"
+          },
+          "other": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Named links in the order the operator wrote them.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "admin",
+          "other"
+        ],
+        "type": "object"
+      },
+      "MetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "counterResets": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "coverageFrom": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "coverageTo": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "from": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "latest": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "points": {
+            "items": {
+              "additionalProperties": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "propertyNames": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "sampledMinutes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "to": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "totals": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "points",
+          "totals",
+          "latest",
+          "coverageFrom",
+          "coverageTo",
+          "sampledMinutes",
+          "counterResets"
+        ],
+        "type": "object"
+      },
+      "ModuleInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description"
+        ],
+        "type": "object"
+      },
+      "Observation": {
+        "additionalProperties": false,
+        "properties": {
+          "checkedAt": {
+            "type": "string"
+          },
+          "evidence": {
+            "enum": [
+              "configuration",
+              "process",
+              "probe",
+              "receipt",
+              "inventory",
+              "metric"
+            ],
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationField"
+            },
+            "type": "array"
+          },
+          "findings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "details",
+              "service",
+              "version",
+              "link"
+            ],
+            "type": "string"
+          },
+          "maxAge": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "modules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "stale": {
+            "description": "True when checkedAt is older than maxAge.",
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "ok",
+              "warning",
+              "failed",
+              "partial",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "table": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ObservationTable"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "value": {
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "title",
+          "modules",
+          "evidence",
+          "state",
+          "checkedAt",
+          "source",
+          "kind",
+          "scope",
+          "fields",
+          "table",
+          "findings",
+          "value",
+          "maxAge",
+          "stale"
+        ],
+        "type": "object"
+      },
+      "ObservationField": {
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "enum": [
+              "text",
+              "number",
+              "bytes",
+              "datetime",
+              "duration",
+              "boolean",
+              "url"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "value": {}
+        },
+        "required": [
+          "label",
+          "value",
+          "format"
+        ],
+        "type": "object"
+      },
+      "ObservationTable": {
+        "additionalProperties": false,
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/Column"
+            },
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "items": {},
+              "type": "array"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "columns",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "Preferences": {
+        "additionalProperties": false,
+        "properties": {
+          "hiddenModules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "showSwitch": {
+            "default": true,
+            "description": "The rows that switch between Garrison and the Stalwart WebUI, in\nboth menus; shown unless the user turns them off.",
+            "type": "boolean"
+          },
+          "theme": {
+            "enum": [
+              "system",
+              "light",
+              "dark"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "theme",
+          "hiddenModules"
+        ],
+        "type": "object"
+      },
+      "SessionDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/EventItem"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/SessionSummary"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "summary",
+          "events",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "SessionInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "csrf": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "description": "The second the session ends, since the epoch.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "links": {
+            "$ref": "#/components/schemas/Links"
+          },
+          "modules": {
+            "items": {
+              "$ref": "#/components/schemas/ModuleInfo"
+            },
+            "type": "array"
+          },
+          "preferences": {
+            "$ref": "#/components/schemas/Preferences"
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "email",
+          "csrf",
+          "expiresAt",
+          "modules",
+          "actions",
+          "profiles",
+          "preferences",
+          "links"
+        ],
+        "type": "object"
+      },
+      "SessionState": {
+        "additionalProperties": false,
+        "description": "The visitor's session, or `null` when nobody is signed in: the interface\nasks before every sign-in, and that question is no error.",
+        "properties": {
+          "session": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SessionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
+      "SessionSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "authentication": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "ehlo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "eventCount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "firstSeen": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSeen": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "listener": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "queueIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rejections": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "remoteIp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spanId": {
+            "type": "string"
+          },
+          "to": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "spanId",
+          "firstSeen",
+          "lastSeen",
+          "eventCount",
+          "listener",
+          "remoteIp",
+          "ehlo",
+          "from",
+          "to",
+          "authentication",
+          "rejections",
+          "queueIds",
+          "complete"
+        ],
+        "type": "object"
+      },
+      "SessionsPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionSummary"
+            },
+            "type": "array"
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      },
+      "StatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "collectedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/Observation"
+            },
+            "type": "array"
+          },
+          "providerErrors": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "collectedAt",
+          "observations",
+          "providerErrors"
+        ],
+        "type": "object"
+      },
+      "SubmitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "confirmation": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "requestId": {
+            "maxLength": 36,
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "requestId",
+          "confirmation"
+        ],
+        "type": "object"
+      },
+      "SubmitResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job",
+          "replayed"
+        ],
+        "type": "object"
+      },
+      "SwitchInfo": {
+        "additionalProperties": false,
+        "description": "Whether the signed-in user wants the switch row in the Stalwart WebUI.",
+        "properties": {
+          "show": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "show"
+        ],
+        "type": "object"
+      },
+      "Trimmed": {
+        "additionalProperties": false,
+        "description": "The history begins later than its retention allows: events up to `until`\nwere removed to keep the size limit `limit` (`events` or `bytes`).",
+        "properties": {
+          "limit": {
+            "type": "string"
+          },
+          "until": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "until",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "WaitingMessage": {
+        "additionalProperties": false,
+        "description": "A queued message without a recorded end.",
+        "properties": {
+          "lastEvent": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "queueId": {
+            "type": "string"
+          },
+          "queuedAt": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queueId",
+          "queuedAt",
+          "lastEvent"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "name": "relative23"
+    },
+    "description": "The web service: sign-in, the API and the compiled interface.",
+    "license": {
+      "identifier": "MIT",
+      "name": "MIT"
+    },
+    "title": "Garrison API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/actions": {
+      "get": {
+        "operationId": "listActions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionsResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The maintenance actions the user may start, and recent jobs.",
+        "tags": [
+          "actions"
+        ]
+      },
+      "post": {
+        "operationId": "submitAction",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Start a maintenance action after its typed confirmation.",
+        "tags": [
+          "actions"
+        ]
+      }
+    },
+    "/api/actions/jobs/{job_id}": {
+      "get": {
+        "operationId": "getJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{32}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          }
+        },
+        "summary": "One maintenance job and its result.",
+        "tags": [
+          "actions"
+        ]
+      }
+    },
+    "/api/attacks": {
+      "get": {
+        "operationId": "getAttacks",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "allOf": [
+                {
+                  "description": "The stretch a summary covers, up to now.",
+                  "enum": [
+                    "24h",
+                    "7d",
+                    "30d"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "default": "24h",
+                  "type": "object"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Attacks"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Failed sign-ins, Stalwart's bans and TLS handshake errors of the last day,\nweek or 30 days, by address, network and account.",
+        "tags": [
+          "attacks"
+        ]
+      }
+    },
+    "/api/coverage": {
+      "get": {
+        "operationId": "getCoverage",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Coverage"
+                }
+              }
+            }
+          }
+        },
+        "summary": "How complete the recorded event history is.",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/deliveries": {
+      "get": {
+        "operationId": "listDeliveries",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "maximum": 253402300799,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "maximum": 253402300799,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "maxLength": 64,
+              "pattern": "^[0-9:]+$",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "format": "int64",
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveriesPage"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Queue lifecycles reconstructed from recorded events, newest first.",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/deliveries/{queue_id}": {
+      "get": {
+        "operationId": "getDelivery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9]{1,20}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryDetail"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Every recorded event of one queued message.",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/destinations": {
+      "get": {
+        "operationId": "getDestinations",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "allOf": [
+                {
+                  "description": "The stretch a summary covers, up to now.",
+                  "enum": [
+                    "24h",
+                    "7d",
+                    "30d"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "default": "24h",
+                  "type": "object"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Destinations"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Outgoing deliveries of the last day, week or 30 days by destination and\nby the cause of their delays and bounces, and the messages that wait.",
+        "tags": [
+          "destinations"
+        ]
+      }
+    },
+    "/api/events": {
+      "get": {
+        "operationId": "listEvents",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 40,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "maximum": 253402300799,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "maximum": 253402300799,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "maxLength": 64,
+              "pattern": "^[0-9:]+$",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventsPage"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Recorded events, newest first.",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/logout": {
+      "post": {
+        "operationId": "logout",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "summary": "Sign out: end the session and revoke its access token.",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/metrics": {
+      "get": {
+        "operationId": "getMetrics",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "default": "24h",
+              "pattern": "^(24h|7d|30d|90d|custom)$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Recorded metric history for the dashboard charts.",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/preferences": {
+      "put": {
+        "operationId": "savePreferences",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Preferences"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preferences"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Save the signed-in user's theme and hidden modules.",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/session": {
+      "get": {
+        "operationId": "getSession",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionState"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The signed-in user: modules, actions, preferences and links; `null`\nwithout a valid session.",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/sessions": {
+      "get": {
+        "operationId": "listSmtpSessions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "maximum": 253402300799,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "maximum": 253402300799,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "maxLength": 64,
+              "pattern": "^[0-9:]+$",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "format": "int64",
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionsPage"
+                }
+              }
+            }
+          }
+        },
+        "summary": "SMTP sessions reconstructed from recorded events, newest first.",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/sessions/{span_id}": {
+      "get": {
+        "operationId": "getSmtpSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "span_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9]{1,20}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetail"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Every recorded event of one SMTP session.",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/status": {
+      "get": {
+        "operationId": "getStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "The latest status snapshot, limited to the user's modules.",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/switch": {
+      "get": {
+        "operationId": "getSwitch",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchInfo"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Whether the signed-in user wants the switch rows. The \"Switch to Garrison\nWebUI\" script asks from the Stalwart WebUI's origin, so this answer, and no\nother, may be read there with the user's cookie. Without a session the rows\nstay.",
+        "tags": [
+          "api"
+        ]
+      }
+    }
+  }
+}

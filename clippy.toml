@@ -1,0 +1,5 @@
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-print-in-tests = true
+# Product and protocol names that are not code items.
+doc-valid-idents = ["WebUI", "OpenID", "SELinux", "SQLite", "UserInfo", "OpenAPI", "TypeScript", "JavaScript", "CycloneDX", ".."]

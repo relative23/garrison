@@ -1,0 +1,6 @@
+# HELP x y
+# TYPE x gauge
+stalwart_server_memory_bytes 1.5e7
+stalwart_auth_failed_total 3
+labelled{a="b"} 1
+bad NaN

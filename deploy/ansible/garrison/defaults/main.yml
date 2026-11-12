@@ -1,0 +1,26 @@
+---
+# The release to install, as published: garrison-<version>-<arch>.tar.gz and
+# its .minisig, in garrison_archives on the control node.
+garrison_version: ""
+garrison_archives: "{{ playbook_dir }}/archives"
+garrison_arch: "{{ ansible_facts['architecture'] }}"
+# The release signing key from the README. Without it the role refuses to
+# install anything (set garrison_unsigned: true for releases before the first
+# signed one, after checking their checksum yourself).
+garrison_signing_key: ""
+garrison_unsigned: false
+
+# The [deployment] addresses; see docs/operator/configuration.md.
+garrison_public_origin: ""
+garrison_issuer: ""
+garrison_stalwart_url: "http://127.0.0.1:8080"
+garrison_admin_url: "{{ garrison_issuer }}/admin/"
+# Modules besides dashboard and services; empty for all of them.
+garrison_modules: []
+# Further configuration, appended as TOML: providers, actions, [web], ...
+garrison_extra_config: ""
+
+# The Stalwart administrator for `garrison stalwart setup`, used once and
+# passed on standard input: {username: ..., secret: ...} or {apiKey: ...}.
+# Keep it in Ansible Vault.
+garrison_stalwart_admin: {}

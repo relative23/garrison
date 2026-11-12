@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: garrison
+  author: Garrison
+  description: Install, configure and upgrade Garrison for Stalwart
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions: ["bookworm", "trixie"]
+    - name: Ubuntu
+      versions: ["noble"]
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

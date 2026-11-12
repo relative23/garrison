@@ -1,0 +1,14 @@
+# Written by the Ansible role garrison; edit the role's variables instead.
+schema = 1
+{# JSON strings and arrays are valid TOML: to_json does the escaping. #}
+{% if garrison_modules %}
+modules = {{ garrison_modules | to_json }}
+{% endif %}
+
+[deployment]
+public_origin = {{ garrison_public_origin | to_json }}
+issuer = {{ garrison_issuer | to_json }}
+stalwart_url = {{ garrison_stalwart_url | to_json }}
+admin_url = {{ garrison_admin_url | to_json }}
+
+{{ garrison_extra_config }}

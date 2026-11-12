@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/relative23/garrison/security/advisories/new
+    about: Report security problems privately, never in a public issue (see SECURITY.md).
+  - name: Questions about Stalwart itself
+    url: https://github.com/stalwartlabs/stalwart/discussions
+    about: Accounts, domains, mail settings and other Stalwart features belong to Stalwart.

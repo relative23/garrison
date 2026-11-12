@@ -1,0 +1,46 @@
+[Unit]
+Description=Garrison - watch over the status collection
+After=network.target
+
+[Service]
+Type=oneshot
+User=garrison-collector
+Group=garrison
+ExecStart=/opt/garrison/current/bin/garrison watch
+# The access token of the notification topic, as the collector loads it.
+LoadCredential=ntfy-token:/etc/garrison/credentials/ntfy-token
+# The webhook's token and the password of the account that submits mail;
+# empty files, which the installer keeps, mean that neither is used.
+LoadCredential=notify-webhook-token:/etc/garrison/credentials/notify-webhook-token
+LoadCredential=notify-mail-password:/etc/garrison/credentials/notify-mail-password
+# Holds one file: that the topic knows the collector has stopped.
+StateDirectory=garrison/watch
+StateDirectoryMode=0750
+UMask=0027
+TimeoutStartSec=60
+# The watch reads the collector's database and never writes it.
+ReadOnlyPaths=/var/lib/garrison/collector
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ProtectHostname=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=128M
+TasksMax=16
+Nice=10

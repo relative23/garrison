@@ -1,0 +1,37 @@
+[package]
+name = "garrison-ingest"
+description = "The loopback webhook receiver for Stalwart events and the event history it writes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+garrison-core.workspace = true
+hmac.workspace = true
+log.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+divan.workspace = true
+garrison-testing.workspace = true
+tempfile.workspace = true
+# A paused clock for the maintenance schedule.
+tokio = { workspace = true, features = ["test-util"] }
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
+
+[[bench]]
+name = "history"
+harness = false
+
+[lints]
+workspace = true

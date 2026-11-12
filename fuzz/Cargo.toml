@@ -1,0 +1,86 @@
+# Fuzz targets for the code that reads input Garrison did not write. They need
+# a nightly compiler and cargo-fuzz, so this is a workspace of its own and no
+# part of a release; see "Fuzzing" in CONTRIBUTING.md.
+[package]
+name = "garrison-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+garrison-broker = { path = "../crates/broker" }
+garrison-collector = { path = "../crates/collector" }
+garrison-core = { path = "../crates/core" }
+garrison-ingest = { path = "../crates/ingest" }
+garrison-milter = { path = "../crates/milter" }
+garrison-stalwart = { path = "../crates/stalwart" }
+garrison-testing = { path = "../crates/testing" }
+garrison-web = { path = "../crates/web" }
+libfuzzer-sys = "0.4.13"
+serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
+tempfile = "3.27.0"
+tokio = { version = "1.53.3", features = ["rt"] }
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
+
+[[bin]]
+name = "json"
+path = "fuzz_targets/json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "broker_request"
+path = "fuzz_targets/broker_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "prometheus"
+path = "fuzz_targets/prometheus.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_answer"
+path = "fuzz_targets/dns_answer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "events"
+path = "fuzz_targets/events.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "web_request"
+path = "fuzz_targets/web_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "milter_scan"
+path = "fuzz_targets/milter_scan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "milter_session"
+path = "fuzz_targets/milter_session.rs"
+test = false
+doc = false
+bench = false

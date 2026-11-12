@@ -1,0 +1,100 @@
+# Garrison backend. One crate per component, mirroring docs/architecture/
+# overview.md; `cargo xtask layering` keeps web frameworks out of the
+# privileged crates. Rules for adding a dependency: CONTRIBUTING.md.
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+authors = ["relative23"]
+publish = false
+
+[workspace.dependencies]
+garrison-core = { path = "crates/core" }
+garrison-stalwart = { path = "crates/stalwart" }
+garrison-authz = { path = "crates/authz" }
+garrison-testing = { path = "crates/testing" }
+garrison-ingest = { path = "crates/ingest" }
+garrison-collector = { path = "crates/collector" }
+garrison-broker = { path = "crates/broker" }
+garrison-milter = { path = "crates/milter" }
+garrison-web = { path = "crates/web" }
+
+# HTTP servers for web and ingest only; `cargo xtask layering` keeps them out of
+# the privileged crates. Crates add the features they need.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+base64 = "0.23.1"
+# The command line of the one binary; no colours or suggestions.
+clap = { version = "4.6.7", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
+# gzip for the web service's JSON answers; flate2 (rust-lang) with its pure-Rust
+# backend miniz_oxide.
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+# The benchmarks in crates/*/benches; a development dependency only.
+divan = "0.1.21"
+getrandom = "0.4.3"
+hmac = "0.13.0"
+# UTC timestamps only; no time zone database.
+jiff = { version = "0.2.38", default-features = false, features = ["std"] }
+# Operator-written version patterns; no Unicode tables needed.
+regex-lite = "0.1.9"
+# Takes over the socket systemd passes to the broker, without unsafe code here.
+listenfd = "1.0.2"
+log = { version = "0.4.34", features = ["std"] }
+# Checks release signatures for `garrison upgrade`; verification only, no dependencies.
+minisign-verify = "0.3.0"
+rusqlite = { version = "0.41.1", features = ["backup", "bundled", "hooks"] }
+rustix = { version = "1.1.5", features = ["fs", "net", "process"] }
+# TLS probes only (collector), with ring and the system's trust store.
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8.5"
+serde = { version = "1.0.229", features = ["derive"] }
+# preserve_order: stored JSON keeps the order in which fields were written.
+# float_roundtrip: a number is read as the nearest double, so a value that was
+# written is the same value when it is read again; without it serde_json may
+# be one unit in the last place off for long or large numbers.
+serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
+sha2 = "0.11.1"
+# Comparisons in constant time (core::constant_time); rustls already brings it.
+subtle = { version = "2.6.1", default-features = false }
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+# preserve_order: links and provider options keep the order the operator wrote.
+toml = { version = "1.1.8", default-features = false, features = ["parse", "preserve_order", "serde", "std"] }
+# No TLS, compression or proxy support: Stalwart is reached over loopback HTTP.
+ureq = { version = "3.4.2", default-features = false }
+url = "2.5.8"
+# The OpenAPI document of the web API, derived from the response types.
+utoipa = { version = "6.0.0", default-features = false, features = ["macros", "preserve_order", "preserve_path_order"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+print_stderr = "warn"
+print_stdout = "warn"
+todo = "warn"
+unwrap_used = "warn"
+# Error and panic sections would repeat what the types and messages already say.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+# Permission checks read better as octal masks (mode & 0o077 == 0).
+verbose_bit_mask = "allow"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+# A missed integer overflow fails loudly instead of wrapping into a wrong value.
+overflow-checks = true
+strip = "symbols"

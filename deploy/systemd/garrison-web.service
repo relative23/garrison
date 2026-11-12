@@ -1,0 +1,50 @@
+[Unit]
+Description=Garrison - web service
+Documentation=file:///opt/garrison/current/share/docs/operator/operations.md
+After=network.target garrison-broker.socket
+Wants=garrison-broker.socket
+
+[Service]
+# Started once the service is listening: a release that cannot come up
+# fails its start, and the installer switches back.
+Type=notify
+TimeoutStartSec=30
+User=garrison
+Group=garrison
+ExecStart=/opt/garrison/current/bin/garrison web
+Restart=on-failure
+RestartSec=5
+StateDirectory=garrison/web
+StateDirectoryMode=0700
+UMask=0077
+# Reads the collector and ingest databases through the shared group.
+ReadOnlyPaths=/var/lib/garrison/collector /var/lib/garrison/ingest
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Loopback only: nginx in front, Stalwart's OAuth endpoints behind.
+IPAddressDeny=any
+IPAddressAllow=localhost
+MemoryMax=256M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

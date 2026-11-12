@@ -1,0 +1,12 @@
+[Unit]
+Description=Garrison - action broker socket
+
+[Socket]
+ListenStream=/run/garrison/broker.sock
+SocketUser=garrison-broker
+SocketGroup=garrison
+SocketMode=0660
+Accept=no
+
+[Install]
+WantedBy=sockets.target

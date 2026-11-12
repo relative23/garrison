@@ -1,0 +1,12 @@
+# cargo-mutants: `cargo mutants --workspace` changes the code one mutation at a
+# time and expects a test to fail for each. See CONTRIBUTING.md.
+
+# Build tooling and shared test fixtures are not product code. The installer and
+# the Stalwart setup change a real host; scripts/acceptance.sh and the contract
+# tests check them there.
+exclude_globs = [
+  "xtask/**",
+  "crates/testing/**",
+  "crates/garrison/src/install/**",
+  "crates/garrison/src/setup/**",
+]

@@ -1,0 +1,22 @@
+[package]
+name = "garrison-milter"
+description = "A milter that refuses Office documents with macros, for Stalwart to ask before it takes a message."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+flate2.workspace = true
+garrison-core.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+garrison-testing.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

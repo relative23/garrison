@@ -1,0 +1,1872 @@
+{
+ "providers": [
+  {
+   "type": "stalwart",
+   "observations": [
+    {
+     "id": "version.stalwart",
+     "provider": "stalwart",
+     "title": "Stalwart",
+     "modules": [
+      "dashboard",
+      "services"
+     ],
+     "evidence": "process",
+     "state": "ok",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "server.startup event",
+     "kind": "version",
+     "scope": "Version reported by the running server at its last recorded start.",
+     "fields": [],
+     "table": null,
+     "findings": [],
+     "value": {
+      "component": "Stalwart",
+      "version": "1.1.1",
+      "startedAt": 1793000000
+     },
+     "maxAge": 3600
+    },
+    {
+     "id": "stalwart.spam",
+     "provider": "stalwart",
+     "title": "Native spam filter and classifier",
+     "modules": [
+      "spam"
+     ],
+     "evidence": "configuration",
+     "state": "ok",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "x:SpamSettings, x:SpamClassifier, x:SpamRule, x:SpamTrainingSample",
+     "kind": "details",
+     "scope": "Configured values. A rule count or queued sample does not prove learning.",
+     "fields": [
+      {
+       "label": "Filter enabled",
+       "value": true,
+       "format": "boolean"
+      },
+      {
+       "label": "Spam threshold",
+       "value": 5.0,
+       "format": "number"
+      },
+      {
+       "label": "Reject threshold",
+       "value": 15,
+       "format": "number"
+      },
+      {
+       "label": "Discard threshold",
+       "value": null,
+       "format": "number"
+      },
+      {
+       "label": "Native rules",
+       "value": 412,
+       "format": "number"
+      },
+      {
+       "label": "Classifier model",
+       "value": "FtrlProximal",
+       "format": "text"
+      },
+      {
+       "label": "Minimum ham samples",
+       "value": 10,
+       "format": "number"
+      },
+      {
+       "label": "Minimum spam samples",
+       "value": 10,
+       "format": "number"
+      },
+      {
+       "label": "Training interval",
+       "value": 86400.0,
+       "format": "duration"
+      },
+      {
+       "label": "Queued training samples",
+       "value": null,
+       "format": "number"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {},
+     "maxAge": 300
+    },
+    {
+     "id": "stalwart.milter",
+     "provider": "stalwart",
+     "title": "Stalwart milter connection",
+     "modules": [
+      "antivirus"
+     ],
+     "evidence": "configuration",
+     "state": "warning",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "x:MtaMilter/get",
+     "kind": "details",
+     "scope": "",
+     "fields": [
+      {
+       "label": "Matching milters",
+       "value": 1,
+       "format": "number"
+      },
+      {
+       "label": "Endpoint",
+       "value": "127.0.0.1:7357",
+       "format": "text"
+      },
+      {
+       "label": "Enabled",
+       "value": true,
+       "format": "boolean"
+      },
+      {
+       "label": "DATA stage",
+       "value": true,
+       "format": "boolean"
+      },
+      {
+       "label": "Temporary failure on error",
+       "value": false,
+       "format": "boolean"
+      }
+     ],
+     "table": null,
+     "findings": [
+      "Milter errors do not cause a temporary rejection; mail may pass unscanned."
+     ],
+     "value": {},
+     "maxAge": 300
+    },
+    {
+     "id": "stalwart.mailboxes",
+     "provider": "stalwart",
+     "title": "Mailbox storage",
+     "modules": [
+      "dashboard"
+     ],
+     "evidence": "inventory",
+     "state": "warning",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "x:Account/get (selected properties)",
+     "kind": "details",
+     "scope": "Stored size and quota per user account. Mail contents are not read; manage accounts in the Stalwart WebUI.",
+     "fields": [
+      {
+       "label": "User accounts",
+       "value": 4,
+       "format": "number"
+      },
+      {
+       "label": "At 90 % or more",
+       "value": 1,
+       "format": "number"
+      }
+     ],
+     "table": {
+      "columns": [
+       {
+        "label": "Account",
+        "format": "text"
+       },
+       {
+        "label": "Used",
+        "format": "bytes"
+       },
+       {
+        "label": "Quota",
+        "format": "bytes"
+       },
+       {
+        "label": "Usage (%)",
+        "format": "number"
+       }
+      ],
+      "rows": [
+       [
+        "full@example.test",
+        955,
+        1000,
+        95.5
+       ],
+       [
+        "half@example.test",
+        1000,
+        2000,
+        50.0
+       ],
+       [
+        "unlimited@example.test",
+        5000,
+        null,
+        null
+       ]
+      ]
+     },
+     "findings": [
+      "full@example.test uses 90 % or more of its quota.",
+      "Only the first 3 accounts are listed."
+     ],
+     "value": {},
+     "maxAge": 900
+    },
+    {
+     "id": "stalwart.queue",
+     "provider": "stalwart",
+     "title": "Mail queue",
+     "modules": [
+      "dashboard",
+      "deliveries"
+     ],
+     "evidence": "inventory",
+     "state": "ok",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "x:QueuedMessage/query",
+     "kind": "details",
+     "scope": "",
+     "fields": [
+      {
+       "label": "Queued messages",
+       "value": 3,
+       "format": "number"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {},
+     "maxAge": 180
+    }
+   ],
+   "gauges": {
+    "queue_count": 3.0
+   },
+   "counters": {}
+  },
+  {
+   "type": "prometheus",
+   "observations": [
+    {
+     "id": "prometheus.exporter",
+     "provider": "prometheus",
+     "title": "Native metrics exporter",
+     "modules": [
+      "dashboard",
+      "services"
+     ],
+     "evidence": "metric",
+     "state": "ok",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "/metrics/prometheus",
+     "kind": "details",
+     "scope": "Community metrics exported by the running server; a counter it has not exported since it started counts as zero.",
+     "fields": [
+      {
+       "label": "Samples read",
+       "value": 7,
+       "format": "number"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {},
+     "maxAge": 180
+    }
+   ],
+   "gauges": {
+    "server_memory_mib": 300.0,
+    "smtp_connections": 2.0,
+    "http_connections": 4.0,
+    "imap_connections": 1.0
+   },
+   "counters": {
+    "queue_message_queued": 7.0,
+    "delivery_completed": 5.0,
+    "auth_failed": 9.0,
+    "message_ingest_ham": 0.0,
+    "message_ingest_spam": 0.0,
+    "milter_action_connection_failure": 0.0,
+    "milter_action_reject": 0.0,
+    "milter_action_temp_fail": 0.0,
+    "milter_timeout": 0.0,
+    "mta_hook_action_reject": 0.0,
+    "queue_authenticated_message_queued": 0.0,
+    "security_authentication_ban": 0.0
+   }
+  },
+  {
+   "type": "http",
+   "observations": [
+    {
+     "id": "http.health",
+     "provider": "http",
+     "title": "Health endpoint",
+     "modules": [
+      "services"
+     ],
+     "evidence": "process",
+     "state": "failed",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "@STALWART@/health",
+     "kind": "details",
+     "scope": "The endpoint answered; this does not test user functionality.",
+     "fields": [
+      {
+       "label": "HTTP status",
+       "value": 204,
+       "format": "number"
+      }
+     ],
+     "table": null,
+     "findings": [
+      "Answered HTTP 204, expected 200."
+     ],
+     "value": {},
+     "maxAge": 180
+    }
+   ],
+   "gauges": {},
+   "counters": {}
+  },
+  {
+   "type": "host",
+   "observations": [
+    {
+     "id": "host.resources",
+     "provider": "host",
+     "title": "Host resources",
+     "modules": [
+      "dashboard",
+      "services"
+     ],
+     "evidence": "metric",
+     "state": null,
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "@FIXTURES@/proc/meminfo, loadavg, uptime; statvfs(@FIXTURES@)",
+     "kind": "details",
+     "scope": "",
+     "fields": [
+      {
+       "label": "Architecture",
+       "value": null,
+       "format": "text"
+      },
+      {
+       "label": "CPU cores",
+       "value": null,
+       "format": "number"
+      },
+      {
+       "label": "Load (1 / 5 / 15 min)",
+       "value": "0.52 / 0.58 / 0.59",
+       "format": "text"
+      },
+      {
+       "label": "Memory total",
+       "value": 8192000000,
+       "format": "bytes"
+      },
+      {
+       "label": "Memory available",
+       "value": 2560000000,
+       "format": "bytes"
+      },
+      {
+       "label": "Swap total",
+       "value": 1073741824,
+       "format": "bytes"
+      },
+      {
+       "label": "Disk total",
+       "value": null,
+       "format": "bytes"
+      },
+      {
+       "label": "Disk free",
+       "value": null,
+       "format": "bytes"
+      },
+      {
+       "label": "Free inodes",
+       "value": null,
+       "format": "text"
+      },
+      {
+       "label": "Uptime",
+       "value": 86523,
+       "format": "duration"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {},
+     "maxAge": 180
+    }
+   ],
+   "gauges": {
+    "ram_used_gib": 5.245208740234375,
+    "load_1m": 0.52
+   },
+   "counters": {}
+  },
+  {
+   "type": "systemd",
+   "observations": [
+    {
+     "id": "systemd.stalwart.service",
+     "provider": "systemd",
+     "title": "Mail server",
+     "modules": [
+      "dashboard",
+      "services"
+     ],
+     "evidence": "process",
+     "state": "ok",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "systemctl show stalwart.service",
+     "kind": "service",
+     "scope": "A running process does not prove that it handled mail correctly.",
+     "fields": [
+      {
+       "label": "Load state",
+       "value": "loaded",
+       "format": "text"
+      },
+      {
+       "label": "Active state",
+       "value": "active (running)",
+       "format": "text"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {
+      "unit": "stalwart.service",
+      "activeState": "active",
+      "subState": "running"
+     },
+     "maxAge": 180
+    },
+    {
+     "id": "systemd.garrison-collect.timer",
+     "provider": "systemd",
+     "title": "Collection schedule",
+     "modules": [
+      "services"
+     ],
+     "evidence": "process",
+     "state": "ok",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "systemctl show garrison-collect.timer",
+     "kind": "service",
+     "scope": "The loaded schedule; a successful run is shown by the job's receipt.",
+     "fields": [
+      {
+       "label": "Load state",
+       "value": "loaded",
+       "format": "text"
+      },
+      {
+       "label": "Active state",
+       "value": "active (waiting)",
+       "format": "text"
+      },
+      {
+       "label": "Schedule",
+       "value": "*:0/1",
+       "format": "text"
+      },
+      {
+       "label": "Next run",
+       "value": "2026-10-29T12:01:00+00:00",
+       "format": "datetime"
+      },
+      {
+       "label": "Last trigger",
+       "value": "2026-10-29T12:00:00+00:00",
+       "format": "datetime"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {
+      "unit": "garrison-collect.timer",
+      "activeState": "active",
+      "subState": "waiting"
+     },
+     "maxAge": 180
+    },
+    {
+     "id": "systemd.backup.service",
+     "provider": "systemd",
+     "title": "Backup job",
+     "modules": [
+      "backups"
+     ],
+     "evidence": "process",
+     "state": "failed",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "systemctl show backup.service",
+     "kind": "service",
+     "scope": "What systemd reports of the job's last run; it does not prove what the job did.",
+     "fields": [
+      {
+       "label": "Load state",
+       "value": "loaded",
+       "format": "text"
+      },
+      {
+       "label": "Active state",
+       "value": "inactive (dead)",
+       "format": "text"
+      },
+      {
+       "label": "Last run",
+       "value": null,
+       "format": "datetime"
+      },
+      {
+       "label": "Result",
+       "value": null,
+       "format": "text"
+      },
+      {
+       "label": "Duration",
+       "value": null,
+       "format": "duration"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {
+      "unit": "backup.service",
+      "activeState": "inactive",
+      "subState": "dead"
+     },
+     "maxAge": 180
+    },
+    {
+     "id": "systemd.clamav-milter.service",
+     "provider": "systemd",
+     "title": "Milter",
+     "modules": [
+      "antivirus"
+     ],
+     "evidence": "process",
+     "state": "ok",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "systemctl show clamav-milter.service",
+     "kind": "service",
+     "scope": "What systemd reports of the job's last run; it does not prove what the job did.",
+     "fields": [
+      {
+       "label": "Load state",
+       "value": "loaded",
+       "format": "text"
+      },
+      {
+       "label": "Active state",
+       "value": "activating (start)",
+       "format": "text"
+      },
+      {
+       "label": "Last run",
+       "value": null,
+       "format": "datetime"
+      },
+      {
+       "label": "Result",
+       "value": null,
+       "format": "text"
+      },
+      {
+       "label": "Duration",
+       "value": null,
+       "format": "duration"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {
+      "unit": "clamav-milter.service",
+      "activeState": "activating",
+      "subState": "start"
+     },
+     "maxAge": 180
+    },
+    {
+     "id": "systemd.gone.service",
+     "provider": "systemd",
+     "title": "Removed",
+     "modules": [
+      "services"
+     ],
+     "evidence": "process",
+     "state": "failed",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "systemctl show gone.service",
+     "kind": "service",
+     "scope": "A running process does not prove that it handled mail correctly.",
+     "fields": [
+      {
+       "label": "Load state",
+       "value": "not-found",
+       "format": "text"
+      },
+      {
+       "label": "Active state",
+       "value": "inactive (dead)",
+       "format": "text"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {
+      "unit": "gone.service",
+      "activeState": "inactive",
+      "subState": "dead"
+     },
+     "maxAge": 180
+    },
+    {
+     "id": "systemd.missing.service",
+     "provider": "systemd",
+     "title": "Missing",
+     "modules": [
+      "services"
+     ],
+     "evidence": "process",
+     "state": "unknown",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "systemctl show missing.service",
+     "kind": "service",
+     "scope": "A running process does not prove that it handled mail correctly.",
+     "fields": [
+      {
+       "label": "Load state",
+       "value": "unknown",
+       "format": "text"
+      },
+      {
+       "label": "Active state",
+       "value": "unknown (unknown)",
+       "format": "text"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {
+      "unit": "missing.service",
+      "activeState": null,
+      "subState": null
+     },
+     "maxAge": 180
+    }
+   ],
+   "gauges": {
+    "healthy_services": 3.0
+   },
+   "counters": {}
+  },
+  {
+   "type": "clamav",
+   "observations": [
+    {
+     "id": "clamav.configuration",
+     "provider": "clamav",
+     "title": "Antivirus configuration",
+     "modules": [
+      "antivirus"
+     ],
+     "evidence": "configuration",
+     "state": "warning",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "@FIXTURES@/clamav/milter.conf; @FIXTURES@/clamav/scan.conf",
+     "kind": "details",
+     "scope": "On-disk configuration; whether the running daemons loaded it is not verified.",
+     "fields": [
+      {
+       "label": "Detected malware",
+       "value": "Reject",
+       "format": "text"
+      },
+      {
+       "label": "Scanner failure",
+       "value": "Accept",
+       "format": "text"
+      },
+      {
+       "label": "Milter socket",
+       "value": "inet:7357@127.0.0.1",
+       "format": "text"
+      },
+      {
+       "label": "Scanner socket",
+       "value": "unix:/run/clamd.scan/clamd.sock",
+       "format": "text"
+      },
+      {
+       "label": "Milter file limit",
+       "value": 26214400,
+       "format": "bytes"
+      },
+      {
+       "label": "Scanner stream limit",
+       "value": 104857600,
+       "format": "bytes"
+      },
+      {
+       "label": "Scanner file limit",
+       "value": 26214400,
+       "format": "bytes"
+      },
+      {
+       "label": "Scanner total limit",
+       "value": 419430400,
+       "format": "bytes"
+      },
+      {
+       "label": "Archive scanning",
+       "value": true,
+       "format": "boolean"
+      },
+      {
+       "label": "Alert when limits are exceeded",
+       "value": false,
+       "format": "boolean"
+      },
+      {
+       "label": "Alert for encrypted content",
+       "value": null,
+       "format": "boolean"
+      }
+     ],
+     "table": null,
+     "findings": [
+      "Scanner failures are handled with Accept, not Defer."
+     ],
+     "value": {},
+     "maxAge": 300
+    },
+    {
+     "id": "clamav.signatures",
+     "provider": "clamav",
+     "title": "Signature databases",
+     "modules": [
+      "antivirus"
+     ],
+     "evidence": "inventory",
+     "state": "ok",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "@FIXTURES@/clamav",
+     "kind": "details",
+     "scope": "File times do not prove a successful update check or a loaded database.",
+     "fields": [],
+     "table": {
+      "columns": [
+       {
+        "label": "File",
+        "format": "text"
+       },
+       {
+        "label": "Size",
+        "format": "bytes"
+       },
+       {
+        "label": "Modified",
+        "format": "datetime"
+       },
+       {
+        "label": "Last refresh check",
+        "format": "datetime"
+       }
+      ],
+      "rows": [
+       [
+        "main.cvd",
+        15,
+        "2026-10-27T11:20:00+00:00",
+        "2026-10-28T06:00:00+00:00"
+       ],
+       [
+        "daily.cld",
+        5,
+        "2026-10-29T10:33:20.123457+00:00",
+        "2026-10-29T06:00:01.123456+00:00"
+       ],
+       [
+        "bytecode.cvd",
+        8,
+        "2026-10-26T07:33:21+00:00",
+        null
+       ]
+      ]
+     },
+     "findings": [],
+     "value": {},
+     "maxAge": 900
+    }
+   ],
+   "gauges": {
+    "signature_age_hours": 1.4444101508333334
+   },
+   "counters": {}
+  },
+  {
+   "type": "receipt",
+   "observations": [
+    {
+     "id": "receipt.restore",
+     "provider": "receipt",
+     "title": "Restore test",
+     "modules": [
+      "backups"
+     ],
+     "evidence": "receipt",
+     "state": "ok",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "@FIXTURES@/restore.json",
+     "kind": "details",
+     "scope": "Historical result reported by the job; not a current test.",
+     "fields": [
+      {
+       "label": "Reported at",
+       "value": "2026-10-28T23:15:00.250000+01:00",
+       "format": "datetime"
+      },
+      {
+       "label": "Accounts",
+       "value": 3,
+       "format": "number"
+      },
+      {
+       "label": "Mail checks",
+       "value": 17,
+       "format": "number"
+      },
+      {
+       "label": "Items",
+       "value": 3,
+       "format": "text"
+      },
+      {
+       "label": "Long text",
+       "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "format": "text"
+      },
+      {
+       "label": "Ratio",
+       "value": 0.75,
+       "format": "number"
+      },
+      {
+       "label": "Flag",
+       "value": true,
+       "format": "boolean"
+      },
+      {
+       "label": "Absent",
+       "value": null,
+       "format": "text"
+      }
+     ],
+     "table": null,
+     "findings": [],
+     "value": {},
+     "maxAge": 900
+    }
+   ],
+   "gauges": {
+    "receipt_age_hours.restore": 13.749930555555556
+   },
+   "counters": {}
+  },
+  {
+   "type": "receipt",
+   "observations": [
+    {
+     "id": "receipt.mail-tests",
+     "provider": "receipt",
+     "title": "Mail tests",
+     "modules": [
+      "antivirus",
+      "spam"
+     ],
+     "evidence": "receipt",
+     "state": "failed",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "@FIXTURES@/tests.json",
+     "kind": "details",
+     "scope": "Historical result reported by the job; not a current test.",
+     "fields": [
+      {
+       "label": "Reported at",
+       "value": "2026-10-28T11:00:00+00:00",
+       "format": "datetime"
+      }
+     ],
+     "table": {
+      "columns": [
+       {
+        "label": "Test",
+        "format": "text"
+       },
+       {
+        "label": "Passed",
+        "format": "boolean"
+       },
+       {
+        "label": "Duration",
+        "format": "number"
+       }
+      ],
+      "rows": [
+       [
+        "EICAR SMTP 25",
+        true,
+        120
+       ],
+       [
+        "EICAR JMAP",
+        1,
+        80.5
+       ],
+       [
+        "GTUBE",
+        false,
+        null
+       ],
+       [
+        "No date",
+        true,
+        null
+       ]
+      ]
+     },
+     "findings": [
+      "At least one recorded result is not a success."
+     ],
+     "value": {},
+     "maxAge": 900
+    }
+   ],
+   "gauges": {
+    "receipt_age_hours.mail-tests": 25.0
+   },
+   "counters": {}
+  },
+  {
+   "type": "receipt",
+   "observations": [
+    {
+     "id": "receipt.backup",
+     "provider": "receipt",
+     "title": "Backup",
+     "modules": [
+      "backups"
+     ],
+     "evidence": "receipt",
+     "state": "warning",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "@FIXTURES@/backup.json",
+     "kind": "details",
+     "scope": "Custom scope text.",
+     "fields": [
+      {
+       "label": "Reported at",
+       "value": "2026-10-27T03:00:00+00:00",
+       "format": "datetime"
+      }
+     ],
+     "table": null,
+     "findings": [
+      "The last receipt is older than 24 hours."
+     ],
+     "value": {},
+     "maxAge": 900
+    }
+   ],
+   "gauges": {
+    "receipt_age_hours.backup": 57.0
+   },
+   "counters": {}
+  },
+  {
+   "type": "receipt",
+   "observations": [
+    {
+     "id": "receipt.missing",
+     "provider": "receipt",
+     "title": "Missing receipt",
+     "modules": [
+      "backups"
+     ],
+     "evidence": "receipt",
+     "state": "unknown",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "@FIXTURES@/none.json",
+     "kind": "details",
+     "scope": "Historical result reported by the job; not a current test.",
+     "fields": [],
+     "table": null,
+     "findings": [
+      "No readable receipt."
+     ],
+     "value": {},
+     "maxAge": 300
+    }
+   ],
+   "gauges": {},
+   "counters": {}
+  },
+  {
+   "type": "version-command",
+   "observations": [
+    {
+     "id": "version.clamav",
+     "provider": "version-command",
+     "title": "ClamAV",
+     "modules": [
+      "services"
+     ],
+     "evidence": "inventory",
+     "state": "ok",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "/usr/bin/clamdscan",
+     "kind": "version",
+     "scope": "Installed binary; the running process version is not verified.",
+     "fields": [],
+     "table": null,
+     "findings": [],
+     "value": {
+      "component": "ClamAV",
+      "version": "1.4.3"
+     },
+     "maxAge": 3600
+    }
+   ],
+   "gauges": {},
+   "counters": {}
+  },
+  {
+   "type": "bulwark",
+   "observations": [
+    {
+     "id": "bulwark.plugins",
+     "provider": "bulwark",
+     "title": "Webmail plugins",
+     "modules": [
+      "spam"
+     ],
+     "evidence": "configuration",
+     "state": "failed",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "@FIXTURES@/bulwark/plugins/registry.json",
+     "kind": "details",
+     "scope": "Administrator configuration; execution in browsers is not tested here.",
+     "fields": [
+      {
+       "label": "spam-report: version",
+       "value": "1.4.0",
+       "format": "text"
+      },
+      {
+       "label": "spam-report: enabled",
+       "value": true,
+       "format": "boolean"
+      },
+      {
+       "label": "spam-report: bundle integrity",
+       "value": "verified",
+       "format": "text"
+      },
+      {
+       "label": "tampered: version",
+       "value": "2.0.0-beta.1",
+       "format": "text"
+      },
+      {
+       "label": "tampered: enabled",
+       "value": false,
+       "format": "boolean"
+      },
+      {
+       "label": "tampered: bundle integrity",
+       "value": "mismatch",
+       "format": "text"
+      },
+      {
+       "label": "odd: version",
+       "value": null,
+       "format": "text"
+      },
+      {
+       "label": "odd: enabled",
+       "value": null,
+       "format": "boolean"
+      },
+      {
+       "label": "odd: bundle integrity",
+       "value": "unknown",
+       "format": "text"
+      },
+      {
+       "label": "twice: version",
+       "value": null,
+       "format": "text"
+      },
+      {
+       "label": "twice: enabled",
+       "value": null,
+       "format": "boolean"
+      },
+      {
+       "label": "twice: bundle integrity",
+       "value": "unknown",
+       "format": "text"
+      },
+      {
+       "label": "absent: version",
+       "value": null,
+       "format": "text"
+      },
+      {
+       "label": "absent: enabled",
+       "value": null,
+       "format": "boolean"
+      },
+      {
+       "label": "absent: bundle integrity",
+       "value": "unknown",
+       "format": "text"
+      }
+     ],
+     "table": null,
+     "findings": [
+      "The tampered bundle does not match its recorded hash."
+     ],
+     "value": {},
+     "maxAge": 900
+    }
+   ],
+   "gauges": {},
+   "counters": {}
+  },
+  {
+   "type": "tls",
+   "observations": [
+    {
+     "id": "tls.endpoints",
+     "provider": "tls",
+     "title": "TLS certificates",
+     "modules": [
+      "dns_tls"
+     ],
+     "evidence": "probe",
+     "state": "failed",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "Local TLS handshake with SNI and chain validation",
+     "kind": "details",
+     "scope": "Proves what the local listener presents; public reachability and automatic renewal are not tested here.",
+     "fields": [
+      {
+       "label": "Lowest remaining validity",
+       "value": null,
+       "format": "number"
+      }
+     ],
+     "table": {
+      "columns": [
+       {
+        "label": "Endpoint",
+        "format": "text"
+       },
+       {
+        "label": "Result",
+        "format": "text"
+       },
+       {
+        "label": "Expires",
+        "format": "datetime"
+       },
+       {
+        "label": "Days left",
+        "format": "number"
+       },
+       {
+        "label": "Protocol",
+        "format": "text"
+       }
+      ],
+      "rows": [
+       [
+        "localhost:1",
+        "failed",
+        null,
+        null,
+        null
+       ]
+      ]
+     },
+     "findings": [
+      "localhost:1 — TLS check failed (connection refused)."
+     ],
+     "value": {},
+     "maxAge": 900
+    }
+   ],
+   "gauges": {},
+   "counters": {}
+  }
+ ],
+ "stored": {
+  "samples": [
+   {
+    "name": "auth_failed",
+    "ts": 1793275200,
+    "value": 4.5,
+    "kind": "increase"
+   },
+   {
+    "name": "delivery_completed",
+    "ts": 1793275200,
+    "value": 2.5,
+    "kind": "increase"
+   },
+   {
+    "name": "healthy_services",
+    "ts": 1793275140,
+    "value": 3.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "healthy_services",
+    "ts": 1793275200,
+    "value": 3.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "http_connections",
+    "ts": 1793275140,
+    "value": 4.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "http_connections",
+    "ts": 1793275200,
+    "value": 4.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "imap_connections",
+    "ts": 1793275140,
+    "value": 1.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "imap_connections",
+    "ts": 1793275200,
+    "value": 1.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "load_1m",
+    "ts": 1793275140,
+    "value": 0.52,
+    "kind": "gauge"
+   },
+   {
+    "name": "load_1m",
+    "ts": 1793275200,
+    "value": 0.52,
+    "kind": "gauge"
+   },
+   {
+    "name": "message_ingest_ham",
+    "ts": 1793275200,
+    "value": 0.0,
+    "kind": "increase"
+   },
+   {
+    "name": "message_ingest_spam",
+    "ts": 1793275200,
+    "value": 0.0,
+    "kind": "increase"
+   },
+   {
+    "name": "milter_action_connection_failure",
+    "ts": 1793275200,
+    "value": 0.0,
+    "kind": "increase"
+   },
+   {
+    "name": "milter_action_reject",
+    "ts": 1793275200,
+    "value": 0.0,
+    "kind": "increase"
+   },
+   {
+    "name": "milter_action_temp_fail",
+    "ts": 1793275200,
+    "value": 0.0,
+    "kind": "increase"
+   },
+   {
+    "name": "milter_timeout",
+    "ts": 1793275200,
+    "value": 0.0,
+    "kind": "increase"
+   },
+   {
+    "name": "mta_hook_action_reject",
+    "ts": 1793275200,
+    "value": 0.0,
+    "kind": "increase"
+   },
+   {
+    "name": "queue_authenticated_message_queued",
+    "ts": 1793275200,
+    "value": 0.0,
+    "kind": "increase"
+   },
+   {
+    "name": "queue_count",
+    "ts": 1793275140,
+    "value": 3.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "queue_count",
+    "ts": 1793275200,
+    "value": 3.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "queue_message_queued",
+    "ts": 1793275200,
+    "value": 3.5,
+    "kind": "increase"
+   },
+   {
+    "name": "ram_used_gib",
+    "ts": 1793275140,
+    "value": 5.245208740234375,
+    "kind": "gauge"
+   },
+   {
+    "name": "ram_used_gib",
+    "ts": 1793275200,
+    "value": 5.245208740234375,
+    "kind": "gauge"
+   },
+   {
+    "name": "receipt_age_hours.backup",
+    "ts": 1793275140,
+    "value": 57.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "receipt_age_hours.backup",
+    "ts": 1793275200,
+    "value": 57.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "receipt_age_hours.mail-tests",
+    "ts": 1793275140,
+    "value": 25.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "receipt_age_hours.mail-tests",
+    "ts": 1793275200,
+    "value": 25.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "receipt_age_hours.restore",
+    "ts": 1793275140,
+    "value": 13.749930555555556,
+    "kind": "gauge"
+   },
+   {
+    "name": "receipt_age_hours.restore",
+    "ts": 1793275200,
+    "value": 13.749930555555556,
+    "kind": "gauge"
+   },
+   {
+    "name": "security_authentication_ban",
+    "ts": 1793275200,
+    "value": 0.0,
+    "kind": "increase"
+   },
+   {
+    "name": "server_memory_mib",
+    "ts": 1793275140,
+    "value": 300.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "server_memory_mib",
+    "ts": 1793275200,
+    "value": 300.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "signature_age_hours",
+    "ts": 1793275140,
+    "value": 1.4444101508333334,
+    "kind": "gauge"
+   },
+   {
+    "name": "signature_age_hours",
+    "ts": 1793275200,
+    "value": 1.4444101508333334,
+    "kind": "gauge"
+   },
+   {
+    "name": "smtp_connections",
+    "ts": 1793275140,
+    "value": 2.0,
+    "kind": "gauge"
+   },
+   {
+    "name": "smtp_connections",
+    "ts": 1793275200,
+    "value": 2.0,
+    "kind": "gauge"
+   }
+  ],
+  "counters": [
+   {
+    "name": "auth_failed",
+    "ts": 1793275200,
+    "value": 9.0
+   },
+   {
+    "name": "delivery_completed",
+    "ts": 1793275200,
+    "value": 5.0
+   },
+   {
+    "name": "message_ingest_ham",
+    "ts": 1793275200,
+    "value": 0.0
+   },
+   {
+    "name": "message_ingest_spam",
+    "ts": 1793275200,
+    "value": 0.0
+   },
+   {
+    "name": "milter_action_connection_failure",
+    "ts": 1793275200,
+    "value": 0.0
+   },
+   {
+    "name": "milter_action_reject",
+    "ts": 1793275200,
+    "value": 0.0
+   },
+   {
+    "name": "milter_action_temp_fail",
+    "ts": 1793275200,
+    "value": 0.0
+   },
+   {
+    "name": "milter_timeout",
+    "ts": 1793275200,
+    "value": 0.0
+   },
+   {
+    "name": "mta_hook_action_reject",
+    "ts": 1793275200,
+    "value": 0.0
+   },
+   {
+    "name": "queue_authenticated_message_queued",
+    "ts": 1793275200,
+    "value": 0.0
+   },
+   {
+    "name": "queue_message_queued",
+    "ts": 1793275200,
+    "value": 7.0
+   },
+   {
+    "name": "security_authentication_ban",
+    "ts": 1793275200,
+    "value": 0.0
+   }
+  ],
+  "resets": []
+ },
+ "history": {
+  "from": 1793271600,
+  "to": 1793275260,
+  "points": [
+   {
+    "timestamp": 1793271752,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793272057,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793272362,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793272667,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793272972,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793273277,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793273582,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793273887,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793274192,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793274497,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793274802,
+    "queue_message_queued": null,
+    "queue_count": null,
+    "ram_used_gib": null,
+    "receipt_age_hours.mail-tests": null,
+    "signature_age_hours": null,
+    "receipt_age_hours.restore": null,
+    "delivery_completed": null,
+    "receipt_age_hours.backup": null,
+    "auth_failed": null,
+    "smtp_connections": null,
+    "healthy_services": null,
+    "load_1m": null,
+    "server_memory_mib": null,
+    "http_connections": null,
+    "imap_connections": null,
+    "message_ingest_ham": null,
+    "message_ingest_spam": null,
+    "milter_action_connection_failure": null,
+    "milter_action_reject": null,
+    "milter_action_temp_fail": null,
+    "milter_timeout": null,
+    "mta_hook_action_reject": null,
+    "queue_authenticated_message_queued": null,
+    "security_authentication_ban": null
+   },
+   {
+    "timestamp": 1793275107,
+    "auth_failed": 4.5,
+    "delivery_completed": 2.5,
+    "healthy_services": 3.0,
+    "load_1m": 0.52,
+    "queue_count": 3.0,
+    "queue_message_queued": 3.5,
+    "ram_used_gib": 5.245208740234375,
+    "receipt_age_hours.backup": 57.0,
+    "receipt_age_hours.mail-tests": 25.0,
+    "receipt_age_hours.restore": 13.749930555555556,
+    "server_memory_mib": 300.0,
+    "signature_age_hours": 1.4444101508333334,
+    "smtp_connections": 2.0,
+    "http_connections": 4.0,
+    "imap_connections": 1.0,
+    "message_ingest_ham": 0.0,
+    "message_ingest_spam": 0.0,
+    "milter_action_connection_failure": 0.0,
+    "milter_action_reject": 0.0,
+    "milter_action_temp_fail": 0.0,
+    "milter_timeout": 0.0,
+    "mta_hook_action_reject": 0.0,
+    "queue_authenticated_message_queued": 0.0,
+    "security_authentication_ban": 0.0
+   }
+  ],
+  "totals": {
+   "auth_failed": 4.5,
+   "delivery_completed": 2.5,
+   "queue_message_queued": 3.5,
+   "message_ingest_ham": 0.0,
+   "message_ingest_spam": 0.0,
+   "milter_action_connection_failure": 0.0,
+   "milter_action_reject": 0.0,
+   "milter_action_temp_fail": 0.0,
+   "milter_timeout": 0.0,
+   "mta_hook_action_reject": 0.0,
+   "queue_authenticated_message_queued": 0.0,
+   "security_authentication_ban": 0.0
+  },
+  "coverageFrom": 1793275140,
+  "coverageTo": 1793275200,
+  "sampledMinutes": 2,
+  "counterResets": 0,
+  "latest": {
+   "healthy_services": 3.0,
+   "load_1m": 0.52,
+   "queue_count": 3.0,
+   "ram_used_gib": 5.245208740234375,
+   "receipt_age_hours.backup": 57.0,
+   "receipt_age_hours.mail-tests": 25.0,
+   "receipt_age_hours.restore": 13.749930555555556,
+   "server_memory_mib": 300.0,
+   "signature_age_hours": 1.4444101508333334,
+   "smtp_connections": 2.0,
+   "http_connections": 4.0,
+   "imap_connections": 1.0
+  }
+ }
+}

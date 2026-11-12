@@ -1,0 +1,5 @@
+# minisign public keys whose signatures `garrison upgrade` accepts, one base64
+# key per line. They are compiled into the binary. To change keys, add the new
+# key in a release signed with the old one, and remove the old key in a later
+# release. See "Signing releases" in CONTRIBUTING.md.
+RWSKAjJdo0lsYJJA64rSgwP6KeVtTEbgqB12xkoAVxzQd+l9U0OplCP6

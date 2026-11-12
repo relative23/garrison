@@ -1,0 +1,3 @@
+O /api/session
+origin: https://mail.example.test
+access-control-request-method: GET

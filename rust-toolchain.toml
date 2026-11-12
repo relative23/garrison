@@ -1,0 +1,6 @@
+# The exact compiler for builds and checks; release archives are reproducible
+# only with the same toolchain. Raise it deliberately, like any dependency.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

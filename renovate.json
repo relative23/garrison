@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommitsDisabled", "helpers:pinGitHubActionDigests"],
+  "minimumReleaseAge": "14 days",
+  "internalChecksFilter": "strict",
+  "rangeStrategy": "pin",
+  "packageRules": [
+    {
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "frontend dependencies (non-major)"
+    },
+    {
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Rust dependencies (non-major)"
+    },
+    {
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7.0.0",
+      "description": "TypeScript 7 lacks the compiler API that typescript-eslint and openapi-typescript need (CONTRIBUTING.md)."
+    }
+  ],
+  "schedule": ["before 6am on monday"]
+}

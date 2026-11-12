@@ -1,0 +1,29 @@
+# Build output and tool caches (dist/ includes frontend/dist from `npm run build`)
+node_modules/
+dist/
+/target/
+/frontend/coverage/
+
+# Private material, never published: records, decisions, evidence, drafts
+# (private/), credentials and runtime data
+/private/
+.runtime/
+runtime/
+*.sqlite*
+.env
+.env.*
+secrets/
+credentials/
+**/*.key
+**/*.pem
+**/*credentials*.txt
+**/*secret*.json
+**/*private*.json
+/garrison.toml
+/access-policy.json
+
+# Local browser checks
+.playwright-mcp/
+
+# IDE project files
+.idea/

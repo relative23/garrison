@@ -1,0 +1,135 @@
+---
+# Install, configure and upgrade Garrison; the play needs `become: true`.
+# Every task can run again: a second run changes only what changed.
+
+- name: The release and the addresses are named
+  ansible.builtin.assert:
+    that:
+      - garrison_version | length > 0
+      - garrison_public_origin is match('^https://')
+      - garrison_issuer is match('^https://')
+      - garrison_unsigned or garrison_signing_key | length > 0
+    fail_msg: >-
+      Set garrison_version, garrison_public_origin, garrison_issuer and
+      garrison_signing_key (or garrison_unsigned for a release before the first
+      signed one).
+
+- name: The archive's name
+  ansible.builtin.set_fact:
+    garrison_name: "garrison-{{ garrison_version }}-{{ garrison_arch }}"
+
+- name: The archive carries a signature by the release key
+  ansible.builtin.command:
+    argv:
+      - minisign
+      - -Vm
+      - "{{ garrison_archives }}/{{ garrison_name }}.tar.gz"
+      - -P
+      - "{{ garrison_signing_key }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: garrison_signature
+  when: not garrison_unsigned
+
+- name: The signature names exactly this release
+  ansible.builtin.assert:
+    # A block scalar: the colon in the pattern would make a plain one a mapping.
+    that:
+      - >-
+        garrison_signature.stdout is search('^Trusted comment: garrison '
+        ~ (garrison_version | regex_escape) ~ ' ' ~ (garrison_arch | regex_escape)
+        ~ '$', multiline=True)
+    fail_msg: The signature is valid but belongs to another release.
+  when: not garrison_unsigned
+
+- name: The archive is on the host
+  ansible.builtin.copy:
+    src: "{{ garrison_archives }}/{{ garrison_name }}.tar.gz"
+    dest: "/root/{{ garrison_name }}.tar.gz"
+    owner: root
+    group: root
+    mode: "0600"
+  register: garrison_archive
+
+- name: The unpacked release
+  ansible.builtin.stat:
+    path: "/root/{{ garrison_name }}/VERSION"
+  register: garrison_unpacked
+
+# Unpacked afresh whenever the checked archive changed, so that nothing left
+# from an earlier copy is installed.
+- name: An earlier unpacked copy is removed
+  ansible.builtin.file:
+    path: "/root/{{ garrison_name }}"
+    state: absent
+  when: garrison_archive is changed or not garrison_unpacked.stat.exists
+
+- name: The release is unpacked
+  ansible.builtin.unarchive:
+    src: "/root/{{ garrison_name }}.tar.gz"
+    dest: /root
+    remote_src: true
+  when: garrison_archive is changed or not garrison_unpacked.stat.exists
+
+- name: The running release
+  ansible.builtin.slurp:
+    src: /opt/garrison/current/VERSION
+  register: garrison_running
+  failed_when: false
+
+- name: Its version
+  ansible.builtin.set_fact:
+    garrison_installed: "{{ (garrison_running.content | default('')) | b64decode | trim }}"
+
+- name: The release is installed (the first time, it starts nothing)
+  ansible.builtin.command:
+    cmd: "/root/{{ garrison_name }}/bin/garrison install"
+  register: garrison_first
+  when: garrison_installed | length == 0
+
+- name: The configuration
+  ansible.builtin.template:
+    src: garrison.toml.j2
+    dest: /etc/garrison/garrison.toml
+    owner: root
+    group: root
+    mode: "0644"
+  register: garrison_config
+
+- name: Stalwart is connected (the administrator goes in on standard input)
+  ansible.builtin.command:
+    argv:
+      - /opt/garrison/current/bin/garrison
+      - stalwart
+      - setup
+      - --admin-credential
+      - "-"
+    stdin: "{{ garrison_stalwart_admin | to_json }}"
+    creates: /etc/garrison/credentials/broker-native-key
+  no_log: true
+  when: garrison_stalwart_admin | length > 0
+
+- name: Stalwart's administrators have access
+  ansible.builtin.command:
+    cmd: /opt/garrison/current/bin/garrison access init
+    creates: /etc/garrison/access-policy.json
+
+- name: Garrison runs this release with this configuration
+  ansible.builtin.command:
+    cmd: "/root/{{ garrison_name }}/bin/garrison install"
+  when: >-
+    garrison_installed != garrison_version
+    or garrison_config is changed
+    or garrison_first is changed
+
+- name: garrison doctor
+  ansible.builtin.command:
+    cmd: /opt/garrison/current/bin/garrison doctor
+  register: garrison_doctor
+  changed_when: false
+  failed_when: garrison_doctor.rc == 2
+
+- name: What doctor found
+  ansible.builtin.debug:
+    var: garrison_doctor.stdout_lines

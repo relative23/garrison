@@ -1,0 +1,36 @@
+# cargo deny check: licenses, security advisories, duplicate crates and sources.
+# Garrison is MIT; every dependency must allow redistribution in a
+# closed binary without copyleft terms (no AGPL, so no Stalwart crates either).
+
+[graph]
+# Releases are static musl builds; tests and CI run on gnu.
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-musl",
+]
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Zlib",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

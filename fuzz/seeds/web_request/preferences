@@ -1,0 +1,4 @@
+swU /api/preferences
+content-type: application/json
+
+{"theme": "dark", "hiddenModules": ["backups"], "showSwitch": false}

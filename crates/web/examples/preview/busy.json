@@ -1,0 +1,2262 @@
+[
+  {
+    "id": "version.stalwart",
+    "provider": "stalwart",
+    "title": "Stalwart",
+    "modules": ["dashboard", "services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "server.startup event",
+    "kind": "version",
+    "scope": "Version reported by the running server at its last recorded start.",
+    "fields": [],
+    "table": null,
+    "findings": [],
+    "value": {
+      "component": "Stalwart",
+      "version": "1.1.0",
+      "startedAt": 1791633600
+    },
+    "maxAge": 3600
+  },
+  {
+    "id": "stalwart.mailboxes",
+    "provider": "stalwart",
+    "title": "Mailbox storage",
+    "modules": ["dashboard"],
+    "evidence": "inventory",
+    "state": "warning",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "x:Account/get (selected properties)",
+    "kind": "details",
+    "scope": "Stored size and quota per user account. Mail contents are not read; manage accounts in the Stalwart WebUI.",
+    "fields": [
+      {
+        "label": "User accounts",
+        "value": 184,
+        "format": "number"
+      },
+      {
+        "label": "At 90 % or more",
+        "value": 3,
+        "format": "number"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Account",
+          "format": "text"
+        },
+        {
+          "label": "Used",
+          "format": "bytes"
+        },
+        {
+          "label": "Quota",
+          "format": "bytes"
+        },
+        {
+          "label": "Usage (%)",
+          "format": "number"
+        }
+      ],
+      "rows": [
+        ["archive@example.org", 50036368998, 53687091200, 93.2],
+        ["sales@example.org", 20293720474, 21474836480, 94.5],
+        ["newsletter@example.net", 9878424781, 10737418240, 92.0],
+        ["anna.keller@example.org", 33715493274, 53687091200, 62.8],
+        ["support@example.org", 29850022707, 53687091200, 55.6],
+        ["billing@example.org", 23729694310, 53687091200, 44.2],
+        ["jonas.weber@example.org", 15354508083, 21474836480, 71.5],
+        ["shop@example.net", 13636521165, 21474836480, 63.5],
+        ["office@example.com", 12777527706, 21474836480, 59.5],
+        ["m.schneider@example.org", 10307921510, 21474836480, 48.0],
+        ["press@example.org", 6871947674, 21474836480, 32.0],
+        ["postmaster@example.org", 2469606195, null, null]
+      ]
+    },
+    "findings": [
+      "archive@example.org, sales@example.org and newsletter@example.net use 90 % or more of their quota.",
+      "Only the first 12 accounts are listed."
+    ],
+    "value": {},
+    "maxAge": 900
+  },
+  {
+    "id": "stalwart.queue",
+    "provider": "stalwart",
+    "title": "Mail queue",
+    "modules": ["dashboard", "deliveries"],
+    "evidence": "inventory",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "x:QueuedMessage/query",
+    "kind": "details",
+    "scope": "",
+    "fields": [
+      {
+        "label": "Queued messages",
+        "value": 37,
+        "format": "number"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "prometheus.exporter",
+    "provider": "prometheus",
+    "title": "Native metrics exporter",
+    "modules": ["dashboard", "services"],
+    "evidence": "metric",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "http://127.0.0.1:8080/metrics/prometheus",
+    "kind": "details",
+    "scope": "Community metrics exported by the running server; a counter it has not exported since it started counts as zero.",
+    "fields": [
+      {
+        "label": "Samples read",
+        "value": 214,
+        "format": "number"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.resources",
+    "provider": "host",
+    "title": "Host resources",
+    "modules": ["dashboard", "services"],
+    "evidence": "metric",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/proc/meminfo, loadavg, uptime; statvfs(/)",
+    "kind": "details",
+    "scope": "",
+    "fields": [
+      {
+        "label": "Architecture",
+        "value": "x86_64",
+        "format": "text"
+      },
+      {
+        "label": "CPU cores",
+        "value": 8,
+        "format": "number"
+      },
+      {
+        "label": "Load (1 / 5 / 15 min)",
+        "value": "2.84 / 2.51 / 2.37",
+        "format": "text"
+      },
+      {
+        "label": "Memory total",
+        "value": 34359738368,
+        "format": "bytes"
+      },
+      {
+        "label": "Memory available",
+        "value": 12025908429,
+        "format": "bytes"
+      },
+      {
+        "label": "Swap total",
+        "value": 4294967296,
+        "format": "bytes"
+      },
+      {
+        "label": "Disk total",
+        "value": 960000000000,
+        "format": "bytes"
+      },
+      {
+        "label": "Disk free",
+        "value": 412000000000,
+        "format": "bytes"
+      },
+      {
+        "label": "Free inodes",
+        "value": "97 %",
+        "format": "text"
+      },
+      {
+        "label": "Uptime",
+        "value": 1659600,
+        "format": "duration"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.stalwart.service",
+    "provider": "systemd",
+    "title": "Mail server",
+    "modules": ["dashboard", "services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show stalwart.service",
+    "kind": "service",
+    "scope": "A running process does not prove that it handled mail correctly.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (running)",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "stalwart.service",
+      "activeState": "active",
+      "subState": "running"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.nginx.service",
+    "provider": "systemd",
+    "title": "Reverse proxy",
+    "modules": ["services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show nginx.service",
+    "kind": "service",
+    "scope": "A running process does not prove that it handled mail correctly.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (running)",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "nginx.service",
+      "activeState": "active",
+      "subState": "running"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.unbound.service",
+    "provider": "systemd",
+    "title": "DNS resolver",
+    "modules": ["dns_tls", "services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show unbound.service",
+    "kind": "service",
+    "scope": "A running process does not prove that it handled mail correctly.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (running)",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "unbound.service",
+      "activeState": "active",
+      "subState": "running"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.clamd@scan.service",
+    "provider": "systemd",
+    "title": "Virus scanner",
+    "modules": ["antivirus", "services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show clamd@scan.service",
+    "kind": "service",
+    "scope": "A running process does not prove that it handled mail correctly.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (running)",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "clamd@scan.service",
+      "activeState": "active",
+      "subState": "running"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.clamav-milter.service",
+    "provider": "systemd",
+    "title": "Scanner milter",
+    "modules": ["antivirus", "services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show clamav-milter.service",
+    "kind": "service",
+    "scope": "A running process does not prove that it handled mail correctly.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (running)",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "clamav-milter.service",
+      "activeState": "active",
+      "subState": "running"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.garrison-milter.service",
+    "provider": "systemd",
+    "title": "Garrison macro filter",
+    "modules": ["antivirus", "services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show garrison-milter.service",
+    "kind": "service",
+    "scope": "A running process does not prove that it handled mail correctly.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (running)",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "garrison-milter.service",
+      "activeState": "active",
+      "subState": "running"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.garrison-web.service",
+    "provider": "systemd",
+    "title": "Garrison web service",
+    "modules": ["services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show garrison-web.service",
+    "kind": "service",
+    "scope": "A running process does not prove that it handled mail correctly.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (running)",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "garrison-web.service",
+      "activeState": "active",
+      "subState": "running"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.garrison-ingest.service",
+    "provider": "systemd",
+    "title": "Garrison event receiver",
+    "modules": ["services", "logs"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show garrison-ingest.service",
+    "kind": "service",
+    "scope": "A running process does not prove that it handled mail correctly.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (running)",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "garrison-ingest.service",
+      "activeState": "active",
+      "subState": "running"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.garrison-broker.socket",
+    "provider": "systemd",
+    "title": "Garrison maintenance broker",
+    "modules": ["services", "actions"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show garrison-broker.socket",
+    "kind": "service",
+    "scope": "A running process does not prove that it handled mail correctly.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (listening)",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "garrison-broker.socket",
+      "activeState": "active",
+      "subState": "listening"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.garrison-collect.timer",
+    "provider": "systemd",
+    "title": "Garrison collector schedule",
+    "modules": ["services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show garrison-collect.timer",
+    "kind": "service",
+    "scope": "The loaded schedule; a successful run is shown by the job's receipt.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (waiting)",
+        "format": "text"
+      },
+      {
+        "label": "Schedule",
+        "value": "*:0/1",
+        "format": "text"
+      },
+      {
+        "label": "Next run",
+        "value": "2026-10-29T12:01:00+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Last trigger",
+        "value": "2026-10-29T12:00:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "garrison-collect.timer",
+      "activeState": "active",
+      "subState": "waiting"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.garrison-watch.timer",
+    "provider": "systemd",
+    "title": "Garrison collector watch",
+    "modules": ["services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show garrison-watch.timer",
+    "kind": "service",
+    "scope": "The loaded schedule; a successful run is shown by the job's receipt.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (waiting)",
+        "format": "text"
+      },
+      {
+        "label": "Schedule",
+        "value": "*:0/5",
+        "format": "text"
+      },
+      {
+        "label": "Next run",
+        "value": "2026-10-29T12:05:00+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Last trigger",
+        "value": "2026-10-29T12:00:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "garrison-watch.timer",
+      "activeState": "active",
+      "subState": "waiting"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.certbot-renew.timer",
+    "provider": "systemd",
+    "title": "Certificate renewal",
+    "modules": ["dns_tls", "services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show certbot-renew.timer",
+    "kind": "service",
+    "scope": "The loaded schedule; a successful run is shown by the job's receipt.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "active (waiting)",
+        "format": "text"
+      },
+      {
+        "label": "Schedule",
+        "value": "*-*-* 03,15:17:00",
+        "format": "text"
+      },
+      {
+        "label": "Next run",
+        "value": "2026-10-29T15:17:00+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Last trigger",
+        "value": "2026-10-29T03:17:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "certbot-renew.timer",
+      "activeState": "active",
+      "subState": "waiting"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.backup.service",
+    "provider": "systemd",
+    "title": "Backup job",
+    "modules": ["backups"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show backup.service",
+    "kind": "service",
+    "scope": "What systemd reports of the job's last run; it does not prove what the job did.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "inactive (dead)",
+        "format": "text"
+      },
+      {
+        "label": "Last run",
+        "value": "2026-10-29T03:30:00+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Result",
+        "value": "success",
+        "format": "text"
+      },
+      {
+        "label": "Duration",
+        "value": 1124,
+        "format": "duration"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "backup.service",
+      "activeState": "inactive",
+      "subState": "dead"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "systemd.dnf-automatic-install.service",
+    "provider": "systemd",
+    "title": "System updates",
+    "modules": ["services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl show dnf-automatic-install.service",
+    "kind": "service",
+    "scope": "What systemd reports of the job's last run; it does not prove what the job did.",
+    "fields": [
+      {
+        "label": "Load state",
+        "value": "loaded",
+        "format": "text"
+      },
+      {
+        "label": "Active state",
+        "value": "inactive (dead)",
+        "format": "text"
+      },
+      {
+        "label": "Last run",
+        "value": "2026-10-29T05:12:00+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Result",
+        "value": "success",
+        "format": "text"
+      },
+      {
+        "label": "Duration",
+        "value": 96,
+        "format": "duration"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {
+      "unit": "dnf-automatic-install.service",
+      "activeState": "inactive",
+      "subState": "dead"
+    },
+    "maxAge": 180
+  },
+  {
+    "id": "version.clamav",
+    "provider": "version-command",
+    "title": "ClamAV",
+    "modules": ["services"],
+    "evidence": "inventory",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/usr/bin/clamdscan",
+    "kind": "version",
+    "scope": "Installed binary; the running process version is not verified.",
+    "fields": [],
+    "table": null,
+    "findings": [],
+    "value": {
+      "component": "ClamAV",
+      "version": "1.4.6"
+    },
+    "maxAge": 3600
+  },
+  {
+    "id": "release.garrison",
+    "provider": "releases",
+    "title": "Garrison release",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "api.github.com: releases of relative23/garrison",
+    "kind": "details",
+    "scope": "The newest release GitHub lists, asked once a day.",
+    "fields": [
+      {
+        "label": "Runs here",
+        "value": "0.1.0",
+        "format": "text"
+      },
+      {
+        "label": "Newest release",
+        "value": "0.1.0",
+        "format": "text"
+      },
+      {
+        "label": "Asked",
+        "value": "2026-10-29T06:14:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "release.stalwart",
+    "provider": "releases",
+    "title": "Stalwart release",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "api.github.com: releases of stalwartlabs/stalwart",
+    "kind": "details",
+    "scope": "The newest release GitHub lists, asked once a day.",
+    "fields": [
+      {
+        "label": "Runs here",
+        "value": "1.1.0",
+        "format": "text"
+      },
+      {
+        "label": "Newest release",
+        "value": "1.1.0",
+        "format": "text"
+      },
+      {
+        "label": "Asked",
+        "value": "2026-10-29T06:14:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "http.health",
+    "provider": "http",
+    "title": "Health endpoint",
+    "modules": ["services"],
+    "evidence": "process",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "http://127.0.0.1:8080/health",
+    "kind": "details",
+    "scope": "The endpoint answered; this does not test user functionality.",
+    "fields": [
+      {
+        "label": "HTTP status",
+        "value": 200,
+        "format": "number"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.updates",
+    "provider": "host-care",
+    "title": "System updates",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "warning",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "dnf updateinfo, from its cache",
+    "kind": "details",
+    "scope": "What the package manager would install, from the metadata the host has fetched; asked every six hours.",
+    "fields": [
+      {
+        "label": "Security updates",
+        "value": 2,
+        "format": "number"
+      },
+      {
+        "label": "Other updates",
+        "value": 11,
+        "format": "number"
+      },
+      {
+        "label": "Asked",
+        "value": "2026-10-29T08:00:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": null,
+    "findings": ["2 security updates are pending."],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.restart",
+    "provider": "host-care",
+    "title": "Restart of the host",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/run/reboot-required, /lib/modules",
+    "kind": "details",
+    "scope": "The distribution's own marker where it writes one, and the installed kernels against the running one.",
+    "fields": [
+      {
+        "label": "Running kernel",
+        "value": "6.12.0-211.74.2.el10_2.x86_64",
+        "format": "text"
+      },
+      {
+        "label": "Newest installed kernel",
+        "value": "6.12.0-211.74.2.el10_2.x86_64",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.clock",
+    "provider": "host-care",
+    "title": "Clock synchronisation",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "timedatectl show",
+    "kind": "details",
+    "scope": "Whether the system clock follows a time server. Mail authentication and TLS depend on the time.",
+    "fields": [
+      {
+        "label": "Synchronised",
+        "value": true,
+        "format": "boolean"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.disk-forecast",
+    "provider": "host-care",
+    "title": "Disk forecast",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/",
+    "kind": "details",
+    "scope": "The free space of the last two weeks, read hourly, carried forward in a straight line.",
+    "fields": [
+      {
+        "label": "Free now",
+        "value": 412000000000,
+        "format": "bytes"
+      },
+      {
+        "label": "Change a day",
+        "value": -1900000000,
+        "format": "bytes"
+      },
+      {
+        "label": "Full in",
+        "value": 18662400,
+        "format": "duration"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.firewall",
+    "provider": "host-care",
+    "title": "Firewall service",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl is-active",
+    "kind": "details",
+    "scope": "Whether a firewall service of the host runs; its rules are not read.",
+    "fields": [
+      {
+        "label": "Active",
+        "value": "firewalld",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "clamav.configuration",
+    "provider": "clamav",
+    "title": "Antivirus configuration",
+    "modules": ["antivirus"],
+    "evidence": "configuration",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/etc/mail/clamav-milter.conf; /etc/clamd.d/scan.conf",
+    "kind": "details",
+    "scope": "On-disk configuration; whether the running daemons loaded it is not verified.",
+    "fields": [
+      {
+        "label": "Detected malware",
+        "value": "Reject",
+        "format": "text"
+      },
+      {
+        "label": "Scanner failure",
+        "value": "Defer",
+        "format": "text"
+      },
+      {
+        "label": "Milter socket",
+        "value": "inet:7357@127.0.0.1",
+        "format": "text"
+      },
+      {
+        "label": "Scanner socket",
+        "value": "unix:/run/clamd.scan/clamd.sock",
+        "format": "text"
+      },
+      {
+        "label": "Milter file limit",
+        "value": 52428800,
+        "format": "bytes"
+      },
+      {
+        "label": "Scanner stream limit",
+        "value": 104857600,
+        "format": "bytes"
+      },
+      {
+        "label": "Scanner file limit",
+        "value": 52428800,
+        "format": "bytes"
+      },
+      {
+        "label": "Scanner total limit",
+        "value": 419430400,
+        "format": "bytes"
+      },
+      {
+        "label": "Archive scanning",
+        "value": true,
+        "format": "boolean"
+      },
+      {
+        "label": "Alert when limits are exceeded",
+        "value": false,
+        "format": "boolean"
+      },
+      {
+        "label": "Alert for encrypted content",
+        "value": false,
+        "format": "boolean"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 300
+  },
+  {
+    "id": "clamav.signatures",
+    "provider": "clamav",
+    "title": "Signature databases",
+    "modules": ["antivirus"],
+    "evidence": "inventory",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/var/lib/clamav",
+    "kind": "details",
+    "scope": "File times do not prove a successful update check or a loaded database.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "File",
+          "format": "text"
+        },
+        {
+          "label": "Size",
+          "format": "bytes"
+        },
+        {
+          "label": "Modified",
+          "format": "datetime"
+        },
+        {
+          "label": "Last refresh check",
+          "format": "datetime"
+        }
+      ],
+      "rows": [
+        ["main.cvd", 170479789, "2026-10-21T11:20:00+00:00", "2026-10-29T10:00:00+00:00"],
+        ["daily.cld", 64721874, "2026-10-29T10:33:20+00:00", "2026-10-29T10:00:01+00:00"],
+        ["bytecode.cvd", 289946, "2026-10-26T07:33:21+00:00", "2026-10-29T10:00:01+00:00"],
+        ["sanesecurity/junk.ndb", 4915200, "2026-10-29T09:10:00+00:00", "2026-10-29T11:50:00+00:00"],
+        ["sanesecurity/phish.ndb", 1887436, "2026-10-29T09:10:00+00:00", "2026-10-29T11:50:00+00:00"],
+        ["sanesecurity/rogue.hdb", 1258291, "2026-10-29T09:10:00+00:00", "2026-10-29T11:50:00+00:00"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 900
+  },
+  {
+    "id": "stalwart.milter",
+    "provider": "stalwart",
+    "title": "Stalwart milter connection",
+    "modules": ["antivirus"],
+    "evidence": "configuration",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "x:MtaMilter/get",
+    "kind": "details",
+    "scope": "",
+    "fields": [
+      {
+        "label": "Matching milters",
+        "value": 2,
+        "format": "number"
+      },
+      {
+        "label": "Endpoint",
+        "value": "127.0.0.1:7357, 127.0.0.1:8096",
+        "format": "text"
+      },
+      {
+        "label": "Enabled",
+        "value": true,
+        "format": "boolean"
+      },
+      {
+        "label": "DATA stage",
+        "value": true,
+        "format": "boolean"
+      },
+      {
+        "label": "Temporary failure on error",
+        "value": true,
+        "format": "boolean"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 300
+  },
+  {
+    "id": "flow.milter",
+    "provider": "mail-flow",
+    "title": "Milter verdicts",
+    "modules": ["antivirus"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "What the scanner behind the milter said of the mail it was shown on each of the last seven days (UTC).",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Day",
+          "format": "text"
+        },
+        {
+          "label": "Accepted",
+          "format": "number"
+        },
+        {
+          "label": "Rejected",
+          "format": "number"
+        },
+        {
+          "label": "Discarded",
+          "format": "number"
+        },
+        {
+          "label": "Deferred",
+          "format": "number"
+        },
+        {
+          "label": "Not reached",
+          "format": "number"
+        }
+      ],
+      "rows": [
+        ["2026-10-29", 21480, 61, 0, 0, 0],
+        ["2026-10-28", 46912, 138, 0, 0, 0],
+        ["2026-10-27", 45107, 127, 0, 0, 0],
+        ["2026-10-26", 44236, 119, 0, 2, 0],
+        ["2026-10-25", 17844, 44, 0, 0, 0],
+        ["2026-10-24", 15932, 37, 0, 0, 0],
+        ["2026-10-23", 43518, 142, 0, 0, 0]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "mailtest.results",
+    "provider": "mail-test",
+    "title": "Test messages",
+    "modules": ["antivirus", "spam"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "SMTP to 127.0.0.1:25",
+    "kind": "details",
+    "scope": "Garrison handed the test messages to the local SMTP listener without signing in, addressed to garrison-test@example.org; the next test follows 24 hours after this one.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Test",
+          "format": "text"
+        },
+        {
+          "label": "Sent",
+          "format": "datetime"
+        },
+        {
+          "label": "Result",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["Antivirus test file (EICAR)", "2026-10-29T04:10:00+00:00", "refused: 554 5.7.1 Message rejected by a milter"],
+        ["Spam test text (GTUBE)", "2026-10-29T04:10:00+00:00", "accepted and filed as spam"],
+        [
+          "Office document with macros (test document)",
+          "2026-10-29T04:10:01+00:00",
+          "refused: 550 5.7.1 Message refused: an attached Office document contains macros."
+        ]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "stalwart.spam",
+    "provider": "stalwart",
+    "title": "Native spam filter and classifier",
+    "modules": ["spam"],
+    "evidence": "configuration",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "x:SpamSettings, x:SpamClassifier, x:SpamRule, x:SpamTrainingSample",
+    "kind": "details",
+    "scope": "Configured values. A rule count or queued sample does not prove learning.",
+    "fields": [
+      {
+        "label": "Filter enabled",
+        "value": true,
+        "format": "boolean"
+      },
+      {
+        "label": "Spam threshold",
+        "value": 5.0,
+        "format": "number"
+      },
+      {
+        "label": "Reject threshold",
+        "value": 15,
+        "format": "number"
+      },
+      {
+        "label": "Discard threshold",
+        "value": 25,
+        "format": "number"
+      },
+      {
+        "label": "Native rules",
+        "value": 412,
+        "format": "number"
+      },
+      {
+        "label": "Classifier model",
+        "value": "FtrlProximal",
+        "format": "text"
+      },
+      {
+        "label": "Minimum ham samples",
+        "value": 100,
+        "format": "number"
+      },
+      {
+        "label": "Minimum spam samples",
+        "value": 100,
+        "format": "number"
+      },
+      {
+        "label": "Training interval",
+        "value": 86400.0,
+        "format": "duration"
+      },
+      {
+        "label": "Queued training samples",
+        "value": 1284,
+        "format": "number"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 300
+  },
+  {
+    "id": "flow.spam",
+    "provider": "mail-flow",
+    "title": "Spam and ham",
+    "modules": ["spam"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "How Stalwart's filter filed delivered mail on each of the last seven days (UTC).",
+    "fields": [
+      {
+        "label": "Training runs in these days",
+        "value": 7,
+        "format": "number"
+      },
+      {
+        "label": "Last training",
+        "value": "2026-10-29T02:10:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Day",
+          "format": "text"
+        },
+        {
+          "label": "Ham",
+          "format": "number"
+        },
+        {
+          "label": "Spam",
+          "format": "number"
+        },
+        {
+          "label": "Spam share",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["2026-10-29", 17212, 4268, "20 %"],
+        ["2026-10-28", 37840, 9072, "19 %"],
+        ["2026-10-27", 36415, 8692, "19 %"],
+        ["2026-10-26", 35902, 8334, "19 %"],
+        ["2026-10-25", 14311, 3533, "20 %"],
+        ["2026-10-24", 12876, 3056, "19 %"],
+        ["2026-10-23", 35107, 8411, "19 %"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "flow.spam-domains",
+    "provider": "mail-flow",
+    "title": "Spam and ham by domain",
+    "modules": ["spam"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "The same seven days by the domain of the mailbox the mail went to.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Domain",
+          "format": "text"
+        },
+        {
+          "label": "Ham",
+          "format": "number"
+        },
+        {
+          "label": "Spam",
+          "format": "number"
+        },
+        {
+          "label": "Spam share",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["example.org", 118420, 24310, "17 %"],
+        ["example.net", 41206, 12944, "24 %"],
+        ["example.com", 22871, 5120, "18 %"],
+        ["shop.example.net", 5912, 2688, "31 %"],
+        ["lists.example.org", 1254, 304, "20 %"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "flow.authentication",
+    "provider": "mail-flow",
+    "title": "Checks of incoming senders",
+    "modules": ["spam"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "How the mail of the last seven days fared in Stalwart's checks of its sender. Not passed includes senders that publish no record to check against.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Check",
+          "format": "text"
+        },
+        {
+          "label": "Passed",
+          "format": "number"
+        },
+        {
+          "label": "Not passed",
+          "format": "number"
+        },
+        {
+          "label": "Passed share",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["SPF of the greeting (EHLO)", 201844, 33120, "86 %"],
+        ["SPF of the sender", 213902, 21062, "91 %"],
+        ["DKIM", 189211, 45753, "81 %"],
+        ["DMARC", 176408, 58556, "75 %"],
+        ["ARC", 22140, 1912, "92 %"],
+        ["Reverse name", 221377, 13587, "94 %"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "flow.failing-senders",
+    "provider": "mail-flow",
+    "title": "Sender domains that fail the checks",
+    "modules": ["spam"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "Domains whose mail failed SPF or DMARC in the last seven days: forged senders, or a sender whose own records are wrong. A domain without a record is not listed.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Sender domain",
+          "format": "text"
+        },
+        {
+          "label": "SPF failures",
+          "format": "number"
+        },
+        {
+          "label": "DMARC failures",
+          "format": "number"
+        }
+      ],
+      "rows": [
+        ["parcel-tracking.example", 4812, 4790],
+        ["invoice-portal.example", 3120, 3120],
+        ["example.org", 2214, 2214],
+        ["bank-secure.example", 1877, 1870],
+        ["newsletter-hub.example", 944, 12],
+        ["partner.example", 0, 618],
+        ["crm-mailer.example", 402, 398],
+        ["old-agency.example", 211, 0]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "bulwark.plugins",
+    "provider": "bulwark",
+    "title": "Webmail plugins",
+    "modules": ["spam"],
+    "evidence": "configuration",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/var/lib/bulwark/plugins/registry.json",
+    "kind": "details",
+    "scope": "Administrator configuration; execution in browsers is not tested here.",
+    "fields": [
+      {
+        "label": "spam-report: version",
+        "value": "1.4.0",
+        "format": "text"
+      },
+      {
+        "label": "spam-report: enabled",
+        "value": true,
+        "format": "boolean"
+      },
+      {
+        "label": "spam-report: bundle integrity",
+        "value": "verified",
+        "format": "text"
+      },
+      {
+        "label": "link-warning: version",
+        "value": "2.1.3",
+        "format": "text"
+      },
+      {
+        "label": "link-warning: enabled",
+        "value": true,
+        "format": "boolean"
+      },
+      {
+        "label": "link-warning: bundle integrity",
+        "value": "verified",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 900
+  },
+  {
+    "id": "senders.accounts",
+    "provider": "senders",
+    "title": "Sending accounts",
+    "modules": ["attacks"],
+    "evidence": "probe",
+    "state": "warning",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "Mail that signed-in accounts handed in during the last 24 hours, against each account's own average of the 14 days before. Read every ten minutes; nothing is blocked.",
+    "fields": [
+      {
+        "label": "Accounts that sent",
+        "value": 173,
+        "format": "number"
+      },
+      {
+        "label": "Unusual",
+        "value": 2,
+        "format": "number"
+      },
+      {
+        "label": "Read",
+        "value": "2026-10-29T11:54:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Account",
+          "format": "text"
+        },
+        {
+          "label": "Messages",
+          "format": "number"
+        },
+        {
+          "label": "Recipients",
+          "format": "number"
+        },
+        {
+          "label": "Usual a day",
+          "format": "number"
+        },
+        {
+          "label": "Busiest hour",
+          "format": "number"
+        },
+        {
+          "label": "Bounces",
+          "format": "number"
+        },
+        {
+          "label": "Addresses",
+          "format": "number"
+        }
+      ],
+      "rows": [
+        ["newsletter@example.net", 214, 48210, 6120, 9840, 1312, 2],
+        ["shop@example.net", 3912, 4406, 4180, 612, 41, 1],
+        ["jonas.weber@example.org", 61, 2984, 38, 2710, 1422, 14],
+        ["billing@example.org", 1840, 1902, 1760, 244, 9, 1],
+        ["support@example.org", 1211, 1388, 1304, 171, 4, 3],
+        ["sales@example.org", 644, 1120, 980, 133, 12, 6],
+        ["anna.keller@example.org", 212, 318, 290, 44, 1, 4],
+        ["office@example.com", 187, 266, 240, 39, 0, 2],
+        ["press@example.org", 44, 912, 610, 402, 18, 1],
+        ["m.schneider@example.org", 96, 141, 150, 21, 0, 3],
+        ["postmaster@example.org", 38, 38, 35, 6, 0, 1],
+        ["archive@example.org", 12, 12, 14, 3, 0, 1]
+      ]
+    },
+    "findings": [
+      "jonas.weber@example.org: 2,984 recipients in 24 hours, where 38 a day are usual; 1,422 of them bounced; handed in from 14 addresses.",
+      "newsletter@example.net: 48,210 recipients in 24 hours, where 6,120 a day are usual."
+    ],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "backup-check.restic",
+    "provider": "backup-check",
+    "title": "restic repository",
+    "modules": ["backups"],
+    "evidence": "receipt",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/var/lib/garrison/backup-check/restic.json",
+    "kind": "details",
+    "scope": "What the backup tool said of its repository when `garrison backup-check` last asked it. A test restore proves that the newest snapshot can be read with the password; it does not compare the restored files with the originals.",
+    "fields": [
+      {
+        "label": "Repository",
+        "value": "sftp:backup@storage.example.net:/srv/restic/mail",
+        "format": "text"
+      },
+      {
+        "label": "Newest snapshot",
+        "value": "2026-10-29T03:48:44+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Snapshots",
+        "value": 214,
+        "format": "number"
+      },
+      {
+        "label": "Stored size",
+        "value": 442381631488,
+        "format": "bytes"
+      },
+      {
+        "label": "Listed",
+        "value": "2026-10-29T03:49:02+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Last integrity check",
+        "value": "passed",
+        "format": "text"
+      },
+      {
+        "label": "Checked",
+        "value": "2026-10-25T04:10:00+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Last test restore",
+        "value": "passed",
+        "format": "text"
+      },
+      {
+        "label": "Restored",
+        "value": "2026-10-25T04:31:40+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "What was restored",
+        "value": "/var/vmail/example.org/archive: 61,204 files, 46.6 GiB",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 900
+  },
+  {
+    "id": "receipt.backup",
+    "provider": "receipt",
+    "title": "Local full backup",
+    "modules": ["backups"],
+    "evidence": "receipt",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/var/lib/backup/last-run.json",
+    "kind": "details",
+    "scope": "What the backup job wrote when it last finished; it does not prove that the copy can be restored.",
+    "fields": [
+      {
+        "label": "Reported at",
+        "value": "2026-10-29T03:48:50+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Result",
+        "value": "passed",
+        "format": "text"
+      },
+      {
+        "label": "Duration",
+        "value": 1124,
+        "format": "duration"
+      },
+      {
+        "label": "Mail service pause",
+        "value": 1.8,
+        "format": "duration"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 900
+  },
+  {
+    "id": "receipt.restore",
+    "provider": "receipt",
+    "title": "Restore test",
+    "modules": ["backups"],
+    "evidence": "receipt",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/var/lib/backup/restore-test.json",
+    "kind": "details",
+    "scope": "Historical result reported by the job; not a current test.",
+    "fields": [
+      {
+        "label": "Reported at",
+        "value": "2026-10-25T04:31:40+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Accounts",
+        "value": 184,
+        "format": "number"
+      },
+      {
+        "label": "Mail checks",
+        "value": 2410,
+        "format": "number"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 900
+  },
+  {
+    "id": "dns.example.org",
+    "provider": "dns",
+    "title": "DNS records of example.org",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "x:Domain/get; resolver 127.0.0.1",
+    "kind": "details",
+    "scope": "What Stalwart names for the domain, asked of this host's resolver now. Records marked optional are a matter of choice; another resolver may still hold older answers.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Name",
+          "format": "text"
+        },
+        {
+          "label": "Type",
+          "format": "text"
+        },
+        {
+          "label": "For mail",
+          "format": "text"
+        },
+        {
+          "label": "Stalwart names",
+          "format": "text"
+        },
+        {
+          "label": "Found",
+          "format": "text"
+        },
+        {
+          "label": "Result",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["example.org", "MX", "needed", "10 mail.example.org", "10 mail.example.org", "published"],
+        ["example.org", "TXT", "needed", "v=spf1 mx ra=postmaster -all", "v=spf1 mx ra=postmaster -all", "published"],
+        [
+          "202610e._domainkey.example.org",
+          "TXT",
+          "needed",
+          "v=DKIM1; k=ed25519; h=sha256; p=MCowBQYDK2VwAyEAq8mVw0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5A=",
+          "v=DKIM1; k=ed25519; h=sha256; p=MCowBQYDK2VwAyEAq8mVw0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5A=",
+          "published"
+        ],
+        [
+          "202610r._domainkey.example.org",
+          "TXT",
+          "needed",
+          "v=DKIM1; k=rsa; h=sha256; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5Aq8mV",
+          "v=DKIM1; k=rsa; h=sha256; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5Aq8mV",
+          "published"
+        ],
+        [
+          "_dmarc.example.org",
+          "TXT",
+          "needed",
+          "v=DMARC1; p=reject; rua=mailto:postmaster@example.org",
+          "v=DMARC1; p=reject; rua=mailto:postmaster@example.org",
+          "published"
+        ],
+        ["_imaps._tcp.example.org", "SRV", "optional", "0 1 993 mail.example.org", "0 1 993 mail.example.org", "published"],
+        ["_submissions._tcp.example.org", "SRV", "optional", "0 1 465 mail.example.org", "0 1 465 mail.example.org", "published"],
+        ["autoconfig.example.org", "CNAME", "optional", "mail.example.org", "mail.example.org", "published"],
+        [
+          "_25._tcp.mail.example.org",
+          "TLSA",
+          "optional",
+          "3 1 1 4b7873a49a0d2c6e8f1a3b5c7d9e0f2a4c6e8b0d2f4a6c8e0b2d4f6a8c0e2b4d",
+          "3 1 1 4b7873a49a0d2c6e8f1a3b5c7d9e0f2a4c6e8b0d2f4a6c8e0b2d4f6a8c0e2b4d",
+          "published"
+        ]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "dns.example.net",
+    "provider": "dns",
+    "title": "DNS records of example.net",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "x:Domain/get; resolver 127.0.0.1",
+    "kind": "details",
+    "scope": "What Stalwart names for the domain, asked of this host's resolver now. Records marked optional are a matter of choice; another resolver may still hold older answers.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Name",
+          "format": "text"
+        },
+        {
+          "label": "Type",
+          "format": "text"
+        },
+        {
+          "label": "For mail",
+          "format": "text"
+        },
+        {
+          "label": "Stalwart names",
+          "format": "text"
+        },
+        {
+          "label": "Found",
+          "format": "text"
+        },
+        {
+          "label": "Result",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["example.net", "MX", "needed", "10 mail.example.net", "10 mail.example.net", "published"],
+        ["example.net", "TXT", "needed", "v=spf1 mx ra=postmaster -all", "v=spf1 mx ra=postmaster -all", "published"],
+        [
+          "202609e._domainkey.example.net",
+          "TXT",
+          "needed",
+          "v=DKIM1; k=ed25519; h=sha256; p=MCowBQYDK2VwAyEAq8mVw0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5A=",
+          "v=DKIM1; k=ed25519; h=sha256; p=MCowBQYDK2VwAyEAq8mVw0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5A=",
+          "published"
+        ],
+        [
+          "202609r._domainkey.example.net",
+          "TXT",
+          "needed",
+          "v=DKIM1; k=rsa; h=sha256; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5Aq8mV",
+          "v=DKIM1; k=rsa; h=sha256; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5Aq8mV",
+          "published"
+        ],
+        [
+          "_dmarc.example.net",
+          "TXT",
+          "needed",
+          "v=DMARC1; p=reject; rua=mailto:postmaster@example.net",
+          "v=DMARC1; p=reject; rua=mailto:postmaster@example.net",
+          "published"
+        ],
+        ["_imaps._tcp.example.net", "SRV", "optional", "0 1 993 mail.example.net", "0 1 993 mail.example.net", "published"],
+        ["_submissions._tcp.example.net", "SRV", "optional", "0 1 465 mail.example.net", "0 1 465 mail.example.net", "published"],
+        ["autoconfig.example.net", "CNAME", "optional", "mail.example.net", "mail.example.net", "published"],
+        [
+          "_25._tcp.mail.example.net",
+          "TLSA",
+          "optional",
+          "3 1 1 4b7873a49a0d2c6e8f1a3b5c7d9e0f2a4c6e8b0d2f4a6c8e0b2d4f6a8c0e2b4d",
+          "3 1 1 4b7873a49a0d2c6e8f1a3b5c7d9e0f2a4c6e8b0d2f4a6c8e0b2d4f6a8c0e2b4d",
+          "published"
+        ]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "dns.example.com",
+    "provider": "dns",
+    "title": "DNS records of example.com",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "x:Domain/get; resolver 127.0.0.1",
+    "kind": "details",
+    "scope": "What Stalwart names for the domain, asked of this host's resolver now. Records marked optional are a matter of choice; another resolver may still hold older answers.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Name",
+          "format": "text"
+        },
+        {
+          "label": "Type",
+          "format": "text"
+        },
+        {
+          "label": "For mail",
+          "format": "text"
+        },
+        {
+          "label": "Stalwart names",
+          "format": "text"
+        },
+        {
+          "label": "Found",
+          "format": "text"
+        },
+        {
+          "label": "Result",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["example.com", "MX", "needed", "10 mail.example.com", "10 mail.example.com", "published"],
+        ["example.com", "TXT", "needed", "v=spf1 mx ra=postmaster -all", "v=spf1 mx ra=postmaster -all", "published"],
+        [
+          "202611e._domainkey.example.com",
+          "TXT",
+          "needed",
+          "v=DKIM1; k=ed25519; h=sha256; p=MCowBQYDK2VwAyEAq8mVw0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5A=",
+          "v=DKIM1; k=ed25519; h=sha256; p=MCowBQYDK2VwAyEAq8mVw0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5A=",
+          "published"
+        ],
+        [
+          "202611r._domainkey.example.com",
+          "TXT",
+          "needed",
+          "v=DKIM1; k=rsa; h=sha256; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5Aq8mV",
+          "v=DKIM1; k=rsa; h=sha256; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5Aq8mV",
+          "published"
+        ],
+        [
+          "_dmarc.example.com",
+          "TXT",
+          "needed",
+          "v=DMARC1; p=reject; rua=mailto:postmaster@example.com",
+          "v=DMARC1; p=reject; rua=mailto:postmaster@example.com",
+          "published"
+        ],
+        ["_imaps._tcp.example.com", "SRV", "optional", "0 1 993 mail.example.com", "0 1 993 mail.example.com", "published"],
+        ["_submissions._tcp.example.com", "SRV", "optional", "0 1 465 mail.example.com", "0 1 465 mail.example.com", "published"],
+        ["autoconfig.example.com", "CNAME", "optional", "mail.example.com", "mail.example.com", "published"],
+        [
+          "_25._tcp.mail.example.com",
+          "TLSA",
+          "optional",
+          "3 1 1 4b7873a49a0d2c6e8f1a3b5c7d9e0f2a4c6e8b0d2f4a6c8e0b2d4f6a8c0e2b4d",
+          "3 1 1 4b7873a49a0d2c6e8f1a3b5c7d9e0f2a4c6e8b0d2f4a6c8e0b2d4f6a8c0e2b4d",
+          "published"
+        ]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "reputation.blocklists",
+    "provider": "reputation",
+    "title": "Blocklists",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "this host's resolver",
+    "kind": "details",
+    "scope": "Whether an address this server sends from stands on a blocklist that receiving servers ask. The lists learn the addresses asked about. Asked every six hours.",
+    "fields": [
+      {
+        "label": "Mail hosts",
+        "value": "mail.example.org, mx2.example.org",
+        "format": "text"
+      },
+      {
+        "label": "Asked",
+        "value": "2026-10-29T08:10:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Address",
+          "format": "text"
+        },
+        {
+          "label": "List",
+          "format": "text"
+        },
+        {
+          "label": "Result",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["203.0.113.24", "zen.spamhaus.org", "not listed"],
+        ["203.0.113.24", "bl.spamcop.net", "not listed"],
+        ["203.0.113.24", "psbl.surriel.com", "not listed"],
+        ["203.0.113.24", "bl.mailspike.net", "not listed"],
+        ["198.51.100.18", "zen.spamhaus.org", "not listed"],
+        ["198.51.100.18", "bl.spamcop.net", "not listed"],
+        ["198.51.100.18", "psbl.surriel.com", "not listed"],
+        ["198.51.100.18", "bl.mailspike.net", "not listed"],
+        ["2001:db8:40:1::24", "zen.spamhaus.org", "not listed"],
+        ["2001:db8:40:2::18", "zen.spamhaus.org", "not listed"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "reputation.reverse",
+    "provider": "reputation",
+    "title": "Reverse names",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "this host's resolver",
+    "kind": "details",
+    "scope": "Each address this server sends from should have a reverse name that leads back to it and is the name the server greets with.",
+    "fields": [
+      {
+        "label": "Mail hosts",
+        "value": "mail.example.org, mx2.example.org",
+        "format": "text"
+      },
+      {
+        "label": "Asked",
+        "value": "2026-10-29T08:10:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Address",
+          "format": "text"
+        },
+        {
+          "label": "Mail host",
+          "format": "text"
+        },
+        {
+          "label": "Reverse name",
+          "format": "text"
+        },
+        {
+          "label": "Result",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["203.0.113.24", "mail.example.org", "mail.example.org", "fits"],
+        ["2001:db8:40:1::24", "mail.example.org", "mail.example.org", "fits"],
+        ["198.51.100.18", "mx2.example.org", "mx2.example.org", "fits"],
+        ["2001:db8:40:2::18", "mx2.example.org", "mx2.example.org", "fits"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "tls.endpoints",
+    "provider": "tls",
+    "title": "TLS certificates",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "Local TLS handshake with SNI and chain validation",
+    "kind": "details",
+    "scope": "Proves what the local listener presents; public reachability and automatic renewal are not tested here.",
+    "fields": [
+      {
+        "label": "Lowest remaining validity",
+        "value": 50,
+        "format": "number"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Endpoint",
+          "format": "text"
+        },
+        {
+          "label": "Result",
+          "format": "text"
+        },
+        {
+          "label": "Expires",
+          "format": "datetime"
+        },
+        {
+          "label": "Days left",
+          "format": "number"
+        },
+        {
+          "label": "Protocol",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["mail.example.org:25", "valid", "2026-12-18T23:59:59+00:00", 50, "TLSv1.3"],
+        ["mail.example.org:465", "valid", "2026-12-18T23:59:59+00:00", 50, "TLSv1.3"],
+        ["mail.example.org:993", "valid", "2026-12-18T23:59:59+00:00", 50, "TLSv1.3"],
+        ["mail.example.org:443", "valid", "2026-12-18T23:59:59+00:00", 50, "TLSv1.3"],
+        ["mx2.example.org:25", "valid", "2027-01-02T23:59:59+00:00", 65, "TLSv1.3"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 900
+  },
+  {
+    "id": "flow.tls",
+    "provider": "mail-flow",
+    "title": "TLS in transit",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "Mail of the last seven days between this server and others: incoming on port 25 with and without STARTTLS, and outgoing deliveries to hosts that offered TLS or did not.",
+    "fields": [
+      {
+        "label": "Incoming with TLS",
+        "value": 229104,
+        "format": "number"
+      },
+      {
+        "label": "Incoming without TLS",
+        "value": 5860,
+        "format": "number"
+      },
+      {
+        "label": "Incoming share with TLS",
+        "value": "98 %",
+        "format": "text"
+      },
+      {
+        "label": "Outgoing with TLS",
+        "value": 71833,
+        "format": "number"
+      },
+      {
+        "label": "Outgoing without TLS",
+        "value": 412,
+        "format": "number"
+      },
+      {
+        "label": "Outgoing share with TLS",
+        "value": "99 %",
+        "format": "text"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Direction",
+          "format": "text"
+        },
+        {
+          "label": "Sender domain or host",
+          "format": "text"
+        },
+        {
+          "label": "Without TLS",
+          "format": "number"
+        }
+      ],
+      "rows": [
+        ["incoming", "newsletter-hub.example", 2940],
+        ["incoming", "old-agency.example", 1211],
+        ["incoming", "(no sender)", 904],
+        ["incoming", "fax-gateway.example", 805],
+        ["outgoing", "mx.old-partner.example", 318],
+        ["outgoing", "mail.print-shop.example", 94]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "notifications.channels",
+    "provider": "notifications",
+    "title": "Notifications",
+    "modules": ["alerts"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "ntfy at notify.example.org, webhook at hooks.example.org, mail to ops@example.org",
+    "kind": "details",
+    "scope": "Garrison sends a message on these channels when one of its checks fails or warns in two runs in a row, and when it is in order again.",
+    "fields": [
+      {
+        "label": "Channels",
+        "value": "ntfy at notify.example.org, webhook at hooks.example.org, mail to ops@example.org",
+        "format": "text"
+      },
+      {
+        "label": "Checks not in order",
+        "value": 3,
+        "format": "number"
+      },
+      {
+        "label": "Last notification",
+        "value": "2026-10-29T09:42:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  }
+]

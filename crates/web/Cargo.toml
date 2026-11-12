@@ -1,0 +1,39 @@
+[package]
+name = "garrison-web"
+description = "The web service: sign-in, the API and the compiled interface."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum = { workspace = true, features = ["query"] }
+base64.workspace = true
+flate2.workspace = true
+garrison-authz.workspace = true
+garrison-broker.workspace = true
+garrison-collector.workspace = true
+garrison-core.workspace = true
+garrison-ingest.workspace = true
+garrison-stalwart.workspace = true
+getrandom.workspace = true
+log.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+url.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+garrison-testing.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
+
+[lints]
+workspace = true

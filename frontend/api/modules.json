@@ -1,0 +1,62 @@
+[
+  {
+    "id": "dashboard",
+    "label": "Dashboard",
+    "description": "Health summary, mailbox storage and recorded metric history."
+  },
+  {
+    "id": "services",
+    "label": "Services",
+    "description": "Process states, schedules, installed versions and newer releases."
+  },
+  {
+    "id": "antivirus",
+    "label": "Antivirus",
+    "description": "Scanner configuration, signature files and test messages through the mail server."
+  },
+  {
+    "id": "spam",
+    "label": "Spam filter",
+    "description": "Native spam filter, classifier, test messages and webmail plugin observations."
+  },
+  {
+    "id": "attacks",
+    "label": "Attacks & bans",
+    "description": "Failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account; accounts that send unusually much."
+  },
+  {
+    "id": "deliveries",
+    "label": "Deliveries",
+    "description": "Queue lifecycles correlated from recorded events."
+  },
+  {
+    "id": "sessions",
+    "label": "Sessions",
+    "description": "Protocol sessions reconstructed from recorded events."
+  },
+  {
+    "id": "logs",
+    "label": "Event history",
+    "description": "Recorded Stalwart events with privacy filtering."
+  },
+  {
+    "id": "backups",
+    "label": "Backups",
+    "description": "Backup jobs with their last run, schedules, receipts and restore tests."
+  },
+  {
+    "id": "alerts",
+    "label": "Alerts",
+    "description": "Notifications when a check fails or warns, and monitor receipts."
+  },
+  {
+    "id": "dns_tls",
+    "label": "DNS & TLS",
+    "description": "DNS records of each domain, blocklists and reverse names, resolver process and TLS certificate checks."
+  },
+  {
+    "id": "actions",
+    "label": "Maintenance",
+    "description": "Reviewed maintenance operations with confirmation and audit."
+  }
+]

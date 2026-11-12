@@ -1,0 +1,24 @@
+[
+ {
+  "test": "EICAR SMTP 25",
+  "ok": true,
+  "date": "2026-10-28T10:00:00+00:00",
+  "ms": 120
+ },
+ {
+  "test": "EICAR JMAP",
+  "ok": 1,
+  "date": "2026-10-28",
+  "ms": 80.5
+ },
+ {
+  "test": "GTUBE",
+  "ok": false,
+  "date": "2026-10-28T11:00:00Z"
+ },
+ "not a row",
+ {
+  "test": "No date",
+  "ok": true
+ }
+]

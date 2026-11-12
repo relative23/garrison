@@ -1,0 +1,828 @@
+[
+  {
+    "id": "release.garrison",
+    "provider": "releases",
+    "title": "Garrison release",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "api.github.com: releases of relative23/garrison",
+    "kind": "details",
+    "scope": "The newest release GitHub lists, asked once a day.",
+    "fields": [
+      { "label": "Runs here", "value": "0.1.0", "format": "text" },
+      { "label": "Newest release", "value": "0.1.0", "format": "text" },
+      { "label": "Asked", "value": "2026-10-29T06:14:00+00:00", "format": "datetime" }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "release.stalwart",
+    "provider": "releases",
+    "title": "Stalwart release",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "warning",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "api.github.com: releases of stalwartlabs/stalwart",
+    "kind": "details",
+    "scope": "The newest release GitHub lists, asked once a day.",
+    "fields": [
+      { "label": "Runs here", "value": "1.1.0", "format": "text" },
+      { "label": "Newest release", "value": "1.1.1", "format": "text" },
+      { "label": "Asked", "value": "2026-10-29T06:14:00+00:00", "format": "datetime" }
+    ],
+    "table": null,
+    "findings": ["Stalwart 1.1.1 is available; 1.1.0 runs here."],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "dns.example.test",
+    "provider": "dns",
+    "title": "DNS records of example.test",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "warning",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "x:Domain/get; resolver 127.0.0.1",
+    "kind": "details",
+    "scope": "What Stalwart names for the domain, asked of this host's resolver now. Records marked optional are a matter of choice; another resolver may still hold older answers.",
+    "fields": [],
+    "table": {
+      "columns": [
+        { "label": "Name", "format": "text" },
+        { "label": "Type", "format": "text" },
+        { "label": "For mail", "format": "text" },
+        { "label": "Stalwart names", "format": "text" },
+        { "label": "Found", "format": "text" },
+        { "label": "Result", "format": "text" }
+      ],
+      "rows": [
+        ["example.test", "MX", "needed", "10 mail.example.test", "10 mail.example.test", "published"],
+        ["example.test", "TXT", "needed", "v=spf1 mx ra=postmaster -all", "v=spf1 mx include:_spf.example.net -all", "differs"],
+        [
+          "202610e._domainkey.example.test",
+          "TXT",
+          "needed",
+          "v=DKIM1; k=ed25519; h=sha256; p=MCowBQYDK2VwAyEAq8mVw0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5A=",
+          "v=DKIM1; k=ed25519; h=sha256; p=MCowBQYDK2VwAyEAq8mVw0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5A=",
+          "published"
+        ],
+        [
+          "202610r._domainkey.example.test",
+          "TXT",
+          "needed",
+          "v=DKIM1; k=rsa; h=sha256; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv0c3y1nSxkq0m5o7cJ1g2Y7mT0u4sE9bQ2xZr5Aq8mV",
+          "",
+          "missing"
+        ],
+        ["_dmarc.example.test", "TXT", "needed", "v=DMARC1; p=reject; rua=mailto:postmaster@example.test", "v=DMARC1; p=reject; rua=mailto:postmaster@example.test", "published"],
+        ["_imaps._tcp.example.test", "SRV", "optional", "0 1 993 mail.example.test", "0 1 993 mail.example.test", "published"],
+        ["_submissions._tcp.example.test", "SRV", "optional", "0 1 465 mail.example.test", "", "missing"],
+        ["autoconfig.example.test", "CNAME", "optional", "mail.example.test", "mail.example.test", "published"],
+        [
+          "_25._tcp.mail.example.test",
+          "TLSA",
+          "optional",
+          "3 1 1 4b7873a49a0d2c6e8f1a3b5c7d9e0f2a4c6e8b0d2f4a6c8e0b2d4f6a8c0e2b4d",
+          "",
+          "missing"
+        ]
+      ]
+    },
+    "findings": ["Not as Stalwart names them: TXT 202610r._domainkey.example.test."],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "mailtest.results",
+    "provider": "mail-test",
+    "title": "Test messages",
+    "modules": ["antivirus", "spam"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "SMTP to 127.0.0.1:25",
+    "kind": "details",
+    "scope": "Garrison handed both test messages to the local SMTP listener without signing in, addressed to garrison-test@example.test; the next test follows 24 hours after this one.",
+    "fields": [],
+    "table": {
+      "columns": [
+        { "label": "Test", "format": "text" },
+        { "label": "Sent", "format": "datetime" },
+        { "label": "Result", "format": "text" }
+      ],
+      "rows": [
+        ["Antivirus test file (EICAR)", "2026-10-29T04:10:00+00:00", "refused: 554 5.7.1 Message rejected by a milter"],
+        ["Spam test text (GTUBE)", "2026-10-29T04:10:00+00:00", "accepted and filed as spam"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "notifications.channels",
+    "provider": "notifications",
+    "title": "Notifications",
+    "modules": ["alerts"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "ntfy at notify.example.test, mail to admin@example.test",
+    "kind": "details",
+    "scope": "Garrison sends a message on these channels when one of its checks fails or warns in two runs in a row, and when it is in order again.",
+    "fields": [
+      { "label": "Channels", "value": "ntfy at notify.example.test, mail to admin@example.test", "format": "text" },
+      { "label": "Checks not in order", "value": 9, "format": "number" },
+      { "label": "Last notification", "value": "2026-10-29T09:42:00+00:00", "format": "datetime" }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.updates",
+    "provider": "host-care",
+    "title": "System updates",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "warning",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "dnf updateinfo, from its cache",
+    "kind": "details",
+    "scope": "What the package manager would install, from the metadata the host has fetched; asked every six hours.",
+    "fields": [
+      {
+        "label": "Security updates",
+        "value": 2,
+        "format": "number"
+      },
+      {
+        "label": "Other updates",
+        "value": 5,
+        "format": "number"
+      },
+      {
+        "label": "Asked",
+        "value": "2026-10-29T08:00:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": null,
+    "findings": ["2 security updates are pending."],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.restart",
+    "provider": "host-care",
+    "title": "Restart of the host",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/run/reboot-required, /lib/modules",
+    "kind": "details",
+    "scope": "The distribution's own marker where it writes one, and the installed kernels against the running one.",
+    "fields": [
+      {
+        "label": "Running kernel",
+        "value": "6.12.0-55.12.1.el10_0.aarch64",
+        "format": "text"
+      },
+      {
+        "label": "Newest installed kernel",
+        "value": "6.12.0-55.12.1.el10_0.aarch64",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.clock",
+    "provider": "host-care",
+    "title": "Clock synchronisation",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "timedatectl show",
+    "kind": "details",
+    "scope": "Whether the system clock follows a time server. Mail authentication and TLS depend on the time.",
+    "fields": [
+      {
+        "label": "Synchronised",
+        "value": true,
+        "format": "boolean"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.disk-forecast",
+    "provider": "host-care",
+    "title": "Disk forecast",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/",
+    "kind": "details",
+    "scope": "The free space of the last two weeks, read hourly, carried forward in a straight line.",
+    "fields": [
+      {
+        "label": "Free now",
+        "value": 61203283968,
+        "format": "bytes"
+      },
+      {
+        "label": "Change a day",
+        "value": -209715200,
+        "format": "bytes"
+      },
+      {
+        "label": "Full in",
+        "value": 25200000,
+        "format": "duration"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "host.firewall",
+    "provider": "host-care",
+    "title": "Firewall service",
+    "modules": ["services"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "systemctl is-active",
+    "kind": "details",
+    "scope": "Whether a firewall service of the host runs; its rules are not read.",
+    "fields": [
+      {
+        "label": "Active",
+        "value": "firewalld",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "senders.accounts",
+    "provider": "senders",
+    "title": "Sending accounts",
+    "modules": ["attacks"],
+    "evidence": "probe",
+    "state": "warning",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "Mail that signed-in accounts handed in during the last 24 hours, against each account's own average of the 14 days before. Read every ten minutes; nothing is blocked.",
+    "fields": [
+      {
+        "label": "Accounts that sent",
+        "value": 3,
+        "format": "number"
+      },
+      {
+        "label": "Unusual",
+        "value": 1,
+        "format": "number"
+      },
+      {
+        "label": "Read",
+        "value": "2026-10-29T11:54:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Account",
+          "format": "text"
+        },
+        {
+          "label": "Messages",
+          "format": "number"
+        },
+        {
+          "label": "Recipients",
+          "format": "number"
+        },
+        {
+          "label": "Usual a day",
+          "format": "number"
+        },
+        {
+          "label": "Busiest hour",
+          "format": "number"
+        },
+        {
+          "label": "Bounces",
+          "format": "number"
+        },
+        {
+          "label": "Addresses",
+          "format": "number"
+        }
+      ],
+      "rows": [
+        ["anna@example.test", 46, 912, 24, 310, 205, 9],
+        ["shop@example.test", 180, 410, 388, 61, 3, 1],
+        ["ben@example.test", 7, 9, 11, 3, 0, 2]
+      ]
+    },
+    "findings": [
+      "anna@example.test: 912 recipients in 24 hours, where 24 a day is usual; 310 recipients within one hour; 205 of 912 recipients bounced."
+    ],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "reputation.blocklists",
+    "provider": "reputation",
+    "title": "Blocklists",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "this host's resolver",
+    "kind": "details",
+    "scope": "Whether an address this server sends from stands on a blocklist that receiving servers ask. The lists learn the addresses asked about. Asked every six hours.",
+    "fields": [
+      {
+        "label": "Mail hosts",
+        "value": "mail.example.test",
+        "format": "text"
+      },
+      {
+        "label": "Asked",
+        "value": "2026-10-29T08:10:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Address",
+          "format": "text"
+        },
+        {
+          "label": "List",
+          "format": "text"
+        },
+        {
+          "label": "Result",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["203.0.113.24", "zen.spamhaus.org", "not listed"],
+        ["203.0.113.24", "bl.spamcop.net", "not listed"],
+        ["203.0.113.24", "psbl.surriel.com", "not listed"],
+        ["203.0.113.24", "bl.mailspike.net", "not listed"],
+        ["2001:db8:40:1::24", "zen.spamhaus.org", "not listed"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "reputation.reverse",
+    "provider": "reputation",
+    "title": "Reverse names",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "warning",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "this host's resolver",
+    "kind": "details",
+    "scope": "Each address this server sends from should have a reverse name that leads back to it and is the name the server greets with.",
+    "fields": [
+      {
+        "label": "Mail hosts",
+        "value": "mail.example.test",
+        "format": "text"
+      },
+      {
+        "label": "Asked",
+        "value": "2026-10-29T08:10:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Address",
+          "format": "text"
+        },
+        {
+          "label": "Mail host",
+          "format": "text"
+        },
+        {
+          "label": "Reverse name",
+          "format": "text"
+        },
+        {
+          "label": "Result",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["203.0.113.24", "mail.example.test", "mail.example.test", "fits"],
+        ["2001:db8:40:1::24", "mail.example.test", null, "no reverse name"]
+      ]
+    },
+    "findings": ["2001:db8:40:1::24 has no reverse name."],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "flow.spam",
+    "provider": "mail-flow",
+    "title": "Spam and ham",
+    "modules": ["spam"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "How Stalwart's filter filed delivered mail on each of the last seven days (UTC).",
+    "fields": [
+      {
+        "label": "Training runs in these days",
+        "value": 3,
+        "format": "number"
+      },
+      {
+        "label": "Last training",
+        "value": "2026-10-28T02:10:00+00:00",
+        "format": "datetime"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Day",
+          "format": "text"
+        },
+        {
+          "label": "Ham",
+          "format": "number"
+        },
+        {
+          "label": "Spam",
+          "format": "number"
+        },
+        {
+          "label": "Spam share",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["2026-10-29", 212, 31, "13 %"],
+        ["2026-10-28", 498, 74, "13 %"],
+        ["2026-10-27", 471, 66, "12 %"],
+        ["2026-10-26", 455, 80, "15 %"],
+        ["2026-10-25", 120, 41, "25 %"],
+        ["2026-10-24", 98, 37, "27 %"],
+        ["2026-10-23", 502, 69, "12 %"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "flow.spam-domains",
+    "provider": "mail-flow",
+    "title": "Spam and ham by domain",
+    "modules": ["spam"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "The same seven days by the domain of the mailbox the mail went to.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Domain",
+          "format": "text"
+        },
+        {
+          "label": "Ham",
+          "format": "number"
+        },
+        {
+          "label": "Spam",
+          "format": "number"
+        },
+        {
+          "label": "Spam share",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["example.test", 2104, 301, "13 %"],
+        ["shop.example.test", 252, 97, "28 %"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "flow.authentication",
+    "provider": "mail-flow",
+    "title": "Checks of incoming senders",
+    "modules": ["spam"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "How the mail of the last seven days fared in Stalwart's checks of its sender. Not passed includes senders that publish no record to check against.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Check",
+          "format": "text"
+        },
+        {
+          "label": "Passed",
+          "format": "number"
+        },
+        {
+          "label": "Not passed",
+          "format": "number"
+        },
+        {
+          "label": "Passed share",
+          "format": "text"
+        }
+      ],
+      "rows": [
+        ["SPF of the greeting (EHLO)", 2390, 410, "85 %"],
+        ["SPF of the sender", 2511, 289, "90 %"],
+        ["DKIM", 2204, 596, "79 %"],
+        ["DMARC", 2188, 612, "78 %"],
+        ["ARC", 140, 12, "92 %"],
+        ["Reverse name", 2633, 167, "94 %"]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "flow.failing-senders",
+    "provider": "mail-flow",
+    "title": "Sender domains that fail the checks",
+    "modules": ["spam"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "Domains whose mail failed SPF or DMARC in the last seven days: forged senders, or a sender whose own records are wrong. A domain without a record is not listed.",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Sender domain",
+          "format": "text"
+        },
+        {
+          "label": "SPF failures",
+          "format": "number"
+        },
+        {
+          "label": "DMARC failures",
+          "format": "number"
+        }
+      ],
+      "rows": [
+        ["example.test", 44, 44],
+        ["parcel-tracking.example", 31, 29],
+        ["partner.example", 0, 12]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "flow.milter",
+    "provider": "mail-flow",
+    "title": "Milter verdicts",
+    "modules": ["antivirus"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "What the scanner behind the milter said of the mail it was shown on each of the last seven days (UTC).",
+    "fields": [],
+    "table": {
+      "columns": [
+        {
+          "label": "Day",
+          "format": "text"
+        },
+        {
+          "label": "Accepted",
+          "format": "number"
+        },
+        {
+          "label": "Rejected",
+          "format": "number"
+        },
+        {
+          "label": "Discarded",
+          "format": "number"
+        },
+        {
+          "label": "Deferred",
+          "format": "number"
+        },
+        {
+          "label": "Not reached",
+          "format": "number"
+        }
+      ],
+      "rows": [
+        ["2026-10-29", 243, 0, 0, 0, 0],
+        ["2026-10-28", 571, 1, 0, 0, 0],
+        ["2026-10-27", 536, 1, 0, 0, 0],
+        ["2026-10-26", 534, 0, 0, 0, 0],
+        ["2026-10-25", 161, 0, 0, 0, 0],
+        ["2026-10-24", 135, 0, 0, 0, 0],
+        ["2026-10-23", 570, 2, 0, 0, 0]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "flow.tls",
+    "provider": "mail-flow",
+    "title": "TLS in transit",
+    "modules": ["dns_tls"],
+    "evidence": "probe",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "event history",
+    "kind": "details",
+    "scope": "Mail of the last seven days between this server and others: incoming on port 25 with and without STARTTLS, and outgoing deliveries to hosts that offered TLS or did not.",
+    "fields": [
+      {
+        "label": "Incoming with TLS",
+        "value": 2744,
+        "format": "number"
+      },
+      {
+        "label": "Incoming without TLS",
+        "value": 56,
+        "format": "number"
+      },
+      {
+        "label": "Incoming share with TLS",
+        "value": "98 %",
+        "format": "text"
+      },
+      {
+        "label": "Outgoing with TLS",
+        "value": 911,
+        "format": "number"
+      },
+      {
+        "label": "Outgoing without TLS",
+        "value": 6,
+        "format": "number"
+      },
+      {
+        "label": "Outgoing share with TLS",
+        "value": "99 %",
+        "format": "text"
+      }
+    ],
+    "table": {
+      "columns": [
+        {
+          "label": "Direction",
+          "format": "text"
+        },
+        {
+          "label": "Sender domain or host",
+          "format": "text"
+        },
+        {
+          "label": "Without TLS",
+          "format": "number"
+        }
+      ],
+      "rows": [
+        ["incoming", "newsletter.example", 41],
+        ["incoming", "(no sender)", 9],
+        ["outgoing", "mx.old-partner.example", 6]
+      ]
+    },
+    "findings": [],
+    "value": {},
+    "maxAge": 180
+  },
+  {
+    "id": "backup-check.restic",
+    "provider": "backup-check",
+    "title": "restic repository",
+    "modules": ["backups"],
+    "evidence": "receipt",
+    "state": "ok",
+    "checkedAt": "2026-10-29T12:00:00+00:00",
+    "source": "/var/lib/garrison/backup-check/restic.json",
+    "kind": "details",
+    "scope": "What the backup tool said of its repository when `garrison backup-check` last asked it. A test restore proves that the newest snapshot can be read with the password; it does not compare the restored files with the originals.",
+    "fields": [
+      {
+        "label": "Repository",
+        "value": "sftp:backup@storage.example.net:/srv/restic/mail",
+        "format": "text"
+      },
+      {
+        "label": "Newest snapshot",
+        "value": "2026-10-29T03:34:10+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Snapshots",
+        "value": 42,
+        "format": "number"
+      },
+      {
+        "label": "Stored size",
+        "value": 18253611008,
+        "format": "bytes"
+      },
+      {
+        "label": "Listed",
+        "value": "2026-10-29T03:36:02+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Last integrity check",
+        "value": "passed",
+        "format": "text"
+      },
+      {
+        "label": "Checked",
+        "value": "2026-10-25T04:10:00+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "Last test restore",
+        "value": "passed",
+        "format": "text"
+      },
+      {
+        "label": "Restored",
+        "value": "2026-10-25T04:16:40+00:00",
+        "format": "datetime"
+      },
+      {
+        "label": "What was restored",
+        "value": "/var/vmail/example.test: 1840 files, 73400320 bytes",
+        "format": "text"
+      }
+    ],
+    "table": null,
+    "findings": [],
+    "value": {},
+    "maxAge": 900
+  }
+]
