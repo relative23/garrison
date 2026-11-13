@@ -6,6 +6,15 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Observation ids are documented and kept.** The new page
+  [observation ids](docs/operator/observations.md) lists the id of every
+  observation the checks report, for scripts that read Garrison's status. A
+  release that renames one names it there and here, and for one more release
+  the observation carries its old id in `value.aliases`, while notifications
+  keep what they remembered under the new id.
+
 ## [0.1.1] - 2026-11-13
 
 ### Added

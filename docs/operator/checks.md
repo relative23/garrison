@@ -9,7 +9,8 @@ other checks.
 `garrison detect --format toml` prints entries for what the host runs, with
 the paths it found (for ClamAV, from the units or the distribution's
 defaults). The rest of the file is in the
-[configuration reference](configuration.md).
+[configuration reference](configuration.md), and the id of every
+observation the checks report is in [observation ids](observations.md).
 
 | `type` | Options | Shows |
 |---|---|---|

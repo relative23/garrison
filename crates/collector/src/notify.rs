@@ -126,6 +126,17 @@ fn compare(open: &Opens, observations: &[Observation]) -> (Opens, News) {
     (next, news)
 }
 
+/// What is open under a renamed check's old id counts for its new id, so a
+/// rename neither tells a problem again nor drops its return.
+fn carried_over(mut open: Opens, renamed: &[(&str, &str)]) -> Opens {
+    for (old, new) in renamed {
+        if let Some(entry) = open.remove(*old) {
+            open.entry((*new).to_owned()).or_insert(entry);
+        }
+    }
+    open
+}
+
 /// The open checks once the news is out: what was told is marked, what is in
 /// order again is dropped.
 fn told(open: Opens) -> Opens {
@@ -224,6 +235,7 @@ fn after_run_with(
         .recall(OPEN)
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
+    let open = carried_over(open, garrison_core::observations::RENAMED);
     let (next, news) = compare(&open, observations);
     let mut problem = memory.recall(PROBLEM).filter(|text| !text.is_empty());
     let kept = if news.is_empty() {

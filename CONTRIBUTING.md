@@ -373,8 +373,19 @@ such as `<code>`. `npm run lint` rejects text written directly in JSX, and
 3. Report an unreadable source as an Unknown observation, not as an error.
 4. Add tests with fixture files and document the options in
    [docs/operator/checks.md](docs/operator/checks.md).
+5. List the new observation ids in
+   [docs/operator/observations.md](docs/operator/observations.md) and give the
+   type an entry in `crates/collector/tests/observation_ids.rs`, which holds
+   every id the checks report to that list.
 
 Status pages render observations generically, so no interface change is needed.
+
+Observation ids are an interface: notifications remember them, and
+operators' scripts read them. Renaming one is a change to announce. Put old
+and new into `RENAMED` (`crates/core/src/observations.rs`) and under Renamed
+in the list, and name it in the changelog. For that release the observation
+carries its old id in `value.aliases` and notifications keep what they
+remembered. The release after takes the entry out again.
 
 ### Supporting a new Stalwart release
 

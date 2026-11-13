@@ -239,11 +239,72 @@ impl Observation {
     }
 }
 
+/// Observation ids are an interface (docs/operator/observations.md): the
+/// ids renamed in this release, old and new. For one release the old id goes
+/// with the observation as `value.aliases`, and the notifier carries what it
+/// remembers over to the new id. Empty while no rename is that recent.
+pub const RENAMED: &[(&str, &str)] = &[];
+
+/// Adds each renamed observation's old ids to `value.aliases`. They go into
+/// the free-form values because the observation's own fields reject what an
+/// older release does not know, and a rollback reads newer snapshots.
+pub fn with_aliases(observations: &mut [Observation], renamed: &[(&str, &str)]) {
+    for observation in observations {
+        let aliases: Vec<Value> = renamed
+            .iter()
+            .filter(|(_, new)| *new == observation.id)
+            .map(|(old, _)| Value::from(*old))
+            .collect();
+        if !aliases.is_empty() {
+            observation
+                .value
+                .insert("aliases".to_owned(), Value::Array(aliases));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_renamed_observation_carries_its_old_id_for_one_release() {
+        let observation = |id: &str| {
+            Observation::new(
+                id,
+                "notifications",
+                "Notifications",
+                [ModuleId::Alerts],
+                Evidence::Probe,
+                State::Ok,
+                "2026-11-13T00:00:00+00:00",
+                "ntfy",
+            )
+            .unwrap()
+        };
+        let mut observations = vec![
+            observation("notifications.channels"),
+            observation("host.clock"),
+        ];
+        with_aliases(
+            &mut observations,
+            &[("notifications.ntfy", "notifications.channels")],
+        );
+        assert_eq!(
+            observations[0].value["aliases"],
+            json!(["notifications.ntfy"])
+        );
+        assert!(!observations[1].value.contains_key("aliases"));
+        // Free-form values are what a release that knows no aliases reads too.
+        let stored = serde_json::to_value(&observations[0]).unwrap();
+        assert_eq!(stored["value"]["aliases"], json!(["notifications.ntfy"]));
+        assert!(serde_json::from_value::<Observation>(stored).is_ok());
+        let mut untouched = vec![observation("notifications.channels")];
+        with_aliases(&mut untouched, RENAMED);
+        assert_eq!(untouched[0].value.is_empty(), RENAMED.is_empty());
+    }
 
     #[test]
     fn serializes_to_the_stored_json_shape() {

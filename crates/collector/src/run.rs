@@ -162,6 +162,10 @@ pub fn collect_from(
         &store,
         now,
     ));
+    garrison_core::observations::with_aliases(
+        &mut observations,
+        garrison_core::observations::RENAMED,
+    );
     // For the watch over the collector, should this configuration stop loading.
     crate::watch::remember(&store, &channels);
     let snapshot = Snapshot {

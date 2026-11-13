@@ -141,6 +141,7 @@ For operators:
 [installation](docs/operator/installation.md) ·
 [configuration](docs/operator/configuration.md) ·
 [checks](docs/operator/checks.md) ·
+[observation ids](docs/operator/observations.md) ·
 [access](docs/operator/access.md) ·
 [operations](docs/operator/operations.md)
 

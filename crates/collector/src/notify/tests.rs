@@ -104,6 +104,37 @@ fn a_check_is_told_after_two_runs_and_its_return_once() {
 }
 
 #[test]
+fn a_renamed_check_keeps_what_was_told_under_its_old_id() {
+    let open = |id: &str| {
+        Opens::from([(
+            id.to_owned(),
+            Open {
+                state: "warning".to_owned(),
+                title: "Firewall service".to_owned(),
+                detail: String::new(),
+                runs: 5,
+                told: true,
+            },
+        )])
+    };
+    let renamed = [("host.firewall", "host.filter")];
+    let carried = carried_over(open("host.firewall"), &renamed);
+    assert_eq!(carried, open("host.filter"));
+    // Still warning under the new id: told already, so nothing is told again.
+    let (next, news) = compare(
+        &carried,
+        &[observed("host.filter", State::Warning, "No filter.")],
+    );
+    assert!(news.is_empty());
+    assert!(next["host.filter"].told);
+    // Without a rename, what is remembered stays as it is.
+    assert_eq!(
+        carried_over(open("host.firewall"), &[]),
+        open("host.firewall")
+    );
+}
+
+#[test]
 fn a_blip_of_one_run_and_a_check_that_was_never_told_say_nothing() {
     let server = serve(Vec::new());
     let url = format!("{}/topic", server.url);
