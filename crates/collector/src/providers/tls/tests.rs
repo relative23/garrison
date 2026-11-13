@@ -7,6 +7,12 @@ use rustls::{ServerConfig, ServerConnection};
 use super::*;
 use crate::testing::{Certificates, certificates, certificates_until};
 
+/// A port that is closed for every test: no test can bind it (it is below
+/// 1024) and nothing on a test host listens on it. A free port that a test
+/// gives back can be bound by another test's server before the connection
+/// is made, which answered a TLS probe with an HTTP test server.
+const CLOSED: u16 = 9;
+
 fn roots(certificates: &Certificates) -> RootCertStore {
     let mut roots = RootCertStore::empty();
     roots.add(certificates.ca.clone()).unwrap();
@@ -260,13 +266,10 @@ fn untrusted_or_misnamed_certificates_fail_verification() {
 
 #[test]
 fn closed_ports_are_refused_connections() {
-    let closed = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = closed.local_addr().unwrap().port();
-    drop(closed);
     assert_eq!(
         probe(
             "localhost",
-            port,
+            CLOSED,
             "127.0.0.1",
             false,
             &trusted(&certificates())
@@ -279,9 +282,7 @@ fn closed_ports_are_refused_connections() {
 fn the_observation_reports_each_endpoint() {
     let certificates = certificates();
     let good = listener(&certificates, None);
-    let closed = TcpListener::bind("127.0.0.1:0").unwrap();
-    let bad = closed.local_addr().unwrap().port();
-    drop(closed);
+    let bad = CLOSED;
     let provider = Tls::new(&crate::testing::table(&format!(
         "type = \"tls\"\nendpoints = [{{ host = \"localhost\", port = {good} }}, {{ host = \"localhost\", port = {bad} }}]"
     )))

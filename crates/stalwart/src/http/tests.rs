@@ -95,9 +95,9 @@ fn headers_and_body_are_sent_as_given() {
 
 #[test]
 fn unreachable_listeners_are_unavailable() {
-    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}", closed.local_addr().unwrap());
-    drop(closed);
+    // Port 9: no test can bind it, so another test's server cannot answer
+    // here as it could on a free port that was given back.
+    let url = "http://127.0.0.1:9".to_owned();
     assert_eq!(
         Request::get(&url).send(),
         Err(Error::Unavailable("Stalwart is unavailable".into()))
