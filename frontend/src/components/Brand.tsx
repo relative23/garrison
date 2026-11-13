@@ -1,12 +1,15 @@
 // The Garrison logo. The mark is the design source from xtask/src/brand.rs; the
 // words are real text, so they follow the theme and stay readable for everyone.
+import { Relative23Logo } from "./Relative23Logo";
+
 const MARK = "M6 4h4v4h4V4h4v4h4V4h4v8H10v12h12v-4h-6v-4h10v12H6z";
 
 // The product name and the byline are names, not interface text: they read the
 // same in every language. The logo carries only Garrison's own name; Stalwart's
-// is named in text, where it says what Garrison works with.
+// is named in text, where it says what Garrison works with. The byline names
+// the maker with relative23's own logo.
 export const PRODUCT = "Garrison";
-const BYLINE = "by relative23";
+const BY = "by";
 
 function BrandMark({ className }: { className: string }) {
   return (
@@ -33,7 +36,10 @@ export function BrandLarge() {
       <BrandMark className="h-[4.5rem] w-[4.5rem] shrink-0" />
       <div className="flex flex-col leading-none">
         <h1 className="text-[2rem] font-bold tracking-tight">{PRODUCT}</h1>
-        <span className="mt-2 text-[0.85rem] text-muted-foreground">{BYLINE}</span>
+        <span className="mt-2 flex items-center gap-[0.3em] text-[0.85rem] text-muted-foreground">
+          {BY}
+          <Relative23Logo className="h-[1.3em] w-[5.06em] shrink-0" />
+        </span>
       </div>
     </div>
   );

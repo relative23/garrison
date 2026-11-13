@@ -16,6 +16,9 @@ Notable changes for operators and users. The format follows
 - **The README's title is Garrison**, as the logo has been since 0.1.2.
   Stalwart is named where the text says what Garrison is for; the Ansible
   role's description says the same.
+- **The byline shows relative23's logo.** "by relative23" under the name on
+  the large logos, the byline logos and the sign-in page now reads "by" and
+  relative23's own logo, the tile and the word, in its colours.
 
 ## [0.1.2] - 2026-11-13
 

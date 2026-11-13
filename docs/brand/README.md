@@ -8,9 +8,9 @@ License), so no font needs to be installed.
 
 | File | Use |
 |---|---|
-| `garrison-logo-large-{dark,light}.svg` | README, sign-in page, presentations: Garrison / by relative23 |
+| `garrison-logo-large-{dark,light}.svg` | README, sign-in page, presentations: Garrison / by and relative23's logo |
 | `garrison-logo-{dark,light}.svg` | Headers (28 px high) and one line where height is scarce: Garrison |
-| `garrison-logo-byline-{dark,light}.svg` | Headers with the byline: Garrison / by relative23 |
+| `garrison-logo-byline-{dark,light}.svg` | Headers with the byline: Garrison / by and relative23's logo |
 | `*-current.svg` | Inline SVG that takes the surrounding text colour |
 | `garrison-mark*.svg` | The mark alone (`garrison-mark.svg` uses the text colour) |
 | `favicon.svg` | Browser tab; switches between dark and light with the browser theme |
@@ -21,8 +21,18 @@ backgrounds. Colours: ink `#FAFAFA` / `#09090B`, secondary text `#A1A1AA` /
 `#71717A`. Keep clear space of at least half the mark's width around the logo
 and do not recolour, stretch or add effects.
 
+The byline shows relative23's logo after "by": the tile and the word as
+relative23 draws them, in relative23's own colours on the `dark` and `light`
+files and in the text colour on `*-current.svg`, with the tile's letters cut
+out. Its source files are `xtask/assets/relative23-on-{dark,light}.svg`
+(outlines, no font). The relative23 logo is relative23's mark and is not
+covered by Garrison's licence: use it only unchanged, to name relative23 as
+Garrison's maker.
+
 The web interface draws the logo itself (`frontend/src/components/Brand.tsx`):
-the same mark plus real text, so it follows the theme and stays accessible.
+the same mark plus real text, so it follows the theme and stays accessible, and
+relative23's logo from `frontend/src/components/Relative23Logo.tsx`, whose
+colours switch with the theme.
 
 Stalwart is a trademark of Stalwart Labs. Garrison is an independent project and
 is not affiliated with or endorsed by Stalwart Labs. The logo carries only
