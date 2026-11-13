@@ -35,7 +35,13 @@ services previous
 before=$(events)
 
 step "Upgrading to the release under test"
-installer '/root/release/bin/garrison install'
+upgrade=$(mktemp)
+if ! installer '/root/release/bin/garrison install' >"$upgrade" 2>&1; then
+    cat "$upgrade"
+    echo "FAIL  the upgrade to the release under test"
+    exit 1
+fi
+cat "$upgrade"
 check "current points at the new release" 'readlink /opt/garrison/current | grep -q "$(cat /root/release/VERSION)"'
 check "the event history survived the upgrade" "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -ge $before"
 services upgraded
@@ -101,6 +107,16 @@ else
     services "kept after the refused rollback"
 fi
 rm -f "$answer"
+# The upgrade's last line names the rollback that works: --restore-state
+# exactly when a schema changed and the plain rollback is refused. The
+# collection run of "services upgraded" has migrated every database by now.
+if grep -q -- "install --rollback --restore-state" "$upgrade"; then named=1; else named=; fi
+if [ "$named" != "$refused" ]; then
+    echo "FAIL  the upgrade names the rollback that works (--restore-state named: ${named:-no}, plain rollback refused: ${refused:-no})"
+    exit 1
+fi
+echo "ok    the upgrade named the rollback that works"
+rm -f "$upgrade"
 
 step "Upgrading again, then rolling back with the pre-upgrade state"
 # After a refused rollback this reinstalls the running release, which must keep

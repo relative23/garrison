@@ -24,7 +24,7 @@ use crate::say;
 pub(crate) const POLICY_COPY: &str = "access-policy.json";
 
 /// The schema version this release writes for `database`.
-fn schema_version(database: Database) -> usize {
+pub(crate) fn schema_version(database: Database) -> usize {
     match database {
         Database::Web => garrison_web::store::SCHEMA_VERSION,
         Database::Events => garrison_ingest::store::SCHEMA_VERSION,
@@ -108,6 +108,15 @@ fn write_backup(config: &Config, target: &Path) -> Result<(), String> {
     }
     say(&format!("Backup written to {}", target.display()));
     Ok(())
+}
+
+/// The schema version stored in the database at `path`; `None` when no
+/// database can be read there.
+pub(crate) fn stored_version(path: &Path) -> Option<i64> {
+    // Root reads a file that a service user wrote.
+    let db = sqlite::open_untrusted(path, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    db.query_row("PRAGMA user_version", [], |row| row.get(0))
+        .ok()
 }
 
 /// Integrity, schema version and row counts; damage is a result, not a crash.

@@ -133,7 +133,7 @@ fn install_release(here: &Path, version: &str) -> Step<PathBuf> {
 /// Back up the running state. Only a change of release moves `last-pre-upgrade`,
 /// the state `--rollback --restore-state` returns to: a reinstall of the running
 /// release would otherwise replace it with data the previous release cannot read.
-fn backup_state(current: &Path, upgrade: bool) -> Step {
+fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
     let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
     let kind = if upgrade {
         "pre-upgrade"
@@ -153,10 +153,10 @@ fn backup_state(current: &Path, upgrade: bool) -> Step {
         ));
     }
     copy_config(Path::new(CONFIG), &target.join("etc"))?;
-    if !upgrade {
-        return Ok(());
+    if upgrade {
+        switch(&Path::new(BACKUPS).join(LAST), &target)?;
     }
-    switch(&Path::new(BACKUPS).join(LAST), &target)
+    Ok(target)
 }
 
 /// The configuration without credentials, which have their own protected backup.
@@ -385,6 +385,7 @@ fn install() -> Step {
     }
     room(&needs)?;
     let release = install_release(&here, &version)?;
+    let mut restore = false;
     if old.is_some() && configured {
         // The installer sets the policy's owner and mode anyway; the check must
         // not refuse what it is about to correct.
@@ -392,7 +393,8 @@ fn install() -> Step {
         // A configuration the new release refuses leaves the running one alone.
         check_config(&release)
             .map_err(|error| format!("{error}; the running release was not touched"))?;
-        backup_state(&current, old.as_ref() != Some(&release))?;
+        let backup = backup_state(&current, old.as_ref() != Some(&release))?;
+        restore = rollback::schema_rises(&backup);
         stop_services();
     }
     let changed = old.as_deref().filter(|old| *old != release);
@@ -416,10 +418,19 @@ fn install() -> Step {
     for line in housekeeping::prune(base, backups, &backups.join(LAST)) {
         announce(&line);
     }
+    // The release before cannot read a database this one migrates. Name the
+    // rollback that works now, not only when a plain `--rollback` refuses.
     announce(&format!(
-        "Garrison {version} is running. Roll back with: {} install --rollback",
-        command::name()
+        "Garrison {version} is running. Roll back with: {} install --rollback{}",
+        command::name(),
+        if restore { " --restore-state" } else { "" }
     ));
+    if restore {
+        announce(
+            "This upgrade changes a database schema: a rollback returns to the data \
+             from before it, and what was recorded since is lost.",
+        );
+    }
     Ok(())
 }
 

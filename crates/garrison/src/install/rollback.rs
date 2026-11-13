@@ -13,6 +13,19 @@ use super::files::{Step, announce, io, lock, place, relabel, replace_in, switch}
 use super::system::install_system_files;
 use super::{BACKUPS, BASE, CONFIG, LAST, LOCK, cli, preflight, start, stop_services};
 
+/// Whether this release will raise the schema of a database whose copy from
+/// before the upgrade is in `backup`. The release that ran before cannot read
+/// such a database, so only `--restore-state` takes the state back with it.
+pub(super) fn schema_rises(backup: &Path) -> bool {
+    Database::ALL.into_iter().any(|database| {
+        let copy = backup.join(database.writer()).join(database.file_name());
+        crate::ops::stored_version(&copy).is_some_and(|stored| {
+            usize::try_from(stored)
+                .is_ok_and(|stored| stored < crate::ops::schema_version(database))
+        })
+    })
+}
+
 /// The backup `--restore-state` returns to, found before anything stops.
 fn restore_source() -> Step<PathBuf> {
     let last = Path::new(BACKUPS).join(LAST);
@@ -130,4 +143,39 @@ pub(super) fn rollback(with_state: bool) -> Step {
     }
     announce(&format!("Rolled back to {name}."));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::*;
+
+    /// A backup that holds `database` at schema `version`.
+    fn copy(backup: &Path, database: Database, version: usize) {
+        let directory = backup.join(database.writer());
+        fs::create_dir_all(&directory).unwrap();
+        Connection::open(directory.join(database.file_name()))
+            .unwrap()
+            .execute_batch(&format!(
+                "CREATE TABLE IF NOT EXISTS t(a); PRAGMA user_version = {version};"
+            ))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_schema_this_release_raises_needs_the_state_from_before() {
+        let directory = tempfile::tempdir().unwrap();
+        let backup = directory.path();
+        assert!(!schema_rises(backup), "an empty backup raises nothing");
+        for database in Database::ALL {
+            copy(backup, database, crate::ops::schema_version(database));
+        }
+        assert!(!schema_rises(backup), "every schema is this release's");
+        // 0.1.2 raised the status database to 2; a copy from 0.1.1 holds 1.
+        let status = crate::ops::schema_version(Database::Status);
+        assert!(status >= 2);
+        copy(backup, Database::Status, status - 1);
+        assert!(schema_rises(backup));
+    }
 }

@@ -122,10 +122,12 @@ sudo garrison install --rollback                  # keep current data
 sudo garrison install --rollback --restore-state  # data as before the upgrade
 ```
 
-A release refuses to open a database written by a newer release. When the
-previous release cannot read the current data, `--rollback` stops before it
-changes anything and asks for `--restore-state`; the data recorded since the
-upgrade is then lost. A rollback also stops first when the previous release
+A release refuses to open a database written by a newer release. The last line
+of an upgrade names the rollback that works: when the new release changes a
+database schema, it says `--rollback --restore-state`. When the previous
+release cannot read the current data, `--rollback` stops before it changes
+anything and asks for `--restore-state`; the data recorded since the upgrade
+is then lost. A rollback also stops first when the previous release
 cannot load today's configuration, for example because of a `modules` line it
 does not know: remove that setting, or put back the file from before the
 upgrade (`/var/backups/garrison/last-pre-upgrade/etc/garrison.toml`). With

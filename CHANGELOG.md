@@ -6,6 +6,14 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The installer names the rollback that works.** After an upgrade that
+  changes a database schema, as from 0.1.1 to 0.1.2, its last line says
+  `garrison install --rollback --restore-state` and that the data recorded
+  since the upgrade would be lost. Before, it named the plain rollback, which
+  then refused and only named `--restore-state` when it was run.
+
 ## [0.1.2] - 2026-11-13
 
 ### Added
