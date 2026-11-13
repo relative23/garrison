@@ -133,7 +133,7 @@ fn install_release(here: &Path, version: &str) -> Step<PathBuf> {
 /// Back up the running state. Only a change of release moves `last-pre-upgrade`,
 /// the state `--rollback --restore-state` returns to: a reinstall of the running
 /// release would otherwise replace it with data the previous release cannot read.
-fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
+fn backup_state(current: &Path, upgrade: bool) -> Step {
     let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
     let kind = if upgrade {
         "pre-upgrade"
@@ -153,10 +153,10 @@ fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
         ));
     }
     copy_config(Path::new(CONFIG), &target.join("etc"))?;
-    if upgrade {
-        switch(&Path::new(BACKUPS).join(LAST), &target)?;
+    if !upgrade {
+        return Ok(());
     }
-    Ok(target)
+    switch(&Path::new(BACKUPS).join(LAST), &target)
 }
 
 /// The configuration without credentials, which have their own protected backup.
@@ -393,8 +393,12 @@ fn install() -> Step {
         // A configuration the new release refuses leaves the running one alone.
         check_config(&release)
             .map_err(|error| format!("{error}; the running release was not touched"))?;
-        let backup = backup_state(&current, old.as_ref() != Some(&release))?;
-        restore = rollback::schema_rises(&backup);
+        backup_state(&current, old.as_ref() != Some(&release))?;
+        // Compared with the state --restore-state returns to, the one from
+        // before the upgrade to this release: a reinstall keeps it, and the
+        // previous release still cannot read what this one migrated.
+        restore = fs::canonicalize(Path::new(BACKUPS).join(LAST))
+            .is_ok_and(|last| rollback::schema_rises(&last));
         stop_services();
     }
     let changed = old.as_deref().filter(|old| *old != release);

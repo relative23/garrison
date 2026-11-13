@@ -122,7 +122,22 @@ step "Upgrading again, then rolling back with the pre-upgrade state"
 # After a refused rollback this reinstalls the running release, which must keep
 # the state from before the first upgrade as the one to restore.
 if [ -n "$refused" ]; then expected=$before; else expected=$(events); fi
-installer '/root/release/bin/garrison install'
+again=$(mktemp)
+if ! installer '/root/release/bin/garrison install' >"$again" 2>&1; then
+    cat "$again"
+    echo "FAIL  upgrading again"
+    exit 1
+fi
+cat "$again"
+# A reinstall keeps the previous release, which still cannot read the data.
+if [ -n "$refused" ]; then
+    if ! grep -q -- "install --rollback --restore-state" "$again"; then
+        echo "FAIL  after the reinstall the last line still names --restore-state"
+        exit 1
+    fi
+    echo "ok    after the reinstall the last line still names --restore-state"
+fi
+rm -f "$again"
 services "upgraded again"
 installer '/opt/garrison/current/bin/garrison install --rollback --restore-state'
 # Every batch stored after that state must be gone again.
