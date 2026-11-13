@@ -8,10 +8,9 @@ License), so no font needs to be installed.
 
 | File | Use |
 |---|---|
-| `garrison-logo-large-{dark,light}.svg` | README, sign-in page, presentations: Garrison / for Stalwart / by relative23 |
-| `garrison-logo-{dark,light}.svg` | Headers (28 px high): Garrison / for Stalwart |
-| `garrison-logo-byline-{dark,light}.svg` | Headers with the byline: for Stalwart · by relative23 |
-| `garrison-logo-inline-{dark,light}.svg` | One line where height is scarce |
+| `garrison-logo-large-{dark,light}.svg` | README, sign-in page, presentations: Garrison / by relative23 |
+| `garrison-logo-{dark,light}.svg` | Headers (28 px high) and one line where height is scarce: Garrison |
+| `garrison-logo-byline-{dark,light}.svg` | Headers with the byline: Garrison / by relative23 |
 | `*-current.svg` | Inline SVG that takes the surrounding text colour |
 | `garrison-mark*.svg` | The mark alone (`garrison-mark.svg` uses the text colour) |
 | `favicon.svg` | Browser tab; switches between dark and light with the browser theme |
@@ -26,6 +25,7 @@ The web interface draws the logo itself (`frontend/src/components/Brand.tsx`):
 the same mark plus real text, so it follows the theme and stays accessible.
 
 Stalwart is a trademark of Stalwart Labs. Garrison is an independent project and
-is not affiliated with or endorsed by Stalwart Labs; "for Stalwart" only
-describes what it works with. Do not combine the Garrison logo with the
+is not affiliated with or endorsed by Stalwart Labs. The logo carries only
+Garrison's own name; "for Stalwart" appears in text, where it describes what
+Garrison works with, never in a logo. Do not combine the Garrison logo with the
 Stalwart logo.

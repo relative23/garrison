@@ -3,9 +3,9 @@
 const MARK = "M6 4h4v4h4V4h4v4h4V4h4v8H10v12h12v-4h-6v-4h10v12H6z";
 
 // The product name and the byline are names, not interface text: they read the
-// same in every language.
+// same in every language. The logo carries only Garrison's own name; Stalwart's
+// is named in text, where it says what Garrison works with.
 export const PRODUCT = "Garrison";
-const PRODUCT_SUFFIX = "for Stalwart";
 const BYLINE = "by relative23";
 
 function BrandMark({ className }: { className: string }) {
@@ -16,16 +16,12 @@ function BrandMark({ className }: { className: string }) {
   );
 }
 
-/** Compact logo for the header, as high as the Stalwart logo (28 px). Its
- * words name the link it sits in; the space between them is not drawn. */
+/** Compact logo for the header, 28 px high. Its word names the link it sits in. */
 export function Brand() {
   return (
     <span className="flex h-7 items-center gap-2">
       <BrandMark className="h-7 w-7 shrink-0" />
-      <span className="flex flex-col justify-center leading-none">
-        <span className="text-[15.5px] font-semibold tracking-tight">{PRODUCT}</span>{" "}
-        <span className="mt-[3px] text-[10px] text-muted-foreground">{PRODUCT_SUFFIX}</span>
-      </span>
+      <span className="text-[17px] leading-none font-semibold tracking-tight">{PRODUCT}</span>
     </span>
   );
 }
@@ -37,8 +33,7 @@ export function BrandLarge() {
       <BrandMark className="h-[4.5rem] w-[4.5rem] shrink-0" />
       <div className="flex flex-col leading-none">
         <h1 className="text-[2rem] font-bold tracking-tight">{PRODUCT}</h1>
-        <span className="mt-1.5 text-[0.95rem] text-muted-foreground">{PRODUCT_SUFFIX}</span>
-        <span className="mt-1 text-[0.7rem] text-muted-foreground">{BYLINE}</span>
+        <span className="mt-2 text-[0.85rem] text-muted-foreground">{BYLINE}</span>
       </div>
     </div>
   );

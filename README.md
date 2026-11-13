@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/garrison-logo-large-dark.svg">
-    <img alt="Garrison for Stalwart, by relative23" src="docs/brand/garrison-logo-large-light.svg" height="96">
+    <img alt="Garrison, by relative23" src="docs/brand/garrison-logo-large-light.svg" height="96">
   </picture>
 </p>
 

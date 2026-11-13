@@ -68,26 +68,24 @@ fn text(
     )
 }
 
-fn header(tone: &Tone, sub: &str) -> String {
+/// The name beside the mark, on one line; with `byline`, the byline below it.
+/// The logo carries only Garrison's own name: Stalwart's is named in text,
+/// where it says what Garrison works with, never in the logo.
+fn header(tone: &Tone, byline: bool) -> String {
     let mut body = mark(tone.ink, 0.0, 0.0, 56.0);
-    body += &text(62, 28, 30, 700, tone.ink, "1", "Garrison");
-    body += &text(63, 49, 17, 400, tone.sub, tone.opacity, sub);
+    if byline {
+        body += &text(62, 28, 30, 700, tone.ink, "1", "Garrison");
+        body += &text(63, 49, 17, 400, tone.sub, tone.opacity, "by relative23");
+    } else {
+        body += &text(62, 39, 30, 700, tone.ink, "1", "Garrison");
+    }
     svg(420, 56, &body)
-}
-
-fn inline(tone: &Tone) -> String {
-    let words = format!(
-        r#"<text x="62" y="39" {FONT} font-size="30"><tspan font-weight="700" fill="{}">Garrison</tspan><tspan dx="11" font-weight="400" fill="{}" fill-opacity="{}">for Stalwart</tspan></text>"#,
-        tone.ink, tone.sub, tone.opacity
-    );
-    svg(520, 56, &(mark(tone.ink, 0.0, 0.0, 56.0) + &words))
 }
 
 fn large(tone: &Tone) -> String {
     let mut body = mark(tone.ink, 0.0, -1.6, 141.0);
-    body += &text(138, 60, 62, 700, tone.ink, "1", "Garrison");
-    body += &text(141, 96, 30, 400, tone.sub, tone.opacity, "for Stalwart");
-    body += &text(141, 122, 21, 400, tone.sub, tone.opacity, "by relative23");
+    body += &text(138, 74, 62, 700, tone.ink, "1", "Garrison");
+    body += &text(141, 112, 26, 400, tone.sub, tone.opacity, "by relative23");
     svg(640, 132, &body)
 }
 
@@ -189,15 +187,11 @@ pub(crate) fn brand(root: &Path) -> Result<(), String> {
     ];
     for (name, ink, sub, opacity) in TONES {
         let tone = Tone { ink, sub, opacity };
-        files.push((
-            format!("garrison-logo-{name}.svg"),
-            header(&tone, "for Stalwart"),
-        ));
+        files.push((format!("garrison-logo-{name}.svg"), header(&tone, false)));
         files.push((
             format!("garrison-logo-byline-{name}.svg"),
-            header(&tone, "for Stalwart · by relative23"),
+            header(&tone, true),
         ));
-        files.push((format!("garrison-logo-inline-{name}.svg"), inline(&tone)));
         files.push((format!("garrison-logo-large-{name}.svg"), large(&tone)));
     }
     for (name, content) in &files {

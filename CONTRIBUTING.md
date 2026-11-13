@@ -53,8 +53,8 @@ explains what each one is allowed to do and why.
 
 - **Garrison shows only what it adds.** Accounts, domains and every other
   Stalwart setting stay in the Stalwart WebUI. The interface follows that
-  WebUI's layout and structure, so both feel like one product; its colours
-  are its own.
+  WebUI's layout and structure, so that an operator finds their way in both;
+  its colours, logo and name are its own.
 - **Least privilege.** The web service never holds an administrative
   credential. The broker derives the user's identity from the user's token and
   runs only reviewed systemd units. A hidden menu entry never grants or revokes

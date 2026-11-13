@@ -44,6 +44,8 @@ Notable changes for operators and users. The format follows
   Stalwart WebUI in Garrison's menu and the "Switch to Garrison WebUI" row in
   the Stalwart WebUI start hidden; each user turns them on in the settings.
   A setting a user saved before keeps its value.
+- **The logo names only Garrison.** "for Stalwart" stays in the text that
+  says what Garrison works with, and is no longer part of the logo.
 
 ## [0.1.1] - 2026-11-13
 
