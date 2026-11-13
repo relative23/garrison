@@ -6,7 +6,7 @@
 |---|---|---|---|
 | **web** | `garrison web`, user `garrison` | status and events databases (group), broker socket | `web.sqlite`: sessions, preferences |
 | **ingest** | `garrison ingest`, user `garrison-ingest` | signed webhook batches on 127.0.0.1:8094 | `events.sqlite` |
-| **collector** | `garrison collect` (timer), user `garrison-collector` | providers: host, systemd, Stalwart API, Prometheus, files, the event history (read-only), DNS and blocklists, TLS listeners, test mail, GitHub's release list | `status.sqlite`: snapshots and metric samples |
+| **collector** | `garrison collect` (timer), user `garrison-collector` | providers: host, systemd, Stalwart API, Prometheus, files, the event history (read-only), DNS and blocklists, TLS listeners, test mail, GitHub's release list | `status.sqlite`: snapshots, metric samples and what the checks remember between runs; messages on the notification channels |
 | **watch** | `garrison watch` (timer), user `garrison-collector` | when the collector last finished a run, read-only | a marker file; a message on the notification channels when the collector stops |
 | **milter** | `garrison milter`, user `garrison-milter`, only where `[milter]` is configured | each incoming message, shown by Stalwart on 127.0.0.1:8096 | nothing: it answers Stalwart and logs what kind of macro it found |
 | **broker** | `garrison broker` (socket-activated), user `garrison-broker` | policy, Stalwart account/role metadata | `jobs.sqlite`: audit and idempotency |
@@ -63,7 +63,9 @@ IDs link the events of one SMTP session.
 
 **Status.** Every minute the collector runs all configured providers. Each
 returns observations (what, when, how, scope, findings) and metric samples.
-The web service filters observations by the modules the user may see.
+The web service filters observations by the modules the user may see. Every
+observation has an id that notifications and operators' scripts rely on, so
+the ids are kept like an interface ([observation ids](../operator/observations.md)).
 
 ## What is deliberately not here
 
