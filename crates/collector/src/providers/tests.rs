@@ -7,7 +7,8 @@ fn unknown_provider_types_and_settings_fail_at_start() {
     assert_eq!(
         error("type = \"docker\""),
         "Unknown provider type \"docker\"; known: backup-check, bulwark, clamav, dns, host, host-care, \
-         http, mail-flow, mail-test, prometheus, receipt, releases, reputation, senders, stalwart, systemd, tls, version-command"
+         http, mail-flow, mail-test, prometheus, receipt, releases, reputation, senders, sign-in, stalwart, systemd, tls, \
+         version-command"
     );
     assert!(error("name = \"x\"").starts_with("A provider has no type;"));
     assert!(error("type = 7").starts_with("Unknown provider type 7;"));

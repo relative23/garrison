@@ -41,6 +41,7 @@ changelog, and for one more release the observation carries its old id in
 | `reputation.blocklists` | `reputation` | Blocklists of the addresses the server sends from |
 | `reputation.reverse` | `reputation` | Their reverse names |
 | `senders.accounts` | `senders` | Accounts that send unusually much |
+| `signin.page` | `sign-in` | Stalwart's sign-in page and the files it loads |
 | `stalwart.api` | `stalwart` | Stands in while Stalwart's API does not answer |
 | `stalwart.spam` | `stalwart` | Spam filter settings and the classifier |
 | `stalwart.milter` | `stalwart` | The milters Stalwart calls |

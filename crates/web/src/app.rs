@@ -18,6 +18,10 @@ use garrison_core::hex;
 use garrison_stalwart::oidc::{CodeExchange, Provider, Token};
 use tokio::sync::Semaphore;
 
+// Garrison's client ID and callback, which the checks also send to Stalwart's
+// sign-in page.
+pub use garrison_stalwart::oidc::{client_id, redirect_uri};
+
 use crate::attempts::Attempts;
 use crate::error::{ApiError, Cause};
 use crate::routes;
@@ -116,17 +120,6 @@ impl App {
     pub fn redirect_uri(&self) -> String {
         redirect_uri(&self.config.deployment.public_origin)
     }
-}
-
-/// Garrison's OAuth client ID is its Client ID Metadata Document URL;
-/// `stalwart setup` registers the same ID with Stalwart.
-pub fn client_id(public_origin: &str) -> String {
-    format!("{public_origin}/oauth-client.json")
-}
-
-/// The only address Stalwart may send a sign-in back to.
-pub fn redirect_uri(public_origin: &str) -> String {
-    format!("{public_origin}/auth/callback")
 }
 
 async fn headers(request: Request, next: Next) -> Response {

@@ -8,6 +8,15 @@ Notable changes for operators and users. The format follows
 
 ### Added
 
+- **The sign-in page is checked all the time.** The new check `sign-in`
+  loads Stalwart's sign-in page under the issuer's name every five minutes,
+  with every script and style sheet it names, as `garrison doctor` does when
+  it is called. A page that does not answer, is not Stalwart's or cannot load
+  its files is a failure, and the notifications report it within minutes:
+  after a Stalwart release that loads files the proxy does not pass, nobody
+  can sign in. The example configuration has the entry; an installation adds
+  `[[providers]]` with `type = "sign-in"` to `garrison.toml`.
+
 - **Observation ids are documented and kept.** The new page
   [observation ids](docs/operator/observations.md) lists the id of every
   observation the checks report, for scripts that read Garrison's status. A

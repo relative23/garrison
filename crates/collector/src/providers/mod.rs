@@ -13,7 +13,7 @@ pub use garrison_checks_host::providers::{
 pub use garrison_checks_mail::providers::{Clamav, Flow, MailTest, Senders, directives};
 pub use garrison_checks_network::providers::{Dns, Reputation, Tls, tls};
 pub use garrison_checks_stalwart::providers::{
-    Prometheus, Releases, Stalwart, mailboxes, prometheus, stalwart,
+    Prometheus, Releases, SignIn, Stalwart, mailboxes, prometheus, signin, stalwart,
 };
 
 type Factory = fn(&toml::Table) -> Result<Box<dyn Provider>, ConfigError>;
@@ -23,7 +23,7 @@ fn boxed<P: Provider + 'static>(provider: Checked<P>) -> Result<Box<dyn Provider
 }
 
 /// Every provider type, sorted by name.
-const TYPES: [(&str, Factory); 18] = [
+const TYPES: [(&str, Factory); 19] = [
     ("backup-check", |raw| boxed(BackupCheck::new(raw))),
     ("bulwark", |raw| boxed(Bulwark::new(raw))),
     ("clamav", |raw| boxed(Clamav::new(raw))),
@@ -38,6 +38,7 @@ const TYPES: [(&str, Factory); 18] = [
     ("releases", |raw| boxed(Releases::new(raw))),
     ("reputation", |raw| boxed(Reputation::new(raw))),
     ("senders", |raw| boxed(Senders::new(raw))),
+    ("sign-in", |raw| boxed(SignIn::new(raw))),
     ("stalwart", |raw| boxed(Stalwart::new(raw))),
     ("systemd", |raw| boxed(Systemd::new(raw))),
     ("tls", |raw| boxed(Tls::new(raw))),

@@ -6,7 +6,6 @@
 mod host;
 mod milter;
 mod public;
-mod signin;
 
 use garrison_core::config::Config;
 

@@ -102,6 +102,9 @@ type = "releases"
 api = "http://127.0.0.1:9/"
 
 [[providers]]
+type = "sign-in"
+
+[[providers]]
 type = "mail-test"
 recipient = "test@example.test"
 port = 9
@@ -150,7 +153,13 @@ fn events(path: &Path, now: i64) {
 /// The ids every check type reports with next to nothing within reach.
 fn reported() -> BTreeSet<String> {
     let directory = tempfile::tempdir().unwrap();
-    let mut text = garrison_testing::config_text(directory.path(), "http://127.0.0.1:9");
+    // The sign-in page is asked for under the issuer: port 9 there as well,
+    // so that no name has to be looked up.
+    let mut text = garrison_testing::config_text(directory.path(), "http://127.0.0.1:9").replace(
+        "issuer = \"https://mail.example.test\"",
+        "issuer = \"https://localhost:9\"",
+    );
+    assert!(text.contains("issuer = \"https://localhost:9\""));
     text.push_str(&providers(directory.path()));
     let config = config::parse(&text.parse().unwrap()).unwrap();
     let credentials = garrison_testing::credentials(&config);

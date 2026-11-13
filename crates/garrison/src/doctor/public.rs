@@ -1,47 +1,28 @@
 //! What visitors and Stalwart see from outside, asked from this host the way
 //! they would ask: Garrison's own host name over TLS, the sign-in at the
-//! issuer with the page it shows (signin.rs), and Stalwart's public hosts,
-//! which must not serve its metrics.
+//! issuer with the page it shows (examined as the `sign-in` check does), and
+//! Stalwart's public hosts, which must not serve its metrics.
 
-use std::fmt::Write as _;
 use std::sync::Arc;
 
+use garrison_collector::providers::signin;
 use garrison_collector::providers::tls::probe;
 use garrison_core::config::Config;
+use garrison_core::observations::State;
+use garrison_stalwart::{oidc, sign_in_page};
 use rustls::RootCertStore;
 
-use super::{Finding, signin};
-use garrison_collector::fetch::{get, roots};
+use super::Finding;
+use garrison_collector::fetch::{get, origin, roots};
 
 /// Fewer days than this before the certificate expires earn a warning.
 const WARN_DAYS: i64 = 14;
-
-/// `scheme://host[:port]` of a URL.
-pub(super) fn origin(url: &str) -> &str {
-    let start = url.find("://").map_or(0, |index| index + 3);
-    url[start..]
-        .find('/')
-        .map_or(url, |index| &url[..start + index])
-}
 
 fn host(origin: &str) -> &str {
     let host = origin.split_once("://").map_or(origin, |(_, rest)| rest);
     host.rsplit_once(':')
         .filter(|(_, port)| port.chars().all(|character| character.is_ascii_digit()))
         .map_or(host, |(host, _)| host)
-}
-
-/// Percent-encoding of a query value.
-fn encode(text: &str) -> String {
-    let mut encoded = String::new();
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-            encoded.push(char::from(byte));
-        } else {
-            let _ = write!(encoded, "%{byte:02X}");
-        }
-    }
-    encoded
 }
 
 fn certificate(origin: &str, roots: &Arc<RootCertStore>) -> Finding {
@@ -130,37 +111,12 @@ fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Finding> {
         .collect()
 }
 
-/// The sign-in request Garrison sends, as Stalwart's login page checks it:
-/// Stalwart names the client only for a complete request whose callback the
-/// registration allows. The state and the code challenge are fixed; RFC 7636's
-/// example challenge is as well formed as any.
-pub(super) fn sign_in_query(origin: &str) -> String {
-    let client = garrison_web::app::client_id(origin);
-    let callback = garrison_web::app::redirect_uri(origin);
-    [
-        ("client_id", client.as_str()),
-        ("redirect_uri", callback.as_str()),
-        ("response_type", "code"),
-        ("scope", "openid"),
-        ("state", "garrison-doctor-0123456789abcdef"),
-        (
-            "code_challenge",
-            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-        ),
-        ("code_challenge_method", "S256"),
-    ]
-    .iter()
-    .map(|(key, value)| format!("{key}={}", encode(value)))
-    .collect::<Vec<_>>()
-    .join("&")
-}
-
 fn sign_in(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
-    let client = garrison_web::app::client_id(&config.deployment.public_origin);
+    let client = oidc::client_id(&config.deployment.public_origin);
     let url = format!(
         "{}/api/auth/client?{}",
         config.deployment.issuer,
-        sign_in_query(&config.deployment.public_origin)
+        sign_in_page::query(&config.deployment.public_origin)
     );
     match get(&url, roots) {
         Ok(answer) if answer.status == 200 => {
@@ -192,13 +148,24 @@ fn sign_in(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
     }
 }
 
+/// Stalwart's sign-in page as a visitor's browser loads it, with the files it
+/// names; the `sign-in` check examines it the same way every few minutes.
+fn sign_in_page(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
+    let examined = signin::check(&config.deployment, roots);
+    match examined.state {
+        State::Ok => Finding::ok(examined.what),
+        State::Failed => Finding::fail(examined.what, examined.fix.unwrap_or_default()),
+        _ => Finding::unknown(examined.what),
+    }
+}
+
 pub(super) fn checks(config: &Config) -> Vec<Finding> {
     let roots = roots();
     let mut findings = vec![certificate(&config.deployment.public_origin, &roots)];
     findings.extend(interface(config, &roots));
     findings.extend(metrics(config, &roots));
     findings.push(sign_in(config, &roots));
-    findings.push(signin::check(config, &roots));
+    findings.push(sign_in_page(config, &roots));
     findings
 }
 
@@ -217,31 +184,8 @@ mod tests {
     }
 
     #[test]
-    fn the_sign_in_check_asks_for_garrisons_own_callback() {
-        let query = sign_in_query("https://admin.example.org");
-        assert!(query.starts_with(
-            "client_id=https%3A%2F%2Fadmin.example.org%2Foauth-client.json\
-             &redirect_uri=https%3A%2F%2Fadmin.example.org%2Fauth%2Fcallback\
-             &response_type=code&scope=openid&state="
-        ));
-        assert!(query.ends_with("&code_challenge_method=S256"));
-    }
-
-    #[test]
-    fn origins_hosts_and_query_values() {
-        assert_eq!(
-            origin("https://stalwart.example.org/admin/"),
-            "https://stalwart.example.org"
-        );
-        assert_eq!(
-            origin("https://mail.example.org"),
-            "https://mail.example.org"
-        );
+    fn the_host_of_an_origin() {
         assert_eq!(host("https://mail.example.org:8443"), "mail.example.org");
         assert_eq!(host("https://mail.example.org"), "mail.example.org");
-        assert_eq!(
-            encode("https://g.example.org/oauth-client.json"),
-            "https%3A%2F%2Fg.example.org%2Foauth-client.json"
-        );
     }
 }

@@ -172,7 +172,7 @@ Stalwart WebUI if you no longer need them.
 | Symptom | Check |
 |---|---|
 | Sign-in fails | `journalctl -u garrison-web`: "token exchange" means OAuth (issuer, origin); "authorization" means policy or roles (`access check <subject>`). The message about too many sign-ins means more than 10 code exchanges in a minute from one network (an IPv4 address or IPv6 /64). |
-| Stalwart's sign-in page shows but does nothing, or another application's sign-in appears | `garrison doctor` names it: the proxy for the issuer's host must pass Stalwart's sign-in page, asked for with a `client_id`, and the scripts and style sheets that page names to Stalwart. This usually follows an update of Stalwart or of a webmail on the same name. |
+| Stalwart's sign-in page shows but does nothing, or another application's sign-in appears | The `sign-in` check and `garrison doctor` name it: the proxy for the issuer's host must pass Stalwart's sign-in page, asked for with a `client_id`, and the scripts and style sheets that page names to Stalwart. This usually follows an update of Stalwart or of a webmail on the same name. |
 | "Authorization is temporarily unavailable" | Broker or Stalwart unreachable: `systemctl status garrison-broker.socket`, Stalwart running? |
 | No new events | The history banner says when events last arrived. `systemctl status garrison-ingest`; Stalwart's log shows `telemetry.webhook-error` if delivery fails; rerun `stalwart setup` after changing the port. |
 | An error names a reference | `journalctl -u garrison-web --grep <reference>` shows what failed inside the service; the interface shows only the outcome. |

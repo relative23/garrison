@@ -3,7 +3,8 @@
 //! as SNI. Only what the caller reads comes back: status, headers and a
 //! bounded body, unpacked if the server sent it compressed. `garrison doctor`
 //! asks the installation's public names with it, the collector the release
-//! list and the notification channel. No redirect is followed.
+//! list, the notification channel and Stalwart's sign-in page. No redirect is
+//! followed.
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -35,12 +36,23 @@ impl Answer {
     }
 }
 
+/// The authorities a server's certificate is checked against.
+pub type Roots = Arc<RootCertStore>;
+
 /// The system's trust store, as `curl` on this host would use it.
 #[must_use]
-pub fn roots() -> Arc<RootCertStore> {
+pub fn roots() -> Roots {
     let mut roots = RootCertStore::empty();
     roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
     Arc::new(roots)
+}
+
+/// `scheme://host[:port]` of a URL.
+pub fn origin(url: &str) -> &str {
+    let start = url.find("://").map_or(0, |index| index + 3);
+    url[start..]
+        .find('/')
+        .map_or(url, |index| &url[..start + index])
 }
 
 /// `http://` or `https://`, a host, an optional port and a path.
@@ -296,6 +308,22 @@ mod tests {
         assert_eq!(split("http://[::1]:8080/a").unwrap().1, "::1");
         assert!(split("ftp://example.org").is_err());
         assert!(split("https://:443/").is_err());
+    }
+
+    #[test]
+    fn the_origin_of_a_url() {
+        assert_eq!(
+            origin("https://stalwart.example.org/admin/"),
+            "https://stalwart.example.org"
+        );
+        assert_eq!(
+            origin("https://mail.example.org"),
+            "https://mail.example.org"
+        );
+        assert_eq!(
+            origin("http://127.0.0.1:8080/login?a=b"),
+            "http://127.0.0.1:8080"
+        );
     }
 
     #[test]

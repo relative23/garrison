@@ -30,6 +30,17 @@ pub fn is_token(text: &str) -> bool {
     (16..=4096).contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
+/// Garrison's OAuth client ID is its Client ID Metadata Document URL;
+/// `stalwart setup` registers the same ID with Stalwart.
+pub fn client_id(public_origin: &str) -> String {
+    format!("{public_origin}/oauth-client.json")
+}
+
+/// The only address Stalwart may send a sign-in back to.
+pub fn redirect_uri(public_origin: &str) -> String {
+    format!("{public_origin}/auth/callback")
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Identity {
     pub subject: String,

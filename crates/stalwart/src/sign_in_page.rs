@@ -4,13 +4,56 @@
 //! that loads scripts and style sheets of its own, named in `script` and
 //! `link` tags, and is of use only if those reach Stalwart as well: a proxy
 //! that passes the page but not its files leaves a page that shows and does
-//! nothing. `garrison doctor` reads the page with these functions; the
-//! contract test holds them against the page of every supported release.
+//! nothing. `garrison doctor` and the `sign-in` check read the page with these
+//! functions; the contract test holds them against the page of every supported
+//! release.
+
+use std::fmt::Write as _;
 
 use url::Url;
 
+use crate::oidc;
+
 /// Where Stalwart serves the page, under the issuer.
 pub const PATH: &str = "/login";
+
+/// The sign-in request Garrison sends, as Stalwart's page checks it: Stalwart
+/// names the client only for a complete request whose callback the
+/// registration allows. The state and the code challenge are fixed; RFC 7636's
+/// example challenge is as well formed as any.
+pub fn query(public_origin: &str) -> String {
+    let client = oidc::client_id(public_origin);
+    let callback = oidc::redirect_uri(public_origin);
+    [
+        ("client_id", client.as_str()),
+        ("redirect_uri", callback.as_str()),
+        ("response_type", "code"),
+        ("scope", "openid"),
+        ("state", "garrison-check-0123456789abcdef"),
+        (
+            "code_challenge",
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+        ),
+        ("code_challenge_method", "S256"),
+    ]
+    .iter()
+    .map(|(key, value)| format!("{key}={}", encode(value)))
+    .collect::<Vec<_>>()
+    .join("&")
+}
+
+/// Percent-encoding of a query value.
+fn encode(text: &str) -> String {
+    let mut encoded = String::new();
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
+}
 
 /// A file a page loads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,6 +210,21 @@ mod tests {
         assert_eq!(leads("http://mail.example.test/a.js"), None);
         assert_eq!(leads("data:text/css,a{}"), None);
         assert_eq!(address("not an address", "/a.js"), None);
+    }
+
+    #[test]
+    fn the_request_names_garrisons_client_and_its_own_callback() {
+        let query = query("https://admin.example.org");
+        assert!(query.starts_with(
+            "client_id=https%3A%2F%2Fadmin.example.org%2Foauth-client.json\
+             &redirect_uri=https%3A%2F%2Fadmin.example.org%2Fauth%2Fcallback\
+             &response_type=code&scope=openid&state="
+        ));
+        assert!(query.ends_with("&code_challenge_method=S256"));
+        assert_eq!(
+            encode("https://g.example.org/a b~"),
+            "https%3A%2F%2Fg.example.org%2Fa%20b~"
+        );
     }
 
     #[test]

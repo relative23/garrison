@@ -150,6 +150,12 @@ type = "senders"
 [[providers]]
 type = "stalwart"
 
+# Stalwart's sign-in page under the issuer's name, with the scripts and style
+# sheets it loads, as a visitor's browser asks for them: every five minutes,
+# and in every run while it is not in order.
+[[providers]]
+type = "sign-in"
+
 [[providers]]
 type = "prometheus"
 

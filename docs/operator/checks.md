@@ -30,6 +30,7 @@ observation the checks report is in [observation ids](observations.md).
 | `reputation` | `hosts` (default: the mail hosts Stalwart names), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
 | `senders` | `min_recipients` (50), `factor` (5), `burst` (100), `bounces` (10), `modules` | The accounts that send unusually much; see below |
 | `releases` | `products` (`garrison`, `stalwart`; default both) | Whether a newer release exists; see below |
+| `sign-in` | `modules` | Whether Stalwart's sign-in page loads under the issuer's name, with its scripts and style sheets; see below |
 | `mail-test` | `recipient`, `sender` (default: none, as a bounce is sent), `host` (`127.0.0.1`), `port` (25), `every_hours` (24), `macro_document` (false) | Test messages through the mail server itself; see below |
 | `receipt` | `id`, `title`, `path`, `modules`, `date`, `max_age_hours`, `fields`, `ok_when`, `rows`, `columns`, `row_date`, `ok_rows`, `scope` | Results that other jobs write as JSON |
 
@@ -220,6 +221,21 @@ this entry; without it nothing is asked.
 Where a release runs, the newest release is the one GitHub marks as latest,
 which is never a pre-release. Where a pre-release runs, such as `0.2.0-rc.1`,
 the newest of the last ten releases counts, pre-releases among them.
+
+## `sign-in`
+
+Everybody signs in to Garrison on Stalwart's sign-in page under the issuer's
+name. The check loads that page from this host the way a browser does, with
+the request Garrison sends, and asks for every script and style sheet it
+names. It holds the page against the one Stalwart serves itself on loopback,
+so a webmail that answers the same name with a sign-in page of its own is
+found as well. A page that does not answer, that is not Stalwart's or whose
+files do not come back is a failure, and the notifications report it after
+two runs. This is what happens after a Stalwart release that loads files the
+proxy does not pass: the page shows, and nobody can sign in.
+
+A page in order is asked for again after five minutes, one that is not in
+every run. `garrison doctor` makes the same check when it is called.
 
 ## `mail-test`
 
