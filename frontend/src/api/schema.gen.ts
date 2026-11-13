@@ -279,8 +279,8 @@ export interface paths {
         /**
          * Whether the signed-in user wants the switch rows. The "Switch to Garrison
          *     WebUI" script asks from the Stalwart WebUI's origin, so this answer, and no
-         *     other, may be read there with the user's cookie. Without a session the rows
-         *     stay.
+         *     other, may be read there with the user's cookie. The rows are off until a
+         *     user turns them on, so without a session they stay hidden.
          */
         get: operations["getSwitch"];
         put?: never;
@@ -641,8 +641,8 @@ export interface components {
             hiddenModules: string[];
             /**
              * @description The rows that switch between Garrison and the Stalwart WebUI, in
-             *     both menus; shown unless the user turns them off.
-             * @default true
+             *     both menus; hidden until the user turns them on.
+             * @default false
              */
             showSwitch: boolean;
             /** @enum {string} */

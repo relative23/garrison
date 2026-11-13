@@ -34,9 +34,10 @@ Garrison shows only what it adds to Stalwart. Accounts, domains and every other
 Stalwart setting stay in the official Stalwart WebUI, which Garrison neither
 replaces nor modifies. Both are laid out alike on purpose: Garrison follows the
 Stalwart WebUI's layout and structure, and its own colours, logo and name tell
-the two apart. A row at the bottom of the menu switches to the Stalwart WebUI in the
-same tab, and an optional nginx include adds the matching "Switch to Garrison
-WebUI" row there (see [installation](docs/operator/installation.md)).
+the two apart. A user who wants it turns on a row at the bottom of the menu
+that switches to the Stalwart WebUI in the same tab; an optional nginx include
+adds the matching "Switch to Garrison WebUI" row there (see
+[installation](docs/operator/installation.md)).
 
 Garrison depends on Stalwart. If you run Stalwart Community, please consider
 [sponsoring Stalwart Labs](https://github.com/sponsors/stalwartlabs).

@@ -42,31 +42,17 @@ pub enum Theme {
     Dark,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Preferences {
     #[schema(inline)]
     pub theme: Theme,
     pub hidden_modules: Vec<String>,
     /// The rows that switch between Garrison and the Stalwart WebUI, in
-    /// both menus; shown unless the user turns them off.
-    #[serde(default = "shown")]
-    #[schema(default = true)]
+    /// both menus; hidden until the user turns them on.
+    #[serde(default)]
+    #[schema(default = false)]
     pub show_switch: bool,
-}
-
-fn shown() -> bool {
-    true
-}
-
-impl Default for Preferences {
-    fn default() -> Self {
-        Preferences {
-            theme: Theme::default(),
-            hidden_modules: Vec::new(),
-            show_switch: true,
-        }
-    }
 }
 
 /// Whether the signed-in user wants the switch row in the Stalwart WebUI.

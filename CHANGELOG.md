@@ -40,6 +40,10 @@ Notable changes for operators and users. The format follows
   take about 48 MiB instead of about 250. An existing history is thinned
   within some 80 minutes after the upgrade. Earlier releases cannot write
   the changed table: a rollback to one needs `--restore-state`.
+- **The switch rows are off until a user turns them on.** The row to the
+  Stalwart WebUI in Garrison's menu and the "Switch to Garrison WebUI" row in
+  the Stalwart WebUI start hidden; each user turns them on in the settings.
+  A setting a user saved before keeps its value.
 
 ## [0.1.1] - 2026-11-13
 

@@ -122,9 +122,9 @@ async fn writes_need_origin_and_csrf() {
         .client
         .send(Method::PUT, &api("preferences"), &good, Some(body.clone()))
         .await;
-    // An interface that does not know the switch setting leaves it on.
+    // An interface that does not know the switch setting leaves it off.
     let mut saved = body.clone();
-    saved["showSwitch"] = json!(true);
+    saved["showSwitch"] = json!(false);
     assert_eq!(ok.json(), saved);
     assert_eq!(
         setup.client.get(&api("session")).await.json()["session"]["preferences"],

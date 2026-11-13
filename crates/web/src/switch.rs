@@ -2,11 +2,11 @@
 //!
 //! Garrison never changes the Stalwart WebUI's code. nginx adds one script tag
 //! to the pages of the location that serves it; the script draws a single menu
-//! row with Stalwart's own classes and shows nothing if Stalwart's layout
-//! changes, or if the user signed in to Garrison turned the switch rows
-//! off (`/api/switch`). The tag pins the script by hash (Subresource
-//! Integrity), so a changed file is not executed. The operator decides where it
-//! applies by including the generated file in that location.
+//! row with Stalwart's own classes. It shows nothing if Stalwart's layout
+//! changes, or unless the user signed in to Garrison turned the switch rows on
+//! (`/api/switch`); they are off until then. The tag pins the script by hash
+//! (Subresource Integrity), so a changed file is not executed. The operator
+//! decides where it applies by including the generated file in that location.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;

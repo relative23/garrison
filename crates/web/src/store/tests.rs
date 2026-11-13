@@ -85,9 +85,10 @@ fn preferences_are_validated_and_sorted() {
         .unwrap();
     let stored = store.preferences("1").unwrap();
     assert_eq!(stored.hidden_modules, ["spam"]);
-    // A document that does not name the switch setting shows the switch rows.
-    assert!(stored.show_switch);
-    assert!(Preferences::default().show_switch);
+    // A document that does not name the switch setting hides the switch rows,
+    // as the setting does until a user turns it on.
+    assert!(!stored.show_switch);
+    assert!(!Preferences::default().show_switch);
 }
 
 #[test]

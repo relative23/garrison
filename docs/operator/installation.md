@@ -240,8 +240,9 @@ location ^~ /admin/ {
 }
 ```
 
-Each user can turn both switch rows off in Garrison's settings; the row in
-the Stalwart WebUI follows while that user is signed in to Garrison.
+Both switch rows stay hidden until a user turns them on in Garrison's
+settings; the row in the Stalwart WebUI then shows while that user is signed
+in to Garrison.
 
 The installer writes that file with a hash of the script and reloads nginx when
 it changes. The `*` keeps nginx valid when Garrison is not installed; the

@@ -173,8 +173,8 @@ async fn save_preferences(
 
 /// Whether the signed-in user wants the switch rows. The "Switch to Garrison
 /// WebUI" script asks from the Stalwart WebUI's origin, so this answer, and no
-/// other, may be read there with the user's cookie. Without a session the rows
-/// stay.
+/// other, may be read there with the user's cookie. The rows are off until a
+/// user turns them on, so without a session they stay hidden.
 #[utoipa::path(
     get,
     path = "/api/switch",
@@ -189,7 +189,7 @@ async fn switch(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Resp
             .preferences(&session.subject)
             .map(|preferences| preferences.show_switch)
             .map_err(ApiError::from),
-        None => Ok(true),
+        None => Ok(false),
     })
     .await?;
     let mut response = Json(SwitchInfo { show }).into_response();

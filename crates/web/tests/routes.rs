@@ -221,9 +221,9 @@ async fn action_requests_have_length_limits() {
 #[tokio::test]
 async fn the_stalwart_webui_may_read_the_switch_setting_and_nothing_else() {
     let mut setup = setup();
-    // Without a session the row stays.
+    // Without a session the row stays hidden, as it does until a user turns it on.
     let anonymous = setup.client.get(&api("switch")).await;
-    assert_eq!(anonymous.json(), json!({"show": true}));
+    assert_eq!(anonymous.json(), json!({"show": false}));
     assert_eq!(
         anonymous.header("access-control-allow-origin"),
         "https://mail.example.test"
@@ -232,24 +232,21 @@ async fn the_stalwart_webui_may_read_the_switch_setting_and_nothing_else() {
     let csrf = setup.client.sign_in("code-admin").await;
     assert_eq!(
         setup.client.get(&api("switch")).await.json(),
-        json!({"show": true})
+        json!({"show": false})
     );
-    let off = json!({"theme": "system", "hiddenModules": [], "showSwitch": false});
+    let on = json!({"theme": "system", "hiddenModules": [], "showSwitch": true});
     let headers = [("origin", ORIGIN), ("x-csrf-token", csrf.as_str())];
     let saved = setup
         .client
-        .send(Method::PUT, &api("preferences"), &headers, Some(off))
+        .send(Method::PUT, &api("preferences"), &headers, Some(on))
         .await;
     assert_eq!(saved.status, StatusCode::OK);
     assert_eq!(
         setup.client.get(&api("switch")).await.json(),
-        json!({"show": false})
+        json!({"show": true})
     );
     let session = setup.client.get(&api("session")).await;
-    assert_eq!(
-        session.json()["session"]["preferences"]["showSwitch"],
-        false
-    );
+    assert_eq!(session.json()["session"]["preferences"]["showSwitch"], true);
     assert!(session.headers.get("access-control-allow-origin").is_none());
 }
 
