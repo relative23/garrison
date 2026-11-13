@@ -1,5 +1,7 @@
 //! Asking the host's package manager for the updates it would install.
 
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use super::reading::{self, Pending};
@@ -41,7 +43,8 @@ pub(super) fn pending(root: &Path, runner: &dyn Runner) -> (String, Result<Pendi
         let every = [&DNF[..], &["check-update"]].concat();
         let listed = run(&security).and_then(|output| {
             if output.code != Some(0) {
-                return Err("dnf could not list the security updates".to_owned());
+                return Err(locked_out(&unreadable(root))
+                    .unwrap_or_else(|| "dnf could not list the security updates".to_owned()));
             }
             let security = reading::dnf_security(&output.stdout);
             // 100 says that updates exist, 0 that none do.
@@ -59,4 +62,48 @@ pub(super) fn pending(root: &Path, runner: &dyn Runner) -> (String, Result<Pendi
         let problem = "no package manager this check reads was found (apt, dnf 4)".to_owned();
         ("package manager".to_owned(), Err(problem))
     }
+}
+
+/// The repositories whose folder in dnf's cache only root may read. Made
+/// under umask 077, one such folder keeps an unprivileged reader like this
+/// check out, and dnf then answers nothing at all.
+pub(super) fn unreadable(root: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(root.join("var/cache/dnf")) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|entry| {
+            entry.metadata().is_ok_and(|metadata| {
+                metadata.is_dir() && metadata.permissions().mode() & 0o005 != 0o005
+            })
+        })
+        .map(|entry| repository(&entry.file_name().to_string_lossy()))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// `epel-74fe7744c98fc60d`, a folder in dnf's cache, holds the repository `epel`.
+fn repository(folder: &str) -> String {
+    folder
+        .rsplit_once('-')
+        .filter(|(_, hash)| hash.len() == 16 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .map_or(folder, |(name, _)| name)
+        .to_owned()
+}
+
+/// What to tell when unreadable cache folders are why dnf failed.
+fn locked_out(repositories: &[String]) -> Option<String> {
+    let (last, rest) = repositories.split_last()?;
+    let (names, folder, them) = if rest.is_empty() {
+        (last.clone(), "folder", "it")
+    } else {
+        (format!("{} and {last}", rest.join(", ")), "folders", "them")
+    };
+    Some(format!(
+        "only root may read the dnf cache {folder} of {names} in /var/cache/dnf; \
+         chmod 755 on {them} lets this check read {them}"
+    ))
 }

@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use serde_json::json;
@@ -203,6 +204,41 @@ fn updates_that_cannot_be_read_are_unknown_and_asked_for_again_within_the_hour()
         checked(&provider, &runner, &memory, ASK_AGAIN - 1);
         assert_eq!(runner.1.borrow().len(), before, "{problem}");
     }
+}
+
+#[test]
+fn a_dnf_cache_that_only_root_may_read_is_named_with_its_remedy() {
+    let root = tempfile::tempdir().unwrap();
+    host(root.path(), &[("usr/bin/dnf", "")]);
+    // What a dnf run under umask 077 leaves behind, as on the reference host.
+    let cache = root.path().join("var/cache/dnf");
+    let open = |folder: &str, mode| {
+        fs::create_dir_all(cache.join(folder)).unwrap();
+        fs::set_permissions(cache.join(folder), fs::Permissions::from_mode(mode)).unwrap();
+    };
+    open("docker-ce-stable-2af464d7514827bd", 0o700);
+    open("epel-74fe7744c98fc60d", 0o700);
+    open("baseos-dd34f9106e98b1fa", 0o755);
+    let failing = Programs::new(vec![("dnf", 1, "")]);
+    let provider = provider(root.path(), "\"updates\"");
+    let both = checked(&provider, &failing, &Remembered::default(), 0);
+    assert_eq!(both.state, State::Unknown);
+    assert_eq!(
+        both.findings,
+        [
+            "The pending updates are not known: only root may read the dnf cache folders of \
+             docker-ce-stable and epel in /var/cache/dnf; chmod 755 on them lets this check read them."
+        ]
+    );
+    open("epel-74fe7744c98fc60d", 0o755);
+    let one = checked(&provider, &failing, &Remembered::default(), 0);
+    assert_eq!(
+        one.findings,
+        [
+            "The pending updates are not known: only root may read the dnf cache folder of \
+             docker-ce-stable in /var/cache/dnf; chmod 755 on it lets this check read it."
+        ]
+    );
 }
 
 #[test]

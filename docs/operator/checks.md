@@ -41,7 +41,9 @@ changes nothing; one that cannot be made is Unknown.
   apart, which are a warning. It reads the metadata the host has fetched, so
   it is as fresh as the host's own update job keeps it, and is asked every
   six hours. It reads `apt` (Debian, Ubuntu) and `dnf` 4 (the RHEL family,
-  Amazon Linux); elsewhere it is Unknown.
+  Amazon Linux); elsewhere it is Unknown. The collector's user reads dnf's
+  cache in `/var/cache/dnf`: where only root may read a cache folder, as a
+  dnf run under umask 077 leaves it, the finding names the repository.
 - `restart`: the marker Debian and Ubuntu write when installed updates need a
   restart, and on every distribution an installed kernel newer than the one
   that runs.

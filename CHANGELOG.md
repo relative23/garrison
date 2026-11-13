@@ -13,6 +13,13 @@ Notable changes for operators and users. The format follows
   own nftables rules. The firewall check then asks whether one of them runs,
   instead of warning that firewalld, nftables and ufw are not active.
 
+### Changed
+
+- **The update check names an unreadable dnf cache.** Where only root may
+  read a folder in `/var/cache/dnf`, as a dnf run under umask 077 leaves it,
+  the check is still Unknown, but now says which repositories and that
+  `chmod 755` on their folders lets it read them.
+
 ## [0.1.0] - 2026-11-12
 
 The first release.
