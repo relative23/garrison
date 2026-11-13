@@ -14,7 +14,7 @@ defaults). The rest of the file is in the
 | `type` | Options | Shows |
 |---|---|---|
 | `host` | `disk_path`, `modules` | Memory, load, disk, uptime |
-| `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path`, `modules` | What the host needs from its operator; see below |
+| `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path`, `firewall_units`, `modules` | What the host needs from its operator; see below |
 | `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; timers show their schedule and next run. For one-shot jobs see below |
 | `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `modules` | Certificate validity per endpoint; see below |
 | `mail-flow` | `checks` (default: all of `spam`, `milter`, `authentication`, `tls`) | A week of the recorded events in numbers; see below |
@@ -51,8 +51,10 @@ changes nothing; one that cannot be made is Unknown.
   forward in a straight line. A disk that would be full within 14 days is a
   warning. The forecast needs a day of readings first.
 - `firewall`: whether one of the services firewalld, nftables and ufw is
-  active; none is a warning. The rules themselves are not read. Leave the
-  check out where the host is filtered in another way.
+  active; none is a warning. Where a unit of the host's own loads the rules,
+  for example one that runs `nft -f`, name it:
+  `firewall_units = ["host-firewall.service"]`. The check then asks for
+  those units instead. The rules themselves are not read.
 
 ## `senders`
 

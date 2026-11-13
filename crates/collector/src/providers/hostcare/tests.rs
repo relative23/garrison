@@ -314,7 +314,39 @@ fn a_firewall_service_that_runs_is_named_and_none_is_a_warning() {
     )]);
     assert_eq!(none.state, State::Warning);
     assert!(none.findings[0].starts_with("No firewall service is active"));
+    assert!(none.findings[0].ends_with("name that unit in firewall_units."));
     assert_eq!(look(vec![]).state, State::Unknown);
+}
+
+#[test]
+fn units_of_the_hosts_own_take_the_place_of_the_known_firewall_services() {
+    // A host whose own unit loads its nftables rules, like the reference host.
+    let provider = HostCare::new(&table(
+        "type = \"host-care\"\nchecks = [\"firewall\"]\n\
+         firewall_units = [\"mailstack-firewall.service\", \"edge-filter.service\"]",
+    ))
+    .unwrap();
+    let look = |code, stdout| {
+        checked(
+            &provider,
+            &Programs::new(vec![(
+                "systemctl is-active mailstack-firewall.service edge-filter.service",
+                code,
+                stdout,
+            )]),
+            &Remembered::default(),
+            0,
+        )
+    };
+    let running = look(3, "active\ninactive\n");
+    assert_eq!(running.state, State::Ok);
+    assert_eq!(field(&running, "Active"), &json!("mailstack-firewall"));
+    let stopped = look(3, "failed\ninactive\n");
+    assert_eq!(stopped.state, State::Warning);
+    assert_eq!(
+        stopped.findings,
+        ["None of the firewall units is active (mailstack-firewall, edge-filter)."]
+    );
 }
 
 #[test]
@@ -361,11 +393,26 @@ fn options_are_checked_and_every_check_runs_by_default() {
     let root = tempfile::tempdir().unwrap();
     let all = HostCare::new(&table("type = \"host-care\"")).unwrap();
     assert_eq!(all.checks.len(), 5);
+    assert_eq!(all.firewall_units, None);
+    let own = HostCare::new(&table(
+        "type = \"host-care\"\nfirewall_units = [\"mailstack-firewall.service\"]",
+    ))
+    .unwrap();
+    assert_eq!(
+        own.firewall_units,
+        Some(vec!["mailstack-firewall.service".to_owned()])
+    );
     for wrong in [
         "checks = []",
         "checks = [\"updates\", \"updates\"]",
         "checks = [\"weather\"]",
         "checks = \"clock\"",
+        "firewall_units = []",
+        "firewall_units = [\"nft -f /etc/nftables.conf\"]",
+        "firewall_units = [\"a.service\", \"a.service\"]",
+        "firewall_units = \"a.service\"",
+        // The units would never be asked for without the firewall check.
+        "checks = [\"updates\"]\nfirewall_units = [\"a.service\"]",
         "other = 1",
     ] {
         assert!(

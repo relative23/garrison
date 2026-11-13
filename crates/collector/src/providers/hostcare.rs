@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
+use garrison_core::config::is_unit_name;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, State};
 use garrison_core::time;
@@ -41,6 +42,8 @@ pub struct HostCare {
     disk_path: PathBuf,
     modules: BTreeSet<ModuleId>,
     checks: BTreeSet<String>,
+    /// The units that filter this host, where it is not one of [`FIREWALLS`].
+    firewall_units: Option<Vec<String>>,
 }
 
 /// What the status database keeps of the last look at the pending updates.
@@ -54,31 +57,55 @@ struct Asked {
 
 type Made = Result<Observation, ProviderError>;
 
+/// A list option: not set, distinct names that are accepted, or anything else.
+enum Listed {
+    Absent,
+    Names(Vec<String>),
+    Wrong,
+}
+
+/// The option `key` as a list of distinct names that `accepted` takes.
+fn names(raw: &toml::Table, key: &str, accepted: impl Fn(&str) -> bool) -> Listed {
+    let Some(value) = raw.get(key) else {
+        return Listed::Absent;
+    };
+    let Some(items) = value.as_array().filter(|items| !items.is_empty()) else {
+        return Listed::Wrong;
+    };
+    let mut names: Vec<String> = Vec::new();
+    for item in items {
+        match item.as_str().filter(|name| accepted(name)) {
+            Some(name) if !names.iter().any(|known| known == name) => names.push(name.to_owned()),
+            _ => return Listed::Wrong,
+        }
+    }
+    Listed::Names(names)
+}
+
 impl HostCare {
     pub fn new(raw: &toml::Table) -> Checked<Self> {
-        let options = Options::new(raw, &["root", "disk_path", "modules", "checks"])?;
-        let checks = match raw.get("checks") {
-            None => CHECKS.iter().map(ToString::to_string).collect(),
-            Some(toml::Value::Array(names)) if !names.is_empty() => {
-                let mut checks = BTreeSet::new();
-                for name in names {
-                    match name.as_str().filter(|name| CHECKS.contains(name)) {
-                        Some(name) if checks.insert(name.to_owned()) => {}
-                        _ => {
-                            return fail(format!(
-                                "providers[host-care].checks lists {}",
-                                CHECKS.join(", ")
-                            ));
-                        }
-                    }
-                }
-                checks
-            }
-            Some(_) => {
+        let options = Options::new(
+            raw,
+            &["root", "disk_path", "modules", "checks", "firewall_units"],
+        )?;
+        let checks: BTreeSet<String> = match names(raw, "checks", |name| CHECKS.contains(&name)) {
+            Listed::Absent => CHECKS.iter().map(ToString::to_string).collect(),
+            Listed::Names(names) => names.into_iter().collect(),
+            Listed::Wrong => {
                 return fail(format!(
                     "providers[host-care].checks lists {}",
                     CHECKS.join(", ")
                 ));
+            }
+        };
+        let firewall_units = match names(raw, "firewall_units", is_unit_name) {
+            Listed::Absent => None,
+            Listed::Names(_) if !checks.contains("firewall") => {
+                return fail("providers[host-care].firewall_units needs the firewall check");
+            }
+            Listed::Names(units) => Some(units),
+            Listed::Wrong => {
+                return fail("providers[host-care].firewall_units lists systemd units, each once");
             }
         };
         Ok(HostCare {
@@ -86,6 +113,7 @@ impl HostCare {
             disk_path: options.path("disk_path", Some("/"))?,
             modules: options.modules(&["services"])?,
             checks,
+            firewall_units,
         })
     }
 
@@ -346,31 +374,43 @@ impl HostCare {
     }
 
     fn firewall(&self, context: &Context<'_>) -> Made {
+        let units: Vec<&str> = self.firewall_units.as_ref().map_or_else(
+            || FIREWALLS.to_vec(),
+            |units| units.iter().map(String::as_str).collect(),
+        );
+        let short = |unit: &&str| unit.trim_end_matches(".service").to_owned();
         let mut arguments = vec!["systemctl", "is-active"];
-        arguments.extend(FIREWALLS);
+        arguments.extend(&units);
         // The exit code only says whether all are active; the lines say which.
-        let active: Option<Vec<&str>> = context.runner.run(&arguments).ok().map(|output| {
+        let active: Option<Vec<String>> = context.runner.run(&arguments).ok().map(|output| {
             let states: Vec<String> = output
                 .stdout
                 .lines()
                 .map(|line| line.trim().to_owned())
                 .collect();
-            FIREWALLS
+            units
                 .iter()
                 .zip(&states)
                 .filter(|(_, state)| *state == "active")
-                .map(|(unit, _)| unit.trim_end_matches(".service"))
+                .map(|(unit, _)| short(unit))
                 .collect()
         });
         let (state, finding) = match &active {
             None => (State::Unknown, Some("systemctl did not answer.".to_owned())),
-            Some(active) if active.is_empty() => (
+            Some(active) if active.is_empty() && self.firewall_units.is_none() => (
                 State::Warning,
                 Some(
-                    "No firewall service is active (firewalld, nftables, ufw). Where the host is filtered \
-                     in another way, leave this check out."
+                    "No firewall service is active (firewalld, nftables, ufw). Where a unit of the \
+                     host's own filters it, name that unit in firewall_units."
                         .to_owned(),
                 ),
+            ),
+            Some(active) if active.is_empty() => (
+                State::Warning,
+                Some(format!(
+                    "None of the firewall units is active ({}).",
+                    units.iter().map(short).collect::<Vec<_>>().join(", ")
+                )),
             ),
             Some(_) => (State::Ok, None),
         };
@@ -382,7 +422,10 @@ impl HostCare {
                 state,
                 "systemctl is-active",
             )?
-            .with_scope("Whether a firewall service of the host runs; its rules are not read.")
+            .with_scope(
+                "Whether one of the host's firewall units runs: firewalld, nftables or ufw, or the \
+                 units that firewall_units names. Their rules are not read.",
+            )
             .with_fields(vec![Field::text(
                 "Active",
                 active.map(|active| active.join(", ")),

@@ -6,6 +6,13 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Firewall units of the host's own.** `firewall_units` in the `host-care`
+  provider names the units that filter the host, such as one that loads its
+  own nftables rules. The firewall check then asks whether one of them runs,
+  instead of warning that firewalld, nftables and ufw are not active.
+
 ## [0.1.0] - 2026-11-12
 
 The first release.
