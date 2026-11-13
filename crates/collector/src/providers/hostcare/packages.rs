@@ -3,9 +3,23 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 use super::reading::{self, Pending};
 use crate::command::Runner;
+
+/// What changes when packages are installed or removed or new metadata is
+/// fetched: rpm's and dpkg's databases and apt's package cache. The
+/// `repomd.xml` of each repository in dnf's cache comes on top.
+const CHANGES: [&str; 7] = [
+    "var/lib/rpm/rpmdb.sqlite",
+    "var/lib/rpm/rpmdb.sqlite-wal",
+    "var/lib/rpm/Packages",
+    "usr/lib/sysimage/rpm/rpmdb.sqlite",
+    "usr/lib/sysimage/rpm/rpmdb.sqlite-wal",
+    "var/lib/dpkg/status",
+    "var/cache/apt/pkgcache.bin",
+];
 
 const DNF: [&str; 5] = [
     "dnf",
@@ -62,6 +76,28 @@ pub(super) fn pending(root: &Path, runner: &dyn Runner) -> (String, Result<Pendi
         let problem = "no package manager this check reads was found (apt, dnf 4)".to_owned();
         ("package manager".to_owned(), Err(problem))
     }
+}
+
+/// When the installed packages or the metadata fetched for them last
+/// changed, in seconds since the epoch.
+pub(super) fn last_change(root: &Path) -> Option<i64> {
+    let repositories = fs::read_dir(root.join("var/cache/dnf"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path().join("repodata/repomd.xml"));
+    CHANGES
+        .iter()
+        .map(|path| root.join(path))
+        .chain(repositories)
+        .filter_map(|path| {
+            fs::metadata(path)
+                .and_then(|metadata| metadata.modified())
+                .ok()
+        })
+        .filter_map(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .filter_map(|since| i64::try_from(since.as_secs()).ok())
+        .max()
 }
 
 /// The repositories whose folder in dnf's cache only root may read. Made

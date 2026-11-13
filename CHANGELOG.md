@@ -19,6 +19,11 @@ Notable changes for operators and users. The format follows
   read a folder in `/var/cache/dnf`, as a dnf run under umask 077 leaves it,
   the check is still Unknown, but now says which repositories and that
   `chmod 755` on their folders lets it read them.
+- **The update check follows the host.** It asks the package manager again
+  within five minutes after packages are installed or removed, new metadata
+  is fetched or the cache folders it could not read are opened, and
+  otherwise every six hours as before. A warning for an update that is
+  installed now goes away within minutes.
 
 ## [0.1.0] - 2026-11-12
 

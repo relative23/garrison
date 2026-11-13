@@ -29,6 +29,9 @@ const CHECKS: [&str; 5] = ["updates", "restart", "clock", "disk", "firewall"];
 /// The package manager is asked every six hours, after a failure every hour.
 const ASK_EVERY: i64 = 6 * 3600;
 const ASK_AGAIN: i64 = 3600;
+/// After a change to the host's packages it is asked again, at most every
+/// five minutes: a long upgrade changes them many times.
+const ASK_SOONEST: i64 = 300;
 const UPDATES: &str = "hostcare.updates";
 const DISK: &str = "hostcare.disk";
 /// A disk that is full within this many days at its present rate is a warning.
@@ -53,6 +56,9 @@ struct Asked {
     source: String,
     pending: Option<Pending>,
     problem: Option<String>,
+    /// The repositories whose cache folders kept dnf out, where that was the problem.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    blocked: Vec<String>,
 }
 
 type Made = Result<Observation, ProviderError>;
@@ -151,7 +157,8 @@ impl HostCare {
             } else {
                 ASK_EVERY
             };
-            if (0..wait).contains(&(now - kept.at)) {
+            let age = now - kept.at;
+            if (0..wait).contains(&age) && (age < ASK_SOONEST || !self.changed(kept, now)) {
                 return kept.clone();
             }
         }
@@ -162,18 +169,28 @@ impl HostCare {
                 source,
                 pending: Some(pending),
                 problem: None,
+                blocked: Vec::new(),
             },
             Err(problem) => Asked {
                 at: now,
                 source,
                 pending: None,
                 problem: Some(problem),
+                blocked: packages::unreadable(&self.root),
             },
         };
         if let Ok(text) = serde_json::to_string(&asked) {
             context.memory.keep(UPDATES, &text);
         }
         asked
+    }
+
+    /// Whether the host changed since `kept` was asked: packages installed or
+    /// removed, new metadata fetched, or the cache folders that kept dnf out
+    /// opened. A change time ahead of the clock waits until the clock is there.
+    fn changed(&self, kept: &Asked, now: i64) -> bool {
+        packages::last_change(&self.root).is_some_and(|at| at > kept.at && at <= now)
+            || (!kept.blocked.is_empty() && packages::unreadable(&self.root) != kept.blocked)
     }
 
     fn updates(&self, context: &Context<'_>) -> Made {
@@ -206,7 +223,8 @@ impl HostCare {
         Ok(self
             .observation(context, "updates", "System updates", state, &asked.source)?
             .with_scope(
-                "What the package manager would install, from the metadata the host has fetched; asked every six hours.",
+                "What the package manager would install, from the metadata the host has fetched; \
+                 asked again after a change to the packages or the metadata, otherwise every six hours.",
             )
             .with_fields(vec![
                 Field::new("Security updates", asked.pending.map(|pending| pending.security), Format::Number),
