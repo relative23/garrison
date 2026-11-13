@@ -177,6 +177,10 @@ Stalwart WebUI if you no longer need them.
 | No new events | The history banner says when events last arrived. `systemctl status garrison-ingest`; Stalwart's log shows `telemetry.webhook-error` if delivery fails; rerun `stalwart setup` after changing the port. |
 | An error names a reference | `journalctl -u garrison-web --grep <reference>` shows what failed inside the service; the interface shows only the outcome. |
 | A module shows Unknown | The provider cannot read its source; the card's footer names the source. File permissions for the collector user are the usual cause. |
+| The firewall check warns though the host is filtered | A unit of the host's own loads the rules, for example one that runs `nft -f`, and the check knows only firewalld, nftables and ufw. Name that unit: `firewall_units = ["…service"]` in the `host-care` provider ([checks](checks.md#host-care)). |
+| Pending updates are Unknown and name a dnf cache folder | Only root may read that folder in `/var/cache/dnf`, as a dnf run under umask 077 leaves it, and dnf then lists nothing for the collector's user. `chmod 755` on the folders named; the check asks again within five minutes. |
+| Pending updates are Unknown on Fedora 41 or newer | The check reads `apt` and `dnf` 4; dnf 5 is not read yet. |
+| A script no longer finds an observation | The id was renamed: [observation ids](observations.md) lists renamed ids, and for one release the observation carries its old id in `value.aliases`. |
 | The metrics exporter warns that series are missing | Stalwart names its metrics differently from the release Garrison supports, usually after a Stalwart upgrade. The named counters stay empty instead of showing zero until Garrison supports that release. |
 | The DNS records page says Stalwart did not give its domains | The collector's API key is older than this check; run `garrison stalwart setup` again, which gives it the permission to read domains. |
 | The TLS certificates card says Stalwart did not give its listeners | As above: run `garrison stalwart setup` again, which lets the collector's key read them; or name `endpoints` for the `tls` provider. |
