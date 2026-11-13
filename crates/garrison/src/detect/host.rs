@@ -94,6 +94,27 @@ impl<'a> Host<'a> {
             .unwrap_or_default()
     }
 
+    /// The services systemd runs now.
+    pub(super) fn active_services(&self) -> Vec<String> {
+        let arguments = [
+            "systemctl",
+            "list-units",
+            "--type=service",
+            "--state=active",
+            "--no-legend",
+            "--plain",
+        ];
+        self.output(&arguments)
+            .map(|text| {
+                text.lines()
+                    .filter_map(|line| line.split_whitespace().next())
+                    .filter(|name| name.ends_with(".service"))
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Every timer systemd has loaded, with the unit it starts.
     pub(super) fn timers(&self) -> Vec<(String, String)> {
         let arguments = [

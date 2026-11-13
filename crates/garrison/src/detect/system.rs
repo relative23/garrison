@@ -47,6 +47,10 @@ pub(super) struct System {
     pub(super) confinement: Option<String>,
     /// Active firewall and time synchronization units with their labels.
     pub(super) guards: Vec<(String, &'static str)>,
+    /// Units of the host's own that load its firewall rules, where none of
+    /// the known firewall services runs: what host care's `firewall_units`
+    /// should name.
+    pub(super) firewall_units: Vec<String>,
 }
 
 const GUARDS: [(&str, &str); 6] = [
@@ -58,6 +62,27 @@ const GUARDS: [(&str, &str); 6] = [
     ("systemd-timesyncd.service", "Time synchronization"),
 ];
 
+/// Services that load firewall rules of the host's own.
+const LOADERS: [&str; 8] = [
+    "iptables.service",
+    "ip6tables.service",
+    "netfilter-persistent.service",
+    "shorewall.service",
+    "shorewall6.service",
+    "ferm.service",
+    "firehol.service",
+    "csf.service",
+];
+/// Programs that load a rule set as a unit's first command; `nft` does with `-f`.
+const RESTORES: [&str; 6] = [
+    "iptables-restore",
+    "ip6tables-restore",
+    "iptables-nft-restore",
+    "ip6tables-nft-restore",
+    "iptables-legacy-restore",
+    "ip6tables-legacy-restore",
+];
+
 pub(super) fn inspect(host: &Host<'_>) -> System {
     let release = host
         .read("/etc/os-release")
@@ -67,11 +92,19 @@ pub(super) fn inspect(host: &Host<'_>) -> System {
     let family = family(&release);
     let names: Vec<&str> = GUARDS.iter().map(|(unit, _)| *unit).collect();
     let units = host.units(&names);
-    let guards = GUARDS
+    let mut guards: Vec<(String, &'static str)> = GUARDS
         .iter()
         .filter(|(name, _)| units.get(*name).is_some_and(|unit| unit.active == "active"))
         .map(|(name, label)| ((*name).to_owned(), *label))
         .collect();
+    // Host care's firewall check knows the services above; another unit that
+    // loads the rules must be named to it.
+    let firewall_units = if guards.iter().any(|(_, label)| *label == "Firewall") {
+        Vec::new()
+    } else {
+        own_firewalls(host)
+    };
+    guards.extend(firewall_units.iter().map(|unit| (unit.clone(), "Firewall")));
     System {
         name: release
             .get("PRETTY_NAME")
@@ -85,6 +118,47 @@ pub(super) fn inspect(host: &Host<'_>) -> System {
         },
         confinement: confinement(host),
         guards,
+        firewall_units,
+    }
+}
+
+/// Running units that load the host's firewall rules: a known loader, a unit
+/// named for a firewall, or one whose command is `nft -f` or a restore of
+/// iptables rules. A unit that runs a script of its own is found by its name.
+fn own_firewalls(host: &Host<'_>) -> Vec<String> {
+    let active = host.active_services();
+    let names: Vec<&str> = active
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !GUARDS.iter().any(|(guard, _)| guard == name))
+        .collect();
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let units = host.units(&names);
+    names
+        .into_iter()
+        .filter(|name| {
+            LOADERS.contains(name)
+                || name.contains("firewall")
+                || units
+                    .get(*name)
+                    .is_some_and(|unit| loads_rules(&unit.command))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `nft -f /etc/rules.nft` or `iptables-restore /etc/iptables/rules.v4`.
+fn loads_rules(command: &[String]) -> bool {
+    let Some(program) = command.first() else {
+        return false;
+    };
+    match program.rsplit('/').next().unwrap_or(program) {
+        "nft" => command
+            .iter()
+            .any(|word| word == "-f" || word.starts_with("--file")),
+        name => RESTORES.contains(&name),
     }
 }
 

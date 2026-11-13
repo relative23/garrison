@@ -6,7 +6,8 @@ use garrison_core::modules::ModuleId;
 use serde_json::Value;
 
 use super::fixtures::{
-    Recorded, almalinux, bare, component, debian, detected, leftovers, mentions, stub, write,
+    Recorded, almalinux, bare, component, debian, detected, leftovers, mentions, own_firewall,
+    stub, write,
 };
 use super::host::Host;
 use super::system::Family;
@@ -354,6 +355,58 @@ fn each_finding_rests_on_evidence_of_its_own() {
     assert!(!mentions(component(&empty, "proxy"), "snippets"));
     let notifications = component(&empty, "notifications");
     assert!(!notifications.found && notifications.details.is_empty());
+}
+
+#[test]
+fn units_that_load_the_hosts_own_firewall_rules_are_named_for_host_care() {
+    let (_root, inventory) = detected(own_firewall);
+    let found = &inventory.system.firewall_units;
+    // By its name, by `nft -f` and by a restore of iptables rules; neither
+    // nginx nor an `nft` that only watches.
+    assert_eq!(
+        found,
+        &[
+            "edge-rules.service",
+            "legacy-filter.service",
+            "mailstack-firewall.service"
+        ]
+    );
+    let guards: Vec<&str> = inventory
+        .system
+        .guards
+        .iter()
+        .map(|(unit, _)| unit.as_str())
+        .collect();
+    assert_eq!(
+        guards,
+        [
+            "chronyd.service",
+            "edge-rules.service",
+            "legacy-filter.service",
+            "mailstack-firewall.service"
+        ]
+    );
+    let text = report::render(&inventory, Format::Text);
+    assert!(
+        text.contains("Firewall (mailstack-firewall.service)")
+            && text.contains("firewall_units = [\"edge-rules.service\", "),
+        "{text}"
+    );
+    let toml = report::render(&inventory, Format::Toml);
+    assert!(
+        toml.contains(
+            "  { unit = \"mailstack-firewall.service\", label = \"Firewall\", modules = [\"services\"] },"
+        ) && toml.contains(
+            "# firewall_units = [\"edge-rules.service\", \"legacy-filter.service\", \
+             \"mailstack-firewall.service\"]"
+        ),
+        "{toml}"
+    );
+    // The entries stay a valid configuration: the hint is a comment.
+    assert!(toml.parse::<toml::Table>().is_ok(), "{toml}");
+    // A known firewall service needs nothing named.
+    let (_root, known) = detected(almalinux);
+    assert_eq!(known.system.firewall_units, Vec::<String>::new());
 }
 
 #[test]

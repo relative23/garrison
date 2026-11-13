@@ -14,6 +14,11 @@ Notable changes for operators and users. The format follows
   release that renames one names it there and here, and for one more release
   the observation carries its old id in `value.aliases`, while notifications
   keep what they remembered under the new id.
+- **`garrison detect` finds the host's own firewall units.** Where none of
+  firewalld, nftables and ufw runs, it looks for a running unit that loads
+  the rules: a known loader such as `netfilter-persistent`, a unit named for a
+  firewall, or one that runs `nft -f` or `iptables-restore`. It lists them
+  with the services to watch and names them for `firewall_units`.
 
 ## [0.1.1] - 2026-11-13
 

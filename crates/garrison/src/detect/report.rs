@@ -49,6 +49,14 @@ fn text(inventory: &Inventory) -> String {
     if !guards.is_empty() {
         let _ = writeln!(text, "{}", guards.join(", "));
     }
+    if !system.firewall_units.is_empty() {
+        let _ = writeln!(
+            text,
+            "Host care's firewall check knows only firewalld, nftables and ufw: \
+             name this host's in firewall_units = [{}]",
+            names(&system.firewall_units)
+        );
+    }
     for component in &inventory.components {
         let state = if component.found {
             "found"
@@ -93,6 +101,7 @@ fn json(inventory: &Inventory) -> Value {
             "packages": system.packages.map(Packages::as_str),
             "confinement": system.confinement,
             "guards": guards,
+            "firewall_units": system.firewall_units,
         },
         "components": components,
     })
@@ -198,6 +207,16 @@ fn toml(inventory: &Inventory, scope: Option<&Scope<'_>>) -> String {
         }
         text.push_str("]\n");
     }
+    let firewall_units = &inventory.system.firewall_units;
+    if scope.is_none() && !firewall_units.is_empty() {
+        let _ = write!(
+            text,
+            "\n# The firewall rules come from this host's own units: name them in\n\
+             # the host-care entry, so its firewall check asks for them.\n\
+             # firewall_units = [{}]\n",
+            names(firewall_units)
+        );
+    }
     match scope {
         Some(_) if text.is_empty() => text,
         Some(_) => format!("# Added by `garrison modules` from what `detect` found.\n{text}"),
@@ -233,4 +252,13 @@ fn modules(id: &str) -> &'static [&'static str] {
 /// A TOML basic string: JSON's escapes are valid there.
 fn quoted(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_default()
+}
+
+/// `"a.service", "b.service"`, for a TOML array.
+fn names(units: &[String]) -> String {
+    units
+        .iter()
+        .map(|unit| quoted(unit))
+        .collect::<Vec<_>>()
+        .join(", ")
 }

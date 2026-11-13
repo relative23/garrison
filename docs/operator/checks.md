@@ -59,7 +59,8 @@ changes nothing; one that cannot be made is Unknown.
   active; none is a warning. Where a unit of the host's own loads the rules,
   for example one that runs `nft -f`, name it:
   `firewall_units = ["host-firewall.service"]`. The check then asks for
-  those units instead. The rules themselves are not read.
+  those units instead; `garrison detect` names the ones it finds. The rules
+  themselves are not read.
 
 ## `senders`
 

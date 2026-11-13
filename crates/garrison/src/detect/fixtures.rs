@@ -242,6 +242,50 @@ pub(super) fn leftovers(root: &Path) -> Recorded {
     Recorded(Vec::new())
 }
 
+/// A host that loads its firewall rules with units of its own, as the
+/// reference host does with a script, and runs no known firewall service.
+pub(super) fn own_firewall(_: &Path) -> Recorded {
+    let units = [
+        unit(
+            "nftables.service",
+            "inactive",
+            "/usr/sbin/nft -f /etc/nftables.conf",
+        ),
+        unit("chronyd.service", "active", "/usr/sbin/chronyd -n"),
+        unit(
+            "mailstack-firewall.service",
+            "active",
+            "/opt/mailstack/scripts/firewall.sh",
+        ),
+        unit(
+            "edge-rules.service",
+            "active",
+            "/usr/sbin/nft -f /etc/edge.nft",
+        ),
+        unit(
+            "legacy-filter.service",
+            "active",
+            "/usr/sbin/iptables-restore /etc/iptables/rules.v4",
+        ),
+        unit("nginx.service", "active", "/usr/sbin/nginx"),
+        unit("nft-monitor.service", "active", "/usr/sbin/nft monitor"),
+    ]
+    .join("\n");
+    Recorded(vec![
+        ("systemctl show", units),
+        (
+            "systemctl list-units",
+            "chronyd.service loaded active running NTP client/server\n\
+             edge-rules.service loaded active exited Edge rules\n\
+             legacy-filter.service loaded active exited Legacy rules\n\
+             mailstack-firewall.service loaded active exited Firewall fuer Mailstack\n\
+             nft-monitor.service loaded active running Watch nftables\n\
+             nginx.service loaded active running The nginx HTTP and reverse proxy server\n"
+                .to_owned(),
+        ),
+    ])
+}
+
 /// A host that resolves through the stub of systemd-resolved.
 pub(super) fn stub(root: &Path) -> Recorded {
     write(
