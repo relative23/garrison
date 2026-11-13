@@ -13,6 +13,9 @@ Notable changes for operators and users. The format follows
   `garrison install --rollback --restore-state` and that the data recorded
   since the upgrade would be lost. Before, it named the plain rollback, which
   then refused and only named `--restore-state` when it was run.
+- **The README's title is Garrison**, as the logo has been since 0.1.2.
+  Stalwart is named where the text says what Garrison is for; the Ansible
+  role's description says the same.
 
 ## [0.1.2] - 2026-11-13
 

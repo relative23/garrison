@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: garrison
   author: Garrison
-  description: Install, configure and upgrade Garrison for Stalwart
+  description: Install, configure and upgrade Garrison, the operations console for Stalwart mail servers
   license: MIT
   min_ansible_version: "2.15"
   platforms:

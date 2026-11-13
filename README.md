@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-# Garrison for Stalwart
+# Garrison
 
 Garrison is a web console for everything around a [Stalwart](https://stalw.art)
 mail server that Stalwart's own WebUI leaves to you. The WebUI manages
