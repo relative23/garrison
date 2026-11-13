@@ -8,6 +8,7 @@ pub mod http;
 pub mod lab;
 pub mod noise;
 pub mod smtp;
+pub mod tls;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

@@ -22,7 +22,6 @@ toml.workspace = true
 [dev-dependencies]
 garrison-checks = { workspace = true, features = ["testing"] }
 garrison-testing.workspace = true
-rcgen.workspace = true
 tempfile.workspace = true
 
 [lints]

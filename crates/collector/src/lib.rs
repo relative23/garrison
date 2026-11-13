@@ -24,11 +24,13 @@ pub use run::{collect, collect_from};
 
 pub(crate) use garrison_checks::values;
 
-/// The checks' test helpers, with the workspace's test configuration.
+/// The checks' test helpers, with the workspace's test configuration and
+/// certificates.
 #[cfg(test)]
 mod testing {
     pub(crate) use garrison_checks::testing::*;
     use garrison_core::config::Config;
+    pub(crate) use garrison_testing::tls::{Certificates, certificates};
 
     pub(crate) fn config(directory: &std::path::Path) -> Config {
         garrison_testing::config(directory, "http://127.0.0.1:9")
