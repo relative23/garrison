@@ -70,6 +70,9 @@ IDs link the events of one SMTP session.
 
 **Status.** Every minute the collector runs all configured providers. Each
 returns observations (what, when, how, scope, findings) and metric samples.
+The metric history keeps every minute for eight days, which the 24-hour and
+7-day views draw; older samples are thinned to one per ten minutes, each
+counting for the minutes it holds, so the longer views read the same.
 The web service filters observations by the modules the user may see. Every
 observation has an id that notifications and operators' scripts rely on, so
 the ids are kept like an interface ([observation ids](../operator/observations.md)).

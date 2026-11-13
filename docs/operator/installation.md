@@ -22,8 +22,9 @@ which answered only health checks there; none of them grew. A collection run
 takes about 4 MiB for a moment each minute. When host care asks the package
 manager for pending updates, every six hours and after packages change, dnf
 takes about 95 MiB for that moment. On disk, the event history stays within
-`ingest.max_database_mib` (256 MiB by default), and the metric history takes
-about 2.7 MiB a day with every check, some 250 MiB at its 90 days
+`ingest.max_database_mib` (256 MiB by default). The metric history keeps
+every minute of the last eight days, about 21 MiB with every check, and
+ten-minute values before them: some 48 MiB at its 90 days
 (`collector.history_days`, see [configuration](configuration.md)).
 
 There are two ways to install. `garrison setup`, the way of the

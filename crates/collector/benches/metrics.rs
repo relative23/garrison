@@ -22,6 +22,8 @@ use rusqlite::{Connection, params};
 /// 2026-10-28T10:00:00Z, the end of the stored history.
 const END: i64 = 1_793_181_600;
 const DAYS: i64 = 90;
+/// The days of minute samples before the store thins them to ten minutes.
+const FINE_DAYS: i64 = 8;
 /// As a host with every provider stores them each minute.
 const GAUGES: i64 = 8;
 const COUNTERS: i64 = 12;
@@ -30,7 +32,7 @@ const COUNTERS: i64 = 12;
 /// period above two seconds is one the dashboard cannot draw.
 const BUDGET: Duration = Duration::from_secs(60);
 
-/// 90 days of samples, one per series and minute, written once.
+/// 90 days of samples as the store keeps them, written once.
 static STATUS: OnceLock<PathBuf> = OnceLock::new();
 
 fn main() {
@@ -44,23 +46,30 @@ fn main() {
     divan::main();
 }
 
+/// Every minute of the last eight days and, before them, one sample per ten
+/// minutes, as the store thins them.
 fn fill(path: &Path) {
     let mut db = Connection::open(path).unwrap();
     let transaction = db.transaction().unwrap();
     {
         let mut insert = transaction
-            .prepare("INSERT INTO samples(name, ts, value, kind) VALUES(?,?,?,?)")
+            .prepare("INSERT INTO samples(name, ts, value, kind, minutes) VALUES(?,?,?,?,?)")
             .unwrap();
         for minute in 0..DAYS * 1440 {
             let at = END - (minute + 1) * 60;
+            let thinned = minute >= FINE_DAYS * 1440;
+            if thinned && at % 600 != 0 {
+                continue;
+            }
             for series in 0..GAUGES + COUNTERS {
                 let (name, kind) = if series < GAUGES {
                     (format!("gauge_{series}"), "gauge")
                 } else {
                     (format!("counter_{series}"), "increase")
                 };
+                let held = if thinned { 10 } else { 1 };
                 insert
-                    .execute(params![name, at, (minute + series) % 97, kind])
+                    .execute(params![name, at, (minute + series) % 97, kind, held])
                     .unwrap();
             }
         }

@@ -19,7 +19,6 @@ Notable changes for operators and users. The format follows
 - **What Garrison needs of the host.** The [installation](docs/operator/installation.md)
   guide names the memory each service held under load and the disk the event
   and metric histories take.
-
 - **Observation ids are documented and kept.** The new page
   [observation ids](docs/operator/observations.md) lists the id of every
   observation the checks report, for scripts that read Garrison's status. A
@@ -31,6 +30,16 @@ Notable changes for operators and users. The format follows
   the rules: a known loader such as `netfilter-persistent`, a unit named for a
   firewall, or one that runs `nft -f` or `iptables-restore`. It lists them
   with the services to watch and names them for `firewall_units`.
+
+### Changed
+
+- **The metric history takes a fifth of the space.** It keeps every minute
+  of the last eight days, which the 24-hour and 7-day views draw, and one
+  value per ten minutes before them, each counting for the minutes it holds,
+  so the 30-day and 90-day views show the same. With every check, 90 days
+  take about 48 MiB instead of about 250. An existing history is thinned
+  within some 80 minutes after the upgrade. Earlier releases cannot write
+  the changed table: a rollback to one needs `--restore-state`.
 
 ## [0.1.1] - 2026-11-13
 

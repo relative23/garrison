@@ -38,7 +38,7 @@ with `LoadCredential=`.
 | `ingest.signature_key` | `credential:webhook-signature-key` | The key Stalwart signs its event batches with; `stalwart setup` writes it. |
 | `ingest.retention_days` | 30 | Event history retention. |
 | `ingest.max_events` / `max_database_mib` | 1000000 / 256 | Size limits. When one is reached, the oldest events go before their retention ends; the event views say from when on events are kept. An event takes about 400 bytes, and a server on the internet records some 15,000 a day from unsolicited connections alone. |
-| `collector.history_days` | 90 | Metric history retention. With every check the history takes about 2.7 MiB a day, some 250 MiB for 90 days; fewer days take less. |
+| `collector.history_days` | 90 | Metric history retention: every minute of the last eight days, ten-minute values before them. With every check that is about 21 MiB for eight days and 48 MiB for 90. |
 | `collector.native_key`, `broker.native_key` | `credential:collector-native-key`, `credential:broker-native-key` | The two read-only API keys; `stalwart setup` writes them. |
 | `collector.metrics_credential` | none | User name and password for Stalwart's Prometheus exporter; the example configuration names `credential:metrics-credential`, which `stalwart setup` writes. |
 | `broker.policy` | `/etc/garrison/access-policy.json` | Access policy, see [access.md](access.md). |

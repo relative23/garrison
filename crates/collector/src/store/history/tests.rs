@@ -1,12 +1,14 @@
 //! The metric history, read bucket by bucket, against one query that groups
 //! every sample of the range at once and must give the same answer.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use garrison_core::sqlite::{out_of_time, reading};
 use garrison_testing::noise::Noise;
 
 use super::*;
+use crate::store::StatusStore;
 
 /// What the comparison looks at.
 struct Grouped {
@@ -28,7 +30,8 @@ fn grouped_at_once(db: &Connection, start: i64, end: i64, buckets: usize) -> Gro
     let mut statement = db
         .prepare(
             "SELECT name, kind, CAST((ts - ?) / ? AS INTEGER) AS bucket, \
-             CASE kind WHEN 'gauge' THEN avg(value) ELSE sum(value) END AS value \
+             CASE kind WHEN 'gauge' THEN sum(value * minutes) / sum(minutes) \
+                       ELSE sum(value) END AS value \
              FROM samples WHERE ts >= ? AND ts < ? GROUP BY name, kind, bucket",
         )
         .unwrap();
@@ -80,7 +83,7 @@ fn grouped_at_once(db: &Connection, start: i64, end: i64, buckets: usize) -> Gro
 fn uneven_samples(db: &Connection) {
     let mut noise = Noise::new(53);
     let mut insert = db
-        .prepare("INSERT OR IGNORE INTO samples VALUES(?,?,?,?)")
+        .prepare("INSERT OR IGNORE INTO samples(name, ts, value, kind) VALUES(?,?,?,?)")
         .unwrap();
     let mut at = 10_000;
     while at < 21_000 {
@@ -175,7 +178,7 @@ fn a_history_stops_when_its_reader_runs_out_of_time() {
         store
             .db
             .execute(
-                "INSERT INTO samples VALUES('queue', ?, 1.5, 'gauge')",
+                "INSERT INTO samples(name, ts, value, kind) VALUES('queue', ?, 1.5, 'gauge')",
                 [minute * 60],
             )
             .unwrap();
