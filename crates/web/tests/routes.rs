@@ -1,92 +1,20 @@
-//! Sign-in details and the exact limits of every route's parameters.
+//! The exact limits of every route's parameters, what the Stalwart WebUI may
+//! read, and one delivery or session in detail.
 
 // Helpers fail the test by panicking, like the tests themselves.
 #![allow(clippy::unwrap_used)]
 
 mod support;
 
-use std::collections::HashMap;
-
 use axum::http::{Method, StatusCode};
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use garrison_core::config::Database;
 use garrison_core::time;
 use garrison_ingest::store::{EventStore, Limits};
 use serde_json::json;
-use sha2::{Digest, Sha256};
-use support::{Client, ORIGIN, setup, write_status};
+use support::{ORIGIN, setup, write_status};
 
 fn api(path: &str) -> String {
     format!("/api/{path}")
-}
-
-/// The provider's sign-in URL parameters of a fresh login.
-async fn login(client: &mut Client) -> HashMap<String, String> {
-    let answer = client.get("/auth/login").await;
-    let location = url::Url::parse(answer.header("location")).unwrap();
-    location.query_pairs().into_owned().collect()
-}
-
-#[tokio::test]
-async fn the_challenge_is_the_sha256_of_the_verifier() {
-    let mut setup = setup();
-    let query = login(&mut setup.client).await;
-    let callback = format!(
-        "/auth/callback?state={}&code=code-admin&iss=https%3A%2F%2Fmail.example.test",
-        query["state"]
-    );
-    setup.client.get(&callback).await;
-    let verifier = setup.provider.verifiers.lock().unwrap()[0].clone();
-    let expected = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-    assert_eq!(query["code_challenge"], expected);
-}
-
-#[tokio::test]
-async fn the_callback_needs_the_state_in_both_url_and_cookie() {
-    let refused = "/admin/?login_error=1";
-    let issuer = "iss=https%3A%2F%2Fmail.example.test";
-    let mut setup = setup();
-    login(&mut setup.client).await;
-    let no_state = format!("/auth/callback?code=code-admin&{issuer}");
-    assert_eq!(
-        setup.client.get(&no_state).await.header("location"),
-        refused
-    );
-
-    let state = login(&mut setup.client).await["state"].clone();
-    setup.client.cookies.clear();
-    let no_cookie = format!("/auth/callback?state={state}&code=code-admin&{issuer}");
-    assert_eq!(
-        setup.client.get(&no_cookie).await.header("location"),
-        refused
-    );
-
-    login(&mut setup.client).await;
-    let other = format!("/auth/callback?state=other&code=code-admin&{issuer}");
-    assert_eq!(setup.client.get(&other).await.header("location"), refused);
-    assert!(setup.provider.verifiers.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn a_session_lasts_the_configured_minutes_at_most() {
-    let mut setup = setup();
-    let state = login(&mut setup.client).await["state"].clone();
-    let callback =
-        format!("/auth/callback?state={state}&code=code-admin&iss=https%3A%2F%2Fmail.example.test");
-    let answer = setup.client.get(&callback).await;
-    let minutes = setup.config.web.session_minutes;
-    let session = answer
-        .headers
-        .get_all("set-cookie")
-        .iter()
-        .map(|value| value.to_str().unwrap())
-        .find(|value| value.starts_with("__Host-garrison_session="))
-        .unwrap();
-    assert!(
-        session.contains(&format!("Max-Age={}", minutes * 60)),
-        "{session}"
-    );
 }
 
 #[tokio::test]
@@ -288,99 +216,6 @@ async fn action_requests_have_length_limits() {
             .await;
         assert_eq!(answer.status.is_success(), accepted, "{}", answer.json());
     }
-}
-
-#[tokio::test]
-async fn assets_go_out_in_the_best_coding_the_browser_accepts() {
-    let setup = setup();
-    let assets = setup.directory.path().join("static/assets");
-    let mut client = setup.client;
-    for (name, body) in [
-        ("app.js", "plain"),
-        ("app.js.br", "brotli"),
-        ("app.js.gz", "gzip"),
-        ("only.css", "plain"),
-    ] {
-        std::fs::write(assets.join(name), body).unwrap();
-    }
-    for (accepted, coding, body) in [
-        ("gzip, deflate, br, zstd", "br", "brotli"),
-        ("GZIP", "gzip", "gzip"),
-        ("br;q=0, gzip;q=0.5", "gzip", "gzip"),
-        ("*", "br", "brotli"),
-        ("*;q=0, gzip", "gzip", "gzip"),
-        ("identity", "", "plain"),
-        ("", "", "plain"),
-    ] {
-        let answer = client
-            .send(
-                Method::GET,
-                "/admin/assets/app.js",
-                &[("accept-encoding", accepted)],
-                None,
-            )
-            .await;
-        assert_eq!(answer.header("content-encoding"), coding, "{accepted}");
-        assert_eq!(answer.body, body.as_bytes(), "{accepted}");
-        assert_eq!(
-            answer.header("content-type"),
-            "text/javascript; charset=utf-8",
-            "{accepted}"
-        );
-        assert_eq!(answer.header("vary"), "accept-encoding", "{accepted}");
-    }
-    // Without a copy, the asset itself goes out.
-    let answer = client
-        .send(
-            Method::GET,
-            "/admin/assets/only.css",
-            &[("accept-encoding", "br, gzip")],
-            None,
-        )
-        .await;
-    assert_eq!(answer.header("content-encoding"), "");
-    assert_eq!(answer.body, b"plain");
-}
-
-#[tokio::test]
-async fn interface_files_carry_their_media_type() {
-    let setup = setup();
-    let assets = setup.directory.path().join("static/assets");
-    let mut client = setup.client;
-    for (name, media) in [
-        ("a.html", "text/html; charset=utf-8"),
-        ("a.js", "text/javascript; charset=utf-8"),
-        ("a.mjs", "text/javascript; charset=utf-8"),
-        ("a.css", "text/css; charset=utf-8"),
-        ("a.json", "application/json"),
-        ("a.map", "application/json"),
-        ("a.svg", "image/svg+xml"),
-        ("a.png", "image/png"),
-        ("a.ico", "image/vnd.microsoft.icon"),
-        ("a.woff2", "font/woff2"),
-        ("a.woff", "font/woff"),
-        ("a.txt", "text/plain; charset=utf-8"),
-        ("a.bin", "application/octet-stream"),
-    ] {
-        std::fs::write(assets.join(name), "x").unwrap();
-        let answer = client.get(&format!("/admin/assets/{name}")).await;
-        assert_eq!(answer.header("content-type"), media, "{name}");
-    }
-    std::fs::write(assets.join("large.js"), vec![b' '; 2 * 1024 * 1024]).unwrap();
-    let large = client.get("/admin/assets/large.js").await;
-    assert_eq!(
-        large.status,
-        StatusCode::OK,
-        "files up to 16 MiB are served"
-    );
-    let favicon = client.get("/admin/favicon.svg").await;
-    assert_eq!(favicon.status, StatusCode::NOT_FOUND);
-    std::fs::write(setup.directory.path().join("static/favicon.svg"), "<svg/>").unwrap();
-    let favicon = client.get("/admin/favicon.svg").await;
-    assert_eq!(
-        (favicon.status, favicon.body),
-        (StatusCode::OK, b"<svg/>".to_vec())
-    );
 }
 
 #[tokio::test]

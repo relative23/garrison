@@ -295,6 +295,8 @@ pub fn from_text(text: &str) -> Result<Config, LoadError> {
 }
 
 #[cfg(test)]
+mod deployment_tests;
+#[cfg(test)]
 mod notification_tests;
 #[cfg(test)]
 mod tests;

@@ -7,10 +7,13 @@ mod support;
 
 use std::collections::HashMap;
 
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use garrison_web::attempts::BUDGET;
 use garrison_web::routes::auth::challenge;
 use serde_json::json;
-use support::{refused, setup};
+use sha2::{Digest, Sha256};
+use support::{Client, refused, setup};
 
 const STATE_COOKIE: &str = "__Host-garrison_login";
 
@@ -160,4 +163,72 @@ async fn code_exchanges_per_network_are_limited() {
         assert_eq!(limited, round >= budget, "round {round}");
     }
     assert_eq!(setup.provider.verifiers.lock().unwrap().len(), budget);
+}
+
+/// The provider's sign-in URL parameters of a fresh login.
+async fn login(client: &mut Client) -> HashMap<String, String> {
+    let answer = client.get("/auth/login").await;
+    let location = url::Url::parse(answer.header("location")).unwrap();
+    location.query_pairs().into_owned().collect()
+}
+
+#[tokio::test]
+async fn the_challenge_is_the_sha256_of_the_verifier() {
+    let mut setup = setup();
+    let query = login(&mut setup.client).await;
+    let callback = format!(
+        "/auth/callback?state={}&code=code-admin&iss=https%3A%2F%2Fmail.example.test",
+        query["state"]
+    );
+    setup.client.get(&callback).await;
+    let verifier = setup.provider.verifiers.lock().unwrap()[0].clone();
+    let expected = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    assert_eq!(query["code_challenge"], expected);
+}
+
+#[tokio::test]
+async fn the_callback_needs_the_state_in_both_url_and_cookie() {
+    let refused = "/admin/?login_error=1";
+    let issuer = "iss=https%3A%2F%2Fmail.example.test";
+    let mut setup = setup();
+    login(&mut setup.client).await;
+    let no_state = format!("/auth/callback?code=code-admin&{issuer}");
+    assert_eq!(
+        setup.client.get(&no_state).await.header("location"),
+        refused
+    );
+
+    let state = login(&mut setup.client).await["state"].clone();
+    setup.client.cookies.clear();
+    let no_cookie = format!("/auth/callback?state={state}&code=code-admin&{issuer}");
+    assert_eq!(
+        setup.client.get(&no_cookie).await.header("location"),
+        refused
+    );
+
+    login(&mut setup.client).await;
+    let other = format!("/auth/callback?state=other&code=code-admin&{issuer}");
+    assert_eq!(setup.client.get(&other).await.header("location"), refused);
+    assert!(setup.provider.verifiers.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_session_lasts_the_configured_minutes_at_most() {
+    let mut setup = setup();
+    let state = login(&mut setup.client).await["state"].clone();
+    let callback =
+        format!("/auth/callback?state={state}&code=code-admin&iss=https%3A%2F%2Fmail.example.test");
+    let answer = setup.client.get(&callback).await;
+    let minutes = setup.config.web.session_minutes;
+    let session = answer
+        .headers
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .find(|value| value.starts_with("__Host-garrison_session="))
+        .unwrap();
+    assert!(
+        session.contains(&format!("Max-Age={}", minutes * 60)),
+        "{session}"
+    );
 }
