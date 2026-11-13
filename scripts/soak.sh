@@ -1,7 +1,9 @@
 #!/bin/sh
 # Garrison under steady load for a while: signed event batches into the
 # receiver, the collector on its timer, and every five minutes a sample of the
-# services' memory and restarts, the stored events and the database sizes.
+# services' memory and restarts, the stored events and the database sizes. At
+# the end it reports the collector's memory peaks as systemd 256 and newer
+# keeps and logs them, and the size of the status database.
 #
 #   [HOST=vm] [DISTRO=debian-13] [SOAK_MINUTES=120] [SOAK_RATE=40] \
 #       scripts/soak.sh dist/previous-x86_64.tar.gz dist/garrison-<version>-x86_64.tar.gz
@@ -127,6 +129,24 @@ inside 'while systemctl is-active --quiet soak-load.service; do sleep 5; done'
 last=$(sample)
 
 step "After $minutes minutes"
+# The collector runs for a moment each minute. systemd keeps the memory peak of
+# its last run, and the journal notes only runs above 64 MiB or a second of CPU
+# time ("Consumed 1.2s CPU time, 95.1M memory peak."), such as one in which
+# host care asks the package manager for pending updates.
+soak_noted=$(inside 'journalctl -u garrison-collect.service -b --no-pager -q -o cat' |
+    sed -n 's/.* \([0-9.]*[KMG]\) memory peak.*/\1/p' |
+    awk '{ value = $0 + 0; unit = substr($0, length($0))
+           if (unit == "K") value /= 1024; if (unit == "G") value *= 1024
+           if (value > most) most = value }
+         END { if (NR) printf "%d, the highest %.1f MiB", NR, most; else print "none" }')
+soak_peak=$(inside 'systemctl show -p MemoryPeak --value garrison-collect.service')
+case $soak_peak in
+    '' | *[!0-9]*) soak_peak="not known" ;;
+    *) soak_peak="$((soak_peak / 1024)) KiB" ;;
+esac
+soak_status=$(inside 'stat -c %s /var/lib/garrison/collector/status.sqlite')
+echo "      collector: last run at most $soak_peak; runs above 64 MiB or 1 s of CPU: $soak_noted;" \
+    "status database $soak_status bytes"
 inside_input 'cat > /root/account.sh' <<'ACCOUNT'
 # "accepted kept dropped lost refused skipped windows": an accepted batch must
 # be kept in full, or have its time inside the window that the receiver

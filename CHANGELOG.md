@@ -16,6 +16,9 @@ Notable changes for operators and users. The format follows
   after a Stalwart release that loads files the proxy does not pass, nobody
   can sign in. The example configuration has the entry; an installation adds
   `[[providers]]` with `type = "sign-in"` to `garrison.toml`.
+- **What Garrison needs of the host.** The [installation](docs/operator/installation.md)
+  guide names the memory each service held under load and the disk the event
+  and metric histories take.
 
 - **Observation ids are documented and kept.** The new page
   [observation ids](docs/operator/observations.md) lists the id of every

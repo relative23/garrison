@@ -15,6 +15,17 @@ Stream 10, Fedora 44 and openSUSE Leap 16.0 (SELinux enforcing); Amazon Linux
 rules. Debian 11 (polkit 0.105) and the RHEL 8 family (systemd 239) do not
 meet the requirements either.
 
+Garrison needs little of the host. Measured on 2026-11-13 in an AlmaLinux 10
+container (x86_64) under 37 events a second for 30 minutes, the event
+receiver held 16 MiB of memory, the broker 6 MiB and the web service 7 MiB,
+which answered only health checks there; none of them grew. A collection run
+takes about 4 MiB for a moment each minute. When host care asks the package
+manager for pending updates, every six hours and after packages change, dnf
+takes about 95 MiB for that moment. On disk, the event history stays within
+`ingest.max_database_mib` (256 MiB by default), and the metric history takes
+about 2.7 MiB a day with every check, some 250 MiB at its 90 days
+(`collector.history_days`, see [configuration](configuration.md)).
+
 There are two ways to install. `garrison setup`, the way of the
 [quick start](quickstart.md), asks for what steps 2 to 5 need and carries them
 out. This page takes the same steps by hand and explains each one. By hand the
