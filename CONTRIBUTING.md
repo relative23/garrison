@@ -147,7 +147,11 @@ cargo xtask lab stop
 CI runs the contract tests against every supported release (`IMAGES` in
 `xtask/src/lab.rs`), on every change and once a week without one, because
 Stalwart serves its WebUI from outside the release and changes it without a
-new version.
+new version. The job `contract-newest` runs them against Stalwart's newest
+release (`NEWEST`, `cargo xtask lab start newest`) while it is not a
+supported one. Renovate moves `NEWEST` to each new release and to a new
+image of the same release, without the 14 days' wait, so its pull request
+shows whether Garrison still fits.
 
 ## Tests
 
@@ -374,9 +378,10 @@ Status pages render observations generically, so no interface change is needed.
 
 ### Supporting a new Stalwart release
 
-1. Add the image and its digest to `xtask/src/lab.rs` and the release to the
-   contract job in `.github/workflows/ci.yml`, then run the contract tests
-   against it. A release stays in both for as long as it is supported.
+1. Add the image and its digest to `IMAGES` in `xtask/src/lab.rs` (Renovate's
+   pull request has them in `NEWEST`) and the release to the contract job in
+   `.github/workflows/ci.yml`, then run the contract tests against it. A
+   release stays in both for as long as it is supported.
 2. Regenerate the event labels from the new schema while the lab runs:
    `curl -sL -u "$GARRISON_LAB_ADMIN" "$GARRISON_LAB_URL/api/schema" | gunzip > schema.json`,
    then `cargo xtask event-types schema.json`.

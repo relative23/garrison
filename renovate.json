@@ -3,7 +3,28 @@
   "extends": ["config:recommended", ":semanticCommitsDisabled", "helpers:pinGitHubActionDigests"],
   "minimumReleaseAge": "14 days",
   "internalChecksFilter": "strict",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Stalwart's newest release, pinned by its digest, which the job contract-newest tests (NEWEST in xtask/src/lab.rs).",
+      "managerFilePatterns": ["/^xtask/src/lab\\.rs$/"],
+      "matchStrings": [
+        "const NEWEST: &str =\\s*\"(?<depName>stalwartlabs/stalwart):(?<currentValue>v\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[0-9a-f]{64})\";"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
+    }
+  ],
   "packageRules": [
+    {
+      "matchDepNames": ["stalwartlabs/stalwart"],
+      "minimumReleaseAge": "0 days",
+      "schedule": ["at any time"],
+      "prBodyNotes": [
+        "The job contract-newest runs Garrison's contract tests against this image. Once they pass, \"Supporting a new Stalwart release\" in CONTRIBUTING.md makes a new release a supported one."
+      ],
+      "description": "A new Stalwart release, or a new image of it, gets its contract tests at once: no waiting time, no schedule."
+    },
     {
       "matchManagers": ["npm"],
       "matchDepTypes": ["dependencies", "devDependencies"],

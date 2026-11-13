@@ -30,6 +30,13 @@ const IMAGES: [(&str, &str); 1] = [(
     "stalwartlabs/stalwart:v1.1.0\
      @sha256:f772aa6ef8cd8018969fa491640f1436b0270eb14e2c219b5f37f1a77020837e",
 )];
+/// Stalwart's newest release, pinned by the digest of its image. Renovate
+/// moves it to each new release and to a new image of the same release
+/// (`customManagers` in renovate.json). The job contract-newest in
+/// `.github/workflows/ci.yml` runs it while it is none of [`IMAGES`], so the
+/// pull request shows whether Garrison still fits before the release becomes
+/// a supported one (CONTRIBUTING.md, "Supporting a new Stalwart release").
+const NEWEST: &str = "stalwartlabs/stalwart:v1.1.0@sha256:f772aa6ef8cd8018969fa491640f1436b0270eb14e2c219b5f37f1a77020837e";
 const NAME: &str = "garrison-lab-stalwart";
 const PORT: u16 = 18180;
 const RECOVERY: &str = "contract-recovery:Contract-Recovery-2026";
@@ -90,11 +97,15 @@ fn wait_http(url: &str) -> Result<(), String> {
     Err(format!("Stalwart did not answer on {url}"))
 }
 
-/// The image of a supported release, or of the newest one.
+/// The image of a supported release, of `newest` ([`NEWEST`]), or of the
+/// newest supported one.
 fn image(release: Option<&str>) -> Result<&'static str, String> {
     let Some(release) = release else {
         return Ok(IMAGES[0].1);
     };
+    if release == "newest" {
+        return Ok(NEWEST);
+    }
     IMAGES
         .iter()
         .find(|(name, _)| *name == release)
@@ -215,6 +226,22 @@ fn stop() {
     let _ = fs::remove_dir_all(state());
 }
 
+/// `stalwartlabs/stalwart:v1.2.3@sha256:…` is the release 1.2.3.
+fn release_of(image: &str) -> Option<&str> {
+    image
+        .strip_prefix("stalwartlabs/stalwart:v")?
+        .split_once('@')
+        .map(|(release, _)| release)
+}
+
+/// The release of [`NEWEST`] while no supported release has its image.
+fn unsupported_newest() -> Option<&'static str> {
+    if IMAGES.iter().any(|(_, image)| *image == NEWEST) {
+        return None;
+    }
+    release_of(NEWEST)
+}
+
 pub(crate) fn lab(command: Option<&str>, release: Option<&str>) -> Result<(), String> {
     match command {
         Some("start") => start(release),
@@ -222,7 +249,15 @@ pub(crate) fn lab(command: Option<&str>, release: Option<&str>) -> Result<(), St
             stop();
             Ok(())
         }
-        _ => Err("usage: cargo xtask lab start [RELEASE]|stop".into()),
+        // For the job contract-newest: nothing while the newest release is a
+        // supported one, which the contract job runs already.
+        Some("newest") => {
+            if let Some(release) = unsupported_newest() {
+                println!("{release}");
+            }
+            Ok(())
+        }
+        _ => Err("usage: cargo xtask lab start [RELEASE|newest]|stop|newest".into()),
     }
 }
 
@@ -243,6 +278,25 @@ mod tests {
             image(Some("0.16.0")),
             Err("no supported Stalwart release \"0.16.0\"; the lab has 1.1.0".to_owned())
         );
+    }
+
+    #[test]
+    fn the_newest_release_is_pinned_and_run_while_it_is_not_supported() {
+        assert_eq!(image(Some("newest")), Ok(NEWEST));
+        let (name, digest) = NEWEST.split_once("@sha256:").unwrap();
+        assert_eq!(
+            name,
+            format!("stalwartlabs/stalwart:v{}", release_of(NEWEST).unwrap())
+        );
+        assert!(digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(
+            release_of("stalwartlabs/stalwart:v1.2.3@sha256:00"),
+            Some("1.2.3")
+        );
+        assert_eq!(release_of("other/image:v1.2.3@sha256:00"), None);
+        // A supported release's image is the contract job's to run.
+        let supported = IMAGES.iter().any(|(_, image)| *image == NEWEST);
+        assert_eq!(unsupported_newest().is_none(), supported);
     }
 
     /// The README states what is supported and the contract job proves it,

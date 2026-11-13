@@ -172,3 +172,28 @@ jobs:
           cargo test --workspace --locked --test contract -- --ignored
       - if: always()
         run: cargo xtask lab stop
+
+  contract-newest:
+    # Stalwart's newest release (NEWEST in xtask/src/lab.rs), which Renovate
+    # moves to each new release and new image: its contract tests run here
+    # until it is one of the supported releases above.
+    runs-on: ubuntu-24.04
+    needs: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Start Stalwart's newest release and run contract tests, unless it is supported
+        run: |
+          newest=$(cargo xtask lab newest)
+          if [ -z "$newest" ]; then
+            echo "Stalwart's newest release is a supported one; the contract job runs it."
+            exit 0
+          fi
+          echo "Stalwart's newest release is $newest."
+          eval "$(cargo xtask lab start newest)"
+          cargo test --workspace --locked --test contract -- --ignored
+      - if: always()
+        run: cargo xtask lab stop

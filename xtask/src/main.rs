@@ -27,7 +27,8 @@ Tasks:
   api       write frontend/api/ from the Rust service (cargo test checks it)
   brand     write the logo files in docs/brand (needs Inkscape, rsvg-convert, Noto Sans)
   event-types SCHEMA.json  write crates/ingest/event_types.json from Stalwart's /api/schema
-  lab       start [RELEASE]|stop the Stalwart instance for contract tests (eval the output of start)
+  lab       start [RELEASE|newest]|stop the Stalwart instance for contract tests (eval the output of start);
+            newest prints Stalwart's newest release while it is not a supported one
   notices   print THIRD_PARTY_NOTICES.txt for one target (default x86_64 musl)
   sbom      print the CycloneDX SBOM of a release for one target (default x86_64 musl)
   release   build dist/garrison-<version>-<arch>.tar.gz [ARCH ...]";
