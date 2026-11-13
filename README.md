@@ -42,7 +42,7 @@ adds the matching "Switch to Garrison WebUI" row there (see
 Garrison depends on Stalwart. If you run Stalwart Community, please consider
 [sponsoring Stalwart Labs](https://github.com/sponsors/stalwartlabs).
 
-Status: 0.1.1. Supported Stalwart releases:
+Status: 0.1.2. Supported Stalwart releases:
 **1.1.0**, verified by contract tests against the real server
 (`cargo test --test contract`, see [contributing](CONTRIBUTING.md)).
 

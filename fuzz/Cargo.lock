@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-authz"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "garrison-core",
  "garrison-stalwart",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-broker"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "garrison-authz",
  "garrison-core",
@@ -443,7 +443,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-checks"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "flate2",
  "garrison-core",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-checks-host"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "garrison-checks",
  "garrison-core",
@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-checks-mail"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "garrison-checks",
@@ -487,7 +487,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-checks-network"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "garrison-checks",
  "garrison-core",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-checks-stalwart"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "garrison-checks",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-collector"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "garrison-checks",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "jiff",
  "log",
@@ -575,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-ingest"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "axum",
  "base64",
@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-milter"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "flate2",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-stalwart"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "garrison-core",
  "serde",
@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-testing"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "flate2",
@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "garrison-web"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "axum",
  "base64",

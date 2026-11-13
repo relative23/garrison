@@ -12,7 +12,7 @@ reaches a host.
   roles:
     - role: garrison
       vars:
-        garrison_version: "0.1.1"
+        garrison_version: "0.1.2"
         garrison_signing_key: "RW..."            # from the README
         garrison_public_origin: "https://garrison.example.org"
         garrison_issuer: "https://mail.example.org"

@@ -6,6 +6,8 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-13
+
 ### Added
 
 - **The sign-in page is checked all the time.** The new check `sign-in`
@@ -193,6 +195,7 @@ The first release.
 - **Releases.** Reproducible static archives for x86_64 and aarch64, each
   with the third-party notices and a CycloneDX SBOM.
 
-[Unreleased]: https://github.com/relative23/garrison/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/relative23/garrison/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/relative23/garrison/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/relative23/garrison/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/relative23/garrison/releases/tag/v0.1.0
