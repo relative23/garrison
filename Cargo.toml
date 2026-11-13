@@ -20,6 +20,11 @@ garrison-authz = { path = "crates/authz" }
 garrison-testing = { path = "crates/testing" }
 garrison-ingest = { path = "crates/ingest" }
 garrison-collector = { path = "crates/collector" }
+garrison-checks = { path = "crates/checks" }
+garrison-checks-host = { path = "crates/checks-host" }
+garrison-checks-mail = { path = "crates/checks-mail" }
+garrison-checks-network = { path = "crates/checks-network" }
+garrison-checks-stalwart = { path = "crates/checks-stalwart" }
 garrison-broker = { path = "crates/broker" }
 garrison-milter = { path = "crates/milter" }
 garrison-web = { path = "crates/web" }
@@ -46,9 +51,12 @@ listenfd = "1.0.2"
 log = { version = "0.4.34", features = ["std"] }
 # Checks release signatures for `garrison upgrade`; verification only, no dependencies.
 minisign-verify = "0.3.0"
-rusqlite = { version = "0.41.1", features = ["backup", "bundled", "hooks"] }
+# Test certificates are made at run time; no key material is stored. Tests only.
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
+rusqlite ={ version = "0.41.1", features = ["backup", "bundled", "hooks"] }
 rustix = { version = "1.1.5", features = ["fs", "net", "process"] }
-# TLS probes only (collector), with ring and the system's trust store.
+# TLS probes and mail submission (checks, collector, doctor), with ring and the
+# system's trust store.
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8.5"
 serde = { version = "1.0.229", features = ["derive"] }

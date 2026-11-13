@@ -1,7 +1,15 @@
-//! Helpers for the providers' tests: a fixed clock and canned command output.
+//! Helpers for the checks' tests, in this crate and, with the feature
+//! `testing`, in the crates of the checks: a fixed clock, canned command
+//! output and a memory that keeps what it is given.
+
+// Helpers fail the test by panicking, like the test itself.
+#![allow(
+    clippy::unwrap_used,
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate
+)]
 
 use std::io;
-use std::path::Path;
 
 use garrison_core::config::{Config, Database};
 use garrison_core::time::{self, Timestamp};
@@ -10,12 +18,13 @@ use crate::command::{Output, Runner};
 use crate::context::{Context, Forgetful};
 
 /// 2026-10-29T12:00:00Z, the collection time of the tests.
-pub(crate) fn now() -> Timestamp {
+pub fn now() -> Timestamp {
     time::parse("2026-10-29T12:00:00Z").unwrap()
 }
 
 /// Answers every command with the same output and exit code 0.
-pub(crate) struct Canned(pub(crate) String);
+#[derive(Debug)]
+pub struct Canned(pub String);
 
 impl Runner for Canned {
     fn run(&self, _: &[&str]) -> io::Result<Output> {
@@ -26,11 +35,14 @@ impl Runner for Canned {
     }
 }
 
-pub(crate) fn config(directory: &Path) -> Config {
+/// The workspace's test configuration, from garrison-testing, which is no
+/// normal dependency: other crates' tests add it in their own `testing`.
+#[cfg(test)]
+pub fn config(directory: &std::path::Path) -> Config {
     garrison_testing::config(directory, "http://127.0.0.1:9")
 }
 
-pub(crate) fn context<'a>(config: &'a Config, runner: &'a dyn Runner) -> Context<'a> {
+pub fn context<'a>(config: &'a Config, runner: &'a dyn Runner) -> Context<'a> {
     Context {
         deployment: &config.deployment,
         now: now(),
@@ -44,9 +56,7 @@ pub(crate) fn context<'a>(config: &'a Config, runner: &'a dyn Runner) -> Context
 
 /// A memory that keeps what it is given for as long as the test runs.
 #[derive(Debug, Default)]
-pub(crate) struct Remembered(
-    pub(crate) std::cell::RefCell<std::collections::BTreeMap<String, String>>,
-);
+pub struct Remembered(pub std::cell::RefCell<std::collections::BTreeMap<String, String>>);
 
 impl crate::context::Memory for Remembered {
     fn recall(&self, key: &str) -> Option<String> {
@@ -58,26 +68,27 @@ impl crate::context::Memory for Remembered {
     }
 }
 
-pub(crate) fn table(text: &str) -> toml::Table {
+pub fn table(text: &str) -> toml::Table {
     text.parse().unwrap()
 }
 
 /// A test CA and a server certificate for `localhost` and 127.0.0.1 that it
 /// issued, valid until 2036-10-26 00:00 UTC; made at run time, so no key
 /// material is stored.
-pub(crate) struct Certificates {
-    pub(crate) ca: rustls::pki_types::CertificateDer<'static>,
-    pub(crate) server: rustls::pki_types::CertificateDer<'static>,
-    pub(crate) key: rustls::pki_types::PrivateKeyDer<'static>,
+#[derive(Debug)]
+pub struct Certificates {
+    pub ca: rustls::pki_types::CertificateDer<'static>,
+    pub server: rustls::pki_types::CertificateDer<'static>,
+    pub key: rustls::pki_types::PrivateKeyDer<'static>,
 }
 
-pub(crate) fn certificates() -> Certificates {
+pub fn certificates() -> Certificates {
     certificates_until(2036, 10, 26)
 }
 
 /// Like [`certificates`], with the server certificate valid until 00:00 UTC of
 /// the given day.
-pub(crate) fn certificates_until(year: i32, month: u8, day: u8) -> Certificates {
+pub fn certificates_until(year: i32, month: u8, day: u8) -> Certificates {
     use rcgen::{
         BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer,
         KeyPair, date_time_ymd,

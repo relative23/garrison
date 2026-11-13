@@ -237,20 +237,3 @@ fn the_version_comes_from_a_recorded_server_start() {
         assert_eq!(version(invalid), Value::Null, "{invalid:?}");
     }
 }
-
-#[test]
-fn every_provider_reports_under_its_configured_type() {
-    let settings = [
-        ("stalwart", ""),
-        ("host", ""),
-        (
-            "systemd",
-            "units = [{ unit = \"dns.service\", label = \"DNS\", modules = [\"services\"] }]",
-        ),
-    ];
-    for (kind, extra) in settings {
-        let raw = table(&format!("type = \"{kind}\"\n{extra}"));
-        let providers = crate::providers::build(&[raw]).unwrap();
-        assert_eq!(providers[0].name(), kind);
-    }
-}

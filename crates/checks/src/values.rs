@@ -7,7 +7,7 @@
 use serde_json::{Number, Value};
 
 /// A JSON value as text for operators: strings without quotes, the rest as JSON.
-pub(crate) fn text(value: &Value) -> String {
+pub fn text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
         Value::Number(number) => number.to_string(),
@@ -17,7 +17,7 @@ pub(crate) fn text(value: &Value) -> String {
 
 /// Equality by value: numbers compare numerically, `true` and `false` count as
 /// 1 and 0, arrays and objects compare element by element.
-pub(crate) fn loosely_equal(left: &Value, right: &Value) -> bool {
+pub fn loosely_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Array(left), Value::Array(right)) => {
             left.len() == right.len() && left.iter().zip(right).all(|(l, r)| loosely_equal(l, r))
@@ -49,17 +49,17 @@ fn numeric(value: &Value) -> Option<f64> {
 
 /// Rounded to one decimal: the nearest representable value to the correctly
 /// rounded decimal, ties to even (0.25 becomes 0.2).
-pub(crate) fn round_one(value: f64) -> f64 {
+pub fn round_one(value: f64) -> f64 {
     format!("{value:.1}").parse().unwrap_or(value)
 }
 
 /// A float for JSON; non-finite values become `null`, as JSON has no NaN.
-pub(crate) fn float(value: f64) -> Value {
+pub fn float(value: f64) -> Value {
     Number::from_f64(value).map_or(Value::Null, Value::Number)
 }
 
 /// A TOML value from the configuration as JSON, for comparisons with documents.
-pub(crate) fn from_toml(value: &toml::Value) -> Value {
+pub fn from_toml(value: &toml::Value) -> Value {
     match value {
         toml::Value::String(text) => Value::String(text.clone()),
         toml::Value::Integer(number) => Value::from(*number),

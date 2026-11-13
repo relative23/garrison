@@ -23,15 +23,22 @@ stalwart/        OIDC, JMAP management client, native permission evaluation
 authz/           access policy, grants, Authority (token -> grant)
 broker/          socket protocol, job store, systemd runner, polkit rule
 ingest/          webhook app, privacy policy, event store, queries, summaries of deliveries, sessions, attacks and destinations
-collector/       provider registry, providers, status store, notifications, one collection run
+checks/          what every check is built from: Provider, Context, options, commands, HTTPS and DNS clients
+checks-host/     checks of the host: resources, host care, systemd units, versions, receipts, endpoints, backups
+checks-stalwart/ checks of Stalwart: management API, mailboxes, metrics exporter, releases
+checks-mail/     checks of the mail flow: event numbers, sending accounts, test mail, antivirus
+checks-network/  checks of the network: DNS records, blocklists and reverse names, TLS certificates
+collector/       provider registry, status store, notifications, one collection run
 milter/          the macro filter: scan of a message, milter protocol, listener
 web/             axum app, sessions, security gate, routes, API models and OpenAPI document
 garrison/        the one binary: services, operator commands, installer
 ```
 
-`core`, `stalwart`, `authz`, `broker`, `collector` and `milter` are
-synchronous and depend on no web framework or async runtime (enforced by `cargo xtask
-layering`); axum and tokio run only in the web and ingest services. `testing`
+`core`, `stalwart`, `authz`, `broker`, the `checks` crates, `collector` and
+`milter` are synchronous and depend on no web framework or async runtime
+(enforced by `cargo xtask layering`); axum and tokio run only in the web and
+ingest services. Each `checks-*` crate names only the libraries its own checks
+use, so one that a single check needs stays out of the others. `testing`
 holds shared test fixtures and `xtask` the build and maintenance tasks; neither
 is shipped.
 

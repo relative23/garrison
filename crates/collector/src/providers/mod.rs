@@ -1,48 +1,20 @@
 //! The provider registry: the `type` of each `[[providers]]` table selects one.
-
-mod backupcheck;
-mod certificate;
-mod clamav;
-pub mod directives;
-mod dns;
-mod flow;
-mod host;
-mod hostcare;
-pub mod mailboxes;
-mod mailtest;
-pub mod prometheus;
-mod receipt;
-mod releases;
-mod reputation;
-mod senders;
-pub mod stalwart;
-mod systemd;
-pub mod tls;
-mod version;
-mod web;
+//! The checks live in the `garrison-checks-*` crates; their types and the
+//! modules other crates use stay reachable here.
 
 use garrison_core::config::ConfigError;
 
 use crate::context::Provider;
 use crate::options::{Checked, fail};
 
-pub use backupcheck::BackupCheck;
-pub use clamav::Clamav;
-pub use dns::Dns;
-pub use flow::Flow;
-pub use host::Host;
-pub use hostcare::HostCare;
-pub use mailtest::MailTest;
-pub use prometheus::Prometheus;
-pub use receipt::Receipt;
-pub use releases::Releases;
-pub use reputation::Reputation;
-pub use senders::Senders;
-pub use stalwart::Stalwart;
-pub use systemd::Systemd;
-pub use tls::Tls;
-pub use version::VersionCommand;
-pub use web::{Bulwark, Http};
+pub use garrison_checks_host::providers::{
+    BackupCheck, Bulwark, Host, HostCare, Http, Receipt, Systemd, VersionCommand,
+};
+pub use garrison_checks_mail::providers::{Clamav, Flow, MailTest, Senders, directives};
+pub use garrison_checks_network::providers::{Dns, Reputation, Tls, tls};
+pub use garrison_checks_stalwart::providers::{
+    Prometheus, Releases, Stalwart, mailboxes, prometheus, stalwart,
+};
 
 type Factory = fn(&toml::Table) -> Result<Box<dyn Provider>, ConfigError>;
 
@@ -93,7 +65,5 @@ pub fn build(tables: &[toml::Table]) -> Checked<Vec<Box<dyn Provider>>> {
     Ok(providers)
 }
 
-#[cfg(test)]
-mod systemd_tests;
 #[cfg(test)]
 mod tests;

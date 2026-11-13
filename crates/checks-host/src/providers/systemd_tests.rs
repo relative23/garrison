@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 use super::tests::value_of;
 use super::*;
+use crate::context::Provider;
 use crate::testing::{Canned, config, context, table};
 
 /// A timer that runs again a while after its unit last ran has no calendar;

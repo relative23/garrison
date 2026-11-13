@@ -543,30 +543,113 @@ dependencies = [
 ]
 
 [[package]]
+name = "garrison-checks"
+version = "0.1.1"
+dependencies = [
+ "flate2",
+ "garrison-core",
+ "garrison-testing",
+ "rcgen",
+ "rustls",
+ "rustls-native-certs",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "garrison-checks-host"
+version = "0.1.1"
+dependencies = [
+ "garrison-checks",
+ "garrison-core",
+ "garrison-stalwart",
+ "garrison-testing",
+ "regex-lite",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "toml",
+ "url",
+]
+
+[[package]]
+name = "garrison-checks-mail"
+version = "0.1.1"
+dependencies = [
+ "base64",
+ "garrison-checks",
+ "garrison-core",
+ "garrison-milter",
+ "garrison-stalwart",
+ "garrison-testing",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "garrison-checks-network"
+version = "0.1.1"
+dependencies = [
+ "garrison-checks",
+ "garrison-core",
+ "garrison-stalwart",
+ "garrison-testing",
+ "log",
+ "rcgen",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "garrison-checks-stalwart"
+version = "0.1.1"
+dependencies = [
+ "base64",
+ "garrison-checks",
+ "garrison-core",
+ "garrison-stalwart",
+ "garrison-testing",
+ "regex-lite",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "garrison-collector"
 version = "0.1.1"
 dependencies = [
  "base64",
  "divan",
- "flate2",
+ "garrison-checks",
+ "garrison-checks-host",
+ "garrison-checks-mail",
+ "garrison-checks-network",
+ "garrison-checks-stalwart",
  "garrison-core",
- "garrison-milter",
  "garrison-stalwart",
  "garrison-testing",
  "log",
- "rcgen",
- "regex-lite",
  "rusqlite",
- "rustix",
  "rustls",
- "rustls-native-certs",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "thiserror",
  "toml",
- "url",
 ]
 
 [[package]]

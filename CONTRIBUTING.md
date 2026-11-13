@@ -29,7 +29,9 @@ Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 | `crates/stalwart` | Stalwart's OIDC, JMAP and management API clients |
 | `crates/authz` | The access policy and the grant of a signed-in user |
 | `crates/broker` | The privileged service that starts maintenance jobs |
-| `crates/collector` | The providers that observe the host into `status.sqlite` |
+| `crates/checks` | What every check is built from: `Provider`, options, commands, the HTTPS and DNS clients |
+| `crates/checks-*` | The checks, by what they look at: `host`, `stalwart`, `mail` and `network` |
+| `crates/collector` | Runs the configured checks into `status.sqlite` and sends the notifications |
 | `crates/ingest` | The webhook receiver and the event history queries |
 | `crates/milter` | The optional macro filter: the scan of a message and the milter protocol |
 | `crates/web` | The HTTP service: sign-in, API, interface files |
@@ -124,7 +126,7 @@ npm run audit                                  # known vulnerabilities, needs th
 | Check | What it protects |
 |---|---|
 | `clippy` | Pedantic lints; `unsafe` is forbidden and `unwrap` is a warning, so an error |
-| `cargo xtask layering` | `core`, `stalwart`, `authz`, `broker`, `collector` and `milter` never depend on a web framework or an async runtime |
+| `cargo xtask layering` | `core`, `stalwart`, `authz`, `broker`, the `checks` crates, `collector` and `milter` never depend on a web framework or an async runtime |
 | `cargo xtask sizes` | Handwritten files stay at or below 500 lines |
 | `contract_files` test | `frontend/api/openapi.json` and `modules.json` match the code |
 | `cargo coverage` | The tests run at least 90 % of the lines, counted without build tooling, test fixtures, and the installer and the Stalwart setup, which acceptance and contract tests check on a real host; `cargo coverage --html` shows the lines no test runs |
@@ -367,8 +369,9 @@ such as `<code>`. `npm run lint` rejects text written directly in JSX, and
 
 ### Adding a provider
 
-1. Implement `Provider` (`name`, `collect`) in `crates/collector/src/providers/`
-   and validate its options with `Options`.
+1. Implement `Provider` (`name`, `collect`) in `src/providers/` of the
+   `crates/checks-*` crate for what it looks at, and validate its options with
+   `Options`. A dependency it needs goes into that crate only.
 2. Register its `type` in `TYPES` in `crates/collector/src/providers/mod.rs`.
 3. Report an unreadable source as an Unknown observation, not as an error.
 4. Add tests with fixture files and document the options in

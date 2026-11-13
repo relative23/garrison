@@ -1,6 +1,6 @@
 [package]
 name = "garrison-collector"
-description = "Providers that observe the host, Stalwart and its neighbours, and the status database they fill."
+description = "Runs the configured checks, stores their snapshots and metric samples in the status database and notifies about changes."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,27 +10,24 @@ publish.workspace = true
 
 [dependencies]
 base64.workspace = true
-flate2.workspace = true
+garrison-checks.workspace = true
+garrison-checks-host.workspace = true
+garrison-checks-mail.workspace = true
+garrison-checks-network.workspace = true
+garrison-checks-stalwart.workspace = true
 garrison-core.workspace = true
-garrison-milter.workspace = true
 garrison-stalwart.workspace = true
 log.workspace = true
-regex-lite.workspace = true
 rusqlite.workspace = true
-rustix.workspace = true
 rustls.workspace = true
-rustls-native-certs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 thiserror.workspace = true
 toml.workspace = true
-url.workspace = true
 
 [dev-dependencies]
-# Test certificates are made at run time; no key material is stored.
-rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
 divan.workspace = true
+garrison-checks = { workspace = true, features = ["testing"] }
 garrison-testing.workspace = true
 tempfile.workspace = true
 

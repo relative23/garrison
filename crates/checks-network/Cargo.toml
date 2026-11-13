@@ -1,0 +1,29 @@
+[package]
+name = "garrison-checks-network"
+description = "Checks of the network: DNS records, blocklists and reverse names, and TLS certificates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+garrison-checks.workspace = true
+garrison-core.workspace = true
+garrison-stalwart.workspace = true
+log.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+garrison-checks = { workspace = true, features = ["testing"] }
+garrison-testing.workspace = true
+rcgen.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

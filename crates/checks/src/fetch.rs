@@ -108,7 +108,7 @@ fn connect(host: &str, port: u16) -> Result<TcpStream, String> {
 
 /// A TLS session with `host`, its certificate checked against `roots` for
 /// that name. The handshake happens with the first read or write.
-pub(crate) fn secure_stream(
+pub fn secure_stream(
     host: &str,
     port: u16,
     roots: &Arc<RootCertStore>,
@@ -128,7 +128,7 @@ pub(crate) fn secure_stream(
 }
 
 /// Why TLS failed, in words an operator can act on.
-pub(crate) fn tls_error(error: &std::io::Error) -> String {
+pub fn tls_error(error: &std::io::Error) -> String {
     match error
         .get_ref()
         .and_then(|inner| inner.downcast_ref::<rustls::Error>())

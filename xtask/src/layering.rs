@@ -10,12 +10,17 @@ use std::process::Command;
 
 use serde_json::Value;
 
-const PRIVILEGED: [&str; 6] = [
+const PRIVILEGED: [&str; 11] = [
     "garrison-core",
     "garrison-stalwart",
     "garrison-authz",
     "garrison-broker",
     "garrison-collector",
+    "garrison-checks",
+    "garrison-checks-host",
+    "garrison-checks-mail",
+    "garrison-checks-network",
+    "garrison-checks-stalwart",
     "garrison-milter",
 ];
 
