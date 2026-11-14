@@ -413,6 +413,7 @@
     "notSaved": "Settings could not be saved.",
     "save": "Save settings",
     "saved": "Settings saved.",
+    "saving": "Saving…",
     "showSwitch": "Show “Switch to Stalwart WebUI” here and “Switch to Garrison WebUI” in the Stalwart WebUI",
     "switch": "Switch rows",
     "switchHint": "In the Stalwart WebUI this applies while you are signed in to Garrison.",

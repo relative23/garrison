@@ -53,6 +53,13 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Settings are saved one at a time.** Two quick clicks of the header's
+  theme button sent two saves at once: the first answer took the look back
+  to the first click's theme while the second was under way, and the server
+  kept whichever save it finished last. The Settings page showed nothing
+  while it saved, and pressing Save again sent the save again. While a save
+  is under way the Settings page now says "Saving…", and both Save and the
+  theme button wait for it to end.
 - **Back leaves a page the interface led away from.** An address that
   names no page of the profile, such as an old bookmark or a page the
   profile no longer grants, leads to the first page it does grant. That page

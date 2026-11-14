@@ -65,7 +65,7 @@ export function PreferencesHead() {
 
 export function Preferences() {
   const { t } = useTranslation();
-  const { session, updatePreferences } = useApp();
+  const { session, saving, updatePreferences } = useApp();
   const [theme, setTheme] = useState<Theme>(session.preferences.theme);
   // The header button saves a theme too; the choice here follows it.
   const [savedTheme, setSavedTheme] = useState(session.preferences.theme);
@@ -84,6 +84,9 @@ export function Preferences() {
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
+    // One save at a time, this page's or the header's theme button's.
+    if (saving) return;
+    setMessage(null);
     try {
       await updatePreferences({ theme, hiddenModules: [...hidden].sort(), showSwitch });
       applyTheme(theme);
@@ -120,7 +123,10 @@ export function Preferences() {
         </CardContent>
       </Card>
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
-      <Button type="submit">{t("preferences.save")}</Button>
+      {/* aria-disabled, not disabled: a disabled button would drop the focus. */}
+      <Button type="submit" aria-disabled={saving || undefined}>
+        {saving ? t("preferences.saving") : t("preferences.save")}
+      </Button>
     </form>
   );
 }

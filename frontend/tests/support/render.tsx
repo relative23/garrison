@@ -31,6 +31,7 @@ export function renderView(
       receivedAt: status === null || status instanceof Error ? null : 0,
       reload: () => undefined,
     },
+    saving: false,
     updatePreferences: async () => undefined,
   };
   return render(<AppContext.Provider value={value}>{view}</AppContext.Provider>);

@@ -46,7 +46,8 @@ export function Layout({
   const visible = (session?.modules ?? []).filter((module) => !hidden.has(module.id) || module.id === current);
   const home = visible[0]?.id ?? "dashboard";
   const toggleTheme = () => {
-    if (!app) return;
+    // One save at a time: the button already shows the theme being saved.
+    if (!app || app.saving) return;
     const { preferences } = app.session;
     const theme = dark ? "light" : "dark";
     applyTheme(theme);
@@ -98,7 +99,14 @@ export function Layout({
               )
             );
           })}
-          <Button variant="ghost" size="icon" aria-label={dark ? t("layout.lightTheme") : t("layout.darkTheme")} onClick={toggleTheme}>
+          {/* aria-disabled, not disabled: a disabled button would drop the focus. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={dark ? t("layout.lightTheme") : t("layout.darkTheme")}
+            aria-disabled={app?.saving || undefined}
+            onClick={toggleTheme}
+          >
             {dark ? <Sun aria-hidden /> : <Moon aria-hidden />}
           </Button>
           <Button asChild variant="ghost" size="icon">

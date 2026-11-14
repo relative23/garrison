@@ -1,10 +1,19 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 
 import { metrics, session, status } from "./support/fixtures";
 import { openApp } from "./support/render";
 import { serve, type Call } from "./support/server";
 
 const echo = (call: Call) => ({ body: call.body });
+
+/** A save that the server answers only when the test lets it. */
+function held() {
+  const waiting: (() => void)[] = [];
+  return {
+    route: (call: Call) => new Promise<{ body: unknown }>((resolve) => waiting.push(() => resolve(echo(call)))),
+    answer: () => act(async () => waiting.shift()?.()),
+  };
+}
 const menu = () => within(screen.getByRole("navigation", { name: "Garrison" }));
 const dark = () => document.documentElement.classList.contains("dark");
 
@@ -62,6 +71,24 @@ describe("settings", () => {
     expect(screen.queryByRole("link", { name: "Switch to Stalwart WebUI" })).toBeNull();
   });
 
+  it("say that they are being saved, and are saved once", async () => {
+    const save = held();
+    const server = serve({ ...signedIn(), "PUT preferences": save.route });
+    openApp("/admin/preferences");
+    fireEvent.click(await screen.findByRole("radio", { name: "Dark" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    const busy = await screen.findByRole("button", { name: "Saving…" });
+    expect(busy.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(busy);
+    // The header's theme button saves the preferences too: it waits as well.
+    fireEvent.click(screen.getByRole("button", { name: "Use the dark theme" }));
+    expect(server.requests("PUT preferences")).toHaveLength(1);
+    await save.answer();
+    expect(await screen.findByText("Settings saved.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save settings" }).hasAttribute("aria-disabled")).toBe(false);
+    expect(dark()).toBe(true);
+  });
+
   it("keep the old look when saving fails", async () => {
     serve({ ...signedIn(), "PUT preferences": { status: 500, body: { detail: "Internal error" } } });
     openApp("/admin/preferences");
@@ -92,6 +119,22 @@ describe("theme button", () => {
     expect(dark()).toBe(true);
     expect(await screen.findByRole("button", { name: "Use the light theme" })).toBeTruthy();
     expect(server.requests("PUT preferences")[0]?.body).toEqual({ theme: "dark", hiddenModules: [], showSwitch: true });
+  });
+
+  it("saves one theme at a time, and shows it until it is saved", async () => {
+    const save = held();
+    const server = serve({ ...signedIn(), "PUT preferences": save.route });
+    openApp();
+    fireEvent.click(await screen.findByRole("button", { name: "Use the dark theme" }));
+    // While that save is under way, a second click changes nothing.
+    fireEvent.click(screen.getByRole("button", { name: "Use the light theme" }));
+    expect(server.requests("PUT preferences")).toHaveLength(1);
+    expect(dark()).toBe(true);
+    expect(screen.getByRole("button", { name: "Use the light theme" }).getAttribute("aria-disabled")).toBe("true");
+    await save.answer();
+    expect(screen.getByRole("button", { name: "Use the light theme" }).hasAttribute("aria-disabled")).toBe(false);
+    expect(dark()).toBe(true);
+    expect(server.requests("PUT preferences").map((call) => call.body)).toEqual([{ theme: "dark", hiddenModules: [], showSwitch: true }]);
   });
 
   it("restores the saved theme when saving fails", async () => {

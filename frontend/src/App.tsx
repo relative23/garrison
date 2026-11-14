@@ -29,11 +29,17 @@ function SignedIn({ initial, onSignedOut }: { initial: SessionInfo; onSignedOut:
     return () => clearTimeout(timer);
   }, [session.expiresAt, onSignedOut]);
 
+  const [saving, setSaving] = useState(false);
   const updatePreferences = useCallback(async (preferences: SessionInfo["preferences"]) => {
-    const saved = await api.savePreferences(preferences);
-    setSession((current) => ({ ...current, preferences: saved }));
+    setSaving(true);
+    try {
+      const saved = await api.savePreferences(preferences);
+      setSession((current) => ({ ...current, preferences: saved }));
+    } finally {
+      setSaving(false);
+    }
   }, []);
-  const state: AppState = useMemo(() => ({ session, status, updatePreferences }), [session, status, updatePreferences]);
+  const state: AppState = useMemo(() => ({ session, status, saving, updatePreferences }), [session, status, saving, updatePreferences]);
 
   const granted = session.modules.find((module) => module.id === route.view);
   useEffect(() => {
