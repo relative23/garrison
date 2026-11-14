@@ -80,7 +80,7 @@ pub use recording::{EVENT_LIMIT, OFFLINE, STORAGE_BUDGET};
 
 const MAX_TIME_TEXT: usize = 40;
 const MAX_EVENT_ID: usize = 40;
-/// Retention runs after this many new events, besides the periodic run.
+/// The clean-up is due after this many new events, besides the periodic run.
 const CLEANUP_AFTER: u64 = 1000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -289,13 +289,15 @@ impl EventStore {
         state.health.unreadable += outcome.unreadable;
         state.health.duplicate += outcome.duplicate;
         state.inserted_since_cleanup += outcome.stored;
-        if state.inserted_since_cleanup >= CLEANUP_AFTER {
-            // The batch is committed either way; a failed cleanup runs again later.
-            if let Err(error) = self.enforce(state, received) {
-                log::error!("Event retention failed: {error}");
-            }
-        }
         Ok(outcome)
+    }
+
+    /// Whether so many events arrived since the last clean-up that the next
+    /// should not wait for its turn. The store does not clean up while it
+    /// takes a batch: removing a tenth of a full history takes longer than
+    /// Stalwart waits for its answer.
+    pub fn cleanup_due(&self) -> bool {
+        self.state().inserted_since_cleanup >= CLEANUP_AFTER
     }
 
     /// The seconds for which an event is kept.

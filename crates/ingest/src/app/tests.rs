@@ -3,15 +3,16 @@ use axum::http::Request;
 use tower::ServiceExt;
 
 use super::*;
-use crate::store::tests::{AT, SPAN, event, read, store};
+pub(super) use crate::store::tests::AT;
+use crate::store::tests::{SPAN, event, read, store};
 
-const KEY: &[u8] = b"test-signature-key-0123456789";
+pub(super) const KEY: &[u8] = b"test-signature-key-0123456789";
 
 /// Request headers, and the status and message they lead to.
 type Case<'a> = (Vec<(&'a str, &'a str)>, StatusCode, &'a str);
 
 /// The second of `AT`, at which the tests' events are written.
-const WRITTEN: i64 = 1_793_231_030;
+pub(super) const WRITTEN: i64 = 1_793_231_030;
 
 /// The receiver as its events are written: an event is taken only at a
 /// time at which it can have arrived.
@@ -316,7 +317,7 @@ async fn the_receiver_beats_every_thirty_seconds() {
         .arriving(&[event(1, "auth.failed", written, &json!({}))])
         .unwrap();
     let ingested = crate::store::parse_time(&json!(written)).map(|second| second.to_string());
-    let task = tokio::spawn(maintain(Arc::clone(&events)));
+    let task = tokio::spawn(maintain(Arc::clone(&events), Arc::new(Notify::new())));
     tokio::time::sleep(HEARTBEAT / 2).await;
     assert_eq!(metadata(directory.path(), "heartbeatAt"), ingested);
     for _ in 0..50 {

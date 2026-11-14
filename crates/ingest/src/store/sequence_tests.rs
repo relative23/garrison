@@ -196,7 +196,12 @@ impl Run {
             self.unread.push((since, self.clock));
         }
         self.since_cleanup += outcome.stored;
-        if self.since_cleanup >= CLEANUP_AFTER {
+        // The store says when its clean-up is due and leaves it to the
+        // maintenance task, which runs it at once.
+        let due = self.since_cleanup >= CLEANUP_AFTER;
+        assert_eq!(self.store().cleanup_due(), due, "when the clean-up is due");
+        if due {
+            self.store().enforce_limits(self.clock).unwrap();
             self.cleaned();
         }
     }

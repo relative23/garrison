@@ -53,6 +53,17 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **The event receiver bounds what it reads at a time.** Every connection
+  to its port was read at once, up to 8 MiB each and several times that
+  once parsed, in a service that is allowed 256 MiB; a sender that stalled
+  kept its connection for ever; and the batch that filled the history
+  waited for its answer until a tenth of the history was removed, which
+  can take longer than the five seconds Stalwart waits. The receiver reads
+  two batches at a time, the others wait before any of their body is read;
+  a batch that has not got its turn and arrived whole within ten seconds
+  is answered 503 or 408 and counted as refused; and the history's limits
+  are kept by the maintenance task, at once when a thousand events have
+  arrived or a batch could not be stored.
 - **The lists and details of deliveries and sessions keep to a size.** A
   session listed every recipient its commands named, up to 25 600 where a
   delivery lists a hundred, and a delivery every recipient's outcome; a

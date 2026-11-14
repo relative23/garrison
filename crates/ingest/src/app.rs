@@ -4,6 +4,10 @@
 //! `X-Signature` header). Unsigned or altered batches are rejected. A batch is
 //! acknowledged only after it is durably committed; on any storage error the
 //! receiver answers 503 and Stalwart retries the same batch later.
+//!
+//! Few batches are read at a time and none for long (`turns`). What the
+//! store removes to keep its limits, it removes in the maintenance task and
+//! not before a batch is answered.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,11 +24,25 @@ use garrison_core::{json, time};
 use hmac::{KeyInit, Mac};
 use serde_json::{Map, Value, json};
 use sha2::Sha256;
+use tokio::sync::Notify;
 
 use crate::store::EventStore;
 
+mod turns;
+
+use turns::{Late, Turns};
+
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_EVENTS_PER_BATCH: usize = 50_000;
+/// The batches that are read and stored at a time. Stalwart sends one and
+/// waits for its answer; the second turn is for whoever else reaches the
+/// port. A batch may hold 8 MiB and takes a few times that once it is
+/// parsed, and the unit allows the service 256 MiB.
+const AT_A_TIME: usize = 2;
+/// How long a batch has to get its turn and to arrive whole. Stalwart waits
+/// five seconds for the answer, as `garrison stalwart setup` sets it, and
+/// brings the batch again.
+const ARRIVAL: Duration = Duration::from_secs(10);
 const HEARTBEAT: Duration = Duration::from_secs(30);
 /// Retention runs every this many heartbeats (ten minutes).
 const CLEANUP_EVERY: u32 = 20;
@@ -56,6 +74,9 @@ struct Receiver {
     key: Arc<[u8]>,
     /// Seconds since the epoch; fixed in comparison tests.
     clock: fn() -> i64,
+    turns: Turns,
+    /// Tells the maintenance task that the store's clean-up is due.
+    due: Arc<Notify>,
 }
 
 fn now() -> i64 {
@@ -84,11 +105,33 @@ pub fn router(store: Arc<EventStore>, key: &[u8]) -> Router {
 
 /// [`router`] with another clock for `received_at`.
 pub fn router_with_clock(store: Arc<EventStore>, key: &[u8], clock: fn() -> i64) -> Router {
-    let receiver = Receiver {
-        store,
-        key: Arc::from(key),
-        clock,
-    };
+    routes(Receiver::new(store, key, clock, ARRIVAL))
+}
+
+/// The routes and the maintenance task that belongs to them: the routes tell
+/// it when the store's clean-up should not wait for its turn.
+pub(crate) fn service(
+    store: Arc<EventStore>,
+    key: &[u8],
+) -> (Router, impl Future<Output = ()> + Send + 'static) {
+    let receiver = Receiver::new(Arc::clone(&store), key, now, ARRIVAL);
+    let maintenance = maintain(store, Arc::clone(&receiver.due));
+    (routes(receiver), maintenance)
+}
+
+impl Receiver {
+    fn new(store: Arc<EventStore>, key: &[u8], clock: fn() -> i64, arrival: Duration) -> Self {
+        Receiver {
+            store,
+            key: Arc::from(key),
+            clock,
+            turns: Turns::new(AT_A_TIME, arrival),
+            due: Arc::new(Notify::new()),
+        }
+    }
+}
+
+fn routes(receiver: Receiver) -> Router {
     Router::new()
         .route("/webhook", post(webhook))
         .route("/health", get(health))
@@ -161,7 +204,23 @@ async fn webhook(State(receiver): State<Receiver>, request: Request) -> Response
     let provided = header_text(headers, &header::HeaderName::from_static("x-signature"))
         .unwrap_or_default()
         .to_owned();
-    let Ok(body) = to_bytes(request.into_body(), MAX_BODY).await else {
+    // Nothing of the body is read before it is this batch's turn, and the
+    // turn is kept until the batch is stored and answered.
+    let arriving = to_bytes(request.into_body(), MAX_BODY);
+    let (_turn, body) = match receiver.turns.take(arriving).await {
+        Ok(taken) => taken,
+        // Either way Stalwart brings the batch again, for an hour: the
+        // time in which none is taken is kept as for any refusal.
+        Err(Late::Busy) => {
+            refused(&receiver, "the batches before it took too long").await;
+            return refuse(StatusCode::SERVICE_UNAVAILABLE, "Busy");
+        }
+        Err(Late::Slow) => {
+            refused(&receiver, "it did not arrive whole in time").await;
+            return refuse(StatusCode::REQUEST_TIMEOUT, "Body did not arrive in time");
+        }
+    };
+    let Ok(body) = body else {
         return refuse(StatusCode::PAYLOAD_TOO_LARGE, "Body missing or too large");
     };
     if !signature_matches(&receiver.key, &body, &provided) {
@@ -182,8 +241,15 @@ async fn webhook(State(receiver): State<Receiver>, request: Request) -> Response
         _ => return refuse(StatusCode::BAD_REQUEST, "Invalid batch"),
     };
     let (store, arrival) = (receiver.store.clone(), (receiver.clock)());
-    match off_thread(move || store.ingest(&events, arrival)).await {
-        Ok(outcome) => {
+    let stored = off_thread(move || {
+        let outcome = store.ingest(&events, arrival)?;
+        Ok::<_, crate::store::SqliteError>((outcome, store.cleanup_due()))
+    });
+    match stored.await {
+        Ok((outcome, cleanup_due)) => {
+            if cleanup_due {
+                receiver.due.notify_one();
+            }
             let mut extra = Map::new();
             extra.insert("stored".into(), json!(outcome.stored));
             extra.insert("skipped".into(), json!(outcome.skipped));
@@ -191,6 +257,8 @@ async fn webhook(State(receiver): State<Receiver>, request: Request) -> Response
         }
         Err(error) => {
             log::error!("Could not store a webhook batch; Stalwart will retry: {error}");
+            // A database that is full is what the clean-up mends.
+            receiver.due.notify_one();
             refused(&receiver, "it could not be stored").await;
             refuse(StatusCode::SERVICE_UNAVAILABLE, "Storage unavailable")
         }
@@ -207,16 +275,22 @@ async fn off_thread<T: Send + 'static, E: std::fmt::Display + Send + 'static>(
     }
 }
 
-/// Heartbeat every 30 seconds and retention every ten minutes, until dropped.
-pub(crate) async fn maintain(store: Arc<EventStore>) {
+/// Heartbeat every 30 seconds and the store's clean-up every ten minutes,
+/// or as soon as the routes say that it is `due`; until dropped.
+pub(crate) async fn maintain(store: Arc<EventStore>, due: Arc<Notify>) {
     let mut ticks = tokio::time::interval(HEARTBEAT);
     ticks.tick().await; // The first tick completes at once.
     let mut beats = 0;
     loop {
-        ticks.tick().await;
-        beats += 1;
         let store = store.clone();
-        if let Err(error) = off_thread(move || beat(&store, beats, now())).await {
+        let done = tokio::select! {
+            _ = ticks.tick() => {
+                beats += 1;
+                off_thread(move || beat(&store, beats, now())).await
+            }
+            () = due.notified() => off_thread(move || store.enforce_limits(now())).await,
+        };
+        if let Err(error) = done {
             log::error!("Event store maintenance failed: {error}");
         }
     }
@@ -231,6 +305,8 @@ fn beat(store: &EventStore, count: u32, at: i64) -> Result<(), crate::store::Sql
     Ok(())
 }
 
+#[cfg(test)]
+mod load_tests;
 #[cfg(test)]
 mod refused_tests;
 #[cfg(test)]

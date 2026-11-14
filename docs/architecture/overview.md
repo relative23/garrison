@@ -74,7 +74,9 @@ cooldown, records the job, re-checks the grant when the job starts, and runs
 
 **Events.** Stalwart sends batches of selected events, signed with HMAC-SHA256.
 The receiver verifies, filters fields, stores idempotently and answers 200 only
-after commit; otherwise Stalwart retries. Queue IDs link delivery events; span
+after commit; otherwise Stalwart retries. It reads two batches at a time and
+removes what its limits no longer keep after the answer, in its maintenance
+task. Queue IDs link delivery events; span
 IDs link the events of one SMTP session.
 
 **Status.** Every minute the collector runs all configured providers. Each

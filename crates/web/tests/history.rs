@@ -150,6 +150,8 @@ async fn coverage_states_where_the_history_begins_and_what_is_missing_inside() {
         })
         .collect();
     store.ingest(&events, now - 5000).unwrap();
+    // The receiver's maintenance task does this as soon as it is due.
+    store.enforce_limits(now - 5000).unwrap();
     // The receiver comes back after more than the hour Stalwart keeps events for it.
     store.start(now).unwrap();
     setup.client.sign_in("code-admin").await;

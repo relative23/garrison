@@ -65,8 +65,9 @@ async fn serve(store: Arc<EventStore>, key: &[u8], port: u16) -> Result<(), Erro
     let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
     log::info!("Event receiver listening on 127.0.0.1:{port}");
     garrison_core::systemd::ready();
-    let maintenance = tokio::spawn(app::maintain(store.clone()));
-    axum::serve(listener, app::router(store, key))
+    let (routes, maintenance) = app::service(store, key);
+    let maintenance = tokio::spawn(maintenance);
+    axum::serve(listener, routes)
         .with_graceful_shutdown(stopped())
         .await?;
     maintenance.abort();

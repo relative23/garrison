@@ -71,18 +71,19 @@ fn downtime_within_the_buffer_loses_nothing() {
 }
 
 #[test]
-fn cleanup_runs_by_itself_after_a_thousand_events() {
+fn the_clean_up_is_due_after_a_thousand_events_and_left_to_the_caller() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
     let now = START + 40 * 86400;
     events.arriving(&batch(999, START)).unwrap();
-    assert_eq!(count(directory.path()), 999, "not yet");
+    assert!(!events.cleanup_due(), "not yet");
     events.ingest(&batch(1, now), now).unwrap();
-    assert_eq!(
-        count(directory.path()),
-        1,
-        "expired events go after 1000 new ones"
-    );
+    // Taking a batch removes nothing: Stalwart waits for the answer.
+    assert!(events.cleanup_due());
+    assert_eq!(count(directory.path()), 1000);
+    events.enforce_limits(now).unwrap();
+    assert_eq!(count(directory.path()), 1, "the expired events are gone");
+    assert!(!events.cleanup_due());
 }
 
 #[test]
