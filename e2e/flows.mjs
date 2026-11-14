@@ -1,14 +1,14 @@
 // What a user does, in a real Chrome against the preview
 // (`cargo run -p garrison-web --example preview`): signing in, every page,
-// moving through the menu, also on a phone, searching the event history,
-// going Back, the page search on a phone, saving settings, running a
-// maintenance action from the keyboard, what each page shows when a request
-// fails (also over HTTP/2, as nginx serves Garrison), a profile that grants
-// the dashboard alone, and signing out. Along the way nothing may write an
-// error to the console, no request to the preview may fail but those a step
-// makes fail, and axe may find nothing on any page (WCAG 2.2 AA, light and
-// dark, as the system switches the page between them); a page as the build
-// drew it starts in the system's theme.
+// moving through the menu, also on a phone and from the keyboard, searching
+// the event history, going Back, the page search on a phone, saving
+// settings, running a maintenance action from the keyboard, what each page
+// shows when a request fails (also over HTTP/2, as nginx serves Garrison),
+// a profile that grants the dashboard alone, and signing out. Along the way
+// nothing may write an error to the console, no request to the preview may
+// fail but those a step makes fail, and axe may find nothing on any page
+// (WCAG 2.2 AA, light and dark, as the system switches the page between
+// them); a page as the build drew it starts in the system's theme.
 //
 // It is a check, not a measurement: it exits with 1 and lists what failed.
 // `measure.mjs` measures the same pages with Lighthouse, by hand.
@@ -188,7 +188,39 @@ try {
   await menu.getByRole("link", { name: "Services", exact: true }).click();
   await page.waitForURL(`${origin}/admin/services`);
   expect((await heading()) === "Services", "the open menu leads to its pages");
+  // From the keyboard: Enter opens the menu, and Escape and its close button
+  // close it on the button that opened it.
+  const toggle = page.getByRole("button", { name: "Open menu" });
+  for (const close of ["Escape", "the close button"]) {
+    await toggle.focus();
+    await page.keyboard.press("Enter");
+    await menu.waitFor({ state: "visible" });
+    if (close === "Escape") await page.keyboard.press("Escape");
+    else await page.getByRole("button", { name: "Close menu" }).press("Enter");
+    const closed = await menu.waitFor({ state: "hidden", timeout: 2000 }).then(
+      () => true,
+      () => false,
+    );
+    expect(closed && (await focused(toggle)), `${close} closes the menu on the button that opened it`);
+  }
+  // A page chosen in it takes the focus to its content: the link is gone with the menu.
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await menu.waitFor({ state: "visible" });
+  await menu.getByRole("link", { name: "Dashboard", exact: true }).press("Enter");
+  await page.waitForURL(`${origin}/admin/dashboard`);
+  expect(await page.evaluate(() => document.activeElement?.id === "content"), "a page chosen in the menu takes the focus to its content");
   await page.setViewportSize(DESKTOP);
+  // On a desk, a group opens on Enter and its entries follow it.
+  await page.goto(`${origin}/admin/dashboard`);
+  await heading();
+  const group = page.getByRole("navigation").getByRole("button", { name: "Mail flow" });
+  await group.press("Enter");
+  expect((await group.getAttribute("aria-expanded")) === "true", "Enter opens a menu group");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await page.waitForURL((url) => url.pathname !== "/admin/dashboard", { timeout: 3000 }).catch(() => undefined);
+  expect(new URL(page.url()).pathname !== "/admin/dashboard", "Tab and Enter lead to the group's first page");
 
   step = "back";
   await page.goto(`${origin}/admin/services`);

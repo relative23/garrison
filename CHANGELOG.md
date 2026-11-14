@@ -80,6 +80,10 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **The menu on a phone keeps the keyboard's place.** Escape now closes
+  it, and closed by Escape or by its button it leaves the focus on the
+  button that opened it; a page chosen in it takes the focus to that
+  page's content. Before, the focus went with the menu, out of sight.
 - **Start keeps the keyboard's place while a maintenance action starts.**
   The button was disabled while the request was under way, which drops the
   focus, so a start that failed left a keyboard user nowhere in the

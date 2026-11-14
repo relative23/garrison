@@ -2,7 +2,7 @@
 // rule, the menu as a tile floating at the left, and the content beside it on
 // the same background, under the page title.
 import { ExternalLink, Menu, Moon, Sun, User } from "lucide-react";
-import { useContext, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useTranslation } from "../i18n";
 import { AppContext } from "../lib/context";
@@ -38,6 +38,25 @@ export function Layout({
   const app = useContext(AppContext);
   const session = app?.session;
   const [open, setOpen] = useState(false);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const content = useRef<HTMLElement>(null);
+  // The menu on a small screen covers the page. Closed by Escape or by its
+  // button, it gives the focus back to the button that opened it, and after
+  // a page chosen in it to that page's content: the focus would otherwise go
+  // with the menu, out of sight.
+  const close = useCallback(() => {
+    setOpen(false);
+    toggle.current?.focus();
+  }, []);
+  useEffect(() => {
+    if (!open) return undefined;
+    const escape = (event: KeyboardEvent) => {
+      // An open dialog, such as the page search, takes its own Escape.
+      if (event.key === "Escape" && !document.querySelector("dialog[open]")) close();
+    };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [open, close]);
   // The theme being saved, shown at once; then the saved one, also when the
   // Settings page changed it.
   const [pending, setPending] = useState<Theme | null>(null);
@@ -70,6 +89,7 @@ export function Layout({
       {/* Opaque, unlike Stalwart's translucent bar: what scrolls beneath must not change the contrast of the text on it. */}
       <header className="sticky top-0 z-40 flex h-16 items-center gap-4 bg-content-background px-4 sm:px-5">
         <Button
+          ref={toggle}
           variant="ghost"
           size="icon"
           className="md:hidden"
@@ -123,7 +143,7 @@ export function Layout({
           type="button"
           aria-label={t("layout.closeMenu")}
           className="fixed inset-0 top-16 z-20 bg-black/40 md:hidden"
-          onClick={() => setOpen(false)}
+          onClick={close}
         />
       )}
       <Sidebar
@@ -132,9 +152,12 @@ export function Layout({
         section={section}
         admin={session?.preferences.showSwitch ? safeUrl(session.links.admin) : null}
         open={open}
-        onNavigate={() => setOpen(false)}
+        onNavigate={() => {
+          if (open) content.current?.focus();
+          setOpen(false);
+        }}
       />
-      <main id="content" tabIndex={-1} className="min-h-[calc(100vh-4rem)] min-w-0 px-3 pb-10 pt-2 sm:px-5 md:ml-[252px]">
+      <main ref={content} id="content" tabIndex={-1} className="min-h-[calc(100vh-4rem)] min-w-0 px-3 pb-10 pt-2 sm:px-5 md:ml-[252px]">
         <div className="relative space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 pt-1">

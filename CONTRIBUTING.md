@@ -227,9 +227,9 @@ network (`crates/web/examples/preview/extras.json`), a week of metric history
 and the receiver's test batch; its sign-in approves at once and its broker
 grants everything, or the dashboard alone to a sign-in asked for with
 `profile=viewer`, and a job it starts is queued until it is first looked at.
-`e2e/` drives it in a real Chrome. `npm run flows` does what a
-user does: it signs in, opens every page, moves through the menu, also at a
-phone's width, searches the event history, goes Back from a page the
+`e2e/` drives it in a real Chrome. `npm run flows` does what a user does: it
+signs in, opens every page, moves through the menu, also at a phone's width
+and from the keyboard, searches the event history, goes Back from a page the
 interface led to, opens the page search with Ctrl+K on a phone, saves
 settings, runs a maintenance action from the keyboard and signs out. It
 makes requests fail and checks what the pages say: a status refresh, a
@@ -239,8 +239,9 @@ over HTTP/2, which carries no status text, through the proxy of
 the console, a failed request other than those, a finding of axe (WCAG 2.2
 AA, in the light and the dark theme, each as the page switches to it with
 the system), a page that is wider than a phone's screen, a closed menu that
-takes the focus, a dialog that lets the focus out, or a page as the build
-drew it that does not start in the system's theme; CI runs it. `npm run measure` measures every page
+takes the focus, a menu or a dialog that lets the focus out or drops it, or
+a page as the build drew it that does not start in the system's theme; CI
+runs it. `npm run measure` measures every page
 with Lighthouse (Performance, Accessibility and Best Practices, desktop and
 mobile) and axe on both screen sizes, by hand. It measures over HTTP/2 with
 TLS, as nginx serves Garrison, through a proxy with a certificate it makes

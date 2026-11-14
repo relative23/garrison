@@ -87,6 +87,37 @@ describe("menu", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close menu" }));
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("button", { name: "Close menu" })).toBeNull();
+    // Its close button goes with it: the focus goes back to the menu button.
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it("closes on Escape with the focus on its button, and leaves Escape to an open dialog", () => {
+    show("dashboard");
+    const toggle = screen.getByRole("button", { name: "Open menu" });
+    fireEvent.click(toggle);
+    const dialog = document.body.appendChild(document.createElement("dialog"));
+    dialog.setAttribute("open", "");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    dialog.remove();
+    fireEvent.keyDown(document, { key: "Enter" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it("takes the focus to the page's content when a page is chosen in the open menu", () => {
+    const menu = show("dashboard");
+    // On a large screen the menu is never opened: the focus stays on the link.
+    const services = menu.getByRole("link", { name: "Services" });
+    services.focus();
+    fireEvent.click(services);
+    expect(document.activeElement).toBe(services);
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    fireEvent.click(menu.getByRole("link", { name: "Dashboard" }));
+    expect(document.activeElement?.id).toBe("content");
+    expect(screen.getByRole("button", { name: "Open menu" }).getAttribute("aria-expanded")).toBe("false");
   });
 });
 
