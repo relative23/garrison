@@ -203,6 +203,83 @@ fn samples_belong_to_their_minute_and_counters_start_at_zero() {
     assert_eq!(resets, 0);
 }
 
+/// 2026-10-28T10:00:00Z, the end of the tests' history.
+const T0: i64 = 1_793_181_600;
+const DAY: i64 = 86400;
+
+/// A store that keeps 90 days, with one sample every `every` seconds over
+/// the `days` before [`T0`], and a run at `T0`.
+fn history_of(days: i64, every: usize) -> (tempfile::TempDir, StatusStore) {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = StatusStore::open(&directory.path().join("status.sqlite"), 90).unwrap();
+    {
+        let mut insert = store
+            .db
+            .prepare("INSERT INTO samples(name, ts, value, kind) VALUES('load', ?, 1.0, 'gauge')")
+            .unwrap();
+        for ts in (T0 - days * DAY..T0).step_by(every) {
+            insert.execute([ts]).unwrap();
+        }
+    }
+    run_at(&mut store, T0);
+    (directory, store)
+}
+
+/// A collection run at `at` that adds no sample of its own.
+fn run_at(store: &mut StatusStore, at: i64) {
+    store
+        .write(at, &snapshot(""), &BTreeMap::new(), &BTreeMap::new())
+        .unwrap();
+}
+
+fn samples_from(store: &StatusStore, from: i64) -> i64 {
+    store
+        .db
+        .query_row(
+            "SELECT count(*) FROM samples WHERE ts >= ?",
+            [from],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn a_clock_a_year_ahead_takes_nothing_from_the_history() {
+    let (_directory, mut store) = history_of(89, 3600);
+    assert_eq!(samples_from(&store, 0), 89 * 24);
+    for minute in 0..3 {
+        run_at(&mut store, T0 + 365 * DAY + minute * 60);
+        assert_eq!(samples_from(&store, 0), 89 * 24, "run {minute}");
+    }
+}
+
+#[test]
+fn a_clock_days_ahead_thins_no_minute_the_views_still_draw() {
+    let (_directory, mut store) = history_of(8, 60);
+    run_at(&mut store, T0 + 3 * DAY);
+    assert_eq!(
+        samples_from(&store, 0),
+        8 * 1440,
+        "each minute of the last eight days keeps its own sample"
+    );
+}
+
+#[test]
+fn after_a_long_downtime_the_clock_is_believed_within_a_day() {
+    let (_directory, mut store) = history_of(90, 3600);
+    // Back a month later, with a run every ten minutes: for a day nothing goes.
+    let back = T0 + 30 * DAY;
+    for run in 0..144 {
+        run_at(&mut store, back + run * 600);
+        assert_eq!(samples_from(&store, 0), 90 * 24, "run {run}");
+    }
+    // Then the clock has kept its time for a day, and the history keeps 90
+    // days by it.
+    run_at(&mut store, back + DAY);
+    let kept = samples_from(&store, back + DAY - 90 * DAY);
+    assert_eq!((samples_from(&store, 0), kept), (59 * 24, 59 * 24));
+}
+
 #[test]
 fn a_stored_document_that_is_no_snapshot_is_an_error() {
     let directory = tempfile::tempdir().unwrap();

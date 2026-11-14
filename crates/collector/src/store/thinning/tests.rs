@@ -199,6 +199,54 @@ fn each_run_thins_one_day_from_where_the_last_stopped() {
     assert_eq!(kept(&store), None);
 }
 
+/// A clock that was ahead long enough left the mark ahead of it. What the
+/// runs write once the clock is right again lies before that mark, and is
+/// thinned all the same.
+#[test]
+fn a_mark_ahead_of_the_clock_comes_back_to_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = StatusStore::open(&directory.path().join("status.sqlite"), 90).unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO memory VALUES(?, ?)",
+            params![KEPT, (END + 400 * DAY).to_string()],
+        )
+        .unwrap();
+    // The clock came back nine days before END; the runs since wrote these.
+    minutes(&store.db, 9);
+    run(&mut store, END - 9 * DAY);
+    assert_eq!(kept(&store), Some((END - 9 * DAY).to_string()));
+    assert_eq!(thin_all(&mut store, END), 1);
+    let thinned = rows(&store.db, END - 9 * DAY, END - 8 * DAY);
+    assert!(thinned.iter().all(|row| row.1 % STEP == 0));
+    assert_eq!(thinned.iter().filter(|row| row.0 == "sent").count(), 144);
+}
+
+/// Days without samples, as while the collector was stopped, take no run of
+/// their own.
+#[test]
+fn days_without_samples_are_passed_over() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = StatusStore::open(&directory.path().join("status.sqlite"), 90).unwrap();
+    for ts in (END - 40 * DAY..END - 39 * DAY).step_by(60) {
+        store
+            .db
+            .execute(
+                "INSERT INTO samples(name, ts, value, kind) VALUES('load', ?, 1.0, 'gauge')",
+                [ts],
+            )
+            .unwrap();
+    }
+    minutes(&store.db, 9);
+    assert_eq!(
+        thin_all(&mut store, END),
+        2,
+        "the day 40 days back, then the oldest of the nine"
+    );
+    assert_eq!(kept(&store), Some((END - 8 * DAY).to_string()));
+}
+
 #[test]
 fn thinning_again_changes_nothing() {
     let directory = tempfile::tempdir().unwrap();

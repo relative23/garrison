@@ -8,9 +8,13 @@
 //!
 //! Each run thins at most one day, the oldest not yet thinned, and remembers
 //! how far it got: after an upgrade the history is thinned within some 80
-//! runs, and no single run takes long.
+//! runs, and no single run takes long. Days without samples, as while the
+//! collector was stopped, are passed over. The mark is never later than the
+//! minute a run cleans up by (clock.rs): one that a clock running ahead left
+//! there comes back to it, or the samples written once the clock is right
+//! would never be thinned.
 
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 /// Every minute is kept for this long.
 const FINE: i64 = 8 * 86400;
@@ -36,19 +40,33 @@ const THIN: &str = "INSERT INTO samples(name, ts, value, kind, minutes) \
      ON CONFLICT(name, ts) DO UPDATE SET \
          value = excluded.value, kind = excluded.kind, minutes = excluded.minutes";
 
-/// Where the last run stopped, or, before the first one, the step of the
-/// oldest sample.
-fn start(transaction: &Transaction<'_>) -> rusqlite::Result<Option<i64>> {
+fn mark(db: &Connection, at: i64) -> rusqlite::Result<()> {
+    db.execute(
+        "INSERT INTO memory VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![KEPT, at.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Where a run begins: the step of the oldest sample from where the last run
+/// stopped on, or before the first run of the oldest sample of all. A mark
+/// later than `newest`, the step of the minute the run cleans up by, comes
+/// back to it.
+fn start(transaction: &Transaction<'_>, newest: i64) -> rusqlite::Result<Option<i64>> {
     let kept: Option<String> = transaction
         .query_row("SELECT value FROM memory WHERE key = ?", [KEPT], |row| {
             row.get(0)
         })
         .optional()?;
-    if let Some(at) = kept.and_then(|text| text.parse().ok()) {
-        return Ok(Some(at));
+    let kept: Option<i64> = kept.and_then(|text| text.parse().ok());
+    if kept.is_some_and(|at| at > newest) {
+        mark(transaction, newest)?;
     }
+    let from = kept.map_or(i64::MIN, |at| at.min(newest));
     let oldest: Option<i64> =
-        transaction.query_row("SELECT min(ts) FROM samples", [], |row| row.get(0))?;
+        transaction.query_row("SELECT min(ts) FROM samples WHERE ts >= ?", [from], |row| {
+            row.get(0)
+        })?;
     Ok(oldest.map(|at| at - at.rem_euclid(STEP)))
 }
 
@@ -56,7 +74,7 @@ fn start(transaction: &Transaction<'_>) -> rusqlite::Result<Option<i64>> {
 /// closer to `minute` than eight days. All of it or nothing: a step is never
 /// left with its minutes and their sum both.
 pub(super) fn thin(transaction: &mut Transaction<'_>, minute: i64) -> rusqlite::Result<()> {
-    let Some(from) = start(transaction)? else {
+    let Some(from) = start(transaction, minute - minute.rem_euclid(STEP))? else {
         return Ok(());
     };
     let horizon = minute - FINE;
@@ -70,10 +88,7 @@ pub(super) fn thin(transaction: &mut Transaction<'_>, minute: i64) -> rusqlite::
         "DELETE FROM samples WHERE ts >= ?1 AND ts < ?2 AND ts % ?3 != 0",
         params![from, to, STEP],
     )?;
-    savepoint.execute(
-        "INSERT INTO memory VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![KEPT, to.to_string()],
-    )?;
+    mark(&savepoint, to)?;
     savepoint.commit()
 }
 

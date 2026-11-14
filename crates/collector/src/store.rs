@@ -6,6 +6,8 @@
 //! Intervals longer than three minutes produce no increase, so a collection
 //! gap never becomes a spike. Samples older than eight days are thinned to
 //! one per ten minutes (thinning.rs); the history reads both (history.rs).
+//! What is old is counted from the time the store believes (clock.rs), so a
+//! clock that jumps ahead takes nothing with it.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -17,6 +19,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use crate::context::Memory;
 use crate::snapshot::Snapshot;
 
+mod clock;
 mod history;
 mod thinning;
 
@@ -89,6 +92,13 @@ impl StatusStore {
         let mut transaction = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let previous: Option<i64> = transaction
+            .query_row(
+                "SELECT collected_at FROM snapshots ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
         transaction.execute(
             "INSERT INTO snapshots(collected_at, document) VALUES(?,?)",
             params![collected_at, document],
@@ -106,11 +116,14 @@ impl StatusStore {
         for (name, value) in counters {
             counter(&transaction, name, collected_at, minute, *value)?;
         }
-        let cutoff = collected_at - i64::from(self.history_days) * 86400;
+        // The snapshot and the samples keep the run's own time; what is old
+        // goes by the time the store believes.
+        let by = clock::cleaned_by(&transaction, collected_at, previous)?;
+        let cutoff = by.saturating_sub(i64::from(self.history_days) * 86400);
         transaction.execute("DELETE FROM samples WHERE ts < ?", [cutoff])?;
         transaction.execute("DELETE FROM resets WHERE ts < ?", [cutoff])?;
         // Thinning is upkeep: where it fails, the run's samples are kept all the same.
-        if let Err(error) = thinning::thin(&mut transaction, minute) {
+        if let Err(error) = thinning::thin(&mut transaction, by - by.rem_euclid(60)) {
             log::warn!("The metric history was not thinned in this run: {error}");
         }
         transaction.commit()?;
