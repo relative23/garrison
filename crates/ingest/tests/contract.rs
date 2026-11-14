@@ -111,6 +111,34 @@ fn sender_checks_keep_their_outcome(events: &[garrison_ingest::answers::EventIte
     );
 }
 
+/// The types of the events recorded under the queue ID `queue`, once one of
+/// them is `wanted`.
+fn kinds_until(path: &Path, queue: &str, wanted: fn(&str) -> bool) -> Vec<String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        // The receiver may be writing at this moment.
+        let Ok(Some(db)) = reading(path, Duration::from_secs(2)) else {
+            std::thread::sleep(Duration::from_secs(1));
+            continue;
+        };
+        let kinds: Vec<String> = db
+            .prepare("SELECT type FROM events WHERE queue_id=?")
+            .unwrap()
+            .query_map([queue], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        if kinds.iter().any(|kind| wanted(kind)) {
+            return kinds;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "The awaited event did not arrive for queue {queue}: {kinds:?}"
+        );
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn a_signed_webhook_records_a_complete_smtp_session() {
@@ -200,32 +228,14 @@ fn a_signed_webhook_records_a_complete_smtp_session() {
         .1
         .trim_end_matches('.');
     let queue = u64::from_str_radix(hex, 16).unwrap().to_string();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let filed = loop {
-        // The receiver may be writing at this moment.
-        let Ok(Some(db)) = reading(&path, Duration::from_secs(2)) else {
-            std::thread::sleep(Duration::from_secs(1));
-            continue;
-        };
-        let kinds: Vec<String> = db
-            .prepare("SELECT type FROM events WHERE queue_id=?")
-            .unwrap()
-            .query_map([&queue], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        if kinds.iter().any(|kind| kind.starts_with("message-ingest.")) {
-            break kinds;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "No filing event arrived for queue {queue}: {kinds:?}"
-        );
-        std::thread::sleep(Duration::from_secs(1));
-    };
+    let filed = kinds_until(&path, &queue, |kind| kind.starts_with("message-ingest."));
     // One of the two verdicts the mail test reads.
     let known = |kind: &String| kind == "message-ingest.spam" || kind == "message-ingest.ham";
     assert!(filed.iter().any(known), "{filed:?}");
+    // What the count of waiting messages relies on: a message delivered to
+    // a mailbox of this server ends with `delivery.completed` under its
+    // queue ID, like one that went to another server.
+    kinds_until(&path, &queue, |kind| kind == "delivery.completed");
 
     failed_sign_ins_are_recorded(&lab, &path, &store);
 }
