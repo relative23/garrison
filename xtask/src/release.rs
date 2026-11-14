@@ -6,6 +6,8 @@
 //! fixed timestamps, owners and modes, so the same commit always yields the
 //! same archive.
 
+mod guards;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,10 +18,6 @@ use sha2::{Digest, Sha256};
 /// Where `npm run build` writes the interface (vite's `outDir`).
 const INTERFACE: &str = "frontend/dist";
 const ARCHITECTURES: [&str; 2] = ["aarch64", "x86_64"];
-/// The cross toolchain is build input like the compiler: other versions
-/// compile the C parts and link differently. Raise them deliberately.
-const ZIG: &str = "0.17.0";
-const ZIGBUILD: &str = "cargo-zigbuild 0.23.4";
 
 fn run(command: &mut Command) -> Result<(), String> {
     let shown = format!("{command:?}");
@@ -40,18 +38,6 @@ fn output(command: &mut Command) -> Result<String, String> {
         return Err(String::from_utf8_lossy(&result.stderr).into_owned());
     }
     Ok(String::from_utf8_lossy(&result.stdout).trim().to_owned())
-}
-
-fn require(program: &str, argument: &str, expected: &str) -> Result<(), String> {
-    let found = output(Command::new(program).arg(argument))
-        .map_err(|error| format!("{program} is required ({expected}): {error}"))?;
-    if found == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "{program}: found {found}, need {expected} for a reproducible archive"
-        ))
-    }
 }
 
 /// Timestamps come from the last commit, never from the build machine's clock.
@@ -268,8 +254,7 @@ pub(crate) fn release(root: &Path, architectures: &[String]) -> Result<(), Strin
             ARCHITECTURES.join(", ")
         ));
     }
-    require("zig", "version", ZIG)?;
-    require("cargo-zigbuild", "--version", ZIGBUILD)?;
+    guards::tools()?;
     let (epoch, version) = (source_date(root)?, version(root)?);
     let (toolchain, standard_library) = (toolchain(root)?, standard_library_notices(root)?);
     // The secret key stays with the maintainer; without it the archives are unsigned.
