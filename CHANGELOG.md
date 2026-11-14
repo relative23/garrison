@@ -53,6 +53,19 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A maintenance job no longer blocks the others for a fault of the
+  broker's own.** A job the broker could find no thread for, one whose
+  record could not be written, or one during which the broker itself
+  failed stayed "queued" or "running", and every action was answered
+  "Another maintenance operation is in progress" until the broker was
+  started anew. Such a job now ends: failed where nothing ran, uncertain
+  where that is not known. A job whose start the audit does not take is
+  not run, and a result it did not take is written with the next request
+  it does take.
+- **A job that did not start says why.** "Authorization changed before
+  execution" also stood for a Stalwart that did not answer, a sign-in that
+  had ended and an access policy that could not be read. Each has its own
+  message now.
 - **The macro filter counts the memory it holds.** The 256 MiB for arriving
   messages counted what was written into their buffers, which held up to
   twice that; the scan decoded every attachment of a message before it

@@ -241,7 +241,10 @@ fn a_running_job_says_so_and_a_doubtful_end_is_kept() {
         vec![action("run_monitor", "RUN HEALTH CHECKS", "m.service", 0)],
         JobStore::open(&database).unwrap(),
         Box::new(Arc::clone(&watching)),
-        Box::new(|work| work()),
+        Box::new(|work| {
+            work();
+            Ok(())
+        }),
     );
     let answer = broker
         .submit("admin-token", "run_monitor", REQUEST, "RUN HEALTH CHECKS")

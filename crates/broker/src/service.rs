@@ -3,7 +3,14 @@
 //! Every operation starts from the user's access token. The broker resolves the
 //! identity and rights itself and re-checks them when a queued job starts, so a
 //! demoted user's pending request is not executed.
+//!
+//! A job the audit shows as queued or running holds back every other. So a
+//! job never stays that way for a reason of the broker's own: one it could
+//! not start is failed at once, one whose start the audit does not take is
+//! not run, and a record the audit did not take is owed to it and written
+//! with the next request it does take.
 
+use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -41,19 +48,35 @@ impl Authorize for Authority {
 }
 
 /// Runs an accepted job; the broker passes a thread spawner, tests their own.
-pub type Worker = Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>;
+/// An error says that the job could not be started: nothing of it ran.
+pub type Worker = Box<dyn Fn(Box<dyn FnOnce() + Send>) -> io::Result<()> + Send + Sync>;
 
 /// Each accepted job runs on its own thread.
 pub fn threads() -> Worker {
     Box::new(|work| {
-        let started = thread::Builder::new()
+        thread::Builder::new()
             .name("maintenance-action".into())
-            .spawn(work);
-        if let Err(error) = started {
-            log::error!("Could not start a maintenance job: {error}");
-        }
+            .spawn(work)
+            .map(drop)
     })
 }
+
+/// Why a job ended before anything ran.
+const NOT_STARTED: &str = "The broker could not start the job; nothing was run.";
+const NOT_RECORDED: &str = "The job's start could not be recorded in the audit; nothing was run.";
+const CHANGED: &str = "Authorization changed before execution; nothing was run.";
+const SIGNED_OUT: &str = "The sign-in ended before execution; nothing was run.";
+const UNCHECKED: &str = "Authorization could not be checked before execution: Stalwart did not \
+                         answer. Nothing was run.";
+const NOT_SET_UP: &str = "Access rights could not be checked before execution: Garrison is not \
+                          set up to check them, and the broker's journal says why. Nothing was \
+                          run.";
+
+const BROKER_FAILED: &str = "The broker failed while it handled the job; whether anything was \
+                             run is not known. Consult the host journal.";
+
+/// A change to a job's record that the audit did not take.
+type Owed = (String, Change<'static>);
 
 /// `xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx` in lowercase.
 fn is_request_id(text: &str) -> bool {
@@ -88,6 +111,8 @@ pub struct Broker {
     authority: Box<dyn Authorize>,
     actions: Vec<Action>,
     store: Mutex<JobStore>,
+    /// What the audit did not take, oldest first. Lock the store before it.
+    owed: Mutex<Vec<Owed>>,
     runner: Box<dyn Runner>,
     worker: Worker,
 }
@@ -113,6 +138,7 @@ impl Broker {
             authority,
             actions,
             store: Mutex::new(store),
+            owed: Mutex::new(Vec::new()),
             runner,
             worker,
         })
@@ -121,6 +147,33 @@ impl Broker {
     fn store(&self) -> MutexGuard<'_, JobStore> {
         // Every write is one statement, so a panic leaves the audit consistent.
         self.store.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The audit, with what it is owed written first where it takes it. A
+    /// request sees the jobs as they are, not as the last record that could
+    /// be written left them.
+    fn audit(&self) -> MutexGuard<'_, JobStore> {
+        let store = self.store();
+        self.settle(&store, None);
+        store
+    }
+
+    /// Write what the audit is owed, oldest first, and `change` after it;
+    /// what it does not take stays owed, in its order. Whether nothing is
+    /// owed any more.
+    fn settle(&self, store: &JobStore, change: Option<Owed>) -> bool {
+        let mut owed = self.owed.lock().unwrap_or_else(PoisonError::into_inner);
+        owed.extend(change);
+        let mut written = 0;
+        for (identifier, change) in owed.iter() {
+            if let Err(error) = store.update(identifier, change) {
+                log::error!("Could not record maintenance job {identifier}: {error}");
+                break;
+            }
+            written += 1;
+        }
+        owed.drain(..written);
+        owed.is_empty()
     }
 
     fn action(&self, id: &str) -> Option<&Action> {
@@ -157,7 +210,7 @@ impl Broker {
             .filter(|action| grant.allows_action(&action.id))
             .map(Action::public)
             .collect();
-        let store = self.store();
+        let store = self.audit();
         store.prune()?;
         let jobs = store
             .recent(RECENT_JOBS)?
@@ -174,7 +227,7 @@ impl Broker {
         if !is_job_id(identifier) {
             return Err(refuse(400, "Invalid job ID"));
         }
-        let job = self.store().get(identifier)?;
+        let job = self.audit().get(identifier)?;
         match job {
             Some(job) if grant.allows_action(&job.action_id) => Ok(job.view()),
             _ => Err(refuse(404, "Job not found")),
@@ -201,7 +254,7 @@ impl Broker {
             return Err(refuse(400, "The confirmation phrase does not match"));
         }
         let job = {
-            let store = self.store();
+            let store = self.audit();
             store.prune()?;
             if let Some(previous) = store.by_request(request_id)? {
                 if previous.actor != grant.subject || previous.action_id != action_id {
@@ -235,9 +288,33 @@ impl Broker {
         };
         log::info!("Maintenance action {action_id} accepted as job {}", job.id);
         let (broker, identifier, token) = (Arc::clone(self), job.id.clone(), token.to_owned());
-        (self.worker)(Box::new(move || {
-            broker.execute(&identifier, &action, &token);
+        let started = (self.worker)(Box::new(move || {
+            broker.attend(&identifier, &action, &token);
         }));
+        let job = match started {
+            Ok(()) => job,
+            // Left queued, the job would hold back every action until the
+            // broker is started anew.
+            Err(error) => {
+                log::error!("Could not start maintenance job {}: {error}", job.id);
+                let finished_at = now();
+                self.record(
+                    &job.id,
+                    Change {
+                        status: Some(JobStatus::Failed),
+                        finished_at: Some(finished_at),
+                        message: Some(NOT_STARTED),
+                        ..Change::default()
+                    },
+                );
+                Job {
+                    status: JobStatus::Failed,
+                    finished_at: Some(finished_at),
+                    message: NOT_STARTED.into(),
+                    ..job
+                }
+            }
+        };
         Ok(Submitted {
             job: job.view(),
             replayed: false,
@@ -279,40 +356,93 @@ impl Broker {
         Ok(())
     }
 
-    fn record(&self, identifier: &str, change: &Change<'_>) {
-        if let Err(error) = self.store().update(identifier, change) {
-            log::error!("Could not record maintenance job {identifier}: {error}");
+    /// Write `change` to the job's record, after anything the audit is still
+    /// owed. What the audit does not take, it is owed.
+    fn record(&self, identifier: &str, change: Change<'static>) {
+        let store = self.store();
+        self.settle(&store, Some((identifier.to_owned(), change)));
+    }
+
+    /// Write `change` now or not at all: whether the audit holds it, with
+    /// everything it was owed before.
+    fn recorded(&self, identifier: &str, change: &Change<'static>) -> bool {
+        let store = self.store();
+        self.settle(&store, None)
+            && store
+                .update(identifier, change)
+                .inspect_err(|error| {
+                    log::error!("Could not record maintenance job {identifier}: {error}");
+                })
+                .is_ok()
+    }
+
+    /// Run an accepted job to its end, whatever that is. A job whose thread
+    /// ended in a panic of the broker's own would stay queued or running,
+    /// and hold back every other until the broker is started anew.
+    fn attend(&self, identifier: &str, action: &Action, token: &str) {
+        let attended = catch_unwind(AssertUnwindSafe(|| self.execute(identifier, action, token)));
+        if attended.is_err() {
+            log::error!("The broker failed while it handled maintenance job {identifier}");
+            self.record(
+                identifier,
+                Change {
+                    status: Some(JobStatus::Uncertain),
+                    finished_at: Some(now()),
+                    message: Some(BROKER_FAILED),
+                    may_still_run: Some(true),
+                    ..Change::default()
+                },
+            );
         }
+    }
+
+    /// End a job that did not run, and say why.
+    fn fail(&self, identifier: &str, message: &'static str) {
+        self.record(
+            identifier,
+            Change {
+                status: Some(JobStatus::Failed),
+                finished_at: Some(now()),
+                message: Some(message),
+                ..Change::default()
+            },
+        );
     }
 
     /// Run an accepted job. A queued request is not a durable permission, so
     /// the rights are checked again first.
     fn execute(&self, identifier: &str, action: &Action, token: &str) {
-        let allowed = self
-            .authority
-            .authorize(token)
-            .is_ok_and(|grant| grant.allows_action(&action.id));
-        if !allowed {
-            self.record(
-                identifier,
-                &Change {
-                    status: Some(JobStatus::Failed),
-                    finished_at: Some(now()),
-                    message: Some("Authorization changed before execution; nothing was run."),
-                    ..Change::default()
-                },
-            );
+        // Rights that changed and rights nobody could confirm both run
+        // nothing, and the record says which it was.
+        let unconfirmed = match self.authority.authorize(token) {
+            Ok(grant) if grant.allows_action(&action.id) => None,
+            Ok(_) | Err(Error::Denied(_)) => Some(CHANGED),
+            Err(Error::InvalidToken(_)) => Some(SIGNED_OUT),
+            Err(Error::Unavailable(reason)) => {
+                log::warn!("Rights for job {identifier} could not be checked: {reason}");
+                Some(UNCHECKED)
+            }
+            Err(Error::Misconfigured(reason)) => {
+                log::error!("Access rights cannot be checked: {reason}");
+                Some(NOT_SET_UP)
+            }
+        };
+        if let Some(message) = unconfirmed {
+            self.fail(identifier, message);
             return;
         }
-        self.record(
-            identifier,
-            &Change {
-                status: Some(JobStatus::Running),
-                started_at: Some(now()),
-                message: Some("Running."),
-                ..Change::default()
-            },
-        );
+        let running = Change {
+            status: Some(JobStatus::Running),
+            started_at: Some(now()),
+            message: Some("Running."),
+            ..Change::default()
+        };
+        // What the audit does not hold does not happen: a job whose start
+        // it does not take is not run, and that start is not owed to it.
+        if !self.recorded(identifier, &running) {
+            self.fail(identifier, NOT_RECORDED);
+            return;
+        }
         let outcome = catch_unwind(AssertUnwindSafe(|| self.runner.run(action)));
         let outcome = outcome.unwrap_or_else(|_| {
             log::error!("Maintenance runner failed for job {identifier}");
@@ -325,7 +455,7 @@ impl Broker {
         let (status, message, pending) = (outcome.status, outcome.message, outcome.may_still_run);
         self.record(
             identifier,
-            &Change {
+            Change {
                 status: Some(status),
                 finished_at: Some(now()),
                 message: Some(message),
@@ -341,5 +471,7 @@ impl Broker {
 mod failure_tests;
 #[cfg(test)]
 mod record_tests;
+#[cfg(test)]
+mod recovery_tests;
 #[cfg(test)]
 pub(crate) mod tests;

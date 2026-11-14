@@ -107,9 +107,15 @@ pub(crate) fn make(queued: bool) -> Setup {
     let worker: Worker = match &queue {
         Some(queue) => {
             let queue = Arc::clone(queue);
-            Box::new(move |work| queue.lock().unwrap().push(work))
+            Box::new(move |work| {
+                queue.lock().unwrap().push(work);
+                Ok(())
+            })
         }
-        None => Box::new(|work| work()),
+        None => Box::new(|work| {
+            work();
+            Ok(())
+        }),
     };
     let actions = vec![
         action("run_monitor", "RUN HEALTH CHECKS", "m.service", 300),

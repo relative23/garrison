@@ -84,7 +84,10 @@ fn serve(uids: BTreeSet<u32>) -> (BrokerClient, tempfile::TempDir) {
         vec![monitor()],
         store,
         Box::new(Nothing),
-        Box::new(std::mem::forget),
+        Box::new(|work| {
+            std::mem::forget(work);
+            Ok(())
+        }),
     );
     let path = directory.path().join("b.sock");
     let listener = UnixListener::bind(&path).unwrap();

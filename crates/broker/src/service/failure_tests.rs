@@ -47,7 +47,10 @@ fn unruly(runner: &Arc<Unruly>, directory: &Path) -> Arc<Broker> {
         ],
         JobStore::open(&directory.join("jobs.sqlite")).unwrap(),
         Box::new(Arc::clone(runner)),
-        Box::new(|work| work()),
+        Box::new(|work| {
+            work();
+            Ok(())
+        }),
     )
 }
 
