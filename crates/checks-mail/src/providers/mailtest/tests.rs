@@ -4,7 +4,7 @@ use std::thread;
 
 use super::*;
 use crate::context::Context;
-use crate::testing::{Canned, Remembered, config, now, table};
+use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 
 /// A mail server for one session per reply: it answers the message of each
 /// session with the reply given for it and returns what it was sent.
@@ -135,6 +135,8 @@ fn a_refused_test_file_and_spam_text_filed_as_spam_are_in_order() {
     );
     assert_eq!(filed.state, State::Ok, "{:?}", filed.findings);
     assert_eq!(results(&filed)[1], "accepted and filed as spam");
+    // The card is as old as the tests, not as the run that reads their result.
+    assert_dated(&filed, 0, 86_400);
     assert_eq!(filed.modules, [ModuleId::Antivirus, ModuleId::Spam].into());
     let sessions = handle.join().unwrap();
     assert_eq!(sessions.len(), 2);

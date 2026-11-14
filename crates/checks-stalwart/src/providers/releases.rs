@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use super::stalwart::running_version;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::fetch::{self, Request};
+use crate::kept::{Kept, cached};
 use crate::options::{Checked, Options, fail};
 
 const API: &str = "https://api.github.com";
@@ -71,7 +72,6 @@ impl Product {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct Asked {
-    at: i64,
     /// The newest release GitHub named, when it last named one.
     latest: Option<String>,
     /// When it last named one.
@@ -198,42 +198,35 @@ impl Releases {
     /// What is known of the product's newest release, asking if that is due.
     /// `every` says whether pre-releases count; an answer kept from the other
     /// way of asking is not used.
-    fn known(&self, context: &Context<'_>, product: Product, every: bool) -> Asked {
+    fn known(&self, context: &Context<'_>, product: Product, every: bool) -> Kept<Asked> {
         let key = format!("release.{}", product.id());
         let now = context.now.as_second();
-        let kept: Option<Asked> = context
-            .memory
-            .recall(&key)
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .filter(|kept: &Asked| kept.every == every);
-        if let Some(kept) = &kept {
-            let wait = if kept.problem.is_some() { RETRY } else { DAY };
-            if (0..wait).contains(&(now - kept.at)) {
-                return kept.clone();
-            }
-        }
-        let asked = match self.ask(product, every) {
-            Ok(latest) => Asked {
-                at: now,
-                latest: Some(latest),
-                answered_at: Some(now),
-                problem: None,
-                every,
-            },
-            // What was known before stays known, with when it was learned;
-            // the next try comes sooner.
-            Err(problem) => Asked {
-                at: now,
-                latest: kept.as_ref().and_then(|kept| kept.latest.clone()),
-                answered_at: kept.and_then(|kept| kept.answered_at),
-                problem: Some(problem),
-                every,
-            },
+        let wait = |_, kept: &Asked| match (kept.every == every, &kept.problem) {
+            (false, _) => 0,
+            (true, Some(_)) => RETRY,
+            (true, None) => DAY,
         };
-        if let Ok(text) = serde_json::to_string(&asked) {
-            context.memory.keep(&key, &text);
-        }
-        asked
+        cached(context, &key, wait, |before| {
+            let before = before
+                .map(|(_, kept)| kept)
+                .filter(|kept| kept.every == every);
+            match self.ask(product, every) {
+                Ok(latest) => Asked {
+                    latest: Some(latest),
+                    answered_at: Some(now),
+                    problem: None,
+                    every,
+                },
+                // What was known before stays known, with when it was learned;
+                // the next try comes sooner.
+                Err(problem) => Asked {
+                    latest: before.as_ref().and_then(|kept| kept.latest.clone()),
+                    answered_at: before.and_then(|kept| kept.answered_at),
+                    problem: Some(problem),
+                    every,
+                },
+            }
+        })
     }
 
     fn observation(
@@ -244,7 +237,8 @@ impl Releases {
         let installed = self.installed(product, context);
         // Whoever runs a pre-release is told of the next one too.
         let every = installed.as_deref().and_then(version::prerelease) == Some(true);
-        let asked = self.known(context, product, every);
+        let kept = self.known(context, product, every);
+        let asked = &kept.answer;
         let title = product.title();
         let (state, finding) = match (&asked.latest, &installed) {
             (Some(latest), Some(installed)) => match version::newer(latest, installed) {
@@ -301,10 +295,7 @@ impl Releases {
             (state, _) => state,
         };
         let finding: Vec<String> = finding.into_iter().chain(silent).collect();
-        let at = time::Timestamp::from_second(asked.at)
-            .ok()
-            .map(time::isoformat);
-        Ok(Observation::new(
+        let observation = Observation::new(
             format!("release.{}", product.id()),
             self.name(),
             format!("{title} release"),
@@ -317,11 +308,13 @@ impl Releases {
         .with_scope("The newest release GitHub lists, asked once a day.")
         .with_fields(vec![
             Field::text("Runs here", installed),
-            Field::text("Newest release", asked.latest),
-            Field::new("Asked", at, Format::Datetime),
+            Field::text("Newest release", asked.latest.clone()),
+            Field::new("Asked", kept.asked(), Format::Datetime),
         ])
-        .with_findings(finding)
-        .with_max_age(180))
+        .with_findings(finding);
+        // The card is as old as GitHub's answer: a release since then is
+        // not seen here, whatever runs on this host by now.
+        Ok(kept.dated(observation))
     }
 }
 

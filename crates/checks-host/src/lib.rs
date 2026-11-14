@@ -5,7 +5,7 @@ pub mod backups;
 pub mod providers;
 
 // The base modules, under the names the checks were written against.
-pub(crate) use garrison_checks::{command, context, options, values};
+pub(crate) use garrison_checks::{command, context, kept, options, values};
 
 /// The checks' test helpers, with the workspace's test configuration.
 #[cfg(test)]

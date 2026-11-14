@@ -15,13 +15,13 @@ use std::time::{Duration, Instant};
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Column, Evidence, Field, Format, Observation, State, Table};
-use garrison_core::time;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::dns::{mail_hosts, max_domains, resolver_option, system_resolver};
 use crate::context::{Collected, Context, Provider, Report};
 use crate::dns::{self, Answer, Kind};
+use crate::kept::{Kept, cached};
 use crate::options::{Checked, Options, fail};
 
 mod verdict;
@@ -56,7 +56,6 @@ struct Asked {
 /// What the status database keeps of the last reading.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 struct Read {
-    at: i64,
     hosts: Vec<String>,
     addresses: Vec<Asked>,
     problem: Option<String>,
@@ -242,7 +241,6 @@ impl Reputation {
             }
         }
         Ok(Read {
-            at: context.now.as_second(),
             hosts,
             addresses,
             problem: None,
@@ -250,28 +248,16 @@ impl Reputation {
         })
     }
 
-    /// The last reading, or a new one where that is due.
-    fn known(&self, context: &Context<'_>) -> Read {
-        let now = context.now.as_second();
-        let kept: Option<Read> = context
-            .memory
-            .recall(MEMORY)
-            .and_then(|text| serde_json::from_str(&text).ok());
-        if let Some(kept) = &kept {
-            let wait = if kept.problem.is_some() { AGAIN } else { EVERY };
-            if (0..wait).contains(&(now - kept.at)) {
-                return kept.clone();
-            }
-        }
-        let read = self.read(context).unwrap_or_else(|problem| Read {
-            at: now,
-            problem: Some(problem),
-            ..Read::default()
-        });
-        if let Ok(text) = serde_json::to_string(&read) {
-            context.memory.keep(MEMORY, &text);
-        }
-        read
+    /// The last reading, or a new one where that is due: after six hours,
+    /// and after one where nothing could be asked.
+    fn known(&self, context: &Context<'_>) -> Kept<Read> {
+        let wait = |_, read: &Read| if read.problem.is_some() { AGAIN } else { EVERY };
+        cached(context, MEMORY, wait, |_| {
+            self.read(context).unwrap_or_else(|problem| Read {
+                problem: Some(problem),
+                ..Read::default()
+            })
+        })
     }
 
     /// A listing is a failure; a list without a verdict is only a row.
@@ -323,8 +309,7 @@ impl Reputation {
                 columns: vec![column("Address"), column("List"), column("Result")],
                 rows,
             })
-            .with_findings(findings)
-            .with_max_age(180))
+            .with_findings(findings))
     }
 
     /// Each address needs a reverse name that leads back to it and is a mail
@@ -393,8 +378,7 @@ impl Reputation {
                 ],
                 rows,
             })
-            .with_findings(findings)
-            .with_max_age(180))
+            .with_findings(findings))
     }
 
     fn observation(
@@ -434,11 +418,9 @@ impl Provider for Reputation {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let read = self.known(context);
-        let at = time::Timestamp::from_second(read.at)
-            .ok()
-            .map(time::isoformat);
-        let asked = Field::new("Asked", at, Format::Datetime);
+        let kept = self.known(context);
+        let read = &kept.answer;
+        let asked = Field::new("Asked", kept.asked(), Format::Datetime);
         let hosts = Field::text("Mail hosts", read.hosts.join(", "));
         let unknown = read
             .problem
@@ -446,15 +428,17 @@ impl Provider for Reputation {
             .map(|problem| format!("Nothing could be asked: {problem}."));
 
         let fields = vec![hosts, asked];
-        let mut report =
-            Report::of(self.blocklists(context, &read, unknown.as_ref(), fields.clone())?);
-        report
-            .observations
-            .push(self.reverse(context, &read, unknown.as_ref(), fields)?);
-        // The hosts of the domains left out are not asked; the state is that
-        // of the hosts that are.
-        for observation in &mut report.observations {
+        let cards = [
+            self.blocklists(context, read, unknown.as_ref(), fields.clone())?,
+            self.reverse(context, read, unknown.as_ref(), fields)?,
+        ];
+        let mut report = Report::default();
+        for mut observation in cards {
+            // The hosts of the domains left out are not asked; the state is
+            // that of the hosts that are.
             observation.findings.extend(read.rest.clone());
+            // Both cards are as old as the reading they are made from.
+            report.observations.push(kept.dated(observation));
         }
         Ok(report)
     }

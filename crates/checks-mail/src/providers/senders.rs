@@ -20,13 +20,13 @@ use std::time::Duration;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Column, Evidence, Field, Format, Observation, State, Table};
 use garrison_core::sqlite::reading;
-use garrison_core::time;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::history;
 use crate::context::{Collected, Context, Provider, Report};
+use crate::kept::{Kept, cached};
 use crate::options::{Checked, Options};
 
 const QUEUED: &str = "queue.authenticated-message-queued";
@@ -62,7 +62,6 @@ struct Sender {
 /// What the status database keeps of the last reading.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 struct Read {
-    at: i64,
     senders: Vec<Sender>,
     /// More events were recorded than were read.
     truncated: bool,
@@ -265,7 +264,6 @@ impl Senders {
                 .then_with(|| left.address.cmp(&right.address))
         });
         Ok(Read {
-            at: now,
             senders,
             truncated,
             problem: None,
@@ -274,37 +272,26 @@ impl Senders {
         })
     }
 
-    /// The last reading, or a new one where that is due.
-    fn known(&self, context: &Context<'_>) -> Read {
-        let now = context.now.as_second();
-        let kept: Option<Read> = context
-            .memory
-            .recall(MEMORY)
-            .and_then(|text| serde_json::from_str(&text).ok());
-        if let Some(kept) = kept.filter(|kept| (0..EVERY).contains(&(now - kept.at))) {
-            return kept;
-        }
-        let read = match reading(&context.events_database, Duration::from_secs(2)) {
-            Ok(Some(db)) => self.read(&db, now).unwrap_or_else(|error| Read {
-                at: now,
-                problem: Some(format!("the event history could not be read: {error}")),
-                ..Read::default()
-            }),
-            Ok(None) => Read {
-                at: now,
-                problem: Some("no events are recorded yet".to_owned()),
-                ..Read::default()
-            },
-            Err(error) => Read {
-                at: now,
-                problem: Some(format!("the event history could not be opened: {error}")),
-                ..Read::default()
-            },
+    /// The last reading, or a new one where that is due: every ten minutes.
+    fn known(&self, context: &Context<'_>) -> Kept<Read> {
+        let problem = |problem: String| Read {
+            problem: Some(problem),
+            ..Read::default()
         };
-        if let Ok(text) = serde_json::to_string(&read) {
-            context.memory.keep(MEMORY, &text);
-        }
-        read
+        cached(
+            context,
+            MEMORY,
+            |_, _| EVERY,
+            |_| match reading(&context.events_database, Duration::from_secs(2)) {
+                Ok(Some(db)) => self
+                    .read(&db, context.now.as_second())
+                    .unwrap_or_else(|error| {
+                        problem(format!("the event history could not be read: {error}"))
+                    }),
+                Ok(None) => problem("no events are recorded yet".to_owned()),
+                Err(error) => problem(format!("the event history could not be opened: {error}")),
+            },
+        )
     }
 }
 
@@ -318,7 +305,8 @@ impl Provider for Senders {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let read = self.known(context);
+        let kept = self.known(context);
+        let read = &kept.answer;
         let unusual: Vec<&Sender> = read
             .senders
             .iter()
@@ -358,9 +346,6 @@ impl Provider for Senders {
             label: label.to_owned(),
             format,
         };
-        let at = time::Timestamp::from_second(read.at)
-            .ok()
-            .map(time::isoformat);
         let observation = Observation::new(
             "senders.accounts",
             self.name(),
@@ -380,7 +365,7 @@ impl Provider for Senders {
         .with_fields(vec![
             Field::new("Addresses that sent", read.senders.len(), Format::Number),
             Field::new("Unusual", unusual.len(), Format::Number),
-            Field::new("Read", at, Format::Datetime),
+            Field::new("Read", kept.asked(), Format::Datetime),
         ])
         .with_table(Table {
             columns: vec![
@@ -409,9 +394,9 @@ impl Provider for Senders {
                 })
                 .collect(),
         })
-        .with_findings(findings)
-        .with_max_age(180);
-        Ok(Report::of(observation))
+        .with_findings(findings);
+        // The card is as old as the reading it is made from.
+        Ok(Report::of(kept.dated(observation)))
     }
 }
 

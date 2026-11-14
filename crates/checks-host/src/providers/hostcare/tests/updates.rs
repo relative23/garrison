@@ -43,14 +43,15 @@ fn pending_security_updates_are_a_warning_and_asked_for_every_six_hours() {
     assert_eq!(first.source, "apt-get -s upgrade");
     // A minute and nearly six hours later the answer is the kept one.
     for later in [60, ASK_EVERY - 1] {
-        assert_eq!(
-            checked(&provider, &runner, &memory, later).state,
-            State::Warning
-        );
+        let kept = checked(&provider, &runner, &memory, later);
+        assert_eq!(kept.state, State::Warning);
+        // The card is as old as the answer, not as the run that repeats it.
+        assert_dated(&kept, 0, ASK_EVERY);
     }
     assert_eq!(runner.runs("apt-get"), 1);
-    checked(&provider, &runner, &memory, ASK_EVERY);
+    let next = checked(&provider, &runner, &memory, ASK_EVERY);
     assert_eq!(runner.runs("apt-get"), 2);
+    assert_dated(&next, ASK_EVERY, ASK_EVERY);
 }
 
 #[test]
@@ -133,8 +134,10 @@ fn updates_that_cannot_be_read_are_unknown_and_asked_for_again_within_the_hour()
             [format!("The pending updates are not known: {problem}.")]
         );
         let before = runner.1.borrow().len();
-        checked(&provider, &runner, &memory, ASK_AGAIN - 1);
+        let kept = checked(&provider, &runner, &memory, ASK_AGAIN - 1);
         assert_eq!(runner.1.borrow().len(), before, "{problem}");
+        // An answer that failed is asked for again sooner, and is stale sooner.
+        assert_dated(&kept, 0, ASK_AGAIN);
     }
 }
 

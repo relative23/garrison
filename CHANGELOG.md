@@ -34,6 +34,15 @@ Notable changes for operators and users. The format follows
   with its own usual volume. The card, its table, its findings, the
   notifications and the documentation now say so. Nothing is counted
   differently, and the observation keeps the id `senders.accounts`.
+- **A card says when its answer is from, not when the collector last ran.**
+  Some checks ask their source only now and then: the pending updates and
+  the blocklists every six hours, the release lists once a day, the sign-in
+  page every five minutes, the test messages once in `every_hours`, the
+  counts from the event history every ten minutes. Their cards said "Checked
+  a minute ago" for an answer hours old, and were marked stale only when the
+  collector stopped. They now carry the time the source was asked, and are
+  marked stale once a new answer is three minutes overdue. See
+  [checks](docs/operator/checks.md).
 - **The README's title is Garrison**, as the logo has been since 0.1.2.
   Stalwart is named where the text says what Garrison is for; the Ansible
   role's description says the same.

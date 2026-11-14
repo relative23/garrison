@@ -1,7 +1,9 @@
 use serde_json::json;
 
+use garrison_core::time;
+
 use super::*;
-use crate::testing::{Canned, Receiver, Remembered, config, now, table};
+use crate::testing::{Canned, Receiver, Remembered, assert_dated, config, now, table};
 
 /// One event of the history: its type, how long before the tests' clock it
 /// came, and its fields.
@@ -192,8 +194,11 @@ fn the_history_is_read_every_ten_minutes_and_its_absence_is_unknown() {
     // Nine minutes later the kept reading answers, whatever the history holds now.
     let kept = observed(&provider(), &[], 20, &memory, EVERY - 1);
     assert_eq!(kept.findings, first.findings);
+    // The card is as old as the reading, not as the run that repeats it.
+    assert_dated(&kept, 0, EVERY);
     let read = observed(&provider(), &[], 20, &memory, EVERY);
     assert_eq!(read.state, State::Ok);
+    assert_dated(&read, EVERY, EVERY);
 
     let directory = tempfile::tempdir().unwrap();
     let config = config(directory.path());

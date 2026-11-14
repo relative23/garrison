@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::context::{Collected, Context, Provider, Report};
+use crate::kept::cached;
 use crate::options::{Checked, Options, fail};
 use message::{Envelope, Test};
 
@@ -51,9 +52,9 @@ struct Sent {
     at_data: bool,
 }
 
+/// The result of each test, as the status database keeps them.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-struct Kept {
-    at: i64,
+struct Tests {
     eicar: Sent,
     gtube: Sent,
     /// The macro test, where the operator switched it on.
@@ -292,30 +293,23 @@ impl Provider for MailTest {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let now = context.now.as_second();
-        let kept: Option<Kept> = context
-            .memory
-            .recall(MEMORY)
-            .and_then(|text| serde_json::from_str(&text).ok())
-            // A result from before the macro test was switched on or off is
-            // not one of these tests.
-            .filter(|kept: &Kept| {
-                (0..self.every).contains(&(now - kept.at)) && kept.macros.is_some() == self.macros
-            });
-        let kept = kept.unwrap_or_else(|| {
-            let kept = Kept {
-                at: now,
-                eicar: self.send(context, Test::Eicar),
-                gtube: self.send(context, Test::Gtube),
-                macros: self.macros.then(|| self.send(context, Test::Macro)),
-            };
-            if let Ok(text) = serde_json::to_string(&kept) {
-                context.memory.keep(MEMORY, &text);
+        // Results from before the macro test was switched on or off are not
+        // these tests.
+        let wait = |_, tests: &Tests| {
+            if tests.macros.is_some() == self.macros {
+                self.every
+            } else {
+                0
             }
-            kept
+        };
+        let kept = cached(context, MEMORY, wait, |_| Tests {
+            eicar: self.send(context, Test::Eicar),
+            gtube: self.send(context, Test::Gtube),
+            macros: self.macros.then(|| self.send(context, Test::Macro)),
         });
-        let mut sent = vec![(Test::Eicar, &kept.eicar), (Test::Gtube, &kept.gtube)];
-        sent.extend(kept.macros.as_ref().map(|sent| (Test::Macro, sent)));
+        let tests = &kept.answer;
+        let mut sent = vec![(Test::Eicar, &tests.eicar), (Test::Gtube, &tests.gtube)];
+        sent.extend(tests.macros.as_ref().map(|sent| (Test::Macro, sent)));
         let results: Vec<(Test, (State, String))> = sent
             .into_iter()
             .map(|(test, sent)| (test, Self::judged(context, test, sent, kept.at)))
@@ -338,46 +332,41 @@ impl Provider for MailTest {
             .filter(|(_, (state, _))| *state != State::Ok)
             .map(|(test, (_, said))| format!("{}: {said}.", test.label()))
             .collect();
-        let sent = time::Timestamp::from_second(kept.at)
-            .ok()
-            .map(time::isoformat);
+        let sent = kept.asked();
         let column = |label: &str, format: Format| Column {
             label: label.to_owned(),
             format,
         };
-        let mut report = Report::default();
-        report.observations.push(
-            Observation::new(
-                "mailtest.results",
-                self.name(),
-                "Test messages",
-                [ModuleId::Antivirus, ModuleId::Spam],
-                Evidence::Probe,
-                state,
-                context.checked_at(),
-                format!("SMTP to {}:{}", self.host, self.port),
-            )?
-            .with_scope(format!(
-                "Garrison handed the test messages to the local SMTP listener without \
-                 signing in, addressed to {}; the next test follows {} hours after this one.",
-                self.recipient,
-                self.every / 3600
-            ))
-            .with_table(Table {
-                columns: vec![
-                    column("Test", Format::Text),
-                    column("Sent", Format::Datetime),
-                    column("Result", Format::Text),
-                ],
-                rows: results
-                    .iter()
-                    .map(|(test, (_, said))| vec![json!(test.label()), json!(sent), json!(said)])
-                    .collect(),
-            })
-            .with_findings(findings)
-            .with_max_age(180),
-        );
-        Ok(report)
+        let observation = Observation::new(
+            "mailtest.results",
+            self.name(),
+            "Test messages",
+            [ModuleId::Antivirus, ModuleId::Spam],
+            Evidence::Probe,
+            state,
+            context.checked_at(),
+            format!("SMTP to {}:{}", self.host, self.port),
+        )?
+        .with_scope(format!(
+            "Garrison handed the test messages to the local SMTP listener without \
+             signing in, addressed to {}; the next test follows {} hours after this one.",
+            self.recipient,
+            self.every / 3600
+        ))
+        .with_table(Table {
+            columns: vec![
+                column("Test", Format::Text),
+                column("Sent", Format::Datetime),
+                column("Result", Format::Text),
+            ],
+            rows: results
+                .iter()
+                .map(|(test, (_, said))| vec![json!(test.label()), json!(sent), json!(said)])
+                .collect(),
+        })
+        .with_findings(findings);
+        // The card is as old as the tests it reports.
+        Ok(Report::of(kept.dated(observation)))
     }
 }
 

@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use super::read::DAY;
 use super::*;
-use crate::testing::{Canned, Receiver, Remembered, config, now, table};
+use crate::testing::{Canned, Receiver, Remembered, assert_dated, config, now, table};
 
 /// One event: its type, how many seconds before the tests' clock, its span
 /// and its fields.
@@ -322,8 +322,14 @@ fn the_history_is_read_every_ten_minutes_and_its_absence_is_unknown() {
     assert_eq!(rows(of(&first, "flow.spam"))[0], "2026-10-29 | 1 | 0 | 0 %");
     let kept = observed(&[], None, &memory, EVERY - 1);
     assert_eq!(rows(of(&kept, "flow.spam"))[0], "2026-10-29 | 1 | 0 | 0 %");
+    // Every card is as old as the reading, not as the run that repeats it.
+    assert_eq!(kept.len(), 4);
+    for card in &kept {
+        assert_dated(card, 0, EVERY);
+    }
     let read = observed(&[], None, &memory, EVERY);
     assert_eq!(rows(of(&read, "flow.spam"))[0], "2026-10-29 | 0 | 0 | –");
+    assert_dated(of(&read, "flow.spam"), EVERY, EVERY);
 
     let directory = tempfile::tempdir().unwrap();
     let config = config(directory.path());

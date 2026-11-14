@@ -69,6 +69,22 @@ impl crate::context::Memory for Remembered {
     }
 }
 
+/// Fails unless `observation` is dated by an answer that was asked `asked`
+/// seconds after the tests' clock and is used for `wait` seconds: checked
+/// then, and stale three collection runs after the next answer is due.
+pub fn assert_dated(observation: &garrison_core::observations::Observation, asked: i64, wait: i64) {
+    let at = Timestamp::from_second(now().as_second() + asked).unwrap();
+    assert_eq!(
+        (
+            observation.checked_at.as_str(),
+            i64::from(observation.max_age)
+        ),
+        (time::isoformat(at).as_str(), wait + 180),
+        "{}",
+        observation.id
+    );
+}
+
 pub fn table(text: &str) -> toml::Table {
     text.parse().unwrap()
 }

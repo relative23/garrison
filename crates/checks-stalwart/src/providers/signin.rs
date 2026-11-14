@@ -19,12 +19,12 @@ use std::collections::BTreeSet;
 use garrison_core::config::Deployment;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, State};
-use garrison_core::time;
 use garrison_stalwart::sign_in_page::{self, Kind};
 use serde::{Deserialize, Serialize};
 
 use crate::context::{Collected, Context, Provider, Report};
 use crate::fetch::{self, Roots, get, origin};
+use crate::kept::{Kept, keep, recalled};
 use crate::options::{Checked, Options};
 
 /// The most files of one page that are asked for.
@@ -259,8 +259,7 @@ pub fn check(deployment: &Deployment, roots: &Roots) -> Examined {
 /// page in order.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Kept {
-    at: i64,
+struct InOrder {
     page: String,
     files: Option<usize>,
 }
@@ -278,36 +277,41 @@ impl SignIn {
         })
     }
 
-    /// When the page was examined and what was found: a page in order is
-    /// examined again after five minutes, any other in every run.
-    fn examined(context: &Context<'_>, page: &str) -> (i64, Examined) {
+    /// What was found of the page and when: a page in order is examined
+    /// again after five minutes, any other in every run. Only a page in
+    /// order is kept, so nothing kept can stand for one that is not.
+    fn examined(context: &Context<'_>, page: &str) -> Kept<Examined> {
         let now = context.now.as_second();
-        let kept = context
-            .memory
-            .recall(KEPT)
-            .and_then(|text| serde_json::from_str::<Kept>(&text).ok())
-            .filter(|kept| kept.page == page && (0..EVERY).contains(&(now - kept.at)));
-        if let Some(kept) = kept {
-            let examined = Examined {
+        let kept = recalled::<InOrder>(context, KEPT).filter(|(at, kept)| {
+            kept.page == page && (0..EVERY).contains(&now.saturating_sub(*at))
+        });
+        if let Some((at, kept)) = kept {
+            let answer = Examined {
                 state: State::Ok,
                 what: String::new(),
                 fix: None,
                 files: kept.files,
             };
-            return (kept.at, examined);
-        }
-        let examined = check(context.deployment, &fetch::roots());
-        if examined.state == State::Ok {
-            let kept = Kept {
-                at: now,
-                page: page.to_owned(),
-                files: examined.files,
+            return Kept {
+                at,
+                wait: EVERY,
+                answer,
             };
-            if let Ok(text) = serde_json::to_string(&kept) {
-                context.memory.keep(KEPT, &text);
-            }
         }
-        (now, examined)
+        let answer = check(context.deployment, &fetch::roots());
+        let wait = if answer.state == State::Ok {
+            let page = page.to_owned();
+            let files = answer.files;
+            keep(context, KEPT, &InOrder { page, files });
+            EVERY
+        } else {
+            0
+        };
+        Kept {
+            at: now,
+            wait,
+            answer,
+        }
     }
 }
 
@@ -322,7 +326,8 @@ impl Provider for SignIn {
 
     fn collect(&self, context: &Context<'_>) -> Collected {
         let page = page(context.deployment);
-        let (at, examined) = Self::examined(context, &page);
+        let kept = Self::examined(context, &page);
+        let examined = kept.answer.clone();
         // A page in order needs no words; what is wrong comes with what to do.
         let findings = if examined.state == State::Ok {
             Vec::new()
@@ -331,7 +336,6 @@ impl Provider for SignIn {
                 .chain(examined.fix)
                 .collect()
         };
-        let asked = time::Timestamp::from_second(at).ok().map(time::isoformat);
         let observation = Observation::new(
             "signin.page",
             self.name(),
@@ -350,11 +354,11 @@ impl Provider for SignIn {
         .with_fields(vec![
             Field::text("Page", page),
             Field::new("Files it loads", examined.files, Format::Number),
-            Field::new("Asked", asked, Format::Datetime),
+            Field::new("Asked", kept.asked(), Format::Datetime),
         ])
-        .with_findings(findings)
-        .with_max_age(180);
-        Ok(Report::of(observation))
+        .with_findings(findings);
+        // The card is as old as the examination it is made from.
+        Ok(Report::of(kept.dated(observation)))
     }
 }
 

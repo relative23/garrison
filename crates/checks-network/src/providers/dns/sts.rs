@@ -11,6 +11,7 @@ use serde_json::json;
 
 use crate::context::Context;
 use crate::fetch;
+use crate::kept::cached;
 
 const EVERY: i64 = 3600;
 
@@ -25,7 +26,6 @@ pub(super) struct Policy {
 /// What the status database keeps of the last fetch.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct Fetched {
-    at: i64,
     outcome: Result<Policy, String>,
 }
 
@@ -76,26 +76,21 @@ pub(super) fn names(policy: &Policy, host: &str) -> bool {
 /// the hour.
 pub(super) fn policy(context: &Context<'_>, domain: &str, url: &str) -> Result<Policy, String> {
     let key = format!("dns.sts.{domain}");
-    let now = context.now.as_second();
-    let kept: Option<Fetched> = context
-        .memory
-        .recall(&key)
-        .and_then(|text| serde_json::from_str(&text).ok());
-    if let Some(kept) = kept.filter(|kept| (0..EVERY).contains(&(now - kept.at))) {
-        return kept.outcome;
-    }
-    let outcome = fetch::get(url, &fetch::roots()).and_then(|answer| {
-        if answer.status == 200 {
-            parse(&answer.body)
-        } else {
-            Err(format!("the server answered {}", answer.status))
-        }
-    });
-    let fetched = Fetched { at: now, outcome };
-    if let Ok(text) = serde_json::to_string(&fetched) {
-        context.memory.keep(&key, &text);
-    }
-    fetched.outcome
+    let fetched = cached(
+        context,
+        &key,
+        |_, _| EVERY,
+        |_| Fetched {
+            outcome: fetch::get(url, &fetch::roots()).and_then(|answer| {
+                if answer.status == 200 {
+                    parse(&answer.body)
+                } else {
+                    Err(format!("the server answered {}", answer.status))
+                }
+            }),
+        },
+    );
+    fetched.answer.outcome
 }
 
 /// What the policy means for the domain's mail hosts: a line for the table

@@ -552,6 +552,7 @@ dependencies = [
  "getrandom 0.4.3",
  "rustls",
  "rustls-native-certs",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

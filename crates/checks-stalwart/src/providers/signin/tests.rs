@@ -2,10 +2,12 @@ use std::fmt::Write as _;
 
 use garrison_testing::http::{answer, serve};
 
+use garrison_core::time;
+
 use super::*;
 use crate::context::Memory;
 use crate::fetch::roots;
-use crate::testing::{Canned, Remembered, config, now, table};
+use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 
 /// The head of Stalwart 1.1.0's sign-in page, as it is served.
 const STALWART: &str = r#"<!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8">
@@ -338,7 +340,8 @@ fn a_page_in_order_is_examined_again_after_five_minutes() {
     assert_eq!(kept.state, State::Ok);
     assert_eq!(field(&kept, "Asked"), field(&first, "Asked"));
     assert_eq!(field(&kept, "Files it loads"), &serde_json::json!(2));
-    assert_eq!(kept.checked_at, "2026-10-29T12:04:59+00:00");
+    // The card is as old as the examination, not as the run that repeats it.
+    assert_dated(&kept, 0, EVERY);
 
     let again = collected(&memory, 300, &public.url, &own.url);
     assert_eq!(
@@ -366,6 +369,8 @@ fn a_page_that_is_not_in_order_is_examined_in_every_run() {
             ]
         );
         assert_eq!(field(&failed, "Files it loads"), &serde_json::Value::Null);
+        // Examined in this run, and due again in the next.
+        assert_dated(&failed, seconds, 0);
     }
     public.requests();
 }

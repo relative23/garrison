@@ -2,12 +2,13 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use garrison_core::time;
 use serde_json::json;
 
 use super::*;
 use crate::command::{Output, Runner};
 use crate::context::Memory;
-use crate::testing::{Remembered, config, now, table};
+use crate::testing::{Remembered, assert_dated, config, now, table};
 
 /// Answers each program with its own output and exit code; a program that
 /// is not listed cannot be run.

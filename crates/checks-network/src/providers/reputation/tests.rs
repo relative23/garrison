@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
+use garrison_core::time;
+
 use super::*;
 use crate::providers::dns::tests::{guessable, resolver as stand_in};
-use crate::testing::{Canned, Remembered, config, now, table};
+use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 
 type Zone = BTreeMap<(String, u16), Vec<Vec<u8>>>;
 
@@ -354,9 +356,12 @@ fn the_lists_are_asked_every_six_hours_and_a_silent_resolver_is_unknown() {
     let memory = Remembered::default();
     let (first, _) = observed(&provider, &memory, 0);
     // Eleven questions were all the stand-in answers: a second reading would hang.
-    let (kept, _) = observed(&provider, &memory, EVERY - 1);
+    let (kept, reverse) = observed(&provider, &memory, EVERY - 1);
     assert_eq!(rows(&kept), rows(&first));
     assert_eq!(kept.fields[1].value, first.fields[1].value);
+    // Both cards are as old as the reading, not as the run that repeats it.
+    assert_dated(&kept, 0, EVERY);
+    assert_dated(&reverse, 0, EVERY);
 
     let (resolver, _) = resolver_that_never_answers();
     let silent = Reputation::new(&table(&format!(
@@ -375,6 +380,9 @@ fn the_lists_are_asked_every_six_hours_and_a_silent_resolver_is_unknown() {
         blocklists.findings
     );
     assert_eq!(blocklists.findings, reverse.findings);
+    // A reading that failed is tried again sooner, and is stale sooner.
+    let (kept, _) = observed(&silent, &memory, AGAIN - 1);
+    assert_dated(&kept, 0, AGAIN);
 }
 
 /// A socket nobody reads: a question to it gets no answer.

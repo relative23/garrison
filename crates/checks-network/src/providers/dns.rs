@@ -292,7 +292,7 @@ impl Dns {
         .with_scope(
             "What Stalwart names for the domain, asked of this host's resolver now. Records \
              marked optional are a matter of choice; another resolver may still hold older \
-             answers.",
+             answers. An MTA-STS policy file is fetched once an hour.",
         )
         .with_table(Table {
             columns: vec![

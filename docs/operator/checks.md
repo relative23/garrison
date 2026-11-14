@@ -6,6 +6,15 @@ is one check, and `type` names it. The collector runs them every minute. A
 source that is missing or unreadable shows as Unknown; it never stops the
 other checks.
 
+Every card says when its source was asked ("Checked ..."). Most checks ask in
+every run, and their cards are marked stale when the last run is more than
+three minutes old. Some ask less often, because the answer costs time or the
+source should not be asked every minute: the pending updates, the blocklists
+and reverse names, the release lists, the sign-in page, the test messages
+and the counts from the event history. Their cards carry the time of the
+answer they are made from, however often the collector has run since, and
+are marked stale once a new answer is three minutes overdue.
+
 `garrison detect --format toml` prints entries for what the host runs, with
 the paths it found (for ClamAV, from the units or the distribution's
 defaults). The rest of the file is in the

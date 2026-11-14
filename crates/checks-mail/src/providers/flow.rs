@@ -31,6 +31,7 @@ use read::{DAY, DAYS, Week};
 use super::history;
 
 use crate::context::{Collected, Context, Provider, ProviderError, Report};
+use crate::kept::{Kept, cached};
 use crate::options::{Checked, Options, fail};
 
 const CHECKS: [&str; 4] = ["spam", "milter", "authentication", "tls"];
@@ -40,7 +41,6 @@ const MEMORY: &str = "flow.week";
 /// What the status database keeps of the last reading.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 struct Read {
-    at: i64,
     week: Week,
     problem: Option<String>,
     /// Why the history does not hold the whole week, where it does not.
@@ -111,25 +111,21 @@ impl Flow {
             .collect()
     }
 
-    /// The last reading, or a new one where that is due.
-    fn known(context: &Context<'_>) -> Read {
+    /// The last reading, or a new one where that is due: every ten minutes.
+    fn known(context: &Context<'_>) -> Kept<Read> {
+        cached(context, MEMORY, |_, _| EVERY, |_| Self::counted(context))
+    }
+
+    /// The week as the event history has it now.
+    fn counted(context: &Context<'_>) -> Read {
         let now = context.now.as_second();
-        let kept: Option<Read> = context
-            .memory
-            .recall(MEMORY)
-            .and_then(|text| serde_json::from_str(&text).ok());
-        if let Some(kept) = kept.filter(|kept| (0..EVERY).contains(&(now - kept.at))) {
-            return kept;
-        }
         let problem = |problem: String| Read {
-            at: now,
             problem: Some(problem),
             ..Read::default()
         };
-        let read = match reading(&context.events_database, Duration::from_secs(2)) {
+        match reading(&context.events_database, Duration::from_secs(2)) {
             Ok(Some(db)) => match read::week(&db, now, &Self::accounts(context)) {
                 Ok(week) => Read {
-                    at: now,
                     uncovered: history::uncovered(
                         &db,
                         week.days.first().copied().unwrap_or(now - DAYS * DAY),
@@ -142,11 +138,7 @@ impl Flow {
             },
             Ok(None) => problem("no events are recorded yet".to_owned()),
             Err(error) => problem(format!("the event history could not be opened: {error}")),
-        };
-        if let Ok(text) = serde_json::to_string(&read) {
-            context.memory.keep(MEMORY, &text);
         }
-        read
     }
 
     /// An observation of this provider; Unknown, with the reason, where the
@@ -177,8 +169,7 @@ impl Flow {
             },
             context.checked_at(),
             "event history",
-        )?
-        .with_max_age(180);
+        )?;
         Ok(match (unknown, incomplete) {
             (Some(problem), _) => {
                 observation.with_findings(vec![format!("Nothing could be counted: {problem}.")])
@@ -205,16 +196,23 @@ impl Provider for Flow {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let read = Self::known(context);
+        let kept = Self::known(context);
+        let read = &kept.answer;
         let mut report = Report::default();
         for check in &self.checks {
             match check.as_str() {
-                "spam" => self.spam(context, &read, &mut report)?,
-                "milter" => self.milter(context, &read, &mut report)?,
-                "authentication" => self.authentication(context, &read, &mut report)?,
-                _ => self.tls(context, &read, &mut report)?,
+                "spam" => self.spam(context, read, &mut report)?,
+                "milter" => self.milter(context, read, &mut report)?,
+                "authentication" => self.authentication(context, read, &mut report)?,
+                _ => self.tls(context, read, &mut report)?,
             }
         }
+        // Every card is as old as the reading it is made from.
+        report.observations = report
+            .observations
+            .into_iter()
+            .map(|observation| kept.dated(observation))
+            .collect();
         if read.week.truncated
             && let Some(first) = report.observations.first_mut()
         {

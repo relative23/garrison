@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use garrison_core::config::is_unit_name;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, State};
-use garrison_core::time;
 use serde::{Deserialize, Serialize};
 
 mod packages;
@@ -23,6 +22,7 @@ mod reading;
 use reading::{Pending, Sample};
 
 use crate::context::{Collected, Context, Provider, ProviderError, Report};
+use crate::kept::{Kept, cached};
 use crate::options::{Checked, Options, fail};
 
 const CHECKS: [&str; 5] = ["updates", "restart", "clock", "disk", "firewall"];
@@ -52,7 +52,6 @@ pub struct HostCare {
 /// What the status database keeps of the last look at the pending updates.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 struct Asked {
-    at: i64,
     source: String,
     pending: Option<Pending>,
     problem: Option<String>,
@@ -145,59 +144,53 @@ impl HostCare {
     }
 
     /// The pending updates, asking the package manager where that is due.
-    fn asked(&self, context: &Context<'_>) -> Asked {
+    fn asked(&self, context: &Context<'_>) -> Kept<Asked> {
         let now = context.now.as_second();
-        let kept: Option<Asked> = context
-            .memory
-            .recall(UPDATES)
-            .and_then(|text| serde_json::from_str(&text).ok());
-        if let Some(kept) = &kept {
+        let wait = |at: i64, kept: &Asked| {
             let wait = if kept.problem.is_some() {
                 ASK_AGAIN
             } else {
                 ASK_EVERY
             };
-            let age = now - kept.at;
-            if (0..wait).contains(&age) && (age < ASK_SOONEST || !self.changed(kept, now)) {
-                return kept.clone();
+            // After a change to the host the answer is no longer used, but
+            // never sooner than five minutes after it was asked.
+            if now.saturating_sub(at) >= ASK_SOONEST && self.changed(at, kept, now) {
+                0
+            } else {
+                wait
             }
-        }
-        let (source, outcome) = packages::pending(&self.root, context.runner);
-        let asked = match outcome {
-            Ok(pending) => Asked {
-                at: now,
-                source,
-                pending: Some(pending),
-                problem: None,
-                blocked: Vec::new(),
-            },
-            Err(problem) => Asked {
-                at: now,
-                source,
-                pending: None,
-                problem: Some(problem),
-                blocked: packages::unreadable(&self.root),
-            },
         };
-        if let Ok(text) = serde_json::to_string(&asked) {
-            context.memory.keep(UPDATES, &text);
-        }
-        asked
+        cached(context, UPDATES, wait, |_| {
+            let (source, outcome) = packages::pending(&self.root, context.runner);
+            match outcome {
+                Ok(pending) => Asked {
+                    source,
+                    pending: Some(pending),
+                    problem: None,
+                    blocked: Vec::new(),
+                },
+                Err(problem) => Asked {
+                    source,
+                    pending: None,
+                    problem: Some(problem),
+                    blocked: packages::unreadable(&self.root),
+                },
+            }
+        })
     }
 
-    /// Whether the host changed since `kept` was asked: packages installed or
-    /// removed, new metadata fetched, or the cache folders that kept dnf out
-    /// opened. A change time ahead of the clock waits until the clock is there.
-    fn changed(&self, kept: &Asked, now: i64) -> bool {
-        packages::last_change(&self.root).is_some_and(|at| at > kept.at && at <= now)
+    /// Whether the host changed since `kept` was asked at `asked`: packages
+    /// installed or removed, new metadata fetched, or the cache folders that
+    /// kept dnf out opened. A change time ahead of the clock waits until the
+    /// clock is there.
+    fn changed(&self, asked: i64, kept: &Asked, now: i64) -> bool {
+        packages::last_change(&self.root).is_some_and(|at| at > asked && at <= now)
             || (!kept.blocked.is_empty() && packages::unreadable(&self.root) != kept.blocked)
     }
 
     fn updates(&self, context: &Context<'_>) -> Made {
-        let asked = self.asked(context);
-        let at = time::Timestamp::from_second(asked.at)
-            .ok()
-            .map(time::isoformat);
+        let kept = self.asked(context);
+        let asked = &kept.answer;
         let (state, finding) = match (&asked.pending, &asked.problem) {
             (Some(pending), _) if pending.security > 0 => (
                 State::Warning,
@@ -220,7 +213,7 @@ impl HostCare {
                 )),
             ),
         };
-        Ok(self
+        let observation = self
             .observation(context, "updates", "System updates", state, &asked.source)?
             .with_scope(
                 "What the package manager would install, from the metadata the host has fetched; \
@@ -229,10 +222,11 @@ impl HostCare {
             .with_fields(vec![
                 Field::new("Security updates", asked.pending.map(|pending| pending.security), Format::Number),
                 Field::new("Other updates", asked.pending.map(|pending| pending.other), Format::Number),
-                Field::new("Asked", at, Format::Datetime),
+                Field::new("Asked", kept.asked(), Format::Datetime),
             ])
-            .with_findings(finding.into_iter().collect())
-            .with_max_age(180))
+            .with_findings(finding.into_iter().collect());
+        // The card is as old as the package manager's answer.
+        Ok(kept.dated(observation))
     }
 
     /// The distribution's own marker, or a kernel newer than the one that runs.

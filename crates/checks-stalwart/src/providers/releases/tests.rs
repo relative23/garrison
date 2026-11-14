@@ -3,7 +3,7 @@ use serde_json::json;
 
 use super::*;
 use crate::context::Context;
-use crate::testing::{Canned, Remembered, config, now, table};
+use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 
 /// The release of Garrison that runs in these tests.
 const RUNS: &str = "0.5.0";
@@ -97,6 +97,8 @@ fn a_newer_release_is_a_warning_and_is_asked_for_once_a_day() {
         let again = collected(&provider, &memory, later);
         assert_eq!(field(&again, "Newest release"), &json!("99.0.0"));
         assert_eq!(field(&again, "Asked"), field(&first, "Asked"));
+        // The card is as old as GitHub's answer, not as the run that repeats it.
+        assert_dated(&again, 0, DAY);
     }
     // After a day GitHub is asked again.
     let next = collected(&provider, &memory, DAY);
@@ -143,10 +145,9 @@ fn no_answer_is_unknown_and_is_asked_for_again_within_the_hour() {
             [format!("The newest release is not known: {problem}.")]
         );
         // Not again within the hour, then again.
-        assert_eq!(
-            collected(&provider, &memory, RETRY - 1).state,
-            State::Unknown
-        );
+        let kept = collected(&provider, &memory, RETRY - 1);
+        assert_eq!(kept.state, State::Unknown);
+        assert_dated(&kept, 0, RETRY);
         assert_eq!(collected(&provider, &memory, RETRY).state, State::Ok);
         assert_eq!(server.requests().len(), 2);
     }

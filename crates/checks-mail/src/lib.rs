@@ -5,7 +5,7 @@
 pub mod providers;
 
 // The base modules, under the names the checks were written against.
-pub(crate) use garrison_checks::{context, options};
+pub(crate) use garrison_checks::{context, kept, options};
 
 /// The checks' test helpers, with the workspace's test configuration.
 #[cfg(test)]
