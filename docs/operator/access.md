@@ -51,6 +51,31 @@ Stalwart account is its numeric account ID; `access check` shows the mapping.
 Every change keeps the previous file as `access-policy.json.<timestamp>.bak`.
 There is deliberately no web page that edits the policy.
 
+## Accounts with permissions of their own
+
+A Stalwart account can have permissions of its own beside its roles (its
+Permissions setting). Garrison counts them as Stalwart does:
+
+| Setting | Permissions | Roles bind profiles |
+|---|---|---|
+| Inherit | the roles' | yes |
+| Merge | the roles' and the account's own; one that a role disables stays disabled, even where the account enables it | yes |
+| Replace | the account's own alone: its roles grant and take away nothing | no |
+
+So an account switched to Replace loses the profiles its roles gave it, even
+where the policy binds one of its roles: within seconds its user is signed
+out, and signing in again is refused. To give the access back, switch the
+account to Merge or Inherit, or bind the account itself under `subjects` in
+the policy, with the subject and account ID that `access check` shows:
+
+```json
+"subjects": {"1": {"accountId": "b", "profile": "viewer"}}
+```
+
+That binding, too, applies only where the account's own permissions hold
+what the profile requires. `garrison access check <subject>` shows what the
+user gets now.
+
 ## Not a tenant boundary
 
 Profiles are server-wide. A user with the Event history module (`logs`) sees

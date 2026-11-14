@@ -163,6 +163,11 @@ fn custom_roles_with_inheritance_and_denial() {
     assert!(result.contains("sysAccountGet") && result.contains("sysRoleGet"));
 }
 
+/// An account's own lists beside its roles. Merge adds them to the roles'
+/// lists, and a permission a role disables stays disabled; Replace puts them
+/// in the roles' place, so the roles grant and deny nothing, and Garrison
+/// counts none of them, which therefore binds no profile of the access
+/// policy (docs/operator/access.md).
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn account_level_overrides() {
@@ -180,6 +185,41 @@ fn account_level_overrides() {
         let result = assert_equal(&lab, &user);
         assert!(result.contains("sysAccountGet"), "{mode}");
         assert!(!result.contains("sysDomainGet"), "{mode}");
+    }
+    // Above, the modes differ only by what Stalwart's default user role
+    // holds. A role of its own holds them apart whatever that is: it grants
+    // one permission and disables another, which the account enables itself.
+    let tag = unique();
+    let role = lab.create(
+        "Role",
+        &json!({
+            "description": format!("{tag} grants sysRoleGet, disables sysAccountGet"),
+            "roleIds": {},
+            "enabledPermissions": {"authenticate": true, "sysRoleGet": true},
+            "disabledPermissions": {"sysAccountGet": true},
+        }),
+    );
+    for (mode, granted, withheld, counted) in [
+        ("Merge", "sysRoleGet", "sysAccountGet", true),
+        ("Replace", "sysAccountGet", "sysRoleGet", false),
+    ] {
+        let user = make_user(
+            &mut lab,
+            &json!({"@type": "Custom", "roleIds": {role.clone(): true}}),
+            &json!({
+                "@type": mode,
+                "enabledPermissions": {"authenticate": true, "sysAccountGet": true},
+                "disabledPermissions": {},
+            }),
+        );
+        let result = assert_equal(&lab, &user);
+        assert!(
+            result.contains(granted) && !result.contains(withheld),
+            "{mode}: {result:?}"
+        );
+        let (account, roles, authentication) = fetch(&lab, &user.id);
+        let rights = evaluate(&account, &roles, &authentication).unwrap();
+        assert_eq!(rights.roles.contains(&role), counted, "{mode}: {rights:?}");
     }
 }
 
