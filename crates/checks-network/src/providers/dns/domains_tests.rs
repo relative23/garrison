@@ -7,6 +7,38 @@ use serde_json::json;
 use super::*;
 use crate::testing::{Canned, config, table};
 
+/// What the checks that take their mail hosts from Stalwart say of its
+/// domains after the first 20.
+pub(crate) const LEFT_OUT: &str =
+    "Stalwart has 21 domains; only the first 20 are checked (`max_domains`).";
+
+/// Stalwart's answer for 21 domains: the first 20 with the mail host
+/// `mail.example.test`, the last with `mx2.example.test`.
+pub(crate) fn twenty_one_domains() -> serde_json::Value {
+    let domains: Vec<serde_json::Value> = (0..21)
+        .map(|number| {
+            let host = if number < 20 { "mail" } else { "mx2" };
+            let name = format!("d{number}.example.test");
+            let zone = format!("{name}. IN MX 10 {host}.example.test.\n");
+            json!({"id": format!("b{number}"), "name": name, "dnsZoneFile": zone})
+        })
+        .collect();
+    json!({"methodResponses": [["x:Domain/get", {"list": domains}, "0"]]})
+}
+
+/// A context in which Stalwart, at `url`, gives its domains to the key.
+pub(crate) fn with_stalwart<'a>(
+    config: &'a mut garrison_core::config::Config,
+    runner: &'a Canned,
+    url: &str,
+) -> Context<'a> {
+    config.deployment.stalwart_url = url.to_owned();
+    Context {
+        native_key: Some("key".into()),
+        ..crate::testing::context(config, runner)
+    }
+}
+
 #[test]
 fn domains_beyond_max_domains_are_named_not_left_out() {
     let domains: Vec<serde_json::Value> = (0..3)

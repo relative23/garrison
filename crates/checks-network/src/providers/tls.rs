@@ -20,6 +20,7 @@ use rustls::{ClientConfig, ClientConnection, RootCertStore};
 use serde_json::{Value, json};
 
 use super::certificate::not_after;
+use super::dns::max_domains;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::options::{Checked, Options, fail};
 
@@ -188,13 +189,16 @@ fn system_roots() -> Arc<RootCertStore> {
 pub struct Tls {
     modules: BTreeSet<ModuleId>,
     endpoints: Vec<Endpoint>,
+    /// Without `endpoints`: of how many of Stalwart's domains the mail hosts
+    /// are probed.
+    max_domains: usize,
     /// `None` uses the system's trust store; tests pass their own.
     roots: Option<Arc<RootCertStore>>,
 }
 
 impl Tls {
     pub fn new(raw: &toml::Table) -> Checked<Self> {
-        let options = Options::new(raw, &["endpoints", "modules"])?;
+        let options = Options::new(raw, &["endpoints", "max_domains", "modules"])?;
         let modules = options.modules(&["dns_tls"])?;
         let mut endpoints = Vec::new();
         for item in options.tables("endpoints")? {
@@ -234,6 +238,7 @@ impl Tls {
         Ok(Tls {
             modules,
             endpoints,
+            max_domains: max_domains(&options)?,
             roots: None,
         })
     }
@@ -293,9 +298,13 @@ impl Provider for Tls {
         let (mut rows, mut findings) = (Vec::new(), Vec::new());
         let (mut lowest, mut failures): (Option<i64>, usize) = (None, 0);
         let found;
+        let mut rest = None;
         let endpoints = if self.endpoints.is_empty() {
-            match listeners::endpoints(context) {
-                Ok(endpoints) => found = endpoints,
+            match listeners::endpoints(context, self.max_domains) {
+                Ok((endpoints, left_out)) => {
+                    found = endpoints;
+                    rest = left_out;
+                }
                 Err(reason) => return self.unknown(context, &reason),
             }
             &found
@@ -345,6 +354,9 @@ impl Provider for Tls {
             (0, false) => State::Warning,
             _ => State::Failed,
         };
+        // The hosts of the domains left out are not probed; the state is that
+        // of the endpoints that are.
+        findings.extend(rest);
         let column = |label: &str, format| Column {
             label: label.to_owned(),
             format,

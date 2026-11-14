@@ -17,7 +17,7 @@ observation the checks report is in [observation ids](observations.md).
 | `host` | `disk_path`, `modules` | Memory, load, disk, uptime |
 | `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path`, `firewall_units`, `modules` | What the host needs from its operator; see below |
 | `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; an alias, such as `sshd.service`, shows the unit it names. Timers show their schedule and next run. For one-shot jobs see below |
-| `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `modules` | Certificate validity per endpoint; see below |
+| `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `max_domains` (20), `modules` | Certificate validity per endpoint; see below |
 | `mail-flow` | `checks` (default: all of `spam`, `milter`, `authentication`, `tls`) | A week of the recorded events in numbers; see below |
 | `stalwart` | `milter_host`, `milter_port`, `max_accounts` | Spam settings, classifier, milter, queue, mailbox storage, running version |
 | `prometheus` | `path` | Native counters and gauges for the dashboard |
@@ -27,7 +27,7 @@ observation the checks report is in [observation ids](observations.md).
 | `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
 | `version-command` | `component`, `command`, `pattern`, `modules` | Installed version from a command; it runs in the collector's sandbox, so a program that compiles code at run time (a JIT) fails there |
-| `reputation` | `hosts` (default: the mail hosts Stalwart names), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
+| `reputation` | `hosts` (default: the mail hosts Stalwart names), `max_domains` (20), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
 | `senders` | `min_recipients` (50), `factor` (5), `burst` (100), `bounces` (10), `modules` | The sender addresses that send unusually much; see below |
 | `releases` | `products` (`garrison`, `stalwart`; default both) | Whether a newer release exists; see below |
 | `sign-in` | `modules` | Whether Stalwart's sign-in page loads under the issuer's name, with its scripts and style sheets; see below |
@@ -106,7 +106,8 @@ server would send it. The certificate must be trusted by the system's
 authorities and valid for that name; one that expires within 14 days is a
 warning. Without `endpoints` the check asks Stalwart what to probe: every
 listener that speaks TLS (25 with STARTTLS, 465, 993, 443 and whatever else
-is set up), once under the name of each mail host of Stalwart's domains. A
+is set up), once under the name of each mail host of Stalwart's domains, of
+the first `max_domains` of them; the card says when Stalwart has more. A
 listener added later is then checked without a change here, and a
 certificate that does not cover a mail host's name shows as untrusted, which
 is what a sender that honours MTA-STS would find. Listeners that begin in
@@ -220,7 +221,8 @@ how many it has.
 A receiving server looks the sender's address up in blocklists and asks for
 its reverse name. The check asks the same questions, every six hours, for
 every address of the mail hosts: `hosts`, or without it the hosts Stalwart
-names in the MX records of its domains.
+names in the MX records of its domains, of the first `max_domains` of them;
+the cards say when Stalwart has more.
 
 - **Blocklists.** A listing is Failed and names the address and the list.
   IPv4 addresses are asked of `lists` (default `zen.spamhaus.org`,

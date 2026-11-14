@@ -56,15 +56,26 @@ pub(super) fn resolver_option(raw: &toml::Table, provider: &str) -> Checked<Opti
     }
 }
 
+/// The `max_domains` option of a check that reads Stalwart's domains: how
+/// many of them it takes, 20 unless it says otherwise.
+pub(super) fn max_domains(options: &Options<'_>) -> Checked<usize> {
+    let most = options.integer("max_domains", 20, 1, 100)?;
+    Ok(usize::try_from(most).unwrap_or(MOST_DOMAINS))
+}
+
 /// What a check says that takes only the first `most` of Stalwart's
 /// `domains`.
 pub(super) fn left_out(domains: usize, most: usize) -> String {
     format!("Stalwart has {domains} domains; only the first {most} are checked (`max_domains`).")
 }
 
-/// The hosts Stalwart names as the mail servers of its domains: the targets
-/// of the MX records in its zone files.
-pub(super) fn mail_hosts(context: &Context<'_>) -> Result<Vec<String>, String> {
+/// The hosts Stalwart names as the mail servers of its first `most` domains,
+/// the targets of the MX records in their zone files, and where it has more
+/// domains, the finding that says so.
+pub(super) fn mail_hosts(
+    context: &Context<'_>,
+    most: usize,
+) -> Result<(Vec<String>, Option<String>), String> {
     let key = context
         .native_key
         .as_deref()
@@ -76,7 +87,7 @@ pub(super) fn mail_hosts(context: &Context<'_>) -> Result<Vec<String>, String> {
         .map_err(|_| "Stalwart did not give its domains to the collector's API key")?;
     let mut hosts: Vec<String> = domains
         .iter()
-        .take(MOST_DOMAINS)
+        .take(most)
         .flat_map(|domain| {
             mx_hosts(&expected(
                 domain.dns_zone_file.as_deref().unwrap_or_default(),
@@ -85,7 +96,8 @@ pub(super) fn mail_hosts(context: &Context<'_>) -> Result<Vec<String>, String> {
         .collect();
     hosts.sort_unstable();
     hosts.dedup();
-    Ok(hosts)
+    let rest = (domains.len() > most).then(|| left_out(domains.len(), most));
+    Ok((hosts, rest))
 }
 
 /// The state of a domain and what to say of it: the records that are not as
@@ -153,11 +165,9 @@ pub struct Dns {
 impl Dns {
     pub fn new(raw: &toml::Table) -> Checked<Self> {
         let options = Options::new(raw, &["resolver", "max_domains"])?;
-        let resolver = resolver_option(raw, "dns")?;
-        let max_domains = options.integer("max_domains", 20, 1, 100)?;
         Ok(Dns {
-            resolver,
-            max_domains: usize::try_from(max_domains).unwrap_or(MOST_DOMAINS),
+            resolver: resolver_option(raw, "dns")?,
+            max_domains: max_domains(&options)?,
             policy_url: None,
         })
     }
@@ -355,7 +365,7 @@ impl Provider for Dns {
 }
 
 #[cfg(test)]
-mod domains_tests;
+pub(crate) mod domains_tests;
 #[cfg(test)]
 pub(crate) mod tests;
 #[cfg(test)]

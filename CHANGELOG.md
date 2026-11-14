@@ -137,6 +137,11 @@ Notable changes for operators and users. The format follows
   `max_domains` (20) of Stalwart's domains and left the others out without
   a word. Where Stalwart has more, the card "DNS records" is now Unknown
   and says how many it has.
+- **The TLS and reputation checks take as many domains as they are told.**
+  Without `endpoints` or `hosts` they took the mail hosts of the first 20 of
+  Stalwart's domains, whatever the DNS check's `max_domains` said, and said
+  nothing of the rest. Both now have `max_domains` of their own, 20 by
+  default, and their cards say when Stalwart has more domains.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser

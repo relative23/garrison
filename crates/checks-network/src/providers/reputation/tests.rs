@@ -237,6 +237,49 @@ fn the_lists_are_asked_with_numbers_at_random() {
     assert!(!guessable(&numbers), "{numbers:?}");
 }
 
+/// Without `hosts`, the mail hosts of the first `max_domains` of Stalwart's
+/// domains are asked, and the check names the domains after them.
+#[test]
+fn the_hosts_of_the_first_max_domains_domains_are_asked_and_the_rest_named() {
+    use crate::providers::dns::domains_tests::{LEFT_OUT, twenty_one_domains, with_stalwart};
+    use garrison_testing::http::{json as answer_json, serve};
+
+    for (more, hosts, named) in [
+        ("", "mail.example.test", true),
+        (
+            "max_domains = 21",
+            "mail.example.test, mx2.example.test",
+            false,
+        ),
+    ] {
+        let stalwart = serve(vec![answer_json(&twenty_one_domains())]);
+        // No mail host has an address: one A and one AAAA question each.
+        let (resolver, _) = stand_in(Zone::new(), None, 4);
+        let provider = Reputation::new(&table(&format!(
+            "type = \"reputation\"\nresolver = \"{resolver}\"\nlists = []\nlists_ipv6 = []\n{more}"
+        )))
+        .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = config(directory.path());
+        let runner = Canned(String::new());
+        let context = with_stalwart(&mut config, &runner, &stalwart.url);
+        let observations = provider.collect(&context).unwrap().observations;
+        stalwart.requests();
+        assert_eq!(observations[0].fields[0].value, json!(hosts), "{more}");
+        for observation in &observations {
+            assert_eq!(
+                observation
+                    .findings
+                    .iter()
+                    .any(|finding| finding == LEFT_OUT),
+                named,
+                "{more}: {:?}",
+                observation.findings
+            );
+        }
+    }
+}
+
 #[test]
 fn a_list_that_is_down_is_asked_once_and_not_for_every_address() {
     let mut zone = Zone::new();

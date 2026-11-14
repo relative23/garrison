@@ -19,7 +19,7 @@ use garrison_core::time;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::dns::{mail_hosts, resolver_option, system_resolver};
+use super::dns::{mail_hosts, max_domains, resolver_option, system_resolver};
 use crate::context::{Collected, Context, Provider, Report};
 use crate::dns::{self, Answer, Kind};
 use crate::options::{Checked, Options, fail};
@@ -60,6 +60,9 @@ struct Read {
     hosts: Vec<String>,
     addresses: Vec<Asked>,
     problem: Option<String>,
+    /// What to say of Stalwart's domains after the first `max_domains`.
+    #[serde(default)]
+    rest: Option<String>,
 }
 
 #[derive(Debug)]
@@ -67,6 +70,8 @@ pub struct Reputation {
     resolver: Option<SocketAddr>,
     /// The mail hosts; without them, those Stalwart names.
     hosts: Vec<String>,
+    /// How many of Stalwart's domains name them.
+    max_domains: usize,
     lists: Vec<String>,
     lists_ipv6: Vec<String>,
     modules: BTreeSet<ModuleId>,
@@ -151,11 +156,19 @@ impl Reputation {
     pub fn new(raw: &toml::Table) -> Checked<Self> {
         let options = Options::new(
             raw,
-            &["resolver", "hosts", "lists", "lists_ipv6", "modules"],
+            &[
+                "resolver",
+                "hosts",
+                "max_domains",
+                "lists",
+                "lists_ipv6",
+                "modules",
+            ],
         )?;
         Ok(Reputation {
             resolver: resolver_option(raw, "reputation")?,
             hosts: names(raw, "hosts", &[])?,
+            max_domains: max_domains(&options)?,
             lists: names(raw, "lists", &LISTS)?,
             lists_ipv6: names(raw, "lists_ipv6", &LISTS_IPV6)?,
             modules: options.modules(&["dns_tls"])?,
@@ -163,15 +176,15 @@ impl Reputation {
     }
 
     /// Ask about every address of the mail hosts.
-    fn read(&self, context: &Context<'_>) -> Result<(Vec<String>, Vec<Asked>), String> {
+    fn read(&self, context: &Context<'_>) -> Result<Read, String> {
         let resolver = self
             .resolver
             .or_else(system_resolver)
             .ok_or("this host names no resolver in /etc/resolv.conf")?;
-        let mut hosts = if self.hosts.is_empty() {
-            mail_hosts(context)?
+        let (mut hosts, rest) = if self.hosts.is_empty() {
+            mail_hosts(context, self.max_domains)?
         } else {
-            self.hosts.clone()
+            (self.hosts.clone(), None)
         };
         hosts.truncate(MOST_HOSTS);
         if hosts.is_empty() {
@@ -228,7 +241,13 @@ impl Reputation {
                 }
             }
         }
-        Ok((hosts, addresses))
+        Ok(Read {
+            at: context.now.as_second(),
+            hosts,
+            addresses,
+            problem: None,
+            rest,
+        })
     }
 
     /// The last reading, or a new one where that is due.
@@ -244,19 +263,11 @@ impl Reputation {
                 return kept.clone();
             }
         }
-        let read = match self.read(context) {
-            Ok((hosts, addresses)) => Read {
-                at: now,
-                hosts,
-                addresses,
-                problem: None,
-            },
-            Err(problem) => Read {
-                at: now,
-                problem: Some(problem),
-                ..Read::default()
-            },
-        };
+        let read = self.read(context).unwrap_or_else(|problem| Read {
+            at: now,
+            problem: Some(problem),
+            ..Read::default()
+        });
         if let Ok(text) = serde_json::to_string(&read) {
             context.memory.keep(MEMORY, &text);
         }
@@ -440,6 +451,11 @@ impl Provider for Reputation {
         report
             .observations
             .push(self.reverse(context, &read, unknown.as_ref(), fields)?);
+        // The hosts of the domains left out are not asked; the state is that
+        // of the hosts that are.
+        for observation in &mut report.observations {
+            observation.findings.extend(read.rest.clone());
+        }
         Ok(report)
     }
 }

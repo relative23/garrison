@@ -278,6 +278,58 @@ fn closed_ports_are_refused_connections() {
     );
 }
 
+/// Without `endpoints`, Stalwart's listeners are probed under the mail hosts
+/// of the first `max_domains` of its domains, and the check names the
+/// domains after them.
+#[test]
+fn the_hosts_of_the_first_max_domains_domains_are_probed_and_the_rest_named() {
+    use crate::providers::dns::domains_tests::{LEFT_OUT, twenty_one_domains, with_stalwart};
+    use garrison_testing::http::{json as answer_json, serve};
+
+    let listeners = serde_json::json!({"methodResponses": [["x:NetworkListener/get", {"list": [
+        {"id": "a", "protocol": "smtp", "bind": {"[::]:9": true}, "useTls": true, "implicitTls": true}
+    ]}, "0"]]});
+    for (more, probed, named) in [
+        ("", vec!["mail.example.test:9"], true),
+        (
+            "max_domains = 21",
+            vec!["mail.example.test:9", "mx2.example.test:9"],
+            false,
+        ),
+    ] {
+        let stalwart = serve(vec![
+            answer_json(&listeners),
+            answer_json(&twenty_one_domains()),
+        ]);
+        let provider =
+            Tls::new(&crate::testing::table(&format!("type = \"tls\"\n{more}"))).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = crate::testing::config(directory.path());
+        let runner = crate::testing::Canned(String::new());
+        let context = with_stalwart(&mut config, &runner, &stalwart.url);
+        let observation = provider.collect(&context).unwrap().observations.remove(0);
+        stalwart.requests();
+        let rows: Vec<&str> = observation
+            .table
+            .as_ref()
+            .unwrap()
+            .rows
+            .iter()
+            .map(|row| row[0].as_str().unwrap())
+            .collect();
+        assert_eq!(rows, probed, "{more}");
+        assert_eq!(
+            observation
+                .findings
+                .iter()
+                .any(|finding| finding == LEFT_OUT),
+            named,
+            "{more}: {:?}",
+            observation.findings
+        );
+    }
+}
+
 #[test]
 fn the_observation_reports_each_endpoint() {
     let certificates = certificates();

@@ -73,8 +73,13 @@ pub(super) fn derived(listeners: &[Listener], hosts: &[String]) -> Vec<Endpoint>
     endpoints
 }
 
-/// What to probe, asked of Stalwart; why not, where it does not say.
-pub(super) fn endpoints(context: &Context<'_>) -> Result<Vec<Endpoint>, String> {
+/// What to probe, asked of Stalwart, under the mail hosts of its first
+/// `most` domains, and what to say of the domains after them; why not,
+/// where Stalwart does not say.
+pub(super) fn endpoints(
+    context: &Context<'_>,
+    most: usize,
+) -> Result<(Vec<Endpoint>, Option<String>), String> {
     let key = context
         .native_key
         .as_deref()
@@ -91,12 +96,12 @@ pub(super) fn endpoints(context: &Context<'_>) -> Result<Vec<Endpoint>, String> 
             "Stalwart did not give its listeners to the collector's API key; run `garrison \
              stalwart setup` again to let it read them, or name `endpoints`"
         })?;
-    let hosts = mail_hosts(context)?;
+    let (hosts, rest) = mail_hosts(context, most)?;
     let endpoints = derived(&listeners, &hosts);
     if endpoints.is_empty() {
         return Err("Stalwart names no mail host with a listener that speaks TLS".to_owned());
     }
-    Ok(endpoints)
+    Ok((endpoints, rest))
 }
 
 #[cfg(test)]
