@@ -15,7 +15,7 @@ use garrison_core::time;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 
-use super::channels::Secret;
+use super::secrets::Secret;
 use crate::fetch::{WITHIN, secure_stream_until, tls_error};
 
 /// Where the mail goes and who submits it.

@@ -14,6 +14,7 @@
 
 pub mod channels;
 pub mod mail;
+pub mod secrets;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -24,7 +25,8 @@ use garrison_core::time;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 
-pub use channels::{Address, Channels, Level, Note, Secret, Secrets, taken};
+pub use channels::{Channels, Level, Note, taken};
+pub use secrets::{Address, Secret, Secrets};
 
 use crate::context::{Deadline, Memory};
 use crate::fetch;
