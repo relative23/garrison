@@ -12,6 +12,8 @@ pub const SCHEMA: u32 = 1;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderError {
+    /// The provider's type, and where more than one of that type is
+    /// configured also its place: `systemd (providers[3])`.
     pub provider: String,
     /// `failed` or `crashed`.
     pub error: String,

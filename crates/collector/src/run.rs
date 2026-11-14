@@ -97,12 +97,49 @@ fn metrics_credential(config: &Config, credentials: &Credentials) -> Option<(Str
     Some((username, secret))
 }
 
+/// One of the configured providers, as the run speaks of it.
+struct Named<'a> {
+    /// The provider's type.
+    name: &'a str,
+    /// Which of the providers of its type it is, from one.
+    place: usize,
+    /// The type, and where more than one of it is configured also the
+    /// provider's place in the configuration, as `garrison check-config`
+    /// names it: a type alone would not say which of them failed.
+    label: String,
+}
+
+impl<'a> Named<'a> {
+    /// Every provider of `providers` with its name, in their order.
+    fn all(providers: &'a [Box<dyn Provider>]) -> Vec<Named<'a>> {
+        let mut places: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut named: Vec<Named<'a>> = Vec::new();
+        for (index, provider) in providers.iter().enumerate() {
+            let name = provider.name();
+            let place = places.entry(name).or_insert(0);
+            *place += 1;
+            named.push(Named {
+                name,
+                place: *place,
+                label: format!("{name} (providers[{index}])"),
+            });
+        }
+        for provider in &mut named {
+            if places.get(provider.name) == Some(&1) {
+                provider.label = provider.name.to_owned();
+            }
+        }
+        named
+    }
+}
+
 /// The observation that stands in for a provider that failed or was not
-/// run; `said` is its finding. `place` is which of the providers of its type
-/// it is, from one: the second and later ones get an id of their own, so
-/// that two of a type that both fail do not report one id.
-fn stand_in(context: &Context<'_>, name: &str, place: usize, said: String) -> Option<Observation> {
-    let id = if place > 1 {
+/// run; `said` is its finding. The second and later providers of a type get
+/// an id of their own, so that two of a type that both fail do not report
+/// one id.
+fn stand_in(context: &Context<'_>, provider: &Named<'_>, said: String) -> Option<Observation> {
+    let Named { name, place, label } = provider;
+    let id = if *place > 1 {
         format!("collector.{name}.{place}")
     } else {
         format!("collector.{name}")
@@ -110,7 +147,7 @@ fn stand_in(context: &Context<'_>, name: &str, place: usize, said: String) -> Op
     Observation::new(Required {
         id: &id,
         provider: name,
-        title: &format!("Provider {name}"),
+        title: &format!("Provider {label}"),
         modules: [ModuleId::Services],
         evidence: Evidence::Process,
         state: State::Unknown,
@@ -200,23 +237,18 @@ pub fn collect_within(
     let mut gauges = BTreeMap::new();
     let mut counters = BTreeMap::new();
     let mut errors = Vec::new();
-    let mut places: BTreeMap<&str, usize> = BTreeMap::new();
-    for provider in providers {
-        let name = provider.name();
-        let place = *places
-            .entry(name)
-            .and_modify(|place| *place += 1)
-            .or_insert(1);
+    for (provider, named) in providers.iter().zip(Named::all(providers)) {
+        let label = &named.label;
         // What is not begun in time is said, not waited for: the run ends
         // with a snapshot of what was found.
         if context.deadline.expired() {
-            log::warn!("Provider {name} was not run: the run's time was used up");
+            log::warn!("Provider {label} was not run: the run's time was used up");
             errors.push(ProviderError {
-                provider: name.to_owned(),
+                provider: label.clone(),
                 error: "not run".to_owned(),
             });
             let said = "Not run: the checks before it used up the time of this collection run.";
-            observations.extend(stand_in(&context, name, place, said.to_owned()));
+            observations.extend(stand_in(&context, &named, said.to_owned()));
             continue;
         }
         let began = Instant::now();
@@ -224,9 +256,9 @@ pub fn collect_within(
         let outcome = catch_unwind(AssertUnwindSafe(|| provider.collect(&context)));
         let took = began.elapsed();
         if took >= SLOW {
-            log::warn!("Provider {name} took {} s", took.as_secs());
+            log::warn!("Provider {label} took {} s", took.as_secs());
         } else {
-            log::debug!("Provider {name} took {} ms", took.as_millis());
+            log::debug!("Provider {label} took {} ms", took.as_millis());
         }
         let kind = match outcome {
             Ok(Ok(report)) => {
@@ -236,20 +268,20 @@ pub fn collect_within(
                 continue;
             }
             Ok(Err(error)) => {
-                log::error!("Provider {} failed: {error}", provider.name());
+                log::error!("Provider {label} failed: {error}");
                 "failed"
             }
             Err(_) => {
-                log::error!("Provider {} failed: it panicked", provider.name());
+                log::error!("Provider {label} failed: it panicked");
                 "crashed"
             }
         };
         errors.push(ProviderError {
-            provider: name.to_owned(),
+            provider: label.clone(),
             error: kind.to_owned(),
         });
         let said = format!("The provider {kind}; see the collector journal.");
-        observations.extend(stand_in(&context, name, place, said));
+        observations.extend(stand_in(&context, &named, said));
     }
     let repeats = without_repeats(&context, &mut observations);
     observations.extend(repeats);

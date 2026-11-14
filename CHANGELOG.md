@@ -49,6 +49,12 @@ Notable changes for operators and users. The format follows
   default. That test alone is now sent again after an hour; the tests that
   did happen keep their result and their time, which the table shows for
   each.
+- **A check that fails says which one it is.** Where several providers of
+  one type are configured, such as two `systemd` or `receipt` entries, a
+  failure named only the type: on its card, in the notice on the Services
+  page and in the collector's journal. All three now also name the entry's
+  place in the configuration, as `garrison check-config` does: `systemd
+  (providers[3])`.
 - **The README's title is Garrison**, as the logo has been since 0.1.2.
   Stalwart is named where the text says what Garrison is for; the Ansible
   role's description says the same.

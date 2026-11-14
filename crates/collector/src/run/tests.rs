@@ -232,6 +232,37 @@ fn two_checks_of_one_type_that_both_fail_stand_in_under_ids_of_their_own() {
             "collector.broken.3"
         ]
     );
+    // Each says which of the configured providers it stands for, as
+    // `garrison check-config` names them, on its card and among the run's
+    // failures: a type alone would name three times the same.
+    let titles: Vec<&str> = snapshot
+        .observations
+        .iter()
+        .map(|observation| observation.title.as_str())
+        .collect();
+    assert_eq!(
+        titles,
+        [
+            "Provider broken (providers[0])",
+            "Provider broken (providers[1])",
+            "Provider broken (providers[2])"
+        ]
+    );
+    let failed: Vec<&str> = snapshot
+        .provider_errors
+        .iter()
+        .map(|error| error.provider.as_str())
+        .collect();
+    assert_eq!(
+        failed,
+        [
+            "broken (providers[0])",
+            "broken (providers[1])",
+            "broken (providers[2])"
+        ]
+    );
+    // The observations still name the type as their provider.
+    assert_eq!(snapshot.observations[1].provider, "broken");
 }
 
 /// A provider that reports one observation after it took its time.
