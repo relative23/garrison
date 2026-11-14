@@ -262,8 +262,9 @@ as `on_macro` says. Otherwise `on_incomplete` decides, and the journal of
 `garrison-milter.service` names the kind of reason, never the message. With
 `"tag"`, the default, the mail arrives and a Sieve rule or mail program acts
 on `X-Garrison-Scan: unscanned`; without such a rule it is delivered like any
-other. With `"defer"` a message that is too large or too deeply packed never
-arrives: the sending server tries until it gives up and tells its sender.
+other. With `"defer"` a message that is too large or holds more than the
+filter unpacks never arrives: the sending server tries until it gives up and
+tells its sender.
 `"refuse"` tells the sender at once. Large archives are common in ordinary
 mail, so look at the journal for a while before choosing one of the two.
 

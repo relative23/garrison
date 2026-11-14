@@ -68,11 +68,13 @@ sudo ./bin/garrison install
 ```
 
 This first run creates five system users, installs the release into
-`/opt/garrison/releases/<version>` without network access and copies an example
-configuration to `/etc/garrison/garrison.toml`. It does not start anything yet,
-because Garrison is not configured. The installer checks every file against
-`SHA256SUMS` and refuses a release that holds anything else, such as an extra
-file or a link.
+`/opt/garrison/releases/<version>` without network access, together with its
+systemd units, and copies an example configuration to
+`/etc/garrison/garrison.toml`. It does not start anything yet, because
+Garrison is not configured; the polkit rule for the maintenance actions and
+the nginx includes made from the configuration follow in step 5. The
+installer checks every file against `SHA256SUMS` and refuses a release that
+holds anything else, such as an extra file or a link.
 
 `sbom.cdx.json` in the archive lists every component the release contains, with
 versions, licenses and checksums, in the CycloneDX format that vulnerability
@@ -167,8 +169,9 @@ Run the installer a second time, in the unpacked release directory:
 sudo ./bin/garrison install
 ```
 
-This run installs the systemd units and the polkit rule, checks the
-configuration and starts the services.
+This run checks the configuration, writes the polkit rule for its
+`[[actions]]`, the nginx include for its `web.port` and the include for the
+switch row (step 6), and starts the services.
 
 ## 6. Publish through nginx
 
@@ -323,7 +326,8 @@ Nothing asks a question unless standard input and standard output are both a
 terminal, so the same steps run from cloud-init, Ansible or a shell script.
 Every command exits with 0 on success and 1 on failure, with the reason on
 standard error; 2 means it was called wrongly or found no usable
-configuration.
+configuration. Run without root, `doctor` and `setup` exit with 2, and
+`install`, `upgrade`, `restore` and `uninstall` with 1.
 
 ```sh
 tar xzf garrison-<version>-<arch>.tar.gz

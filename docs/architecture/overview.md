@@ -58,14 +58,17 @@ sign-out whose row could not be deleted answers with an error and keeps the
 cookie, so that it can be tried again; it never answers "ok" for a session
 that is still there.
 
-**Every API request.** The web service sends the user's token to the broker.
-The broker resolves the identity through UserInfo, applies the policy (denial
-first), reads the account's roles with its own read-only API key, evaluates
-permissions and returns modules and actions. The web service caches this for
-five seconds per session. 401 (the token is no longer valid) and 403 (the
-policy refuses this user) end the session; 503 keeps it: Stalwart or the
-broker is unavailable, or Garrison's own setup cannot decide
-([failure behavior](security.md#failure-behavior)).
+**Every API request.** Except for sign-out and the switch row's question
+(`/api/switch`), which look only at the session, the web service sends the
+user's token to the broker. The broker resolves the identity through
+UserInfo, applies the policy (denial first), reads the account's roles with
+its own read-only API key, evaluates permissions and returns modules and
+actions. The web service caches this for five seconds per session. When the
+broker answers 401 (the token is no longer valid) or 403 (the policy refuses
+this user), the session ends; any other error keeps it, such as 503 when
+Stalwart or the broker is unavailable or Garrison's own setup cannot decide
+([failure behavior](security.md#failure-behavior)). A request for a module
+the grant does not name gets 403 and keeps the session as well.
 
 **Actions.** Web checks Origin, CSRF and the grant; the broker checks the grant
 again, the confirmation phrase, idempotency (UUID4 request ID), concurrency and

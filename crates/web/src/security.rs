@@ -1,16 +1,19 @@
 //! Request authentication and authorization for the web service.
 //!
-//! Every API request needs a valid session cookie. The session's rights come
-//! from the broker, which re-derives them from the user's token and the current
-//! native roles. They are cached for at most five seconds per session so that
+//! An API request that shows or changes anything needs a valid session
+//! cookie. Without one, the session question answers `null`, sign-out "ok"
+//! and the switch row's question `false`; every other API route answers 401.
+//! The session's rights come from the broker, which re-derives them from the
+//! user's token and the current native roles. They are cached for at most five seconds per session so that
 //! one page load does not trigger a dozen identical checks; actions are always
 //! re-checked by the broker itself, uncached. Requests of one session that
 //! arrive while its rights are being asked for wait for that answer
 //! (`flights`), so a page costs the broker one question, not a dozen.
 //!
 //! Write requests additionally need the exact public Origin and the session's
-//! CSRF token. Menu visibility never grants anything: every route names its
-//! module.
+//! CSRF token. Menu visibility never grants anything: every route that serves
+//! a module's data names that module, and the status answer is filtered by
+//! the user's modules.
 
 use std::collections::{BTreeSet, HashMap};
 use std::net::{IpAddr, SocketAddr};

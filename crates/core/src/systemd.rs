@@ -11,8 +11,11 @@ use std::os::linux::net::SocketAddrExt;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::{SocketAddr, UnixDatagram};
 
-/// Where every supported distribution has `systemctl`. It is called by this
-/// path, never looked up in `PATH`.
+/// Where every supported distribution has `systemctl`. Whatever starts,
+/// stops or changes units calls it by this path, so that no other
+/// `systemctl` earlier in `PATH` takes part. The read-only questions of
+/// `detect` and of the host-care check still find it in `PATH`, as they find
+/// their other programs.
 pub const SYSTEMCTL: &str = "/usr/bin/systemctl";
 
 /// Tell systemd the service is ready; outside systemd this does nothing.

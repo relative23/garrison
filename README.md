@@ -23,9 +23,9 @@ webhook or a mailbox.
   <a href=".github/screenshots/dashboard.png"><img src=".github/screenshots/dashboard.png" alt="The dashboard in the dark theme: the health of every module as a tile, and the mailbox storage of 184 accounts against their quotas"></a>
 </p>
 
-Garrison runs on the mail host itself, as one static binary and four small
-services without root, and users sign in with the Stalwart account they
-already have. It reads what the host and Stalwart report, and it records
+Garrison runs on the mail host itself, as one static binary and a few small
+services, none of them as root, and users sign in with the Stalwart account
+they already have. It reads what the host and Stalwart report, and it records
 Stalwart's webhook events behind a privacy filter, so that deliveries, SMTP
 sessions and attacks on accounts can be traced for 30 days. No message
 content is stored.
@@ -108,9 +108,12 @@ Stalwart ─ signed webhooks ─▶ ingest (loopback) ─▶ events.sqlite
          ◀─ JMAP / Prometheus ─ collector (timer, providers) ─▶ status.sqlite
 ```
 
-Four services of one static Rust binary, each under a system user of its own,
-no root process. Garrison watches and reports; it changes nothing in the mail
-flow. The one exception is optional and off by default: a
+Up to six services of one static Rust binary: the web service, the event
+receiver, the broker, the collector and the watch over it on timers, and the
+macro filter where it is switched on. Each runs under a system user of its
+own, but the watch under the collector's, and none as root. Garrison
+watches and reports; it changes nothing in the mail flow. The one exception
+is optional and off by default: a
 [macro filter](docs/operator/configuration.md#milter) that has Stalwart refuse
 or mark mail with Office macros.
 Details:
