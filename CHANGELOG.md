@@ -43,6 +43,12 @@ Notable changes for operators and users. The format follows
   collector stopped. They now carry the time the source was asked, and are
   marked stale once a new answer is three minutes overdue. See
   [checks](docs/operator/checks.md).
+- **A test message that could not be sent is tried again after an hour.**
+  A `mail-test` whose session did not come about, or was turned away before
+  the message, stayed "not tested" until the next test, a day later by
+  default. That test alone is now sent again after an hour; the tests that
+  did happen keep their result and their time, which the table shows for
+  each.
 - **The README's title is Garrison**, as the logo has been since 0.1.2.
   Stalwart is named where the text says what Garrison is for; the Ansible
   role's description says the same.

@@ -290,6 +290,11 @@ shows how an accepted one was filed. The check runs only where you name a
 `recipient`. Make a mailbox of its own for it: a test that goes wrong leaves a
 harmless message there.
 
+Each test is sent again `every_hours` after it was sent. One that did not
+happen, because no session came about or the server turned it away before
+the message, is "not tested": it alone is tried again after an hour, and the
+table says when each test was sent.
+
 With `macro_document = true` a third message carries a document that a macro
 filter takes for one with macros (it holds none, only the name a macro
 project has inside a document). It must be refused. Switch this on together

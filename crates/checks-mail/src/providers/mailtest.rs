@@ -3,14 +3,17 @@
 //!
 //! Only where an operator names a recipient. At most once in the configured
 //! hours, the provider hands both to the local SMTP listener the way a
-//! stranger would, without signing in. A scanner must refuse the test file
-//! while the session lasts. The spam text is refused there too, or accepted
-//! and then filed as spam, which the event history shows under the queue ID
-//! Stalwart named. Stalwart knows the spam text only as a message's subject
-//! (a text in the body is ordinary mail to it), so the test message carries it
-//! there and in the body, where other filters look. A test that goes wrong
-//! leaves a harmless message in the recipient's mailbox, which is why that
-//! mailbox is one made for it.
+//! stranger would, without signing in. A test that did not happen, because
+//! no session came about or the server turned it away before the message,
+//! is no result to keep that long: it alone is tried again after an hour.
+//!
+//! A scanner must refuse the test file while the session lasts. The spam
+//! text is refused there too, or accepted and then filed as spam, which the
+//! event history shows under the queue ID Stalwart named. Stalwart knows the
+//! spam text only as a message's subject (a text in the body is ordinary
+//! mail to it), so the test message carries it there and in the body, where
+//! other filters look. A test that goes wrong leaves a harmless message in
+//! the recipient's mailbox, which is why that mailbox is one made for it.
 //!
 //! Where the operator switches it on (`macro_document = true`), a third
 //! message carries a document that a macro filter such as Garrison's milter
@@ -38,6 +41,8 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 const MEMORY: &str = "mailtest";
 /// How long Stalwart may take to file an accepted message.
 const VERDICT_WITHIN: i64 = 900;
+/// A test that did not happen is tried again after this long.
+const AGAIN: i64 = 3600;
 
 /// How the server answered one test, as the status database keeps it.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -50,9 +55,21 @@ struct Sent {
     queue: Option<String>,
     /// Whether the refusal came for the message itself, not earlier.
     at_data: bool,
+    /// The second it was sent at. An earlier release kept one time for all
+    /// tests; where this is missing, that time counts.
+    #[serde(default)]
+    at: Option<i64>,
 }
 
-/// The result of each test, as the status database keeps them.
+impl Sent {
+    /// Whether the test happened: the server refused the message itself or
+    /// took it. A session that did not come that far tested nothing.
+    fn happened(&self) -> bool {
+        self.at_data && (self.code == 250 || (400..600).contains(&self.code))
+    }
+}
+
+/// The last result of each test, as the status database keeps them.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 struct Tests {
     eicar: Sent,
@@ -210,6 +227,7 @@ impl MailTest {
                         reply: said,
                         code,
                         at_data: index == 5,
+                        at: None,
                     };
                     if code != *expected {
                         break;
@@ -244,42 +262,100 @@ impl MailTest {
         }
     }
 
-    /// The result of one test: its state and what to say of it.
+    /// The result of one test that was sent at `at`: its state and what to
+    /// say of it.
     fn judged(context: &Context<'_>, test: Test, sent: &Sent, at: i64) -> (State, String) {
-        if sent.at_data && (400..600).contains(&sent.code) {
+        if !sent.happened() {
+            // Refused before the message, or no session.
+            return (State::Unknown, format!("not tested: {}", sent.reply));
+        }
+        if sent.code != 250 {
             return (State::Ok, format!("refused: {}", sent.reply));
         }
-        if sent.code == 250 && sent.at_data {
-            let unfiltered = match test {
-                Test::Eicar => Some("accepted: no scanner refused the test file"),
-                Test::Macro => Some("accepted: no filter refused the test document"),
-                Test::Gtube => None,
-            };
-            if let Some(said) = unfiltered {
-                return (State::Failed, said.to_owned());
-            }
-            let filed = sent
-                .queue
-                .as_deref()
-                .and_then(|queue| Self::filed(context, queue));
-            return match filed {
-                Some("spam") => (State::Ok, "accepted and filed as spam".to_owned()),
-                Some(_) => (
-                    State::Failed,
-                    "accepted and delivered as ordinary mail".to_owned(),
-                ),
-                None if context.now.as_second() - at <= VERDICT_WITHIN => (
-                    State::Unknown,
-                    "accepted; the event history does not show yet how it was filed".to_owned(),
-                ),
-                None => (
-                    State::Unknown,
-                    "accepted; the event history never showed how it was filed".to_owned(),
-                ),
-            };
+        let unfiltered = match test {
+            Test::Eicar => Some("accepted: no scanner refused the test file"),
+            Test::Macro => Some("accepted: no filter refused the test document"),
+            Test::Gtube => None,
+        };
+        if let Some(said) = unfiltered {
+            return (State::Failed, said.to_owned());
         }
-        // Refused before the message, or no session: the test did not happen.
-        (State::Unknown, format!("not tested: {}", sent.reply))
+        let filed = sent
+            .queue
+            .as_deref()
+            .and_then(|queue| Self::filed(context, queue));
+        match filed {
+            Some("spam") => (State::Ok, "accepted and filed as spam".to_owned()),
+            Some(_) => (
+                State::Failed,
+                "accepted and delivered as ordinary mail".to_owned(),
+            ),
+            None if context.now.as_second().saturating_sub(at) <= VERDICT_WITHIN => (
+                State::Unknown,
+                "accepted; the event history does not show yet how it was filed".to_owned(),
+            ),
+            None => (
+                State::Unknown,
+                "accepted; the event history never showed how it was filed".to_owned(),
+            ),
+        }
+    }
+
+    /// When a test of results kept at `kept` is sent again: after its hours
+    /// if it happened, sooner if it did not.
+    fn due(&self, kept: i64, sent: &Sent) -> i64 {
+        let wait = if sent.happened() {
+            self.every
+        } else {
+            AGAIN.min(self.every)
+        };
+        sent.at.unwrap_or(kept).saturating_add(wait)
+    }
+
+    /// For how long results kept at `kept` are used: until the first test is
+    /// due again, and not at all once the macro test was switched on or off.
+    fn wait(&self, kept: i64, tests: &Tests) -> i64 {
+        if tests.macros.is_some() != self.macros {
+            return 0;
+        }
+        [
+            Some(&tests.eicar),
+            Some(&tests.gtube),
+            tests.macros.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|sent| self.due(kept, sent))
+        .min()
+        .map_or(0, |due| due.saturating_sub(kept))
+    }
+
+    /// The tests that are due, sent now; the others stay as they were kept.
+    fn tested(&self, context: &Context<'_>, before: Option<(i64, Tests)>) -> Tests {
+        let now = context.now.as_second();
+        // Results from before the macro test was switched are not these tests.
+        let before = before.filter(|(_, tests)| tests.macros.is_some() == self.macros);
+        let result = |test: Test, kept: fn(&Tests) -> Option<&Sent>| {
+            let stays = before.as_ref().and_then(|(at, tests)| {
+                let sent = kept(tests)?;
+                let sent_at = sent.at.unwrap_or(*at);
+                (sent_at..self.due(*at, sent)).contains(&now).then(|| Sent {
+                    at: Some(sent_at),
+                    ..sent.clone()
+                })
+            });
+            stays.unwrap_or_else(|| Sent {
+                at: Some(now),
+                ..self.send(context, test)
+            })
+        };
+        Tests {
+            eicar: result(Test::Eicar, |tests| Some(&tests.eicar)),
+            gtube: result(Test::Gtube, |tests| Some(&tests.gtube)),
+            macros: self
+                .macros
+                .then(|| result(Test::Macro, |tests| tests.macros.as_ref())),
+        }
     }
 }
 
@@ -293,35 +369,31 @@ impl Provider for MailTest {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        // Results from before the macro test was switched on or off are not
-        // these tests.
-        let wait = |_, tests: &Tests| {
-            if tests.macros.is_some() == self.macros {
-                self.every
-            } else {
-                0
-            }
-        };
-        let kept = cached(context, MEMORY, wait, |_| Tests {
-            eicar: self.send(context, Test::Eicar),
-            gtube: self.send(context, Test::Gtube),
-            macros: self.macros.then(|| self.send(context, Test::Macro)),
-        });
+        let kept = cached(
+            context,
+            MEMORY,
+            |at, tests: &Tests| self.wait(at, tests),
+            |before| self.tested(context, before),
+        );
         let tests = &kept.answer;
         let mut sent = vec![(Test::Eicar, &tests.eicar), (Test::Gtube, &tests.gtube)];
         sent.extend(tests.macros.as_ref().map(|sent| (Test::Macro, sent)));
-        let results: Vec<(Test, (State, String))> = sent
+        // Each test with when it was sent and what became of it.
+        let results: Vec<(Test, i64, (State, String))> = sent
             .into_iter()
-            .map(|(test, sent)| (test, Self::judged(context, test, sent, kept.at)))
+            .map(|(test, sent)| {
+                let at = sent.at.unwrap_or(kept.at);
+                (test, at, Self::judged(context, test, sent, at))
+            })
             .collect();
         let state = if results
             .iter()
-            .any(|(_, (state, _))| *state == State::Failed)
+            .any(|(_, _, (state, _))| *state == State::Failed)
         {
             State::Failed
         } else if results
             .iter()
-            .any(|(_, (state, _))| *state == State::Unknown)
+            .any(|(_, _, (state, _))| *state == State::Unknown)
         {
             State::Unknown
         } else {
@@ -329,10 +401,10 @@ impl Provider for MailTest {
         };
         let findings: Vec<String> = results
             .iter()
-            .filter(|(_, (state, _))| *state != State::Ok)
-            .map(|(test, (_, said))| format!("{}: {said}.", test.label()))
+            .filter(|(_, _, (state, _))| *state != State::Ok)
+            .map(|(test, _, (_, said))| format!("{}: {said}.", test.label()))
             .collect();
-        let sent = kept.asked();
+        let stated = |at: i64| time::Timestamp::from_second(at).ok().map(time::isoformat);
         let column = |label: &str, format: Format| Column {
             label: label.to_owned(),
             format,
@@ -348,8 +420,9 @@ impl Provider for MailTest {
             format!("SMTP to {}:{}", self.host, self.port),
         )?
         .with_scope(format!(
-            "Garrison handed the test messages to the local SMTP listener without \
-             signing in, addressed to {}; the next test follows {} hours after this one.",
+            "Garrison handed the test messages to the local SMTP listener without signing in, \
+             addressed to {}. Each test is sent again {} hours after it was sent; one that did \
+             not happen is tried again after an hour.",
             self.recipient,
             self.every / 3600
         ))
@@ -361,11 +434,14 @@ impl Provider for MailTest {
             ],
             rows: results
                 .iter()
-                .map(|(test, (_, said))| vec![json!(test.label()), json!(sent), json!(said)])
+                .map(|(test, at, (_, said))| {
+                    vec![json!(test.label()), json!(stated(*at)), json!(said)]
+                })
                 .collect(),
         })
         .with_findings(findings);
-        // The card is as old as the tests it reports.
+        // The card is as old as the last session, and stale once the next
+        // test is overdue.
         Ok(Report::of(kept.dated(observation)))
     }
 }
