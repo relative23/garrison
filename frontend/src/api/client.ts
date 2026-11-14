@@ -43,11 +43,15 @@ export class ApiError extends Error {
 
 let csrfToken = "";
 let onUnauthorized: () => void = () => undefined;
+let onRefused: () => void = () => undefined;
 
-/** The CSRF token comes from /api/session; every write sends it back. */
-export function configure(options: { csrf: string; onUnauthorized: () => void }): void {
+/** The CSRF token comes from /api/session; every write sends it back.
+ * `onRefused` hears of a write the server refused (403): its token or rights
+ * may belong to a session that a sign-in in another tab has replaced. */
+export function configure(options: { csrf: string; onUnauthorized: () => void; onRefused: () => void }): void {
   csrfToken = options.csrf;
   onUnauthorized = options.onUnauthorized;
+  onRefused = options.onRefused;
 }
 
 type Query = Record<string, string | number | undefined | null>;
@@ -87,6 +91,7 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
     // empty notice.
     if (!detail) detail = i18n.t("common.answeredStatus", { status: response.status });
     if (response.status === 401) onUnauthorized();
+    if (response.status === 403 && write) onRefused();
     throw new ApiError(response.status, detail, response.headers.get("x-request-id"));
   }
   return (await response.json()) as T;

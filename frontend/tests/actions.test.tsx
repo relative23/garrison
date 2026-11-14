@@ -20,7 +20,7 @@ function confirmWith(phrase: string): HTMLButtonElement {
 
 const dialogOpen = () => document.querySelector("dialog")?.hasAttribute("open");
 
-beforeEach(() => configure({ csrf: "csrf-token", onUnauthorized: () => undefined }));
+beforeEach(() => configure({ csrf: "csrf-token", onUnauthorized: () => undefined, onRefused: () => undefined }));
 
 describe("maintenance actions", () => {
   it("start only after the exact confirmation phrase", async () => {

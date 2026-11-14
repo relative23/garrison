@@ -53,6 +53,14 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A tab follows a sign-in made in another one.** Every tab shares the
+  browser's session cookie, but each read its session only once: after a
+  sign-in in a second tab the first went on naming the account it had
+  started with while it worked with the new session, and every change it
+  saved was refused with "Origin or CSRF validation failed". A tab now reads
+  the session again whenever it is shown and when a change it saves is
+  refused: for another session it shows that session's account and rights,
+  and after a sign-out elsewhere the sign-in page.
 - **Settings are saved one at a time.** Two quick clicks of the header's
   theme button sent two saves at once: the first answer took the look back
   to the first click's theme while the second was under way, and the server

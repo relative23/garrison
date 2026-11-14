@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 
 import { coverage, metrics, observation, session, status } from "./support/fixtures";
 import { openApp } from "./support/render";
@@ -200,6 +200,69 @@ describe("sign-out", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeTruthy();
     await act(async () => vi.advanceTimersByTimeAsync(60_000));
     expect(screen.getByText(/Your session has ended/)).toBeTruthy();
+  });
+});
+
+describe("a sign-in or sign-out in another tab", () => {
+  /** This tab is shown again after another one was in front. */
+  function shown() {
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+  }
+  const other = { body: { session: session({ email: "other@example.test", csrf: "csrf-other" }) } };
+
+  it("is taken over when this tab is shown again: its account and its token", async () => {
+    const server = serve({ ...signedIn(), "PUT preferences": (call) => ({ body: call.body }) });
+    openApp("/admin/account");
+    expect(await screen.findByText("admin@example.test")).toBeTruthy();
+    // The browser's cookie now belongs to the session the other tab made.
+    server.answer("GET session", other);
+    shown();
+    expect(await screen.findByText("other@example.test")).toBeTruthy();
+    expect(screen.queryByText("admin@example.test")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Use the dark theme" }));
+    await screen.findByRole("button", { name: "Use the light theme" });
+    expect(server.requests("PUT preferences")[0]?.headers.get("x-csrf-token")).toBe("csrf-other");
+  });
+
+  it("is taken over when a write is refused, and the next write carries its token", async () => {
+    const server = serve({
+      ...signedIn(),
+      "PUT preferences": (call) =>
+        call.headers.get("x-csrf-token") === "csrf-other"
+          ? { body: call.body }
+          : { status: 403, body: { detail: "Origin or CSRF validation failed" } },
+    });
+    openApp("/admin/preferences");
+    await screen.findByRole("radio", { name: "Dark" });
+    server.answer("GET session", other);
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(server.requests("GET session")).toHaveLength(2));
+    fireEvent.click(await screen.findByRole("button", { name: "Save settings" }));
+    expect(await screen.findByText("Settings saved.")).toBeTruthy();
+    expect(server.requests("PUT preferences").map((call) => call.headers.get("x-csrf-token"))).toEqual(["csrf-token", "csrf-other"]);
+  });
+
+  it("shows the sign-in page when the other tab signed out", async () => {
+    const server = serve(signedIn());
+    openApp("/admin/account");
+    expect(await screen.findByText("admin@example.test")).toBeTruthy();
+    server.answer("GET session", { body: { session: null } });
+    shown();
+    expect(await screen.findByRole("link", { name: "Sign in with Stalwart" })).toBeTruthy();
+  });
+
+  it("is not looked for at the cost of the page when the session cannot be read again", async () => {
+    const server = serve(signedIn());
+    openApp("/admin/account");
+    expect(await screen.findByText("admin@example.test")).toBeTruthy();
+    server.answer("GET session", { status: 503, body: { detail: "The broker is not reachable" } });
+    shown();
+    await waitFor(() => expect(server.requests("GET session")).toHaveLength(2));
+    expect(screen.getByText("admin@example.test")).toBeTruthy();
+    expect(screen.queryByText("The broker is not reachable")).toBeNull();
   });
 });
 

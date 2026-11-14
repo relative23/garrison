@@ -7,7 +7,7 @@ describe("API client", () => {
       "GET status": { body: {} },
       "PUT preferences": { body: { theme: "dark", hiddenModules: [], showSwitch: true } },
     });
-    configure({ csrf: "token-1", onUnauthorized: () => undefined });
+    configure({ csrf: "token-1", onUnauthorized: () => undefined, onRefused: () => undefined });
     await api.status();
     await api.savePreferences({ theme: "dark", hiddenModules: [], showSwitch: true });
     const [read, write] = server.calls;
@@ -51,7 +51,7 @@ describe("API client", () => {
   it("signs out once when the server ends the session", async () => {
     serve({ "GET status": { status: 401, body: { detail: "Sign in again" } } });
     const signedOut = vi.fn();
-    configure({ csrf: "", onUnauthorized: signedOut });
+    configure({ csrf: "", onUnauthorized: signedOut, onRefused: () => undefined });
     await expect(api.status()).rejects.toMatchObject({ status: 401 });
     expect(signedOut).toHaveBeenCalledTimes(1);
   });
@@ -59,8 +59,19 @@ describe("API client", () => {
   it("does not sign out on other refusals", async () => {
     serve({ "GET actions": { status: 403, body: { detail: "Not permitted" } } });
     const signedOut = vi.fn();
-    configure({ csrf: "", onUnauthorized: signedOut });
+    const refused = vi.fn();
+    configure({ csrf: "", onUnauthorized: signedOut, onRefused: refused });
     await expect(api.actions()).rejects.toMatchObject({ status: 403, message: "Not permitted" });
     expect(signedOut).not.toHaveBeenCalled();
+    // A read needs no token: its refusal says nothing about the session's.
+    expect(refused).not.toHaveBeenCalled();
+  });
+
+  it("says when a write is refused, whose token may be another session's", async () => {
+    serve({ "PUT preferences": { status: 403, body: { detail: "Origin or CSRF validation failed" } } });
+    const refused = vi.fn();
+    configure({ csrf: "old", onUnauthorized: () => undefined, onRefused: refused });
+    await expect(api.savePreferences({ theme: "dark", hiddenModules: [], showSwitch: true })).rejects.toMatchObject({ status: 403 });
+    expect(refused).toHaveBeenCalledTimes(1);
   });
 });

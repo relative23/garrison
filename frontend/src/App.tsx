@@ -88,11 +88,24 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
   const signOut = useCallback(() => setEnded(true), []);
   const session = useResource((signal) => api.session(signal), [], 0, initial);
   const signedIn = session.data?.session;
+  const readAgain = session.reload;
 
-  // Before the views' first requests, which run as effects after this one.
+  // Before the views' first requests, which run as effects after this one. A
+  // refused write reads the session again.
   useLayoutEffect(() => {
-    if (signedIn) configure({ csrf: signedIn.csrf, onUnauthorized: signOut });
-  }, [signedIn, signOut]);
+    if (signedIn) configure({ csrf: signedIn.csrf, onUnauthorized: signOut, onRefused: readAgain });
+  }, [signedIn, signOut, readAgain]);
+
+  // The browser's cookie is the same in every tab: a sign-in or sign-out in
+  // another one changes the session this tab works with, its token and maybe
+  // its account. The session is read again whenever this tab is shown.
+  useEffect(() => {
+    const shown = () => {
+      if (document.visibilityState === "visible") readAgain();
+    };
+    document.addEventListener("visibilitychange", shown);
+    return () => document.removeEventListener("visibilitychange", shown);
+  }, [readAgain]);
 
   useEffect(() => {
     if (!signedIn) applyTheme("system");
@@ -100,7 +113,8 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
 
   let content;
   if (ended) content = <SignIn expired />;
-  else if (session.error)
+  // A session read again that fails leaves the page as it is.
+  else if (session.error && !session.data)
     content = (
       <Centered>
         <ErrorState error={session.error} retry={session.reload} />
@@ -115,6 +129,8 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
       </Centered>
     );
   else if (!signedIn) content = <SignIn />;
-  else content = <SignedIn initial={signedIn} onSignedOut={signOut} />;
+  // Another session, with its own token, gets a page of its own; the same
+  // session read again keeps the page as it is.
+  else content = <SignedIn key={signedIn.csrf} initial={signedIn} onSignedOut={signOut} />;
   return content;
 }
