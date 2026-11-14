@@ -41,6 +41,21 @@ describe("event history", () => {
     ]);
   });
 
+  it("shows nothing of the previous filter when the new filter's request fails", async () => {
+    const server = serve({ "GET coverage": { body: coverage() }, "GET events": pages });
+    renderView(<Logs />);
+    await screen.findByText("Newest event");
+    expect(screen.getByRole("button", { name: "Older" })).toHaveProperty("disabled", false);
+    server.answer("GET events", { status: 503, body: { detail: "The event history is busy." } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Category" }), { target: { value: "auth" } });
+    expect(await screen.findByText("The event history is busy.")).toBeTruthy();
+    // Neither the other filter's rows nor its cursor to older pages.
+    expect(screen.queryByText("Newest event")).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("button", { name: "Older" })).toHaveProperty("disabled", true);
+    expect(screen.getByText("Showing 0 entries, newest first")).toBeTruthy();
+  });
+
   it("shows recorded fields and links to the delivery and SMTP session", async () => {
     const smtp = event({
       category: "smtp",

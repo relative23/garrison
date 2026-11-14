@@ -40,6 +40,12 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A list no longer shows another filter's rows after a failed request.**
+  When the request for a new search, category or page failed, the event
+  history, Deliveries, Sessions, Attacks & bans and Delivery problems kept
+  the previous filter's rows under the error, with its link to older pages.
+  They now show the error alone; a failed refresh of the same filter still
+  keeps its rows.
 - **The macro filter answers in time whatever a message holds.** A crafted
   attachment could keep the filter's one scan busy for seconds to minutes (a
   megabyte of zip directory headers took eight seconds), and all other mail

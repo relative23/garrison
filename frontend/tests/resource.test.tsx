@@ -57,6 +57,19 @@ describe("useResource", () => {
     expect(shown()).toBe("settled / first / offline");
   });
 
+  it("shows no data of another filter when the new filter's request fails", async () => {
+    const { load, requests } = controlled();
+    const view = render(<Probe filter="a" load={load} />);
+    await act(async () => requests[0]?.resolve("a-data"));
+    view.rerender(<Probe filter="b" load={load} />);
+    await act(async () => requests[1]?.reject(new Error("offline")));
+    expect(shown()).toBe("settled / no data / offline");
+    // The failed filter's own reload still has nothing to keep.
+    fireEvent.click(screen.getByRole("button", { name: "reload" }));
+    await act(async () => requests[2]?.reject(new Error("still offline")));
+    expect(shown()).toBe("settled / no data / still offline");
+  });
+
   it("turns a rejection that is not an Error into one", async () => {
     const { load, requests } = controlled();
     render(<Probe filter="a" load={load} />);

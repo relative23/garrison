@@ -54,12 +54,14 @@ export function useResource<T>(
       (reason: unknown) => {
         if (controller.signal.aborted) return;
         const error = reason instanceof Error ? reason : new Error(String(reason));
-        // Keep the previous data visible while showing the error.
-        setSettled((previous) => ({ request, data: previous.data, error }));
+        // Keep the data visible while showing the error, but only data that
+        // answered these same dependencies: after a failed request for a new
+        // filter, the previous filter's rows are not this filter's.
+        setSettled((previous) => ({ request, data: previous.request.startsWith(`${key}#`) ? previous.data : null, error }));
       },
     );
     return () => controller.abort();
-  }, [request]);
+  }, [key, request]);
 
   useEffect(() => {
     if (!refreshSeconds) return undefined;
