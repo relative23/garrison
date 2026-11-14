@@ -1,9 +1,12 @@
 // What a user does, in a real Chrome against the preview
 // (`cargo run -p garrison-web --example preview`): signing in, every page,
-// moving through the menu, searching the event history, saving settings,
-// running a maintenance action and signing out. Along the way nothing may
-// write an error to the console, no request to the preview may fail, and axe
-// may find nothing on any page (WCAG 2.2 AA, light and dark).
+// moving through the menu, also on a phone, searching the event history,
+// going Back, the page search on a phone, saving settings, running a
+// maintenance action and signing out. Along the way nothing may write an
+// error to the console, no request to the preview may fail, and axe may find
+// nothing on any page (WCAG 2.2 AA, light and dark, as the system switches
+// the page between them); a page as the build drew it starts in the system's
+// theme.
 //
 // It is a check, not a measurement: it exits with 1 and lists what failed.
 // `measure.mjs` measures the same pages with Lighthouse, by hand.
@@ -252,4 +255,4 @@ if (failures.length > 0) {
   console.log(failures.join("\n"));
   process.exit(1);
 }
-console.log(`Passed: sign-in, ${PAGES.length} pages, menu, search, settings, maintenance and sign-out.`);
+console.log(`Passed: sign-in, ${PAGES.length} pages, menu, search, phone, back, first paint, settings, maintenance and sign-out.`);
