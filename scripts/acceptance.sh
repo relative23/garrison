@@ -139,9 +139,34 @@ if [ -n "$refused" ]; then
 fi
 rm -f "$again"
 services "upgraded again"
+
+step "Restoring a backup of the state"
+installer '/opt/garrison/current/bin/garrison backup --to /root/kept-state' >/dev/null
+kept=$(events)
+# The checks store another batch: the history moves on after the backup.
+services "after the backup"
+check "more was recorded since the backup" \
+    "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -gt $kept"
+answer=$(mktemp)
+if installer '/opt/garrison/current/bin/garrison restore --from /root/no-backup' >"$answer" 2>&1 ||
+    ! grep -q "nothing was changed" "$answer"; then
+    cat "$answer"
+    echo "FAIL  a directory that is no backup is refused, and nothing changes"
+    exit 1
+fi
+rm -f "$answer"
+echo "ok    a directory that is no backup is refused, and nothing changes"
+installer '/opt/garrison/current/bin/garrison restore --from /root/kept-state'
+check "the events are those of the backup" \
+    "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -eq $kept"
+check "the state from before the restore was kept" 'ls -d /var/backups/garrison/pre-restore-* >/dev/null'
+check "the databases belong to their services again" \
+    'test "$(stat -c %U /var/lib/garrison/ingest/events.sqlite)" = garrison-ingest &&
+        test "$(stat -c %U /var/lib/garrison/collector/status.sqlite)" = garrison-collector'
+services "after the restore"
 installer '/opt/garrison/current/bin/garrison install --rollback --restore-state'
 # Every batch stored after that state must be gone again.
 check "the events are those from before the upgrade" "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -eq $expected"
 services "restored"
 
-step "Accepted: install, upgrade, rollback and state restore all passed"
+step "Accepted: install, upgrade, a restored backup, rollback and state restore all passed"

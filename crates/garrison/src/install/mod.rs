@@ -5,6 +5,9 @@
 //! sudo /opt/garrison/current/bin/garrison install --rollback [--restore-state]
 //! ```
 //!
+//! `garrison restore --from DIR` puts back what `garrison backup` wrote
+//! (`restore.rs`).
+//!
 //! Every release lives in `/opt/garrison/releases/<version>`.
 //! /opt/garrison/current and .../previous are symlinks; switching them is
 //! the upgrade and the rollback. Before an upgrade the running state is
@@ -17,6 +20,7 @@ mod files;
 mod housekeeping;
 mod milter;
 mod requirements;
+mod restore;
 mod rollback;
 mod selinux;
 mod settle;
@@ -35,6 +39,7 @@ use garrison_core::time;
 use crate::{say, units};
 use files::{Step, announce, copy_tree, exchange, io, lock, must, place, run, switch};
 use requirements::{preflight, room, size, state_size};
+pub(crate) use restore::run_restore;
 use system::{install_system_files, protect_policy, unit_file};
 pub(crate) use uninstall::run_uninstall;
 

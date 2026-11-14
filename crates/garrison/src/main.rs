@@ -78,6 +78,12 @@ enum Command {
         #[arg(long)]
         signature: Option<PathBuf>,
     },
+    /// Put back the state that `garrison backup` wrote (root).
+    Restore {
+        /// A directory written by `backup`.
+        #[arg(long)]
+        from: PathBuf,
+    },
     /// One look at whether the collector still runs (systemd timer).
     Watch,
     /// Ask restic or borg about its repository and write a report for the collector (root).
@@ -373,6 +379,7 @@ fn main() -> ExitCode {
         Command::Upgrade { archive, signature } => upgrade::run(&archive, signature.as_deref()),
         Command::Setup => wizard::run(&arguments.config),
         Command::Uninstall { purge, dry_run } => install::run_uninstall(purge, dry_run),
+        Command::Restore { from } => install::run_restore(&from),
         // The watch also looks where the configuration no longer loads.
         Command::Watch => watch::run(&arguments.config),
         Command::BackupCheck {

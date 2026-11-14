@@ -112,6 +112,7 @@ fn installer_backups(backups: &Path) -> Vec<PathBuf> {
                     name == super::LAST
                         || name.starts_with("pre-upgrade-")
                         || name.starts_with("pre-reinstall-")
+                        || name.starts_with("pre-restore-")
                 })
         })
         .collect();

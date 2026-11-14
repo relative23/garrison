@@ -77,7 +77,8 @@ fn old_backups(backups: &Path, last: &Path) -> Vec<PathBuf> {
         let name = path.file_name()?.to_str()?;
         let stamp = name
             .strip_prefix("pre-upgrade-")
-            .or_else(|| name.strip_prefix("pre-reinstall-"))?;
+            .or_else(|| name.strip_prefix("pre-reinstall-"))
+            .or_else(|| name.strip_prefix("pre-restore-"))?;
         let digits = stamp.chars().filter(char::is_ascii_digit).count();
         (stamp.len() == 15 && digits == 14 && stamp.as_bytes()[8] == b'T').then(|| stamp.to_owned())
     };

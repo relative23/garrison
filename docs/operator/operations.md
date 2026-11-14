@@ -68,6 +68,28 @@ credentials. To verify a restored copy:
 sudo garrison self-check --state /path/to/restored/latest
 ```
 
+To put such a copy back, on the host it came from or on a new one where
+Garrison is installed and configured:
+
+```sh
+sudo garrison restore --from /path/to/restored/latest
+```
+
+Before anything stops, the command checks that the directory is a backup
+(`backup.json`), that the running release reads it (a backup names the
+release that wrote it, and no release reads what a newer one wrote) and that
+its copies pass `self-check --state`. It then copies the state as it is to
+`/var/backups/garrison/pre-restore-*`, stops the services, puts every
+database and the access policy back with their owners and modes, removes a
+database that did not exist when the backup was made, and starts the
+services. What was recorded since the backup is in the `pre-restore-*` copy
+and no longer in Garrison; restore that copy to take the restore back.
+
+A backup holds neither sessions nor credentials. After a restore everyone
+signs in again. On a new host, restore `/etc/garrison` from your host backup
+first; where `/etc/garrison/credentials` is lost, `garrison stalwart setup`
+makes new keys in Stalwart and here, before or after the restore.
+
 Your own backup of the mail data is watched in another way: where it is a
 restic or borg repository, `garrison backup-check` reports its newest
 snapshot, its size, an integrity check and a test restore to the Backups
@@ -137,7 +159,8 @@ free space suffice: the release and a backup as large as the databases must
 fit with room to spare. After a successful installation it keeps the running,
 the previous and one older release, and the three newest of its own backups
 plus the one a rollback restores; it removes the older ones. Backups you write
-with `garrison backup --to` are left alone.
+with `garrison backup --to` are left alone; the `pre-restore-*` copies of a
+restore count among the installer's own.
 
 While one installer runs, a second one is refused. An installer that was
 interrupted, even killed, leaves nothing a later run cannot finish: run it

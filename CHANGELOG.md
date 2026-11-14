@@ -8,6 +8,12 @@ Notable changes for operators and users. The format follows
 
 ### Added
 
+- **`garrison restore --from DIR` puts back a backup.** What `garrison
+  backup` wrote had no way back but by hand. The command checks the backup
+  before anything stops, keeps the state as it is in
+  `/var/backups/garrison/pre-restore-*`, puts every database and the access
+  policy back with the right owner and mode, and starts the services. See
+  [operations](docs/operator/operations.md#backup-and-restore).
 - **`on_incomplete` in `[milter]`: what a message gets that the macro filter
   could not scan completely.** `"tag"`, the default, takes it with the header
   `X-Garrison-Scan: unscanned`; `"defer"` has the sending server bring it
