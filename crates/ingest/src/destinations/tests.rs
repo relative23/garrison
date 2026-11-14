@@ -164,6 +164,18 @@ fn a_message_without_a_recorded_end_waits() {
             {"queueId": "24", "queuedAt": MIDNIGHT + 36_000, "lastEvent": MIDNIGHT + 36_000},
         ])
     );
+    // A message a milter refused has a queue ID and never reached the queue:
+    // it does not wait for a delivery that will never begin.
+    let mut with_refused = events.to_vec();
+    with_refused.push(at(
+        8,
+        "milter.action-reject",
+        "10:30:00",
+        &json!({"queueId": 25, "spanId": 9}),
+    ));
+    let summary = self::summary(&with_refused, MIDNIGHT, MIDNIGHT + 86_399);
+    assert_eq!(summary.totals.waiting, 2);
+    assert_eq!(summary.waiting.len(), 2);
     // A week later Stalwart has long given up on them: they wait no more.
     let later = MIDNIGHT + 8 * 86_400;
     let directory = tempfile::tempdir().unwrap();

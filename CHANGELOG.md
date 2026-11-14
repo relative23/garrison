@@ -53,6 +53,10 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Mail a milter refused no longer counts as waiting.** Delivery problems
+  listed a message that a milter or a hook had refused among the messages
+  waiting for delivery, for seven days. Such a message never reached the
+  queue and is not counted there any more.
 - **An installation under a linked `/opt` keeps its rollback release.**
   Where `/opt` or `/opt/garrison` is a link to another disk, every upgrade
   removed all releases but the newest, the one to roll back to included; a

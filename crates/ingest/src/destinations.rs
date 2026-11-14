@@ -259,8 +259,13 @@ fn waiting(db: &Connection, until: i64) -> Result<(u64, Vec<Waiting>)> {
         .iter()
         .map(|kind| format!("'{}'", kind.as_str()))
         .collect();
+    // A delivery, as the Deliveries page lists it: a message that reached
+    // the queue. One a milter or a hook refused has a queue ID too and will
+    // never be delivered; it does not wait.
     let open = format!(
-        "FROM queues q WHERE q.first_seen>=?1 AND q.first_seen<=?2 AND NOT EXISTS \
+        "FROM queues q WHERE q.first_seen>=?1 AND q.first_seen<=?2 AND EXISTS \
+         (SELECT 1 FROM events r WHERE r.queue_id=q.queue_id \
+          AND r.category IN ('queue','delivery')) AND NOT EXISTS \
          (SELECT 1 FROM events e WHERE e.queue_id=q.queue_id AND e.type IN ({}))",
         finished.join(",")
     );
