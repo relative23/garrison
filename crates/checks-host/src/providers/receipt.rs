@@ -327,12 +327,25 @@ impl Receipt {
     }
 }
 
+/// Two clocks may differ by this many seconds before a date counts as one
+/// from the future.
+const AHEAD: f64 = 300.0;
+
 impl Receipt {
     /// What the receipt's age says against it, where it says anything: no
-    /// date that reads, or one beyond the limit.
+    /// date that reads, one from the future, or one beyond the limit.
     fn by_age(&self, age: Option<f64>) -> Option<(State, String)> {
         match age {
             None => Some((State::Unknown, "The receipt has no valid date.".to_owned())),
+            // A date from the future is no fresh one: a clock is wrong.
+            Some(seconds) if seconds < -AHEAD => Some((
+                State::Warning,
+                format!(
+                    "The receipt is dated {:.0} minutes ahead of this host's clock; one of the \
+                     two clocks is wrong, so its age is not known.",
+                    -seconds / 60.0
+                ),
+            )),
             #[allow(clippy::cast_precision_loss)]
             Some(seconds)
                 if self.max_age_hours > 0 && seconds > (self.max_age_hours * 3600) as f64 =>

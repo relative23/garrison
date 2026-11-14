@@ -199,6 +199,25 @@ fn a_receipt_is_old_only_after_its_maximum_age() {
         "",
     );
     assert_eq!(large.state, State::Ok);
+    // A date from the future is no fresh one: a clock is wrong, and the
+    // receipt's age is not known. A few minutes are two clocks that differ.
+    let ahead = observe(
+        &json!({"date": "2026-10-29T13:00:00Z"}),
+        "max_age_hours = 30",
+    );
+    assert_eq!(ahead.state, State::Warning);
+    assert_eq!(
+        ahead.findings,
+        [
+            "The receipt is dated 60 minutes ahead of this host's clock; one of the two clocks \
+          is wrong, so its age is not known."
+        ]
+    );
+    let near = observe(
+        &json!({"date": "2026-10-29T12:04:00Z"}),
+        "max_age_hours = 30",
+    );
+    assert_eq!((near.state, near.findings.len()), (State::Ok, 0));
     // Without a limit a receipt never grows old, and says that of itself.
     let unlimited = observe(&json!({"date": "2020-01-01T00:00:00Z"}), "");
     assert_eq!(unlimited.state, State::Ok);

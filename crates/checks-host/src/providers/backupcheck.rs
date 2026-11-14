@@ -91,6 +91,50 @@ impl BackupCheck {
     }
 
     /// What a check or a restore that is expected every `days` days says.
+    /// What the times of the newest snapshot and of the report say against
+    /// the repository, where they say anything.
+    fn by_time(
+        &self,
+        context: &Context<'_>,
+        newest: Option<time::Timestamp>,
+        listed: Option<time::Timestamp>,
+        noun: &str,
+    ) -> Option<(State, String)> {
+        let now = context.now.as_second();
+        let limit = self.max_age_hours * HOUR;
+        let Some(newest) = newest else {
+            return Some((State::Failed, format!("The repository holds no {noun}.")));
+        };
+        if now - newest.as_second() > limit {
+            return Some((
+                State::Warning,
+                format!(
+                    "The newest {noun} is older than {} hours.",
+                    self.max_age_hours
+                ),
+            ));
+        }
+        // A time ahead of this host's clock is no fresh one.
+        let from_the_future = ahead(context, newest, &format!("newest {noun}"))
+            .or_else(|| listed.and_then(|listed| ahead(context, listed, "report")));
+        if let Some(finding) = from_the_future {
+            return Some((State::Warning, finding));
+        }
+        // A report that is no longer written says nothing of today.
+        listed
+            .is_none_or(|listed| now - listed.as_second() > limit)
+            .then(|| {
+                (
+                    State::Warning,
+                    format!(
+                        "The report itself is older than {} hours: `garrison backup-check` no \
+                         longer runs.",
+                        self.max_age_hours
+                    ),
+                )
+            })
+    }
+
     fn judged(
         context: &Context<'_>,
         what: &str,
@@ -120,6 +164,23 @@ impl BackupCheck {
             _ => {}
         }
     }
+}
+
+/// Two clocks may differ by this many seconds before a time counts as one
+/// from the future.
+const AHEAD: i64 = 300;
+
+/// What to say of a time that lies ahead of this host's clock: it is no
+/// fresh one, since a clock is wrong, and nothing is known of its age.
+fn ahead(context: &Context<'_>, at: time::Timestamp, what: &str) -> Option<String> {
+    let seconds = at.as_second() - context.now.as_second();
+    (seconds > AHEAD).then(|| {
+        format!(
+            "The {what} is dated {} minutes ahead of this host's clock; one of the two clocks \
+             is wrong, so its age is not known.",
+            seconds / 60
+        )
+    })
 }
 
 /// The card's fields: the repository, its snapshots and the two kinds of run.
@@ -225,33 +286,9 @@ impl Provider for BackupCheck {
             (Some(snapshots), None) => {
                 let newest = snapshots.newest.as_deref().and_then(time::parse);
                 let listed = time::parse(&snapshots.at);
-                match newest {
-                    None => {
-                        state = State::Failed;
-                        findings.push(format!("The repository holds no {noun}."));
-                    }
-                    Some(newest)
-                        if context.now.as_second() - newest.as_second()
-                            > self.max_age_hours * HOUR =>
-                    {
-                        state = State::Warning;
-                        findings.push(format!(
-                            "The newest {noun} is older than {} hours.",
-                            self.max_age_hours
-                        ));
-                    }
-                    Some(_) => {}
-                }
-                // A report that is no longer written says nothing of today.
-                if listed.is_none_or(|listed| {
-                    context.now.as_second() - listed.as_second() > self.max_age_hours * HOUR
-                }) && state == State::Ok
-                {
-                    state = State::Warning;
-                    findings.push(format!(
-                        "The report itself is older than {} hours: `garrison backup-check` no longer runs.",
-                        self.max_age_hours
-                    ));
+                if let Some((by_time, finding)) = self.by_time(context, newest, listed, noun) {
+                    state = by_time;
+                    findings.push(finding);
                 }
             }
         }

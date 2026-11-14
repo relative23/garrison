@@ -197,3 +197,34 @@ fn options_are_checked() {
         );
     }
 }
+
+#[test]
+fn a_snapshot_or_a_report_from_the_future_is_not_a_fresh_one() {
+    // A clock that is wrong, here or where the report was written: such a
+    // time says nothing of how old the backup is.
+    let mut ahead = report();
+    ahead["snapshots"]["newest"] = json!(at(-3600));
+    let observation = observed(Some(&ahead), 0o644, "");
+    assert_eq!(observation.state, State::Warning);
+    assert_eq!(
+        observation.findings,
+        [
+            "The newest snapshot is dated 60 minutes ahead of this host's clock; one of the two \
+          clocks is wrong, so its age is not known."
+        ]
+    );
+    let mut listed = report();
+    listed["snapshots"]["at"] = json!(at(-900));
+    let observation = observed(Some(&listed), 0o644, "");
+    assert_eq!(observation.state, State::Warning);
+    assert!(
+        observation.findings[0].starts_with("The report is dated 15 minutes ahead"),
+        "{:?}",
+        observation.findings
+    );
+    // A few minutes are two clocks that differ a little.
+    let mut near = report();
+    near["snapshots"]["newest"] = json!(at(-240));
+    near["snapshots"]["at"] = json!(at(-240));
+    assert_eq!(observed(Some(&near), 0o644, "").state, State::Ok);
+}

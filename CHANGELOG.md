@@ -53,6 +53,10 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A date from the future is no fresh date.** A receipt, a backup's newest
+  snapshot or a backup report dated ahead of the host's clock counted as
+  just written, however long that state lasted. More than five minutes
+  ahead is now a warning that says a clock is wrong.
 - **A receipt without an age limit says so.** Without `max_age_hours` the
   receipt of a job that stopped running long ago stayed in order with
   nothing to show it. Its card now carries a finding that no limit is set;
