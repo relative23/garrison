@@ -8,7 +8,7 @@ use std::path::Path;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use garrison_core::config::{Config, MailSettings};
+use garrison_core::config::{Config, Endpoint, MailSettings};
 use garrison_core::credentials::Credentials;
 use garrison_testing::http::{answer, serve};
 
@@ -20,7 +20,7 @@ const TOKEN: &str = "tk_abcdefghijklmnopqrstuvwxyz123";
 /// A configuration in `directory` that names an ntfy topic at `url`.
 fn with_topic(directory: &Path, url: &str) -> (Config, Credentials) {
     let mut config = crate::testing::config(directory);
-    config.notifications.ntfy_url = Some(url.to_owned());
+    config.notifications.ntfy_url = Some(Endpoint::Written(url.to_owned()));
     let credentials = Credentials::new(&config.credentials_directory);
     fs::create_dir_all(credentials.directory()).unwrap();
     (config, credentials)
@@ -35,7 +35,7 @@ fn secret(credentials: &Credentials, name: &str, data: &str, mode: u32) {
 }
 
 fn channels(config: &Config, credentials: &Credentials) -> Channels {
-    Channels::of(config, Secrets::read(credentials, &config.notifications))
+    Channels::of(config, Secrets::read(credentials, &config.notifications)).located(credentials)
 }
 
 #[test]

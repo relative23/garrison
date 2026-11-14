@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::credentials::SecretSource;
 use crate::modules::ModuleId;
 
+pub use notify::{ntfy_address, webhook_address};
 pub use parse::parse;
 pub use values::{is_action_id, is_confirmation, is_unit_name, is_user_name};
 
@@ -65,16 +66,26 @@ pub struct CollectorConfig {
     pub providers: Vec<toml::Table>,
 }
 
+/// Where a channel's address comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Endpoint {
+    /// Written in this file, which every user of the host may read.
+    Written(String),
+    /// Read from a protected file, for an address that is itself a secret:
+    /// an ntfy topic that takes no token, a webhook with its key in the path.
+    File(SecretSource),
+}
+
 /// Where the collector tells an operator that a check changed its state: any
 /// of an ntfy topic, a webhook and a mailbox.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notifications {
     /// The address of an ntfy topic, `https://host/topic`.
-    pub ntfy_url: Option<String>,
+    pub ntfy_url: Option<Endpoint>,
     /// The access token for that topic; an empty file means the topic needs none.
     pub token: SecretSource,
     /// An address every message is posted to as JSON.
-    pub webhook_url: Option<String>,
+    pub webhook_url: Option<Endpoint>,
     /// A token that goes with it as `Authorization: Bearer`; an empty file means none.
     pub webhook_token: SecretSource,
     pub mail: Option<MailSettings>,

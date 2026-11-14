@@ -26,3 +26,22 @@ to the playbook. Changing `garrison_version` upgrades; the installer backs up
 and switches back on failure as always. The role prints `garrison doctor`'s
 report at the end and fails only when doctor cannot run. The nginx server
 block stays yours: `garrison nginx` prints one for your names.
+
+Every user of the host may read `/etc/garrison/garrison.toml`. A
+notification address that is a secret itself, such as an ntfy topic that
+takes no token, goes into a credential file instead, and
+`garrison_extra_config` names that file (`ntfy_url = "credential:ntfy-url"`
+under `[notifications]`, see
+[configuration](../../docs/operator/configuration.md#an-address-that-is-a-secret)):
+
+```yaml
+  post_tasks:
+    - name: The ntfy topic's address, kept out of garrison.toml
+      ansible.builtin.copy:
+        content: "{{ vault_ntfy_url }}\n"
+        dest: /etc/garrison/credentials/ntfy-url
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+```

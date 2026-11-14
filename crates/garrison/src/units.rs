@@ -29,6 +29,17 @@ pub(crate) const RUNNING: [&str; 5] = [WEB, INGEST, BROKER_SOCKET, COLLECT_TIMER
 pub(crate) const STATE: &str = "/var/lib/garrison";
 /// Where the units load every credential from (`LoadCredential=`).
 pub(crate) const CREDENTIALS: &str = "/etc/garrison/credentials";
+/// The files of the notification channels that the collector and the watch
+/// load: the tokens, the mail password and the addresses kept as secrets.
+/// systemd starts no unit whose credential is missing, so the installer
+/// keeps an empty file for each, which means: none.
+pub(crate) const NOTIFICATION_FILES: [&str; 5] = [
+    "ntfy-token",
+    "notify-webhook-token",
+    "notify-mail-password",
+    "ntfy-url",
+    "notify-webhook-url",
+];
 /// Where `garrison-broker.socket` listens; systemd hands it to the broker.
 pub(crate) const BROKER_PATH: &str = "/run/garrison/broker.sock";
 
@@ -104,5 +115,26 @@ mod tests {
             assert_eq!(source, format!("{CREDENTIALS}/{name}"), "{unit}");
         }
         assert_eq!(values("ListenStream="), [(BROKER_SOCKET, BROKER_PATH)]);
+    }
+
+    /// The installer keeps a file for every notification credential the
+    /// collector and the watch load, and they load every one it keeps: both
+    /// send on the same channels.
+    #[test]
+    fn the_collector_and_the_watch_load_every_notification_file() {
+        let loaded = |unit: &str| -> Vec<&str> {
+            values("LoadCredential=")
+                .into_iter()
+                .filter(|(name, _)| *name == unit)
+                .filter_map(|(_, credential)| credential.split_once(':').map(|(name, _)| name))
+                .collect()
+        };
+        for unit in [COLLECT, WATCH] {
+            for name in NOTIFICATION_FILES {
+                assert!(loaded(unit).contains(&name), "{unit} does not load {name}");
+            }
+        }
+        let watch = loaded(WATCH);
+        assert_eq!(watch.len(), NOTIFICATION_FILES.len(), "{watch:?}");
     }
 }

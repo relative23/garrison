@@ -124,6 +124,10 @@ pub enum Form {
     /// bytes, spaces inside it included, without control characters (a NUL
     /// would end it inside the sign-in).
     Password,
+    /// An address that is itself a secret, such as an ntfy topic's: at most
+    /// 8192 printable ASCII characters without spaces, as a request line
+    /// carries it.
+    Address,
 }
 
 /// Read a single-line secret that may be absent: an empty file holds none.
@@ -144,6 +148,7 @@ pub fn read_optional_secret(
                 && text.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
         }
         Form::Password => text.len() <= 8192 && !text.chars().any(char::is_control),
+        Form::Address => text.len() <= 8192 && text.bytes().all(|byte| byte.is_ascii_graphic()),
     };
     if fits {
         Ok(Some(text.to_owned()))

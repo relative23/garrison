@@ -293,8 +293,13 @@ ntfy_url = "https://ntfy.example.org/mailserver"
 
 ntfy does not have to run on this host: any topic you can publish to will do,
 on a server of your own or on ntfy.sh. On ntfy.sh anyone who knows a topic's
-name can read it, so choose a name nobody can guess. Then send a test
-message; it says how each channel took it:
+name can read it, so choose a name nobody can guess. Every user of this host
+may read `garrison.toml`, so keep the address of such a topic out of it:
+write the address into `/etc/garrison/credentials/ntfy-url` and set
+`ntfy_url = "credential:ntfy-url"` instead
+([configuration](configuration.md#an-address-that-is-a-secret)). A topic
+that takes an access token needs neither. Then send a test message; it says
+how each channel took it:
 
 ```sh
 sudo garrison notify-test

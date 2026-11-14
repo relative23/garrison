@@ -71,10 +71,16 @@ impl Host {
                 ntfy: Secret::Text("token-1".to_owned()),
                 ..Secrets::default()
             },
+            credentials: self.credentials(),
             now: now(),
             roots: Arc::new(RootCertStore::empty()),
         }
         .look()
+    }
+
+    /// The credentials directory, which the watch's unit would load.
+    fn credentials(&self) -> Credentials {
+        Credentials::new(self.directory.path().join("credentials"))
     }
 }
 
@@ -84,6 +90,7 @@ fn channel(server: &str) -> Channels {
         ntfy: Some(Address {
             url: format!("{server}/mailserver"),
             token: Secret::Text("token-1".to_owned()),
+            ..Address::default()
         }),
         ..Channels::default()
     }
@@ -148,6 +155,7 @@ fn a_run_within_the_limit_and_a_host_without_runs_are_left_alone() {
         marker: &directory.path().join("collector-stopped"),
         configured: Err(()),
         secrets: Secrets::default(),
+        credentials: Credentials::new(directory.path()),
         now: now(),
         roots: Arc::new(RootCertStore::empty()),
     };
@@ -230,4 +238,48 @@ fn a_run_leaves_the_channel_and_takes_it_back() {
         recorded(&host.database()).unwrap().channels,
         Channels::default()
     );
+}
+
+/// Where the configuration does not load, an address kept in a file is read
+/// from that file again: the status database holds only its name.
+#[test]
+fn a_kept_address_is_read_again_from_its_file_without_a_configuration() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use garrison_core::config::Endpoint;
+    use garrison_core::credentials::SecretSource;
+
+    let kept = Channels {
+        host: "garrison.example.org".to_owned(),
+        ntfy: Some(Address::configured(&Endpoint::File(
+            SecretSource::Credential("ntfy-url".into()),
+        ))),
+        ..Channels::default()
+    };
+    let host = Host::new(Some(3600), Some(&kept));
+    let left = recorded(&host.database()).unwrap().channels;
+    assert_eq!(left.ntfy.as_ref().unwrap().url, "");
+    // Nothing listens on this port, so the error shows where the watch sent.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let file = host.credentials().directory().join("ntfy-url");
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(&file, format!("https://127.0.0.1:{port}/topic\n")).unwrap();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+    let error = host.look(Err(())).unwrap_err();
+    assert!(
+        error.starts_with(&format!("ntfy: 127.0.0.1:{port}: ")),
+        "{error}"
+    );
+    // Without the file it says why, and tells nobody.
+    fs::remove_file(&file).unwrap();
+    let error = host.look(Err(())).unwrap_err();
+    assert!(
+        error.starts_with("ntfy: notifications.ntfy_url cannot be used: "),
+        "{error}"
+    );
+    assert!(!host.marker().exists());
 }

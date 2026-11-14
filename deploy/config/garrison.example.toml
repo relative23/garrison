@@ -54,7 +54,11 @@ allowed_peers = ["garrison"]
 # collector itself stops: to an ntfy topic, to a webhook, by mail, or to
 # several of them. Secrets are files in /etc/garrison/credentials (mode
 # 0600), never written here: ntfy-token, notify-webhook-token and
-# notify-mail-password. `garrison notify-test` sends a test message.
+# notify-mail-password. Every user of this host may read this file, so an
+# address that is a secret itself, a topic without a token or a webhook with
+# its key in the address, goes into ntfy-url or notify-webhook-url, and the
+# setting names it: ntfy_url = "credential:ntfy-url". `garrison notify-test`
+# sends a test message.
 # [notifications]
 # ntfy_url = "https://ntfy.example.org/mailserver"
 # webhook_url = "https://hooks.example.org/garrison"

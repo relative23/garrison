@@ -17,8 +17,10 @@ fn notifications_need_the_address_of_a_topic() {
     };
     let set = with("https://ntfy.example.org/mailserver/").unwrap();
     assert_eq!(
-        set.notifications.ntfy_url.as_deref(),
-        Some("https://ntfy.example.org/mailserver")
+        set.notifications.ntfy_url,
+        Some(Endpoint::Written(
+            "https://ntfy.example.org/mailserver".into()
+        ))
     );
     assert_eq!(
         set.notifications.token,
@@ -75,8 +77,10 @@ fn a_webhook_is_an_https_address_with_a_token_of_its_own() {
     )])
     .unwrap();
     assert_eq!(
-        set.notifications.webhook_url.as_deref(),
-        Some("https://hooks.example.org/garrison?room=7")
+        set.notifications.webhook_url,
+        Some(Endpoint::Written(
+            "https://hooks.example.org/garrison?room=7".into()
+        ))
     );
     assert_eq!(
         set.notifications.webhook_token,
@@ -89,6 +93,73 @@ fn a_webhook_is_an_https_address_with_a_token_of_its_own() {
             .unwrap_err()
             .0,
         "notifications.webhook_url must be an https:// URL"
+    );
+}
+
+/// An address that is itself a secret stays out of this file, which every
+/// user of the host may read: the setting names the file that holds it.
+#[test]
+fn an_address_may_be_kept_in_a_file_of_its_own() {
+    let set = with(&[
+        ("ntfy_url", text("credential:ntfy-url")),
+        ("webhook_url", text("/etc/garrison/webhook-url")),
+    ])
+    .unwrap()
+    .notifications;
+    assert_eq!(
+        set.ntfy_url,
+        Some(Endpoint::File(SecretSource::Credential("ntfy-url".into())))
+    );
+    assert_eq!(
+        set.webhook_url,
+        Some(Endpoint::File(SecretSource::File(
+            "/etc/garrison/webhook-url".into()
+        )))
+    );
+    assert!(set.any());
+    for (key, wrong, said) in [
+        (
+            "ntfy_url",
+            text("credential:two words"),
+            "notifications.ntfy_url must be an absolute path or credential:NAME",
+        ),
+        (
+            "webhook_url",
+            text("credential:"),
+            "notifications.webhook_url must be an absolute path or credential:NAME",
+        ),
+        (
+            "ntfy_url",
+            text("secrets/ntfy-url"),
+            "notifications.ntfy_url must be an https:// URL",
+        ),
+        (
+            "webhook_url",
+            toml::Value::Integer(7),
+            "notifications.webhook_url must be an https:// URL",
+        ),
+    ] {
+        assert_eq!(
+            with(&[(key, wrong.clone())]).unwrap_err().0,
+            said,
+            "{wrong:?}"
+        );
+    }
+    // What a file holds is held to the rules of a written address.
+    let name = "the address in /run/credentials/x/ntfy-url";
+    assert_eq!(
+        ntfy_address("https://ntfy.sh/abc/", name),
+        Ok("https://ntfy.sh/abc".to_owned())
+    );
+    assert_eq!(
+        ntfy_address("https://ntfy.sh", name).unwrap_err().0,
+        format!("{name} must name a topic: https://host/topic")
+    );
+    assert_eq!(
+        webhook_address("https://user:pass@hooks.example.org/x", name)
+            .unwrap_err()
+            .0,
+        format!("{name} must be an https:// URL")
     );
 }
 

@@ -285,7 +285,8 @@ pub fn collect_within(
     }
     let repeats = without_repeats(&context, &mut observations);
     observations.extend(repeats);
-    let channels = Channels::of(config, Secrets::read(credentials, &config.notifications));
+    let channels = Channels::of(config, Secrets::read(credentials, &config.notifications))
+        .located(credentials);
     // The channels get what is left of the run's time: a channel that does
     // not answer must not cost the snapshot.
     observations.extend(crate::notify::after_run(

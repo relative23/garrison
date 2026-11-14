@@ -253,11 +253,12 @@ fn check_config(release: &Path) -> Step {
     Ok(())
 }
 
-/// The collector's units load the notification channels' secrets. systemd
-/// refuses to start a unit whose credential file is missing, so an
-/// installation that has none gets empty ones, which mean: no secret.
+/// The collector's units load the notification channels' secrets and the
+/// addresses kept as secrets. systemd refuses to start a unit whose
+/// credential file is missing, so an installation that has none gets empty
+/// ones, which mean: no secret, no address kept there.
 fn keep_secret_files() -> Step {
-    for name in ["ntfy-token", "notify-webhook-token", "notify-mail-password"] {
+    for name in units::NOTIFICATION_FILES {
         let secret = Path::new(CONFIG).join("credentials").join(name);
         if secret.symlink_metadata().is_ok() {
             continue;

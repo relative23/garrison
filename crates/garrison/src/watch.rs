@@ -4,7 +4,7 @@
 //!
 //! The look works without a configuration that loads, since a configuration
 //! the collector refuses is the usual reason it stopped: the paths then are
-//! the ones the units use, and the topic is the one the last run left.
+//! the ones the units use, and the channels are the ones the last run left.
 
 use std::path::{Path, PathBuf};
 
@@ -52,8 +52,9 @@ pub(crate) fn run(path: &Path) -> u8 {
         configured: loaded
             .as_ref()
             .map_err(drop)
-            .map(|config| Channels::of(config, secrets.clone())),
+            .map(|config| Channels::of(config, secrets.clone()).located(&credentials)),
         secrets,
+        credentials: credentials.clone(),
         now: time::now(),
         roots: garrison_collector::fetch::roots(),
     };

@@ -16,6 +16,10 @@ LoadCredential=ntfy-token:/etc/garrison/credentials/ntfy-token
 # empty files, which the installer keeps, mean that neither is used.
 LoadCredential=notify-webhook-token:/etc/garrison/credentials/notify-webhook-token
 LoadCredential=notify-mail-password:/etc/garrison/credentials/notify-mail-password
+# The topic's and the webhook's address, where it is a secret itself and the
+# configuration names the file (credential:ntfy-url); empty files otherwise.
+LoadCredential=ntfy-url:/etc/garrison/credentials/ntfy-url
+LoadCredential=notify-webhook-url:/etc/garrison/credentials/notify-webhook-url
 StateDirectory=garrison/collector
 StateDirectoryMode=0750
 UMask=0027

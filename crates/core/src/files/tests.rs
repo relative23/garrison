@@ -130,7 +130,7 @@ fn an_empty_file_holds_no_secret_and_a_password_may_hold_spaces() {
     let read = |form| read_optional_secret(&file, Privacy::Owned, form);
     for empty in ["", "\n", "  \r\n"] {
         write(&file, empty, 0o600);
-        for form in [Form::Token, Form::Password] {
+        for form in [Form::Token, Form::Password, Form::Address] {
             assert_eq!(read(form).unwrap(), None, "{empty:?}");
         }
     }
@@ -166,6 +166,31 @@ fn an_empty_file_holds_no_secret_and_a_password_may_hold_spaces() {
         read(Form::Password),
         Err(ProtectedFileError::NotPrivate(_))
     ));
+}
+
+#[test]
+fn an_address_is_one_line_without_spaces_however_short() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("address");
+    let read = || read_optional_secret(&file, Privacy::Owned, Form::Address);
+    for text in ["https://n.sh/t\n", "https://ntfy.example.org/a-b_c?x=1"] {
+        write(&file, text, 0o600);
+        assert_eq!(read().unwrap().as_deref(), Some(text.trim()), "{text:?}");
+    }
+    for text in [
+        "https://host/a b",
+        "https://host/ä",
+        "two\nlines",
+        "tab\there",
+    ] {
+        write(&file, text, 0o600);
+        assert!(
+            matches!(read(), Err(ProtectedFileError::InvalidSecret(_))),
+            "{text:?}"
+        );
+    }
+    write(&file, &format!("https://host/{}", "x".repeat(8192)), 0o600);
+    assert!(read().is_err());
 }
 
 #[test]

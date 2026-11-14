@@ -6,11 +6,47 @@ use toml::Value;
 
 use super::values::{Section, https_url, integer, secret_source};
 use super::{
-    ConfigError, IncompleteAction, MacroAction, MailSettings, MilterConfig, Notifications,
+    ConfigError, Endpoint, IncompleteAction, MacroAction, MailSettings, MilterConfig, Notifications,
 };
 
 fn fail<T>(message: impl Into<String>) -> Result<T, ConfigError> {
     Err(ConfigError(message.into()))
+}
+
+/// An ntfy topic's address, `https://host/topic`: the last part of the path
+/// names the topic. `name` is what an error calls the value. The collector
+/// holds an address read from a file to the same rules.
+pub fn ntfy_address(text: &str, name: &str) -> Result<String, ConfigError> {
+    let url = https_url(Some(&Value::String(text.to_owned())), name)?;
+    let topic = url.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    let named =
+        !topic.is_empty() && !topic.contains(['.', ':', '?', '#']) && url.matches('/').count() >= 3;
+    if !named {
+        return fail(format!("{name} must name a topic: https://host/topic"));
+    }
+    Ok(url.trim_end_matches('/').to_owned())
+}
+
+/// A webhook's address, which every message is posted to.
+pub fn webhook_address(text: &str, name: &str) -> Result<String, ConfigError> {
+    https_url(Some(&Value::String(text.to_owned())), name)
+}
+
+/// A channel's address as written, or the file that holds it: `credential:NAME`
+/// or an absolute path, read as the channels' secrets are.
+fn endpoint(
+    value: Option<&Value>,
+    name: &str,
+    address: fn(&str, &str) -> Result<String, ConfigError>,
+) -> Result<Option<Endpoint>, ConfigError> {
+    match value.map(Value::as_str) {
+        None => Ok(None),
+        Some(Some(text)) if text.starts_with('/') || text.starts_with("credential:") => {
+            Ok(Some(Endpoint::File(secret_source(value, "", name)?)))
+        }
+        Some(Some(text)) => Ok(Some(Endpoint::Written(address(text, name)?))),
+        Some(None) => fail(format!("{name} must be an https:// URL")),
+    }
 }
 
 /// A mail address as a notification uses it: one `@`, a name on each side
@@ -63,25 +99,16 @@ pub(super) fn notifications(value: Option<&Value>) -> Result<Notifications, Conf
         "mail_password",
     ];
     let table = Section::take(value, "notifications", &KEYS)?;
-    // An ntfy topic is `https://host/topic`: the last part of the path names it.
-    let ntfy_url = match table.get("ntfy_url") {
-        None => None,
-        Some(url) => {
-            let url = https_url(Some(url), "notifications.ntfy_url")?;
-            let topic = url.trim_end_matches('/').rsplit('/').next().unwrap_or("");
-            let named = !topic.is_empty()
-                && !topic.contains(['.', ':', '?', '#'])
-                && url.matches('/').count() >= 3;
-            if !named {
-                return fail("notifications.ntfy_url must name a topic: https://host/topic");
-            }
-            Some(url.trim_end_matches('/').to_owned())
-        }
-    };
-    let webhook_url = match table.get("webhook_url") {
-        None => None,
-        Some(url) => Some(https_url(Some(url), "notifications.webhook_url")?),
-    };
+    let ntfy_url = endpoint(
+        table.get("ntfy_url"),
+        "notifications.ntfy_url",
+        ntfy_address,
+    )?;
+    let webhook_url = endpoint(
+        table.get("webhook_url"),
+        "notifications.webhook_url",
+        webhook_address,
+    )?;
     // Mail is submitted signed in, so all of where, as whom and to whom is needed.
     let named = ["mail_to", "mail_from", "mail_host"].map(|key| table.get(key).is_some());
     let mail = if named.contains(&true) {

@@ -99,9 +99,9 @@ only a monitor on another machine notices that.
 
 | Key | Meaning |
 |---|---|
-| `ntfy_url` | An ntfy topic's address, `https://host/topic`. |
+| `ntfy_url` | An ntfy topic's address, `https://host/topic`, or the file it is kept in: `credential:ntfy-url` or an absolute path ([an address that is a secret](#an-address-that-is-a-secret)). |
 | `token` | Where the topic's access token is read from; default `credential:ntfy-token`. |
-| `webhook_url` | An `https://` address every message is posted to as JSON. |
+| `webhook_url` | An `https://` address every message is posted to as JSON, or the file it is kept in: `credential:notify-webhook-url` or an absolute path. |
 | `webhook_token` | Where a token for it is read from, sent as `Authorization: Bearer`; default `credential:notify-webhook-token`. |
 | `mail_to`, `mail_from`, `mail_host` | The recipient, the sender and the mail server's host name. All three, or none. |
 | `mail_user` | The account that signs in; default: the sender's address. |
@@ -116,9 +116,10 @@ sudo garrison notify-test
 
 The secrets are files in `/etc/garrison/credentials` (root, mode 0600). The
 installer keeps an empty file for each, which means that none is needed: a
-topic or a webhook without a token. Mail is always submitted signed in, so
-its password file must hold the password. To write one, run this with the
-file's name, paste the secret, press Enter and then Ctrl-D:
+topic or a webhook without a token, an address written in this file. Mail
+is always submitted signed in, so its password file must hold the password.
+To write one, run this with the file's name, paste the secret, press Enter
+and then Ctrl-D:
 
 ```sh
 sudo sh -c 'cat > /etc/garrison/credentials/ntfy-token'
@@ -127,10 +128,11 @@ sudo sh -c 'cat > /etc/garrison/credentials/ntfy-token'
 A token is one line of 16 to 8192 printable characters without spaces. A
 password is one line of text, which may be short and hold spaces, without
 control characters such as a tab; spaces before and after it are not part
-of it. A file that cannot be used, because other users may read it, it is
-missing or it holds something else, is that channel's error: nothing goes out
-on the channel, the channels' check on the Alerts page is Failed with it from
-the next collection run on, and `garrison notify-test`, like the collector's
+of it. An address is one line of printable characters without spaces. A
+file that cannot be used, because other users may read it, it is missing or
+it holds something else, is that channel's error: nothing goes out on the
+channel, the channels' check on the Alerts page is Failed with it from the
+next collection run on, and `garrison notify-test`, like the collector's
 journal for a message that did not go out, names the setting and the file,
 never what it holds.
 
@@ -144,7 +146,9 @@ ntfy_url = "https://ntfy.example.org/mailserver"
 ntfy does not have to run on this host: any topic works, on a server of your
 own or on ntfy.sh. `garrison detect` names an ntfy server that runs on this
 host, with the address its configuration gives. A topic that needs an access
-token gets it from the file `ntfy-token`.
+token gets it from the file `ntfy-token`. A topic without one is open to
+whoever knows its address: keep that address in a file of its own
+([an address that is a secret](#an-address-that-is-a-secret)).
 
 ### Webhook
 
@@ -172,6 +176,35 @@ counts as taken. A token in the file `notify-webhook-token` goes along as
 ```
 
 `level` is `failed`, `warning` or `ok`.
+
+### An address that is a secret
+
+Every user of this host may read `garrison.toml`: the macro filter and the
+broker read it as users of their own. Some addresses are a secret, though:
+an ntfy topic that takes no token is open to whoever knows its address, and
+some webhooks, such as Slack's and Discord's, carry their key in their
+address. Keep such an address in a file of its own and name the file
+instead. Write the address on one line, as for a secret above:
+
+```sh
+sudo sh -c 'cat > /etc/garrison/credentials/ntfy-url'
+```
+
+```toml
+[notifications]
+ntfy_url = "credential:ntfy-url"
+# webhook_url = "credential:notify-webhook-url"
+```
+
+Use the names `ntfy-url` and `notify-webhook-url`: the units load only
+those, and the installer keeps an empty file for each. The address in the
+file is held to the same rules as one written here; an empty file or one
+that holds no such address is that channel's error. Such an address never
+shows: the Alerts page, the journal and `garrison notify-test` name its
+server only, and the status database, where the watch finds the channels
+when the configuration does not load, holds the name of its file, which the
+watch reads again. `garrison doctor` warns of a topic or a webhook that
+takes no token while its address is written in `garrison.toml`.
 
 ### Mail
 

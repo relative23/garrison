@@ -8,7 +8,7 @@ use toml::{Table, Value};
 use url::{Host, Url};
 
 use super::ConfigError;
-use crate::credentials::{SecretSource, is_credential_name};
+use crate::credentials::SecretSource;
 
 fn fail<T>(message: String) -> Result<T, ConfigError> {
     Err(ConfigError(message))
@@ -176,16 +176,8 @@ pub(super) fn secret_source(
     default: &str,
     name: &str,
 ) -> Result<SecretSource, ConfigError> {
-    match text(value, default) {
-        Some(path) if path.starts_with('/') => Ok(SecretSource::File(PathBuf::from(path))),
-        Some(text) => match text.strip_prefix("credential:") {
-            Some(credential) if is_credential_name(credential) => {
-                Ok(SecretSource::Credential(credential.to_owned()))
-            }
-            _ => fail(format!(
-                "{name} must be an absolute path or credential:NAME"
-            )),
-        },
+    match text(value, default).and_then(SecretSource::parse) {
+        Some(source) => Ok(source),
         None => fail(format!(
             "{name} must be an absolute path or credential:NAME"
         )),

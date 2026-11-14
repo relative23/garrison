@@ -35,6 +35,7 @@ fn ntfy(url: &str) -> Channels {
         ntfy: Some(Address {
             url: url.to_owned(),
             token: Secret::Text("token-1".to_owned()),
+            ..Address::default()
         }),
         ..Channels::default()
     }
@@ -241,6 +242,7 @@ fn a_test_message_and_a_topic_without_a_token() {
         ntfy: Some(Address {
             url: url.clone(),
             token: Secret::Empty,
+            ..Address::default()
         }),
         ..ntfy(&url)
     };
@@ -267,6 +269,7 @@ fn every_channel_gets_the_message_and_one_that_fails_is_named() {
         webhook: Some(Address {
             url: format!("{}/hooks/garrison", hook.url),
             token: Secret::Text("hook-token".to_owned()),
+            ..Address::default()
         }),
         mail: Some(mail::tests::mail(port)),
         ..ntfy(&format!("{}/mailserver", topic.url))
@@ -316,10 +319,12 @@ fn every_channel_gets_the_message_and_one_that_fails_is_named() {
         ntfy: Some(Address {
             url: format!("{}/mailserver", topic.url),
             token: Secret::Empty,
+            ..Address::default()
         }),
         webhook: Some(Address {
             url: format!("{}/hooks/garrison", broken.url),
             token: Secret::Empty,
+            ..Address::default()
         }),
         ..channels
     };

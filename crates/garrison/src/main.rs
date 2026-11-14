@@ -248,8 +248,9 @@ pub(crate) fn placeholder(origin: &str) -> bool {
 /// work before a check depends on them.
 fn notify_test(config: &Config) -> u8 {
     use garrison_collector::notify::{Channels, Secrets, test};
-    let secrets = Secrets::read(&credentials(config), &config.notifications);
-    let channels = Channels::of(config, secrets);
+    let credentials = credentials(config);
+    let secrets = Secrets::read(&credentials, &config.notifications);
+    let channels = Channels::of(config, secrets).located(&credentials);
     if channels.is_empty() {
         complain(
             "No channel is configured: set ntfy_url, webhook_url or the mail settings under \

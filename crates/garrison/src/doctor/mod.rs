@@ -5,6 +5,7 @@
 
 mod host;
 mod milter;
+mod notify;
 mod public;
 
 use garrison_core::config::Config;
@@ -130,6 +131,7 @@ pub(crate) fn run(config: &Config) -> u8 {
     let mut findings = origins(config);
     findings.extend(host::checks(config));
     findings.extend(milter::checks(config, &config.credentials_directory));
+    findings.extend(notify::checks(config, &crate::credentials(config)));
     findings.extend(public::checks(config));
     for finding in &findings {
         say(&finding.line());

@@ -4,7 +4,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use garrison_core::config::Config;
+use garrison_core::config::{self, Config};
+use garrison_core::credentials::Credentials;
 use garrison_core::time;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,8 @@ use super::secrets::{Address, Secret, Secrets};
 use crate::context::Deadline;
 use crate::fetch::{self, Request};
 
-/// Where notifications go. Its stored form holds no secret.
+/// Where notifications go. Its stored form holds no secret, and no address
+/// that is kept in a file.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Channels {
     /// This installation's own host name, which every message carries.
@@ -66,6 +68,8 @@ pub(crate) fn host_of(url: &str) -> &str {
 }
 
 /// Send `body` as JSON to `url`, done by `until`; an empty token sends none.
+/// An error names the server, not the whole address: a webhook's may carry
+/// its key, and the error goes to the journal and onto the Alerts page.
 fn post(
     url: &str,
     token: &str,
@@ -85,24 +89,24 @@ fn post(
         headers: &headers,
         body: body.as_bytes(),
     };
-    Ok(fetch::send_until(&request, roots, until)?.status)
+    fetch::send_until(&request, roots, until)
+        .map(|answer| answer.status)
+        .map_err(|error| match url {
+            "" => error,
+            url => error.replace(url, &format!("the address at {}", host_of(url))),
+        })
 }
 
 impl Channels {
-    /// The channels of a configuration, with their secrets.
+    /// The channels of a configuration, with their secrets. An address that
+    /// is kept in a file is read by [`Channels::located`].
     #[must_use]
     pub fn of(config: &Config, secrets: Secrets) -> Self {
         let notifications = &config.notifications;
         let channels = Channels {
             host: host_of(&config.deployment.public_origin).to_owned(),
-            ntfy: notifications.ntfy_url.clone().map(|url| Address {
-                url,
-                token: Secret::Empty,
-            }),
-            webhook: notifications.webhook_url.clone().map(|url| Address {
-                url,
-                token: Secret::Empty,
-            }),
+            ntfy: notifications.ntfy_url.as_ref().map(Address::configured),
+            webhook: notifications.webhook_url.as_ref().map(Address::configured),
             mail: notifications.mail.as_ref().map(|mail| Mail {
                 host: mail.host.clone(),
                 port: mail.port,
@@ -130,37 +134,63 @@ impl Channels {
         self
     }
 
+    /// These channels with every address that is kept in a file read from
+    /// it, as the configuration and the stored form name it.
+    #[must_use]
+    pub fn located(mut self, credentials: &Credentials) -> Self {
+        if let Some(ntfy) = &mut self.ntfy {
+            ntfy.read(credentials, "notifications.ntfy_url", config::ntfy_address);
+        }
+        if let Some(webhook) = &mut self.webhook {
+            webhook.read(
+                credentials,
+                "notifications.webhook_url",
+                config::webhook_address,
+            );
+        }
+        self
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.ntfy.is_none() && self.webhook.is_none() && self.mail.is_none()
     }
 
-    /// The channels that cannot send, as their secret's file stands now,
-    /// each with why: `ntfy: notifications.token cannot be used: …`.
+    /// The channels that cannot send, as the files of their addresses and
+    /// secrets stand now, each with why: `ntfy: notifications.token cannot
+    /// be used: …`.
     #[must_use]
     pub fn unusable(&self) -> Vec<String> {
-        [
-            ("ntfy", self.ntfy.as_ref().map(|ntfy| &ntfy.token)),
-            ("webhook", self.webhook.as_ref().map(|hook| &hook.token)),
-            ("mail", self.mail.as_ref().map(|mail| &mail.password)),
-        ]
-        .into_iter()
-        .filter_map(|(channel, secret)| match secret {
-            Some(Secret::Unusable(why)) => Some(format!("{channel}: {why}")),
-            _ => None,
-        })
-        .collect()
+        let mut found = Vec::new();
+        for (channel, address) in [("ntfy", &self.ntfy), ("webhook", &self.webhook)] {
+            let Some(address) = address else {
+                continue;
+            };
+            if let Some(why) = &address.unusable {
+                found.push(format!("{channel}: {why}"));
+            }
+            if let Secret::Unusable(why) = &address.token {
+                found.push(format!("{channel}: {why}"));
+            }
+        }
+        if let Some(Secret::Unusable(why)) = self.mail.as_ref().map(|mail| &mail.password) {
+            found.push(format!("mail: {why}"));
+        }
+        found
     }
 
-    /// Each channel as a page names it, without anything secret.
+    /// Each channel as a page names it, without anything secret: the server
+    /// of an address, never the rest of it.
     #[must_use]
     pub fn names(&self) -> Vec<String> {
         let mut names = Vec::new();
-        if let Some(ntfy) = &self.ntfy {
-            names.push(format!("ntfy at {}", host_of(&ntfy.url)));
-        }
-        if let Some(webhook) = &self.webhook {
-            names.push(format!("webhook at {}", host_of(&webhook.url)));
+        for (channel, address) in [("ntfy", &self.ntfy), ("webhook", &self.webhook)] {
+            if let Some(address) = address {
+                names.push(match address.usable() {
+                    Ok(url) => format!("{channel} at {}", host_of(url)),
+                    Err(_) => format!("{channel}, whose address cannot be read"),
+                });
+            }
         }
         if let Some(mail) = &self.mail {
             names.push(format!("mail to {}", mail.to));
@@ -216,7 +246,15 @@ impl Channels {
                 "sentAt": time::isoformat(now),
             });
             let sent = in_time()
-                .and_then(|until| post(&webhook.url, webhook.token.text()?, &body, roots, until))
+                .and_then(|until| {
+                    post(
+                        webhook.usable()?,
+                        webhook.token.text()?,
+                        &body,
+                        roots,
+                        until,
+                    )
+                })
                 .and_then(|status| {
                     if (200..300).contains(&status) {
                         Ok(())
@@ -245,7 +283,7 @@ fn to_ntfy(
     until: Instant,
 ) -> Result<(), String> {
     let (base, topic) = ntfy
-        .url
+        .usable()?
         .rsplit_once('/')
         .ok_or("the address names no topic")?;
     let (priority, tag) = match note.level {

@@ -1,11 +1,11 @@
 //! What the channels read from protected files: the tokens of a topic and a
 //! webhook and the password of the account that submits mail, and the
-//! addresses that go with them.
+//! addresses that go with them, which may be secrets themselves.
 
-use garrison_core::config::Notifications;
+use garrison_core::config::{ConfigError, Endpoint, Notifications};
 use garrison_core::credentials::{Credentials, SecretSource};
 use garrison_core::files::{Form, ProtectedFileError};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A channel's secret as its file holds it.
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -60,26 +60,143 @@ fn unusable(setting: &str, form: Form, error: &ProtectedFileError) -> String {
         (ProtectedFileError::InvalidSecret(_), Form::Password) => {
             ". A password is one line of text without control characters, at most 8192 bytes"
         }
+        (ProtectedFileError::InvalidSecret(_), Form::Address) => {
+            ". An address is one line of printable characters without spaces"
+        }
         _ => "",
     };
     format!("{setting} cannot be used: {error}{wanted}")
 }
 
-/// An address with the token that goes with it; an empty file sends none.
-#[derive(Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+/// How a channel's address is checked: [`garrison_core::config::ntfy_address`]
+/// or [`garrison_core::config::webhook_address`].
+pub(crate) type Rule = fn(&str, &str) -> Result<String, ConfigError>;
+
+/// An address with the token that goes with it; an empty token file sends
+/// none. An address kept in a file of its own is a secret like the token: it
+/// never shows in a message, a log line or the stored form.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct Address {
+    /// Where messages go: as the configuration writes it, or as its file
+    /// holds it.
     pub url: String,
+    /// The file the address is kept in, where it is kept in one.
+    pub file: Option<SecretSource>,
+    /// Why the address cannot be used as its file stands; never what it holds.
+    pub unusable: Option<String>,
     /// Read from its credential, never kept with the address.
-    #[serde(skip)]
     pub token: Secret,
 }
 
 impl std::fmt::Debug for Address {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("Address")
-            .field("url", &self.url)
-            .finish_non_exhaustive()
+        let mut shown = formatter.debug_struct("Address");
+        match &self.file {
+            Some(file) => shown.field("file", &file.to_string()),
+            None => shown.field("url", &self.url),
+        };
+        shown.finish_non_exhaustive()
+    }
+}
+
+impl Address {
+    /// The address that `endpoint` names. One kept in a file is read by
+    /// [`Channels::located`](crate::notify::Channels::located); until then
+    /// it cannot be used.
+    #[must_use]
+    pub fn configured(endpoint: &Endpoint) -> Self {
+        match endpoint {
+            Endpoint::Written(url) => Address {
+                url: url.clone(),
+                ..Address::default()
+            },
+            Endpoint::File(file) => Address {
+                unusable: Some(format!("the address in {file} was not read")),
+                file: Some(file.clone()),
+                ..Address::default()
+            },
+        }
+    }
+
+    /// Read an address that is kept in a file, which must hold one line that
+    /// `rule` takes; `setting` names it in an error, which never shows what
+    /// the file holds. A written address is left as it is.
+    pub(crate) fn read(&mut self, credentials: &Credentials, setting: &str, rule: Rule) {
+        let Some(file) = &self.file else {
+            return;
+        };
+        let path = credentials.path(file);
+        let (url, unusable) = match credentials.read_optional_secret(file, Form::Address) {
+            Ok(Some(text)) => match rule(&text, &format!("the address in {}", path.display())) {
+                Ok(url) => (url, None),
+                Err(error) => (
+                    String::new(),
+                    Some(format!("{setting} cannot be used: {error}")),
+                ),
+            },
+            Ok(None) => (
+                String::new(),
+                Some(format!(
+                    "{setting} cannot be used: {} is empty; write the address into it",
+                    path.display()
+                )),
+            ),
+            Err(error) => (
+                String::new(),
+                Some(unusable(setting, Form::Address, &error)),
+            ),
+        };
+        self.url = url;
+        self.unusable = unusable;
+    }
+
+    /// Where to send, or why there is nowhere.
+    pub(crate) fn usable(&self) -> Result<&str, String> {
+        match &self.unusable {
+            Some(why) => Err(why.clone()),
+            None => Ok(&self.url),
+        }
+    }
+}
+
+/// What the status database keeps of an address for the watch: the address
+/// as the configuration writes it, but only the file of one kept in a file,
+/// since the database's group may read it.
+#[derive(Deserialize, Serialize)]
+struct Kept {
+    url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+}
+
+impl Serialize for Address {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let url = if self.file.is_some() {
+            String::new()
+        } else {
+            self.url.clone()
+        };
+        let file = self.file.as_ref().map(ToString::to_string);
+        Kept { url, file }.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Address {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let kept = Kept::deserialize(deserializer)?;
+        Ok(match kept.file {
+            None => Address {
+                url: kept.url,
+                ..Address::default()
+            },
+            Some(text) => match SecretSource::parse(&text) {
+                Some(file) => Address::configured(&Endpoint::File(file)),
+                None => Address {
+                    unusable: Some("the stored channel names no file its address is in".into()),
+                    ..Address::default()
+                },
+            },
+        })
     }
 }
 

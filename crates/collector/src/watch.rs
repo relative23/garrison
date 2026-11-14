@@ -7,14 +7,17 @@
 //! has finished again.
 //!
 //! A collector usually stops because it no longer loads the configuration.
-//! The watch must not depend on that file then: every run leaves the topic's
-//! address in the status database, and the watch falls back on it.
+//! The watch must not depend on that file then: every run leaves the
+//! channels in the status database, and the watch falls back on them. An
+//! address that is kept in a file is left as the name of that file, which
+//! the watch reads again.
 
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use garrison_core::credentials::Credentials;
 use garrison_core::{sqlite, time};
 use rusqlite::{Connection, OptionalExtension};
 use rustls::RootCertStore;
@@ -69,6 +72,8 @@ pub struct Watch<'a> {
     pub configured: Result<Channels, ()>,
     /// The secrets for the channels the last run left.
     pub secrets: Secrets,
+    /// Where those channels' files are, for an address kept in one.
+    pub credentials: Credentials,
     pub now: time::Timestamp,
     /// The authorities a channel's certificate is checked against.
     pub roots: Arc<RootCertStore>,
@@ -140,7 +145,10 @@ impl Watch<'_> {
         };
         let channels = match &self.configured {
             Ok(channels) => channels.clone(),
-            Err(()) => recorded.channels.with(self.secrets.clone()),
+            Err(()) => recorded
+                .channels
+                .with(self.secrets.clone())
+                .located(&self.credentials),
         };
         let stopped = stopped(last, self.now);
         let told = fs::symlink_metadata(self.marker).is_ok();

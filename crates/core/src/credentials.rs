@@ -16,6 +16,20 @@ pub enum SecretSource {
     Credential(String),
 }
 
+impl SecretSource {
+    /// An absolute path or `credential:NAME`, as a setting writes it and
+    /// [`fmt::Display`] shows it.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        if text.starts_with('/') {
+            return Some(SecretSource::File(PathBuf::from(text)));
+        }
+        text.strip_prefix("credential:")
+            .filter(|name| is_credential_name(name))
+            .map(|name| SecretSource::Credential(name.to_owned()))
+    }
+}
+
 impl fmt::Display for SecretSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

@@ -19,6 +19,22 @@ Notable changes for operators and users. The format follows
   `X-Garrison-Scan: unscanned`; `"defer"` has the sending server bring it
   again; `"refuse"` refuses it. See
   [configuration](docs/operator/configuration.md#milter).
+- **An ntfy topic's or a webhook's address can be kept in a file of its
+  own.** Every user of the host may read `garrison.toml`, and some addresses
+  are the secret themselves: an ntfy topic that takes no token, a webhook
+  that carries its key in its address. `ntfy_url` and `webhook_url` now also
+  take `credential:NAME` or an absolute path, read as the tokens are; the
+  collector and the watch load `ntfy-url` and `notify-webhook-url`, and the
+  installer keeps an empty file for each. Such an address never shows on the
+  Alerts page, in the journal or in `garrison notify-test`, and the status
+  database, which the group `garrison` reads, keeps only the file's name for
+  the watch. `garrison doctor` now looks at the channels: it fails on one
+  that cannot send and warns of a topic or a webhook that takes no token
+  while its address is written in `garrison.toml`. A release before this
+  one does not load such a setting, so `garrison install --rollback`
+  refuses, before anything stops, until the address is written into
+  `garrison.toml` again. See
+  [configuration](docs/operator/configuration.md#an-address-that-is-a-secret).
 
 ### Changed
 
@@ -64,6 +80,11 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A channel's error no longer shows its whole address.** An answer that
+  was no HTTP answer was reported with the address it came from, on the
+  Alerts page, in the journal and by `garrison notify-test`; for a webhook
+  that carries its key in its address, that was the key. Such an error now
+  names the server only.
 - **A state that a page does not know no longer stops it or reads as OK.**
   A page opened before an upgrade that brings a new state of a check failed
   on such a state and showed its error instead of its checks, and the
