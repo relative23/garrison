@@ -173,7 +173,8 @@ no message is kept or written anywhere.
 |---|---|---|
 | `port` | 8096 | Loopback port the filter listens on. |
 | `on_macro` | `"reject"` | `"reject"`: the sending server gets `550 5.7.1 Message refused: an attached Office document contains macros.` and tells its sender. `"tag"`: the message is taken with the header `X-Garrison-Macro: yes`, for a Sieve rule or a mail program to act on. |
-| `max_message_mib` | 64 | A larger message is taken unscanned; at most 256. The filter holds 256 MiB of arriving mail in all and has the sending server bring a message again that finds no room. |
+| `on_incomplete` | `"tag"` | What a message gets that the filter could not scan completely (see below). `"tag"`: it is taken with the header `X-Garrison-Scan: unscanned`. `"defer"`: the sending server is told to bring it again later. `"refuse"`: the sending server gets `550 5.7.1 Message refused: its attachments could not be scanned completely.` |
+| `max_message_mib` | 64 | A larger message is not scanned and gets what `on_incomplete` says; at most 256. The filter holds 256 MiB of arriving mail in all and has the sending server bring a message again that finds no room. |
 | `when_unreachable` | `"defer"` | What Stalwart does while the filter does not answer: `"defer"` has the sending server try again later, `"accept"` takes the mail unscanned. |
 
 To switch it on, add the section (`[milter]` alone takes every default) and
@@ -203,6 +204,28 @@ What it does not see: an archive with a password, other archive formats such
 as 7z and RAR, Excel 4.0 macro sheets in an old `.xls` file, the macros of an
 old `.ppt` file, macros in LibreOffice's own formats, and a document behind
 a link. It complements a virus scanner and does not replace one.
+
+A message the filter could not scan completely is never passed as if it were
+clean. That is a message
+
+- larger than `max_message_mib`,
+- with an archive whose files unpack to more than 16 MiB each or 64 MiB
+  together, or that holds more packed files than a zip archive lists
+  (65 535),
+- with a zip archive packed otherwise than by deflate (bzip2, LZMA, zstd,
+  Deflate64 and the like), or
+- whose scan was not done 20 seconds after the message's end, the wait for
+  other messages' scans included.
+
+Macros the filter did see count first: such a message is refused or marked
+as `on_macro` says. Otherwise `on_incomplete` decides, and the journal of
+`garrison-milter.service` names the kind of reason, never the message. With
+`"tag"`, the default, the mail arrives and a Sieve rule or mail program acts
+on `X-Garrison-Scan: unscanned`; without such a rule it is delivered like any
+other. With `"defer"` a message that is too large or too deeply packed never
+arrives: the sending server tries until it gives up and tells its sender.
+`"refuse"` tells the sender at once. Large archives are common in ordinary
+mail, so look at the journal for a while before choosing one of the two.
 
 The Antivirus page lists the milters Stalwart asks, this one beside a
 scanner's, and warns of each that lets mail pass while it is away (the

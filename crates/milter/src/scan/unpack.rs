@@ -9,12 +9,14 @@ use std::time::Instant;
 
 use flate2::{Decompress, FlushDecompress, Status};
 
-use super::marks::{self, ZIP_ENTRY, number};
+use super::marks::{self, ZIP_ENTRY, ZIP_LISTED, number};
 use super::{Found, Gap};
 
 /// One file of an archive is unpacked up to this size, all of a message's
 /// together up to four times as much.
 const UNPACKED: usize = 16 * 1024 * 1024;
+/// How a zip archive names a deflated file.
+const DEFLATED: usize = 8;
 /// So many packed files are opened in one message: what an archive lists
 /// without the format's 64-bit extension.
 const ENTRIES: usize = 65_535;
@@ -84,56 +86,90 @@ impl Work {
         // same stretch are not read past that: the scan would unpack it once
         // for every header.
         let mut readable = data.len();
-        // Every local file header, wherever the archive begins: a file that
-        // is stored was searched above, one that is deflated is unpacked.
+        // Every header, wherever the archive begins: the one before a file,
+        // and the directory's entry for it, which is what a program that
+        // opens the archive goes by.
         let mut at = 0;
-        while let Some(offset) = data[at..].windows(4).position(|window| window == ZIP_ENTRY) {
+        while let Some(offset) = data[at..].windows(2).position(|window| window == b"PK") {
             let header = at + offset;
-            at = header + 4;
-            let (Some(method), Some(packed), Some(name), Some(extra)) = (
-                number(data, header + 8, 2),
-                number(data, header + 18, 4),
-                number(data, header + 26, 2),
-                number(data, header + 28, 2),
-            ) else {
-                break;
-            };
-            if method != 8 || self.budget == 0 {
-                continue;
-            }
-            let start = header + 30 + name + extra;
-            let Some(rest) = data.get(start..) else {
-                continue;
-            };
-            // The header's size is zero where the archive was written as a
-            // stream; the deflated data ends itself either way.
-            let claimed = if packed == 0 {
-                rest.len()
-            } else {
-                packed.min(rest.len())
-            };
-            if self.entries == 0 || (readable == 0 && claimed > 0) {
-                self.gap.get_or_insert(Gap::Budget);
-                continue;
-            }
-            self.entries -= 1;
-            let offered = claimed.min(readable);
-            let limit = self.budget.min(UNPACKED);
-            let (unpacked, read, end) = self.unpacked(&rest[..offered], limit);
-            readable = readable.saturating_sub(read);
-            self.budget = self.budget.saturating_sub(unpacked.len());
-            match end {
-                End::Late => return None,
-                End::Short if offered < claimed => {
-                    self.gap.get_or_insert(Gap::Budget);
+            at = header + 2;
+            match data.get(header..header + 4) {
+                Some(ZIP_LISTED) => {
+                    if number(data, header + 10, 2).is_some_and(unread) {
+                        self.gap.get_or_insert(Gap::Method);
+                    }
                 }
-                End::Whole | End::Short | End::Cut => {}
-            }
-            if let Some(found) = self.scanned(&unpacked, depth - 1) {
-                return Some(found);
+                Some(ZIP_ENTRY) => {
+                    if let Some(found) = self.file(data, header, depth, &mut readable) {
+                        return Some(found);
+                    }
+                    if self.gap == Some(Gap::Deadline) {
+                        return None;
+                    }
+                }
+                _ => {}
             }
         }
         None
+    }
+
+    /// The file behind the header at `header`: one that is stored was
+    /// searched with the data around it, one that is deflated is unpacked
+    /// and scanned, and one packed otherwise is a gap.
+    fn file(
+        &mut self,
+        data: &[u8],
+        header: usize,
+        depth: usize,
+        readable: &mut usize,
+    ) -> Option<Found> {
+        let (Some(method), Some(packed), Some(name), Some(extra)) = (
+            number(data, header + 8, 2),
+            number(data, header + 18, 4),
+            number(data, header + 26, 2),
+            number(data, header + 28, 2),
+        ) else {
+            return None;
+        };
+        if unread(method) {
+            self.gap.get_or_insert(Gap::Method);
+        }
+        if method != DEFLATED {
+            return None;
+        }
+        let rest = data.get(header + 30 + name + extra..)?;
+        // The header's size is zero where the archive was written as a
+        // stream; the deflated data ends itself either way.
+        let claimed = if packed == 0 {
+            rest.len()
+        } else {
+            packed.min(rest.len())
+        };
+        if self.budget == 0 || self.entries == 0 || (*readable == 0 && claimed > 0) {
+            self.gap.get_or_insert(Gap::Budget);
+            return None;
+        }
+        self.entries -= 1;
+        let offered = claimed.min(*readable);
+        let limit = self.budget.min(UNPACKED);
+        let (unpacked, read, end) = self.unpacked(&rest[..offered], limit);
+        *readable = readable.saturating_sub(read);
+        self.budget = self.budget.saturating_sub(unpacked.len());
+        match end {
+            End::Late => return None,
+            // The file goes on beyond what was unpacked of it.
+            End::Cut if limit < UNPACKED => {
+                self.gap.get_or_insert(Gap::Budget);
+            }
+            End::Cut => {
+                self.gap.get_or_insert(Gap::Truncated);
+            }
+            End::Short if offered < claimed => {
+                self.gap.get_or_insert(Gap::Budget);
+            }
+            End::Whole | End::Short => {}
+        }
+        self.scanned(&unpacked, depth - 1)
     }
 
     /// One deflated file: at most `limit` bytes of it, how much of `packed`
@@ -147,10 +183,12 @@ impl Work {
                 return (data, read, End::Late);
             }
             let filled = data.len();
-            let room = PIECE.min(limit - filled);
-            if room == 0 {
+            if filled > limit {
+                // One byte more than is kept came out: the file goes on.
+                data.truncate(limit);
                 return (data, read, End::Cut);
             }
+            let room = PIECE.min(limit + 1 - filled);
             let piece = &packed[read..(read + PIECE).min(packed.len())];
             let before = (self.inflater.total_in(), self.inflater.total_out());
             data.resize(filled + room, 0);
@@ -162,7 +200,8 @@ impl Work {
             read += taken;
             data.truncate(filled + written);
             match status {
-                Ok(Status::StreamEnd) => return (data, read, End::Whole),
+                Ok(Status::StreamEnd) if data.len() <= limit => return (data, read, End::Whole),
+                Ok(Status::StreamEnd) => {}
                 // Nothing more can come: the packed data is used up.
                 Ok(_) if taken == 0 && written == 0 => return (data, read, End::Short),
                 Ok(_) => {}
@@ -171,6 +210,15 @@ impl Work {
             }
         }
     }
+}
+
+/// Whether `method` is a way to pack a zip archive's file that this scan
+/// does not unpack: every one the format knows but "stored" and "deflated".
+/// The number that stands for an encrypted file is left out: what a password
+/// hides is a limit the documentation names. A number the format does not
+/// know is noise, since no program unpacks such a file.
+const fn unread(method: usize) -> bool {
+    matches!(method, 1..=7 | 9 | 10 | 12 | 14 | 16 | 18..=20 | 93..=98)
 }
 
 /// How far a counter of the inflater went in one step.

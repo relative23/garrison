@@ -10,7 +10,7 @@ pub(super) const OLE: &[u8] = &[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 const VBA_STORAGE: &[u8] = b"_\0V\0B\0A\0_\0P\0R\0O\0J\0E\0C\0T\0";
 pub(super) const ZIP_ENTRY: &[u8] = b"PK\x03\x04";
 /// An entry of the directory at an archive's end, which is what Office reads.
-const ZIP_LISTED: &[u8] = b"PK\x01\x02";
+pub(super) const ZIP_LISTED: &[u8] = b"PK\x01\x02";
 const ACTIVE_MIME: &[u8] = b"ActiveMime";
 /// The names inside a zip archive that are macros, in lower case.
 const ZIP_MACROS: [&[u8]; 2] = [b"vbaproject.bin", b"xl/macrosheets/"];

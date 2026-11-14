@@ -6,6 +6,14 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`on_incomplete` in `[milter]`: what a message gets that the macro filter
+  could not scan completely.** `"tag"`, the default, takes it with the header
+  `X-Garrison-Scan: unscanned`; `"defer"` has the sending server bring it
+  again; `"refuse"` refuses it. See
+  [configuration](docs/operator/configuration.md#milter).
+
 ### Changed
 
 - **The installer names the rollback that works.** After an upgrade that
@@ -22,13 +30,23 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **The macro filter no longer passes what it could not scan as clean.** A
+  message larger than `max_message_mib`, an archive that unpacks to more than
+  the filter unpacks (16 MiB a file, 64 MiB together), and a zip archive
+  packed with bzip2, LZMA, zstd or Deflate64 were answered like a message
+  without macros: a document with macros behind four large files of zeros
+  passed. Such a message now gets what the new `on_incomplete` says, by
+  default the header `X-Garrison-Scan: unscanned`, and the journal names the
+  kind of reason. Macros the filter did see are refused or marked as before.
+  Mail with large archives, which arrived unmarked before, now carries that
+  header.
 - **The macro filter answers in time whatever a message holds.** A crafted
   attachment could keep the filter's one scan busy for seconds to minutes (a
   megabyte of zip directory headers took eight seconds), and all other mail
   waited behind it. The scan's work now grows with the size of the message
   alone, whatever its archives' headers claim, and the filter answers within
   20 seconds of a message's end, the wait for its turn included. A message
-  whose scan is not done by then is deferred, not taken as clean.
+  whose scan is not done by then gets what `on_incomplete` says.
 
 ## [0.1.2] - 2026-11-13
 

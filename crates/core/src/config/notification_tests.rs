@@ -192,6 +192,7 @@ fn the_milter_runs_where_its_section_is_there() {
         Some(MilterConfig {
             port: 8096,
             action: MacroAction::Reject,
+            on_incomplete: IncompleteAction::Tag,
             max_message_bytes: 64 * 1024 * 1024,
             defer_when_unreachable: true,
         })
@@ -199,6 +200,7 @@ fn the_milter_runs_where_its_section_is_there() {
     let set = with(&[
         ("port", toml::Value::Integer(9001)),
         ("on_macro", text("tag")),
+        ("on_incomplete", text("defer")),
         ("max_message_mib", toml::Value::Integer(10)),
         ("when_unreachable", text("accept")),
     ]);
@@ -207,6 +209,7 @@ fn the_milter_runs_where_its_section_is_there() {
         Some(MilterConfig {
             port: 9001,
             action: MacroAction::Tag,
+            on_incomplete: IncompleteAction::Defer,
             max_message_bytes: 10 * 1024 * 1024,
             defer_when_unreachable: false,
         })
@@ -215,6 +218,19 @@ fn the_milter_runs_where_its_section_is_there() {
         with(&[("on_macro", text("quarantine"))]).unwrap_err().0,
         "milter.on_macro is \"reject\" or \"tag\""
     );
+    for (word, action) in [
+        ("tag", IncompleteAction::Tag),
+        ("defer", IncompleteAction::Defer),
+        ("refuse", IncompleteAction::Refuse),
+    ] {
+        let set = with(&[("on_incomplete", text(word))]).unwrap().milter;
+        assert_eq!(set.unwrap().on_incomplete, action);
+    }
+    assert_eq!(
+        with(&[("on_incomplete", text("accept"))]).unwrap_err().0,
+        "milter.on_incomplete is \"tag\", \"defer\" or \"refuse\""
+    );
+    assert!(with(&[("on_incomplete", toml::Value::Boolean(true))]).is_err());
     assert!(with(&[("when_unreachable", text("drop"))]).is_err());
     assert!(with(&[("port", toml::Value::Integer(25))]).is_err());
     assert!(with(&[("max_message_mib", toml::Value::Integer(0))]).is_err());

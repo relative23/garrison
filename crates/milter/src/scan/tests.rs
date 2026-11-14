@@ -270,7 +270,11 @@ fn an_archive_that_unpacks_to_far_more_than_it_is_ends_the_scan_in_time() {
     let bomb = archive(&listed);
     assert!(bomb.len() < 1024 * 1024, "{}", bomb.len());
     let began = Instant::now();
-    assert_eq!(macros(&message("big.zip", &bomb)), Outcome::Clean);
+    // The first file is cut at what is unpacked of one: not all was seen.
+    assert_eq!(
+        macros(&message("big.zip", &bomb)),
+        Outcome::Incomplete(Gap::Truncated)
+    );
     assert!(
         began.elapsed() < Duration::from_secs(20),
         "{:?}",

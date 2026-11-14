@@ -24,6 +24,12 @@
 //! as [`DEPTH`] goes. What the scan cannot see is said in the crate's
 //! documentation: encrypted archives, Excel 4.0 macro sheets in old `.xls`
 //! files and the macros of an old `.ppt` file among it.
+//!
+//! What the scan could have seen but did not look at is another matter, and
+//! never passes for a clean message: more packed data than it unpacks, a
+//! file packed otherwise than by deflate, or time that ran out end as
+//! [`Outcome::Incomplete`], and the filter's operator decides what such a
+//! message gets.
 
 use std::time::Instant;
 
@@ -78,8 +84,14 @@ impl Found {
 pub enum Gap {
     /// Its archives hold more than the scan unpacks or reads.
     Budget,
+    /// One packed file is larger than the scan unpacks of one.
+    Truncated,
+    /// A file is packed in a way the scan does not read.
+    Method,
     /// The scan's time ran out.
     Deadline,
+    /// The message is larger than what is scanned at all.
+    Size,
 }
 
 impl Gap {
@@ -88,7 +100,10 @@ impl Gap {
     pub const fn name(self) -> &'static str {
         match self {
             Gap::Budget => "its archives hold more than the scan unpacks",
+            Gap::Truncated => "a packed file in it is larger than the scan unpacks",
+            Gap::Method => "an archive in it is packed in a way the scan does not read",
             Gap::Deadline => "the scan's time ran out",
+            Gap::Size => "it is larger than the configured max_message_mib",
         }
     }
 }
@@ -212,5 +227,7 @@ fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
 
 #[cfg(test)]
 mod bounds_tests;
+#[cfg(test)]
+mod incomplete_tests;
 #[cfg(test)]
 pub(crate) mod tests;

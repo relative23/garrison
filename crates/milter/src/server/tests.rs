@@ -2,7 +2,7 @@ use std::io::Cursor;
 
 use super::*;
 use crate::protocol::tests::{frame, opening};
-use crate::sample::document;
+use crate::sample::{archive, document};
 use crate::scan::tests::message;
 
 /// What the mail server sends, and what the filter wrote back.
@@ -30,6 +30,7 @@ impl Write for Wire {
 
 const SETTINGS: Settings = Settings {
     tag: false,
+    on_incomplete: IncompleteAction::Defer,
     max_bytes: 8 * 1024 * 1024,
     scan_time: SCAN_TIME,
 };
@@ -194,7 +195,7 @@ fn a_message_that_finds_no_room_is_deferred_and_the_room_comes_back() {
     large.extend(sent(&raw, 1000));
     assert_eq!(
         answers_among(large, small, &shared)[1..],
-        [(b'a', Vec::new())]
+        [(b't', Vec::new())]
     );
     assert_eq!(shared.held.load(Ordering::SeqCst), 0);
     // One message of the largest size always has room.
@@ -206,14 +207,70 @@ fn a_message_that_finds_no_room_is_deferred_and_the_room_comes_back() {
     assert_eq!(Shared::new(SETTINGS).room, HELD);
 }
 
+/// The header and the answer of a message that was taken unscanned.
+fn tagged_unscanned() -> [(u8, Vec<u8>); 2] {
+    [
+        (b'h', b"X-Garrison-Scan\0unscanned\0".to_vec()),
+        (b'a', Vec::new()),
+    ]
+}
+
 #[test]
-fn a_message_beyond_the_size_that_is_scanned_is_taken() {
-    let small = Settings {
+fn a_message_beyond_the_size_that_is_scanned_gets_what_the_operator_chose() {
+    let raw = message("invoice.docm", &document());
+    let with = |on_incomplete| Settings {
+        on_incomplete,
         max_bytes: 512,
         ..SETTINGS
     };
-    let replies = conversation(&message("invoice.docm", &document()), MODERN, small);
-    assert_eq!(replies[1..], [(b'a', Vec::new())]);
+    let tagged = conversation(&raw, MODERN, with(IncompleteAction::Tag));
+    assert_eq!(tagged[1..], tagged_unscanned());
+    let deferred = conversation(&raw, MODERN, with(IncompleteAction::Defer));
+    assert_eq!(deferred[1..], [(b't', Vec::new())]);
+    let refused = conversation(&raw, MODERN, with(IncompleteAction::Refuse));
+    assert_eq!(
+        refused[1..],
+        [(b'y', [UNSCANNED_REFUSAL.as_bytes(), b"\0"].concat())]
+    );
+    // An empty section tags.
+    assert_eq!(Settings::default().on_incomplete, IncompleteAction::Tag);
+}
+
+#[test]
+fn a_message_the_scan_could_not_open_completely_is_not_taken_as_clean() {
+    // One packed file larger than the scan unpacks of one.
+    let large = vec![0u8; 16 * 1024 * 1024 + 1];
+    let raw = message("large.zip", &archive(&[("large.bin", &large, true)]));
+    let tagging = Settings {
+        on_incomplete: IncompleteAction::Tag,
+        ..SETTINGS
+    };
+    assert_eq!(conversation(&raw, MODERN, tagging)[1..], tagged_unscanned());
+    assert_eq!(
+        conversation(&raw, MODERN, SETTINGS)[1..],
+        [(b't', Vec::new())]
+    );
+    // Macros that are in sight count before what was not looked at.
+    let both = archive(&[("large.bin", &large, true), ("a.docm", &document(), false)]);
+    let refused = conversation(&message("both.zip", &both), MODERN, tagging);
+    assert_eq!(refused[1], (b'y', [REFUSAL.as_bytes(), b"\0"].concat()));
+}
+
+#[test]
+fn the_filter_asks_for_leave_to_add_headers_only_where_it_may_tag() {
+    let asked = |settings| {
+        let replies = conversation(&message("letter.txt", b"Text."), MODERN, settings);
+        u32::from_be_bytes(replies[0].1[4..8].try_into().unwrap())
+    };
+    let with = |tag, on_incomplete| Settings {
+        tag,
+        on_incomplete,
+        ..SETTINGS
+    };
+    assert_eq!(asked(with(false, IncompleteAction::Defer)), 0);
+    assert_eq!(asked(with(false, IncompleteAction::Refuse)), 0);
+    assert_eq!(asked(with(false, IncompleteAction::Tag)), 1);
+    assert_eq!(asked(with(true, IncompleteAction::Defer)), 1);
 }
 
 #[test]
@@ -242,14 +299,22 @@ fn steps_that_were_not_asked_for_pass_and_broken_frames_end_the_connection() {
 }
 
 #[test]
-fn a_message_whose_scan_has_no_time_left_is_deferred() {
+fn a_message_whose_scan_has_no_time_left_gets_what_the_operator_chose() {
     // No time at all: the scan ends before it looked at anything.
     let hurried = Settings {
         scan_time: Duration::ZERO,
         ..SETTINGS
     };
-    let replies = conversation(&message("invoice.docm", &document()), MODERN, hurried);
-    assert_eq!(replies[1..], [(b't', Vec::new())]);
+    let raw = message("invoice.docm", &document());
+    assert_eq!(
+        conversation(&raw, MODERN, hurried)[1..],
+        [(b't', Vec::new())]
+    );
+    let tagging = Settings {
+        on_incomplete: IncompleteAction::Tag,
+        ..hurried
+    };
+    assert_eq!(conversation(&raw, MODERN, tagging)[1..], tagged_unscanned());
 }
 
 #[test]

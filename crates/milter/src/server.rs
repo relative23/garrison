@@ -6,6 +6,10 @@
 //! message, or refuse it. Where the operator chose to tag instead, the
 //! message is taken with a header that says what was found.
 //!
+//! A message the scan could not look at completely is no clean message. It
+//! gets what the operator chose for it ([`Settings::on_incomplete`]): a
+//! header of its own, a temporary failure or a refusal.
+//!
 //! Memory is bounded for all connections together ([`Shared`]): the messages
 //! being received may hold so much and no more, and one message is scanned
 //! at a time. A message that finds no room is answered with a temporary
@@ -13,13 +17,15 @@
 //!
 //! Time is bounded too: from a message's end the filter answers within
 //! [`SCAN_TIME`], the wait for its turn included. A message whose scan is
-//! not done by then was not looked at completely, and is not taken as clean.
+//! not done by then was not looked at completely.
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
+
+use garrison_core::config::IncompleteAction;
 
 use crate::protocol::{
     self, Command, NO_REPLY_BODY, NO_REPLY_END_OF_HEADERS, NO_REPLY_HEADER, Reply,
@@ -30,6 +36,14 @@ use crate::scan::{self, Gap, Outcome};
 pub const HEADER: &str = "X-Garrison-Macro";
 /// What the sender's server is told of a refused message.
 pub const REFUSAL: &str = "550 5.7.1 Message refused: an attached Office document contains macros.";
+/// The header a message gets that was taken although the scan could not
+/// look at all of it, and the header's value.
+pub const UNSCANNED_HEADER: &str = "X-Garrison-Scan";
+pub const UNSCANNED: &str = "unscanned";
+/// What the sender's server is told of a message that is refused because it
+/// could not be scanned completely.
+pub const UNSCANNED_REFUSAL: &str =
+    "550 5.7.1 Message refused: its attachments could not be scanned completely.";
 /// A mail server that is silent for this long has gone.
 const PATIENCE: Duration = Duration::from_secs(60);
 /// Connections at one time; a mail server opens one for each message it is
@@ -48,10 +62,19 @@ pub const SCAN_TIME: Duration = Duration::from_secs(20);
 pub struct Settings {
     /// Take a message with macros and mark it, instead of refusing it.
     pub tag: bool,
-    /// A message larger than this is not scanned, and is taken.
+    /// What a message gets that could not be scanned completely.
+    pub on_incomplete: IncompleteAction,
+    /// A message larger than this is not scanned.
     pub max_bytes: usize,
     /// What a message's wait and scan may take together.
     pub scan_time: Duration,
+}
+
+impl Settings {
+    /// Whether an answer of this filter may add a header to a message.
+    fn adds_headers(self) -> bool {
+        self.tag || self.on_incomplete == IncompleteAction::Tag
+    }
 }
 
 impl Default for Settings {
@@ -59,6 +82,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             tag: false,
+            on_incomplete: IncompleteAction::Tag,
             max_bytes: 64 * 1024 * 1024,
             scan_time: SCAN_TIME,
         }
@@ -231,7 +255,7 @@ pub fn session_among(
             Command::Negotiate {
                 actions, protocol, ..
             } => {
-                let reply = protocol::negotiated(actions, protocol, settings.tag);
+                let reply = protocol::negotiated(actions, protocol, settings.adds_headers());
                 if let Reply::Negotiate { protocol, .. } = reply {
                     quiet = protocol;
                 }
@@ -278,13 +302,6 @@ pub fn session_among(
 
 /// The answer to one message.
 fn verdict(message: &Message<'_>, settings: Settings) -> Vec<Reply> {
-    if message.too_large {
-        log::warn!(
-            "A message larger than {} bytes was not scanned",
-            settings.max_bytes
-        );
-        return vec![Reply::Accept];
-    }
     if message.crowded {
         log::warn!(
             "A message was not scanned: the messages being received fill the filter's memory. \
@@ -292,21 +309,9 @@ fn verdict(message: &Message<'_>, settings: Settings) -> Vec<Reply> {
         );
         return vec![Reply::TempFail];
     }
-    let until = Instant::now() + settings.scan_time;
-    let outcome = match message.shared.scanning.take(until) {
-        Some(_turn) => scan::macros_until(&message.data, until),
-        None => Outcome::Incomplete(Gap::Deadline),
-    };
-    match outcome {
+    match judged(message, settings) {
         Outcome::Clean => vec![Reply::Accept],
-        Outcome::Incomplete(gap) => {
-            log::warn!(
-                "A message was not scanned completely: {}. The sending server was told to \
-                 bring it again.",
-                gap.name()
-            );
-            vec![Reply::TempFail]
-        }
+        Outcome::Incomplete(gap) => unscanned(gap, settings.on_incomplete),
         Outcome::Macros(found) if settings.tag => {
             log::info!("Tagged a message with {}", found.name());
             vec![
@@ -320,6 +325,47 @@ fn verdict(message: &Message<'_>, settings: Settings) -> Vec<Reply> {
         Outcome::Macros(found) => {
             log::info!("Refused a message with {}", found.name());
             vec![Reply::Refuse(REFUSAL.to_owned())]
+        }
+    }
+}
+
+/// What the scan says of a message, within the time a message has.
+fn judged(message: &Message<'_>, settings: Settings) -> Outcome {
+    if message.too_large {
+        return Outcome::Incomplete(Gap::Size);
+    }
+    let until = Instant::now() + settings.scan_time;
+    match message.shared.scanning.take(until) {
+        Some(_turn) => scan::macros_until(&message.data, until),
+        None => Outcome::Incomplete(Gap::Deadline),
+    }
+}
+
+/// The answer to a message that could not be scanned completely. The log
+/// gets the kind of reason and nothing of the message.
+fn unscanned(gap: Gap, action: IncompleteAction) -> Vec<Reply> {
+    let reason = gap.name();
+    match action {
+        IncompleteAction::Tag => {
+            log::warn!("Tagged a message as not scanned completely: {reason}");
+            vec![
+                Reply::AddHeader {
+                    name: UNSCANNED_HEADER.to_owned(),
+                    value: UNSCANNED.to_owned(),
+                },
+                Reply::Accept,
+            ]
+        }
+        IncompleteAction::Defer => {
+            log::warn!(
+                "Deferred a message that was not scanned completely: {reason}. The sending \
+                 server was told to bring it again."
+            );
+            vec![Reply::TempFail]
+        }
+        IncompleteAction::Refuse => {
+            log::warn!("Refused a message that was not scanned completely: {reason}");
+            vec![Reply::Refuse(UNSCANNED_REFUSAL.to_owned())]
         }
     }
 }

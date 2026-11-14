@@ -5,7 +5,9 @@
 use toml::Value;
 
 use super::values::{Section, https_url, integer, secret_source};
-use super::{ConfigError, MacroAction, MailSettings, MilterConfig, Notifications};
+use super::{
+    ConfigError, IncompleteAction, MacroAction, MailSettings, MilterConfig, Notifications,
+};
 
 fn fail<T>(message: impl Into<String>) -> Result<T, ConfigError> {
     Err(ConfigError(message.into()))
@@ -150,7 +152,13 @@ pub(super) fn milter(value: Option<&Value>) -> Result<Option<MilterConfig>, Conf
     let table = Section::take(
         value,
         "milter",
-        &["port", "on_macro", "max_message_mib", "when_unreachable"],
+        &[
+            "port",
+            "on_macro",
+            "on_incomplete",
+            "max_message_mib",
+            "when_unreachable",
+        ],
     )?;
     let defer_when_unreachable = match table.get("when_unreachable").map(Value::as_str) {
         None | Some(Some("defer")) => true,
@@ -162,6 +170,12 @@ pub(super) fn milter(value: Option<&Value>) -> Result<Option<MilterConfig>, Conf
         Some(Some("tag")) => MacroAction::Tag,
         Some(_) => return fail("milter.on_macro is \"reject\" or \"tag\""),
     };
+    let on_incomplete = match table.get("on_incomplete").map(Value::as_str) {
+        None | Some(Some("tag")) => IncompleteAction::Tag,
+        Some(Some("defer")) => IncompleteAction::Defer,
+        Some(Some("refuse")) => IncompleteAction::Refuse,
+        Some(_) => return fail("milter.on_incomplete is \"tag\", \"defer\" or \"refuse\""),
+    };
     let megabytes: u64 = integer(
         table.get("max_message_mib"),
         Some(64),
@@ -172,6 +186,7 @@ pub(super) fn milter(value: Option<&Value>) -> Result<Option<MilterConfig>, Conf
     Ok(Some(MilterConfig {
         port: integer(table.get("port"), Some(8096), "milter.port", 1024, 65535)?,
         action,
+        on_incomplete,
         max_message_bytes: megabytes * 1024 * 1024,
         defer_when_unreachable,
     }))

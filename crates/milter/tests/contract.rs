@@ -18,7 +18,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use garrison_milter::protocol::{self, Command, Reply};
 use garrison_milter::sample::{NAME, document};
-use garrison_milter::server::{HEADER, REFUSAL, Settings, serve};
+use garrison_milter::server::{HEADER, REFUSAL, Settings, UNSCANNED_HEADER, serve};
 use garrison_testing::lab::{Lab, random_hex};
 use garrison_testing::smtp::Smtp;
 use serde_json::json;
@@ -65,16 +65,17 @@ fn handed_in(smtp: &str, message: &str) -> String {
     answer
 }
 
-/// The filter's header on the message with `subject` in the administrator's
-/// mailbox, once the message is there; `None` if it carries none.
-fn mark_of(lab: &Lab, subject: &str) -> Option<String> {
+/// The filter's header `name` on the message with `subject` in the
+/// administrator's mailbox, once the message is there; `None` if it carries
+/// none.
+fn mark_of(lab: &Lab, name: &str, subject: &str) -> Option<String> {
     let admin = std::env::var("GARRISON_LAB_ADMIN").unwrap();
     let session = lab.http("/jmap/session", &admin, None);
     let account = session["primaryAccounts"]["urn:ietf:params:jmap:mail"]
         .as_str()
         .expect("the administrator has a mailbox")
         .to_owned();
-    let property = format!("header:{HEADER}:asText");
+    let property = format!("header:{name}:asText");
     for _ in 0..40 {
         let answer = lab.http(
             "/jmap/",
@@ -105,6 +106,22 @@ fn mark_of(lab: &Lab, subject: &str) -> Option<String> {
         std::thread::sleep(Duration::from_millis(500));
     }
     panic!("the message {subject:?} did not arrive");
+}
+
+/// Change the milter's entry as setup changes it, to the filter on `port`,
+/// and have Stalwart read its settings again.
+fn moved_to(lab: &Lab, entry: &str, callback: &str, port: u16) {
+    lab.call(
+        "x:MtaMilter/set",
+        &json!({"update": {(entry): {
+            "host": callback, "port": port, "tempFailOnError": true,
+        }}}),
+    );
+    lab.call(
+        "x:Action/set",
+        &json!({"create": {"r": {"@type": "ReloadSettings"}}}),
+    );
+    std::thread::sleep(Duration::from_secs(2));
 }
 
 #[test]
@@ -163,26 +180,29 @@ fn stalwart_asks_the_filter_and_refuses_what_it_refuses() {
             },
         );
     });
-    lab.call(
-        "x:MtaMilter/set",
-        &json!({"update": {(entry.clone()): {
-            "host": callback, "port": tagging_port, "tempFailOnError": true,
-        }}}),
-    );
-    lab.call(
-        "x:Action/set",
-        &json!({"create": {"r": {"@type": "ReloadSettings"}}}),
-    );
-    std::thread::sleep(Duration::from_secs(2));
+    moved_to(&lab, &entry, &callback, tagging_port);
     let marked = format!("Macro test {}", random_hex(6));
     let taken = handed_in(&smtp, &message(&marked, Some(&document())));
     assert!(taken.starts_with("250"), "{taken}");
     let clean = format!("Macro test {}", random_hex(6));
     let taken = handed_in(&smtp, &message(&clean, None));
     assert!(taken.starts_with("250"), "{taken}");
-    let mark = mark_of(&lab, &marked).expect("the message with macros carries the header");
+    let mark = mark_of(&lab, HEADER, &marked).expect("the message with macros carries the header");
     assert!(mark.starts_with("yes"), "{mark}");
-    assert_eq!(mark_of(&lab, &clean), None);
+    assert_eq!(mark_of(&lab, HEADER, &clean), None);
+    // A message the filter could not look at completely (one packed file
+    // larger than it unpacks) arrives with the header that says so, and
+    // without the one for macros.
+    let large = vec![0u8; 16 * 1024 * 1024 + 1];
+    let cut = garrison_milter::sample::archive(&[("large.bin", &large, true)]);
+    let unscanned = format!("Macro test {}", random_hex(6));
+    let taken = handed_in(&smtp, &message(&unscanned, Some(&cut)));
+    assert!(taken.starts_with("250"), "{taken}");
+    let mark = mark_of(&lab, UNSCANNED_HEADER, &unscanned)
+        .expect("the message that was not scanned carries the header");
+    assert!(mark.starts_with("unscanned"), "{mark}");
+    assert_eq!(mark_of(&lab, HEADER, &unscanned), None);
+    assert_eq!(mark_of(&lab, UNSCANNED_HEADER, &clean), None);
     // A filter that has no room says "not now": Stalwart passes that on as a
     // temporary failure, so the sending server keeps the message.
     let busy = TcpListener::bind((callback.as_str(), 0)).unwrap();
@@ -207,17 +227,7 @@ fn stalwart_asks_the_filter_and_refuses_what_it_refuses() {
             }
         }
     });
-    lab.call(
-        "x:MtaMilter/set",
-        &json!({"update": {(entry.clone()): {
-            "host": callback, "port": busy_port, "tempFailOnError": true,
-        }}}),
-    );
-    lab.call(
-        "x:Action/set",
-        &json!({"create": {"r": {"@type": "ReloadSettings"}}}),
-    );
-    std::thread::sleep(Duration::from_secs(2));
+    moved_to(&lab, &entry, &callback, busy_port);
     let deferred = handed_in(&smtp, &message("Macro test", None));
     assert!(deferred.starts_with('4'), "{deferred}");
 }

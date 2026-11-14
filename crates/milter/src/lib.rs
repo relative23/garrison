@@ -11,7 +11,11 @@
 //! compressed inside one of its streams; macros of other office suites'
 //! own formats; a document behind a link; and what lies deeper in archives
 //! than [`scan::DEPTH`].
-//! A message larger than the configured size is taken unscanned.
+//!
+//! What the scan could not look at completely is no clean message: one
+//! larger than the configured size, one whose archives hold more than the
+//! scan unpacks or are packed otherwise than by deflate, and one whose scan
+//! ran out of time get what `on_incomplete` says.
 
 pub mod protocol;
 pub mod sample;
@@ -52,6 +56,7 @@ pub fn run(config: &Config) -> Result<(), Error> {
         &listener,
         Settings {
             tag: milter.action == MacroAction::Tag,
+            on_incomplete: milter.on_incomplete,
             max_bytes: usize::try_from(milter.max_message_bytes).unwrap_or(usize::MAX),
             scan_time: server::SCAN_TIME,
         },

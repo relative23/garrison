@@ -99,13 +99,28 @@ pub enum MacroAction {
     Tag,
 }
 
+/// What the macro milter does with a message it could not scan completely:
+/// one that is too large, holds more packed data than is unpacked, is packed
+/// in a way the scan does not read, or whose scan ran out of time.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IncompleteAction {
+    /// Take it, with a header that says it was not scanned.
+    #[default]
+    Tag,
+    /// Have the sending server bring it again later.
+    Defer,
+    /// Refuse it while the sender's server is still connected.
+    Refuse,
+}
+
 /// The macro milter, which Stalwart asks about each incoming message.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MilterConfig {
     /// The loopback port it listens on.
     pub port: u16,
     pub action: MacroAction,
-    /// A message larger than this is taken unscanned.
+    pub on_incomplete: IncompleteAction,
+    /// A message larger than this is not scanned.
     pub max_message_bytes: u64,
     /// Whether Stalwart defers mail while the milter cannot be reached; if
     /// not, it takes mail unscanned then.
