@@ -237,11 +237,13 @@ The command is available as {command}.",
     Ok(())
 }
 
-/// The release's own `check-config` against the system configuration.
+/// The release's own `check-config` against the system configuration. What
+/// it said goes to standard error with the installer's own reason, so that
+/// a script that keeps only that stream learns which setting failed.
 fn check_config(release: &Path) -> Step {
     let check = cli(release, &["check-config"])?;
     if !check.status.success() {
-        say(&format!(
+        crate::complain(&format!(
             "{}\n{}",
             String::from_utf8_lossy(&check.stdout),
             String::from_utf8_lossy(&check.stderr)

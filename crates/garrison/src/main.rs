@@ -307,7 +307,7 @@ fn check_config(config: &Config) -> u8 {
             0
         }
         Err(error) => {
-            say(&format!("Access policy not usable: {error}"));
+            complain(&format!("Access policy not usable: {error}"));
             1
         }
     }

@@ -43,6 +43,12 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **`check-config` and the installer say why on standard error.**
+  `check-config` printed an access policy it could not use on standard
+  output, and the installer printed there what a failed `check-config` had
+  said, so a script that looks for the reason on standard error, where the
+  installation guide says it is, learned no more than "check-config
+  failed". Both now write the reason to standard error.
 - **Sign-ins from more networks than the web service counts are limited
   too.** The web service lets each client network (an IPv4 address or an
   IPv6 /64) exchange 10 sign-in codes a minute at Stalwart and counts up to

@@ -78,6 +78,9 @@ scenario_refusals() {
         printf "\nunknown_setting = 1\n" >> /etc/garrison/garrison.toml'
     refused "a configuration the release refuses stops the upgrade" \
         '/root/release/bin/garrison install' "the running release was not touched"
+    # A script that keeps only standard error finds the reason there.
+    check "the installer names the refused setting on standard error" \
+        'umask 077 && /root/release/bin/garrison install 2>&1 >/dev/null | grep -q unknown_setting'
     inside 'cp -p /root/garrison.toml.good /etc/garrison/garrison.toml'
     check "the refused upgrade backed nothing up" "test \$(ls /var/backups/garrison | wc -l) -eq $backups"
     # Too little room for the backup: a small file system over the backups.

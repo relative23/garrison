@@ -121,7 +121,13 @@ fn check_config_reports_providers_actions_and_the_policy() {
     std::fs::remove_file(directory.path().join("policy.json")).unwrap();
     let unusable = run(directory.path(), &["check-config"]);
     assert_eq!(unusable.status.code(), Some(1));
-    assert!(text(&unusable.stdout).contains("Access policy not usable: "));
+    // The reason of a failure is on standard error, as for every command.
+    assert!(
+        text(&unusable.stderr).contains("Access policy not usable: "),
+        "{}",
+        text(&unusable.stderr)
+    );
+    assert!(!text(&unusable.stdout).contains("Access policy"));
 }
 
 #[test]
