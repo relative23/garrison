@@ -58,6 +58,20 @@ check "upgraded: a configured action runs through the broker and polkit" '
     printf "%s\n" "{\"op\": \"job\", \"token\": \"acceptance-token-0123456789abcdef\", \"id\": \"$(cat /root/job-id)\"}" |
         timeout 10 runuser -u garrison -- /usr/local/bin/acceptance-connect /run/garrison/broker.sock |
         grep -q "\"status\":\"succeeded\""'
+# The rule lets the broker's user do what the actions name and nothing
+# else: not another operation on the action's unit, not another unit. The
+# refusal must be polkit's (systemd's default asks for an administrator, and
+# --no-ask-password turns that into a refusal), not a unit that is missing.
+check "polkit lets the broker's user start the action's unit" \
+    'runuser -u garrison-broker -- /usr/bin/systemctl --no-ask-password start acceptance-check.service'
+inside 'systemctl show -p MainPID --value garrison-web.service > /root/web-pid'
+for refused in "stop acceptance-check.service" "restart garrison-web.service"; do
+    check "polkit refuses the broker's user: systemctl $refused" "
+        ! runuser -u garrison-broker -- /usr/bin/systemctl --no-ask-password $refused 2>/root/polkit.log &&
+            grep -q 'Interactive authentication required' /root/polkit.log"
+done
+check "garrison-web.service ran on through the refused restart" \
+    'test "$(systemctl show -p MainPID --value garrison-web.service)" = "$(cat /root/web-pid)"'
 
 step "Choosing modules"
 inside '/opt/garrison/current/bin/garrison --config /etc/garrison/garrison.toml modules --set dns_tls --adopt --yes'
