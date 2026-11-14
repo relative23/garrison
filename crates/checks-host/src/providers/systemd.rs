@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 
 use garrison_core::config::is_unit_name;
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Kind, Observation, State};
+use garrison_core::observations::{Evidence, Field, Format, Kind, Observation, Required, State};
 use garrison_core::systemd::SYSTEMCTL;
 use garrison_core::time;
 use regex_lite::Regex;
@@ -354,16 +354,16 @@ impl Systemd {
         value.insert("unit".into(), json!(unit.name));
         value.insert("activeState".into(), json!(active));
         value.insert("subState".into(), json!(get("SubState")));
-        Ok(Observation::new(
-            format!("systemd.{}", unit.name),
-            self.name(),
-            unit.label.clone(),
-            unit.modules.iter().copied(),
-            Evidence::Process,
+        Ok(Observation::new(Required {
+            id: &format!("systemd.{}", unit.name),
+            provider: self.name(),
+            title: &unit.label,
+            modules: unit.modules.iter().copied(),
+            evidence: Evidence::Process,
             state,
-            context.checked_at(),
-            format!("systemctl show {}", unit.name),
-        )?
+            checked_at: &context.checked_at(),
+            source: &format!("systemctl show {}", unit.name),
+        })?
         .with_kind(Kind::Service)
         .with_scope(scope)
         .with_fields(fields)

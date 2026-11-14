@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Observation, State};
+use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 
 use crate::context::{Collected, Context, Provider, Report};
 use crate::options::{Checked, Options};
@@ -105,16 +105,16 @@ impl Provider for Host {
     #[allow(clippy::cast_precision_loss)]
     fn collect(&self, context: &Context<'_>) -> Collected {
         let base = |state, source: String| {
-            Observation::new(
-                "host.resources",
-                self.name(),
-                "Host resources",
-                self.modules.iter().copied(),
-                Evidence::Metric,
+            Observation::new(Required {
+                id: "host.resources",
+                provider: self.name(),
+                title: "Host resources",
+                modules: self.modules.iter().copied(),
+                evidence: Evidence::Metric,
                 state,
-                context.checked_at(),
-                source,
-            )
+                checked_at: &context.checked_at(),
+                source: &source,
+            })
         };
         let Some(reading) = self.read() else {
             let unknown = base(State::Unknown, self.proc.display().to_string())?

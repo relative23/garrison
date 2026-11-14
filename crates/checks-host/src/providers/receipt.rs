@@ -23,7 +23,9 @@ use std::path::PathBuf;
 
 use garrison_core::files::{changed_only_by_trusted, read_json_with_metadata};
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Column, Evidence, Field, Format, Observation, State, Table};
+use garrison_core::observations::{
+    Column, Evidence, Field, Format, Observation, Required, State, Table,
+};
 use garrison_core::time::{self, Written};
 use serde_json::{Value, json};
 
@@ -376,16 +378,16 @@ impl Provider for Receipt {
         let read = read_json_with_metadata(&self.path, MAX_DOCUMENT)
             .filter(|(value, _)| value.is_object() || value.is_array());
         let base = |state| {
-            Observation::new(
-                format!("receipt.{}", self.id),
-                self.name(),
-                self.title.clone(),
-                self.modules.iter().copied(),
-                Evidence::Receipt,
+            Observation::new(Required {
+                id: &format!("receipt.{}", self.id),
+                provider: self.name(),
+                title: &self.title,
+                modules: self.modules.iter().copied(),
+                evidence: Evidence::Receipt,
                 state,
-                context.checked_at(),
-                self.path.display().to_string(),
-            )
+                checked_at: &context.checked_at(),
+                source: &self.path.display().to_string(),
+            })
             .map(|observation| observation.with_scope(self.scope.clone()))
         };
         let Some((document, metadata)) = read else {

@@ -1,5 +1,5 @@
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, State};
+use garrison_core::observations::{Evidence, Required, State};
 use serde_json::json;
 
 use super::*;
@@ -115,16 +115,16 @@ fn a_failure_is_tried_again_sooner_and_an_answer_from_ahead_is_not_used() {
 #[test]
 fn an_observation_is_as_old_as_its_answer_and_stale_once_the_next_is_late() {
     let observation = || {
-        Observation::new(
-            "test.answer",
-            "test",
-            "Answer",
-            [ModuleId::Services],
-            Evidence::Probe,
-            State::Ok,
-            "2026-10-29T18:00:00+00:00",
-            "a source",
-        )
+        Observation::new(Required {
+            id: "test.answer",
+            provider: "test",
+            title: "Answer",
+            modules: [ModuleId::Services],
+            evidence: Evidence::Probe,
+            state: State::Ok,
+            checked_at: "2026-10-29T18:00:00+00:00",
+            source: "a source",
+        })
         .unwrap()
     };
     let start = now().as_second();

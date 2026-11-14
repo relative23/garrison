@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use garrison_core::files::{changed_only_by_trusted, read_json_with_metadata};
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Observation, State};
+use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_core::{json, time};
 
 use crate::backups::{Report as Backup, Run, Tool};
@@ -254,16 +254,16 @@ impl Provider for BackupCheck {
             Tool::Borg => ("archive", "borg repository"),
         };
         let base = |state| {
-            Observation::new(
-                format!("backup-check.{}", self.tool.name()),
-                self.name(),
+            Observation::new(Required {
+                id: &format!("backup-check.{}", self.tool.name()),
+                provider: self.name(),
                 title,
-                self.modules.iter().copied(),
-                Evidence::Receipt,
+                modules: self.modules.iter().copied(),
+                evidence: Evidence::Receipt,
                 state,
-                context.checked_at(),
-                self.path.display().to_string(),
-            )
+                checked_at: &context.checked_at(),
+                source: &self.path.display().to_string(),
+            })
         };
         let report = match self.read() {
             Ok(report) => report,

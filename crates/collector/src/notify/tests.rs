@@ -5,16 +5,16 @@ use super::*;
 use crate::testing::{Remembered, now};
 
 pub(super) fn observed(id: &str, state: State, finding: &str) -> Observation {
-    Observation::new(
+    Observation::new(Required {
         id,
-        "test",
-        format!("Check {id}"),
-        [ModuleId::Services],
-        Evidence::Process,
+        provider: "test",
+        title: &format!("Check {id}"),
+        modules: [ModuleId::Services],
+        evidence: Evidence::Process,
         state,
-        time::isoformat(now()),
-        "test",
-    )
+        checked_at: &time::isoformat(now()),
+        source: "test",
+    })
     .unwrap()
     .with_findings(if finding.is_empty() {
         Vec::new()

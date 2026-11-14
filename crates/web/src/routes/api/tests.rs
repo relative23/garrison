@@ -64,16 +64,16 @@ fn a_document_serde_json_would_read_as_another_is_refused() {
 
 /// An observation checked at `at`; without `max_age` it keeps the default.
 fn checked(at: &str, max_age: Option<u32>) -> observations::Observation {
-    let observation = observations::Observation::new(
-        "x",
-        "p",
-        "t",
-        [ModuleId::Dashboard],
-        observations::Evidence::Probe,
-        observations::State::Ok,
-        at,
-        "s",
-    )
+    let observation = observations::Observation::new(observations::Required {
+        id: "x",
+        provider: "p",
+        title: "t",
+        modules: [ModuleId::Dashboard],
+        evidence: observations::Evidence::Probe,
+        state: observations::State::Ok,
+        checked_at: at,
+        source: "s",
+    })
     .unwrap();
     match max_age {
         Some(seconds) => observation.with_max_age(seconds),

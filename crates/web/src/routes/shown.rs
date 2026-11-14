@@ -185,16 +185,16 @@ mod tests {
 
     #[test]
     fn a_shown_observation_is_the_stored_one_with_granted_modules_and_staleness() {
-        let stored = observations::Observation::new(
-            "clamav.signatures",
-            "clamav",
-            "Signature files",
-            [ModuleId::Dashboard, ModuleId::Antivirus, ModuleId::Actions],
-            observations::Evidence::Inventory,
-            observations::State::Warning,
-            "2026-10-29T00:00:00+00:00",
-            "/var/lib/clamav",
-        )
+        let stored = observations::Observation::new(observations::Required {
+            id: "clamav.signatures",
+            provider: "clamav",
+            title: "Signature files",
+            modules: [ModuleId::Dashboard, ModuleId::Antivirus, ModuleId::Actions],
+            evidence: observations::Evidence::Inventory,
+            state: observations::State::Warning,
+            checked_at: "2026-10-29T00:00:00+00:00",
+            source: "/var/lib/clamav",
+        })
         .unwrap()
         .with_kind(observations::Kind::Version)
         .with_scope("host")

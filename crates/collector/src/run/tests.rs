@@ -34,16 +34,16 @@ impl Provider for Twice {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let one = Observation::new(
-            "same.id",
-            "twice",
-            "Same",
-            [ModuleId::Services],
-            Evidence::Process,
-            State::Ok,
-            context.checked_at(),
-            "test",
-        )?;
+        let one = Observation::new(Required {
+            id: "same.id",
+            provider: "twice",
+            title: "Same",
+            modules: [ModuleId::Services],
+            evidence: Evidence::Process,
+            state: State::Ok,
+            checked_at: &context.checked_at(),
+            source: "test",
+        })?;
         Ok(Report {
             observations: vec![one.clone(), one],
             ..Report::default()
@@ -244,16 +244,16 @@ impl Provider for Takes {
 
     fn collect(&self, context: &Context<'_>) -> Collected {
         std::thread::sleep(self.1);
-        Ok(Report::of(Observation::new(
-            format!("{}.done", self.0),
-            self.0,
-            "Done",
-            [ModuleId::Services],
-            Evidence::Process,
-            State::Ok,
-            context.checked_at(),
-            "test",
-        )?))
+        Ok(Report::of(Observation::new(Required {
+            id: &format!("{}.done", self.0),
+            provider: self.0,
+            title: "Done",
+            modules: [ModuleId::Services],
+            evidence: Evidence::Process,
+            state: State::Ok,
+            checked_at: &context.checked_at(),
+            source: "test",
+        })?))
     }
 }
 

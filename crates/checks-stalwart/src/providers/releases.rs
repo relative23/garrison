@@ -13,7 +13,7 @@
 use std::sync::LazyLock;
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Observation, State};
+use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_core::{time, version};
 use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
@@ -295,16 +295,16 @@ impl Releases {
             (state, _) => state,
         };
         let finding: Vec<String> = finding.into_iter().chain(silent).collect();
-        let observation = Observation::new(
-            format!("release.{}", product.id()),
-            self.name(),
-            format!("{title} release"),
-            [ModuleId::Services],
-            Evidence::Probe,
+        let observation = Observation::new(Required {
+            id: &format!("release.{}", product.id()),
+            provider: self.name(),
+            title: &format!("{title} release"),
+            modules: [ModuleId::Services],
+            evidence: Evidence::Probe,
             state,
-            context.checked_at(),
-            self.source(product),
-        )?
+            checked_at: &context.checked_at(),
+            source: &self.source(product),
+        })?
         .with_scope("The newest release GitHub lists, asked once a day.")
         .with_fields(vec![
             Field::text("Runs here", installed),

@@ -110,8 +110,9 @@ pub struct Table {
 #[error("observation {0} names no module")]
 pub struct NoModule(pub String);
 
-/// One result of one provider. Build it with [`Observation::new`] and the
-/// `with_*` methods; the fields serialize to the JSON the status database keeps.
+/// One result of one provider. Build it with [`Observation::new`] from what
+/// is [`Required`] and the `with_*` methods; the fields serialize to the JSON
+/// the status database keeps.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Observation {
@@ -152,33 +153,43 @@ fn known<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeSet<ModuleId
     Ok(names.iter().filter_map(|name| name.parse().ok()).collect())
 }
 
+/// What every observation states, by name: five of these are texts, and by
+/// place alone one is easily taken for another. The rest of an observation
+/// has defaults and the `with_*` methods.
+#[derive(Debug)]
+pub struct Required<'a, M> {
+    pub id: &'a str,
+    /// The `type` of the provider that reports it.
+    pub provider: &'a str,
+    pub title: &'a str,
+    /// The modules that show it: at least one.
+    pub modules: M,
+    pub evidence: Evidence,
+    pub state: State,
+    /// When the source was asked, as [`crate::time::isoformat`] writes it.
+    pub checked_at: &'a str,
+    pub source: &'a str,
+}
+
 impl Observation {
     /// An observation must name at least one module, or nobody could see it.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        id: impl Into<String>,
-        provider: impl Into<String>,
-        title: impl Into<String>,
-        modules: impl IntoIterator<Item = ModuleId>,
-        evidence: Evidence,
-        state: State,
-        checked_at: impl Into<String>,
-        source: impl Into<String>,
+    pub fn new<M: IntoIterator<Item = ModuleId>>(
+        required: Required<'_, M>,
     ) -> Result<Self, NoModule> {
-        let id = id.into();
-        let modules: BTreeSet<ModuleId> = modules.into_iter().collect();
+        let id = required.id.to_owned();
+        let modules: BTreeSet<ModuleId> = required.modules.into_iter().collect();
         if modules.is_empty() {
             return Err(NoModule(id));
         }
         Ok(Observation {
             id,
-            provider: provider.into(),
-            title: title.into(),
+            provider: required.provider.to_owned(),
+            title: required.title.to_owned(),
             modules,
-            evidence,
-            state,
-            checked_at: checked_at.into(),
-            source: source.into(),
+            evidence: required.evidence,
+            state: required.state,
+            checked_at: required.checked_at.to_owned(),
+            source: required.source.to_owned(),
             kind: Kind::Details,
             scope: String::new(),
             fields: Vec::new(),
@@ -272,16 +283,16 @@ mod tests {
     #[test]
     fn a_renamed_observation_carries_its_old_id_for_one_release() {
         let observation = |id: &str| {
-            Observation::new(
+            Observation::new(Required {
                 id,
-                "notifications",
-                "Notifications",
-                [ModuleId::Alerts],
-                Evidence::Probe,
-                State::Ok,
-                "2026-11-13T00:00:00+00:00",
-                "ntfy",
-            )
+                provider: "notifications",
+                title: "Notifications",
+                modules: [ModuleId::Alerts],
+                evidence: Evidence::Probe,
+                state: State::Ok,
+                checked_at: "2026-11-13T00:00:00+00:00",
+                source: "ntfy",
+            })
             .unwrap()
         };
         let mut observations = vec![
@@ -308,16 +319,16 @@ mod tests {
 
     #[test]
     fn serializes_to_the_stored_json_shape() {
-        let observation = Observation::new(
-            "clamav.signatures",
-            "clamav",
-            "Signature files",
-            [ModuleId::DnsTls, ModuleId::Antivirus],
-            Evidence::Inventory,
-            State::Warning,
-            "2026-10-29T00:00:00+00:00",
-            "/var/lib/clamav",
-        )
+        let observation = Observation::new(Required {
+            id: "clamav.signatures",
+            provider: "clamav",
+            title: "Signature files",
+            modules: [ModuleId::DnsTls, ModuleId::Antivirus],
+            evidence: Evidence::Inventory,
+            state: State::Warning,
+            checked_at: "2026-10-29T00:00:00+00:00",
+            source: "/var/lib/clamav",
+        })
         .unwrap()
         .with_fields(vec![Field::new("Size", 1024, Format::Bytes)])
         .with_table(Table {
@@ -356,7 +367,16 @@ mod tests {
     #[test]
     fn an_observation_without_modules_is_refused() {
         let empty: [ModuleId; 0] = [];
-        let result = Observation::new("x", "p", "t", empty, Evidence::Probe, State::Ok, "", "");
+        let result = Observation::new(Required {
+            id: "x",
+            provider: "p",
+            title: "t",
+            modules: empty,
+            evidence: Evidence::Probe,
+            state: State::Ok,
+            checked_at: "",
+            source: "",
+        });
         assert_eq!(result, Err(NoModule("x".into())));
     }
 
@@ -385,16 +405,16 @@ mod tests {
 
     #[test]
     fn a_stored_observation_reads_back_as_it_was_written() {
-        let observation = Observation::new(
-            "clamav.signatures",
-            "clamav",
-            "Signature files",
-            [ModuleId::DnsTls, ModuleId::Antivirus],
-            Evidence::Inventory,
-            State::Warning,
-            "2026-10-29T00:00:00+00:00",
-            "/var/lib/clamav",
-        )
+        let observation = Observation::new(Required {
+            id: "clamav.signatures",
+            provider: "clamav",
+            title: "Signature files",
+            modules: [ModuleId::DnsTls, ModuleId::Antivirus],
+            evidence: Evidence::Inventory,
+            state: State::Warning,
+            checked_at: "2026-10-29T00:00:00+00:00",
+            source: "/var/lib/clamav",
+        })
         .unwrap()
         .with_kind(Kind::Version)
         .with_scope("host")

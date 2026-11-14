@@ -13,7 +13,7 @@ use garrison_core::config::{Config, ConfigError, Database};
 use garrison_core::credentials::Credentials;
 use garrison_core::json;
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Observation, State};
+use garrison_core::observations::{Evidence, Observation, Required, State};
 use garrison_core::sqlite::SqliteError;
 use garrison_core::time::{self, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -107,16 +107,16 @@ fn stand_in(context: &Context<'_>, name: &str, place: usize, said: String) -> Op
     } else {
         format!("collector.{name}")
     };
-    Observation::new(
-        id,
-        name,
-        format!("Provider {name}"),
-        [ModuleId::Services],
-        Evidence::Process,
-        State::Unknown,
-        context.checked_at(),
-        "collector",
-    )
+    Observation::new(Required {
+        id: &id,
+        provider: name,
+        title: &format!("Provider {name}"),
+        modules: [ModuleId::Services],
+        evidence: Evidence::Process,
+        state: State::Unknown,
+        checked_at: &context.checked_at(),
+        source: "collector",
+    })
     .ok()
     .map(|observation| observation.with_findings(vec![said]))
 }
@@ -142,16 +142,16 @@ fn without_repeats(
     let names: Vec<String> = repeated.into_iter().collect();
     let names = names.join(", ");
     log::error!("More than one provider reported: {names}; the first of each was kept");
-    Observation::new(
-        "collector.duplicates",
-        "collector",
-        "Checks that report the same observation",
-        [ModuleId::Services],
-        Evidence::Process,
-        State::Unknown,
-        context.checked_at(),
-        "collector",
-    )
+    Observation::new(Required {
+        id: "collector.duplicates",
+        provider: "collector",
+        title: "Checks that report the same observation",
+        modules: [ModuleId::Services],
+        evidence: Evidence::Process,
+        state: State::Unknown,
+        checked_at: &context.checked_at(),
+        source: "collector",
+    })
     .ok()
     .map(|observation| {
         observation.with_findings(vec![format!(

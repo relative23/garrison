@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use garrison_core::json;
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Kind, Observation, State};
+use garrison_core::observations::{Evidence, Field, Format, Kind, Observation, Required, State};
 use garrison_core::recording::{self, QUIET_AFTER};
 use garrison_core::sqlite::reading;
 use garrison_stalwart::Error;
@@ -172,16 +172,16 @@ impl Stalwart {
         state: State,
         source: &str,
     ) -> Result<Observation, ProviderError> {
-        Ok(Observation::new(
+        Ok(Observation::new(Required {
             id,
-            "stalwart",
+            provider: "stalwart",
             title,
-            modules.iter().copied(),
+            modules: modules.iter().copied(),
             evidence,
             state,
-            context.checked_at(),
+            checked_at: &context.checked_at(),
             source,
-        )?)
+        })?)
     }
 
     fn unknown(context: &Context<'_>, finding: String) -> Result<Observation, ProviderError> {

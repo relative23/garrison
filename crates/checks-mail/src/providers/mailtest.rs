@@ -24,7 +24,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Column, Evidence, Format, Observation, State, Table};
+use garrison_core::observations::{Column, Evidence, Format, Observation, Required, State, Table};
 use garrison_core::sqlite::reading;
 use garrison_core::time;
 use serde::{Deserialize, Serialize};
@@ -409,16 +409,16 @@ impl Provider for MailTest {
             label: label.to_owned(),
             format,
         };
-        let observation = Observation::new(
-            "mailtest.results",
-            self.name(),
-            "Test messages",
-            [ModuleId::Antivirus, ModuleId::Spam],
-            Evidence::Probe,
+        let observation = Observation::new(Required {
+            id: "mailtest.results",
+            provider: self.name(),
+            title: "Test messages",
+            modules: [ModuleId::Antivirus, ModuleId::Spam],
+            evidence: Evidence::Probe,
             state,
-            context.checked_at(),
-            format!("SMTP to {}:{}", self.host, self.port),
-        )?
+            checked_at: &context.checked_at(),
+            source: &format!("SMTP to {}:{}", self.host, self.port),
+        })?
         .with_scope(format!(
             "Garrison handed the test messages to the local SMTP listener without signing in, \
              addressed to {}. Each test is sent again {} hours after it was sent; one that did \

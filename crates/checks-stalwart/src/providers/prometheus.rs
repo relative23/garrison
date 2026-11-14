@@ -15,7 +15,7 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Observation, State};
+use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_core::sqlite::reading;
 use garrison_stalwart::http::Request;
 use rusqlite::params;
@@ -246,16 +246,16 @@ impl Provider for Prometheus {
             Ok(_) if !samples.findings.is_empty() => (State::Warning, samples.findings),
             Ok(_) => (State::Ok, Vec::new()),
         };
-        let observation = Observation::new(
-            "prometheus.exporter",
-            self.name(),
-            "Native metrics exporter",
-            [ModuleId::Dashboard, ModuleId::Services],
-            Evidence::Metric,
+        let observation = Observation::new(Required {
+            id: "prometheus.exporter",
+            provider: self.name(),
+            title: "Native metrics exporter",
+            modules: [ModuleId::Dashboard, ModuleId::Services],
+            evidence: Evidence::Metric,
             state,
-            context.checked_at(),
-            self.path.clone(),
-        )?
+            checked_at: &context.checked_at(),
+            source: &self.path,
+        })?
         .with_scope(
             "Community metrics exported by the running server; a counter it has not \
              exported since it started counts as zero.",

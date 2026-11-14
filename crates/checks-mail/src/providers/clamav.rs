@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Column, Evidence, Field, Format, Observation, State, Table};
+use garrison_core::observations::{
+    Column, Evidence, Field, Format, Observation, Required, State, Table,
+};
 use garrison_core::sqlite::reading;
 use garrison_core::time;
 use serde_json::json;
@@ -159,20 +161,20 @@ impl Clamav {
         let bytes =
             |label: &str, values, key| Field::new(label, size(get(values, key)), Format::Bytes);
         let flag = |label: &str, key| Field::new(label, yes(get(c, key)), Format::Boolean);
-        Ok(Observation::new(
-            "clamav.configuration",
-            self.name(),
-            "Antivirus configuration",
-            [ModuleId::Antivirus],
-            Evidence::Configuration,
+        Ok(Observation::new(Required {
+            id: "clamav.configuration",
+            provider: self.name(),
+            title: "Antivirus configuration",
+            modules: [ModuleId::Antivirus],
+            evidence: Evidence::Configuration,
             state,
-            context.checked_at(),
-            format!(
+            checked_at: &context.checked_at(),
+            source: &format!(
                 "{}; {}",
                 self.milter_config.display(),
                 self.clamd_config.display()
             ),
-        )?
+        })?
         .with_scope("On-disk configuration; whether the running daemons loaded it is not verified.")
         .with_fields(vec![
             Field::text("Detected malware", infected),
@@ -241,16 +243,16 @@ impl Clamav {
             ),
             Some(_) => (State::Ok, None),
         };
-        Ok(Observation::new(
-            "clamav.signatures",
-            self.name(),
-            "Signature databases",
-            [ModuleId::Antivirus],
-            Evidence::Inventory,
+        Ok(Observation::new(Required {
+            id: "clamav.signatures",
+            provider: self.name(),
+            title: "Signature databases",
+            modules: [ModuleId::Antivirus],
+            evidence: Evidence::Inventory,
             state,
-            context.checked_at(),
-            self.database.display().to_string(),
-        )?
+            checked_at: &context.checked_at(),
+            source: &self.database.display().to_string(),
+        })?
         .with_scope("File times do not prove a successful update check or a loaded database.")
         .with_findings(finding.into_iter().collect())
         .with_table(Table {

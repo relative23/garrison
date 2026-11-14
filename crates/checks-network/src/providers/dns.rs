@@ -12,7 +12,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Column, Evidence, Format, Observation, State, Table};
+use garrison_core::observations::{Column, Evidence, Format, Observation, Required, State, Table};
 use garrison_stalwart::jmap::JmapClient;
 use serde::Deserialize;
 use serde_json::json;
@@ -181,16 +181,16 @@ impl Dns {
         context: &Context<'_>,
         finding: &str,
     ) -> Result<Observation, crate::context::ProviderError> {
-        Ok(Observation::new(
-            "dns.records",
-            self.name(),
-            "DNS records",
-            [ModuleId::DnsTls],
-            Evidence::Probe,
-            State::Unknown,
-            context.checked_at(),
-            "x:Domain/get",
-        )?
+        Ok(Observation::new(Required {
+            id: "dns.records",
+            provider: self.name(),
+            title: "DNS records",
+            modules: [ModuleId::DnsTls],
+            evidence: Evidence::Probe,
+            state: State::Unknown,
+            checked_at: &context.checked_at(),
+            source: "x:Domain/get",
+        })?
         .with_findings(vec![finding.to_owned()])
         .with_max_age(180))
     }
@@ -279,16 +279,16 @@ impl Dns {
             label: label.to_owned(),
             format: Format::Text,
         };
-        Ok(Observation::new(
-            format!("dns.{name}"),
-            self.name(),
-            format!("DNS records of {name}"),
-            [ModuleId::DnsTls],
-            Evidence::Probe,
+        Ok(Observation::new(Required {
+            id: &format!("dns.{name}"),
+            provider: self.name(),
+            title: &format!("DNS records of {name}"),
+            modules: [ModuleId::DnsTls],
+            evidence: Evidence::Probe,
             state,
-            context.checked_at(),
-            format!("x:Domain/get; resolver {}", resolver.ip()),
-        )?
+            checked_at: &context.checked_at(),
+            source: &format!("x:Domain/get; resolver {}", resolver.ip()),
+        })?
         .with_scope(
             "What Stalwart names for the domain, asked of this host's resolver now. Records \
              marked optional are a matter of choice; another resolver may still hold older \

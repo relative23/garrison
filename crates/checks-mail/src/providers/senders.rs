@@ -18,7 +18,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Column, Evidence, Field, Format, Observation, State, Table};
+use garrison_core::observations::{
+    Column, Evidence, Field, Format, Observation, Required, State, Table,
+};
 use garrison_core::sqlite::reading;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -346,16 +348,16 @@ impl Provider for Senders {
             label: label.to_owned(),
             format,
         };
-        let observation = Observation::new(
-            "senders.accounts",
-            self.name(),
-            "Sending addresses",
-            self.modules.iter().copied(),
-            Evidence::Probe,
+        let observation = Observation::new(Required {
+            id: "senders.accounts",
+            provider: self.name(),
+            title: "Sending addresses",
+            modules: self.modules.iter().copied(),
+            evidence: Evidence::Probe,
             state,
-            context.checked_at(),
-            "event history",
-        )?
+            checked_at: &context.checked_at(),
+            source: "event history",
+        })?
         .with_scope(
             "Mail that signed-in accounts handed in during the last 24 hours, by sender address, \
              against each address's own average of the 14 days before. An account that sends \

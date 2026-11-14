@@ -14,7 +14,9 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Column, Evidence, Field, Format, Observation, State, Table};
+use garrison_core::observations::{
+    Column, Evidence, Field, Format, Observation, Required, State, Table,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -388,16 +390,16 @@ impl Reputation {
         title: &str,
         state: State,
     ) -> Result<Observation, crate::context::ProviderError> {
-        Ok(Observation::new(
-            format!("reputation.{id}"),
-            self.name(),
+        Ok(Observation::new(Required {
+            id: &format!("reputation.{id}"),
+            provider: self.name(),
             title,
-            self.modules.iter().copied(),
-            Evidence::Probe,
+            modules: self.modules.iter().copied(),
+            evidence: Evidence::Probe,
             state,
-            context.checked_at(),
-            "this host's resolver",
-        )?)
+            checked_at: &context.checked_at(),
+            source: "this host's resolver",
+        })?)
     }
 }
 

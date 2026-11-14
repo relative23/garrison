@@ -17,7 +17,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Observation, State};
+use garrison_core::observations::{Evidence, Observation, Required, State};
 use garrison_core::sqlite::reading;
 use garrison_stalwart::ids::decode_native_id;
 use garrison_stalwart::jmap::JmapClient;
@@ -156,20 +156,20 @@ impl Flow {
         let unknown = read.problem.as_ref();
         // What was seen stays what it is; only "in order" needs all of it.
         let incomplete = read.uncovered.as_ref().filter(|_| unknown.is_none());
-        let observation = Observation::new(
-            format!("flow.{id}"),
-            self.name(),
+        let observation = Observation::new(Required {
+            id: &format!("flow.{id}"),
+            provider: self.name(),
             title,
-            [module],
-            Evidence::Probe,
-            if unknown.is_some() || (incomplete.is_some() && state == State::Ok) {
+            modules: [module],
+            evidence: Evidence::Probe,
+            state: if unknown.is_some() || (incomplete.is_some() && state == State::Ok) {
                 State::Unknown
             } else {
                 state
             },
-            context.checked_at(),
-            "event history",
-        )?;
+            checked_at: &context.checked_at(),
+            source: "event history",
+        })?;
         Ok(match (unknown, incomplete) {
             (Some(problem), _) => {
                 observation.with_findings(vec![format!("Nothing could be counted: {problem}.")])

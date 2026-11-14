@@ -3,7 +3,9 @@
 use std::cmp::Ordering;
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Column, Evidence, Field, Format, Observation, State, Table};
+use garrison_core::observations::{
+    Column, Evidence, Field, Format, Observation, Required, State, Table,
+};
 use serde_json::{Value, json};
 
 use super::stalwart::answers::MailboxAccount;
@@ -54,16 +56,16 @@ pub fn mailboxes(
     max_accounts: usize,
 ) -> Result<Observation, ProviderError> {
     let base = |state| {
-        Observation::new(
-            "stalwart.mailboxes",
-            "stalwart",
-            "Mailbox storage",
-            [ModuleId::Dashboard],
-            Evidence::Inventory,
+        Observation::new(Required {
+            id: "stalwart.mailboxes",
+            provider: "stalwart",
+            title: "Mailbox storage",
+            modules: [ModuleId::Dashboard],
+            evidence: Evidence::Inventory,
             state,
-            context.checked_at(),
-            "x:Account/get (selected properties)",
-        )
+            checked_at: &context.checked_at(),
+            source: "x:Account/get (selected properties)",
+        })
         .map(|observation| {
             observation.with_scope(
                 "Stored size and quota per user account. Mail contents are not read; \

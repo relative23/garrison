@@ -7,7 +7,7 @@ use std::time::Duration;
 use garrison_core::files::{read_bounded, read_json};
 use garrison_core::hex;
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Observation, State};
+use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_stalwart::http::status_of;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -70,20 +70,20 @@ impl Provider for Http {
             }
             Some(_) => Vec::new(),
         };
-        let observation = Observation::new(
-            format!("http.{}", self.id),
-            self.name(),
-            self.title.clone(),
-            self.modules.iter().copied(),
-            Evidence::Process,
-            if status == Some(self.expect) {
+        let observation = Observation::new(Required {
+            id: &format!("http.{}", self.id),
+            provider: self.name(),
+            title: &self.title,
+            modules: self.modules.iter().copied(),
+            evidence: Evidence::Process,
+            state: if status == Some(self.expect) {
                 State::Ok
             } else {
                 State::Failed
             },
-            context.checked_at(),
-            self.url.clone(),
-        )?
+            checked_at: &context.checked_at(),
+            source: &self.url,
+        })?
         .with_scope("The endpoint answered; this does not test user functionality.")
         .with_fields(vec![Field::new("HTTP status", status, Format::Number)])
         .with_findings(findings)
@@ -220,16 +220,16 @@ impl Provider for Bulwark {
             (true, false) => State::Failed,
             (true, true) => State::Ok,
         };
-        let observation = Observation::new(
-            "bulwark.plugins",
-            self.name(),
-            "Webmail plugins",
-            [ModuleId::Spam],
-            Evidence::Configuration,
+        let observation = Observation::new(Required {
+            id: "bulwark.plugins",
+            provider: self.name(),
+            title: "Webmail plugins",
+            modules: [ModuleId::Spam],
+            evidence: Evidence::Configuration,
             state,
-            context.checked_at(),
-            registry_path.display().to_string(),
-        )?
+            checked_at: &context.checked_at(),
+            source: &registry_path.display().to_string(),
+        })?
         .with_scope("Administrator configuration; execution in browsers is not tested here.")
         .with_fields(fields)
         .with_findings(findings)

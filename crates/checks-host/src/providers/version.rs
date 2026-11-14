@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Kind, Observation, State};
+use garrison_core::observations::{Evidence, Kind, Observation, Required, State};
 use regex_lite::Regex;
 use serde_json::{Map, json};
 
@@ -83,20 +83,20 @@ impl Provider for VersionCommand {
         let mut value = Map::new();
         value.insert("component".into(), json!(self.component));
         value.insert("version".into(), json!(version));
-        let observation = Observation::new(
-            self.id(),
-            self.name(),
-            self.component.clone(),
-            self.modules.iter().copied(),
-            Evidence::Inventory,
-            if version.is_some() {
+        let observation = Observation::new(Required {
+            id: &self.id(),
+            provider: self.name(),
+            title: &self.component,
+            modules: self.modules.iter().copied(),
+            evidence: Evidence::Inventory,
+            state: if version.is_some() {
                 State::Ok
             } else {
                 State::Unknown
             },
-            context.checked_at(),
-            self.command[0].clone(),
-        )?
+            checked_at: &context.checked_at(),
+            source: &self.command[0],
+        })?
         .with_kind(Kind::Version)
         .with_scope("Installed binary; the running process version is not verified.")
         .with_value(value)

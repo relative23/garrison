@@ -13,7 +13,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Column, Evidence, Field, Format, Observation, State, Table};
+use garrison_core::observations::{
+    Column, Evidence, Field, Format, Observation, Required, State, Table,
+};
 use garrison_core::time::{self, Timestamp};
 use rustls::pki_types::{ServerName, UnixTime};
 use rustls::time_provider::TimeProvider;
@@ -285,16 +287,16 @@ impl Tls {
     /// The check where Stalwart did not say what to probe.
     fn unknown(&self, context: &Context<'_>, reason: &str) -> Collected {
         Ok(Report::of(
-            Observation::new(
-                "tls.endpoints",
-                self.name(),
-                "TLS certificates",
-                self.modules.iter().copied(),
-                Evidence::Probe,
-                State::Unknown,
-                context.checked_at(),
-                "x:NetworkListener/get, x:Domain/get",
-            )?
+            Observation::new(Required {
+                id: "tls.endpoints",
+                provider: self.name(),
+                title: "TLS certificates",
+                modules: self.modules.iter().copied(),
+                evidence: Evidence::Probe,
+                state: State::Unknown,
+                checked_at: &context.checked_at(),
+                source: "x:NetworkListener/get, x:Domain/get",
+            })?
             .with_findings(vec![format!("The endpoints are not known: {reason}.")])
             .with_max_age(900),
         ))
@@ -379,16 +381,16 @@ impl Provider for Tls {
             label: label.to_owned(),
             format,
         };
-        let observation = Observation::new(
-            "tls.endpoints",
-            self.name(),
-            "TLS certificates",
-            self.modules.iter().copied(),
-            Evidence::Probe,
+        let observation = Observation::new(Required {
+            id: "tls.endpoints",
+            provider: self.name(),
+            title: "TLS certificates",
+            modules: self.modules.iter().copied(),
+            evidence: Evidence::Probe,
             state,
-            context.checked_at(),
-            "Local TLS handshake with SNI and chain validation",
-        )?
+            checked_at: &context.checked_at(),
+            source: "Local TLS handshake with SNI and chain validation",
+        })?
         .with_scope(self.scope())
         .with_fields(vec![Field::new(
             "Lowest remaining validity",

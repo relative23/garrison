@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 
 use garrison_core::config::Deployment;
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Observation, State};
+use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_stalwart::sign_in_page::{self, Kind};
 use serde::{Deserialize, Serialize};
 
@@ -336,16 +336,16 @@ impl Provider for SignIn {
                 .chain(examined.fix)
                 .collect()
         };
-        let observation = Observation::new(
-            "signin.page",
-            self.name(),
-            "Sign-in page",
-            self.modules.iter().copied(),
-            Evidence::Probe,
-            examined.state,
-            context.checked_at(),
-            page.clone(),
-        )?
+        let observation = Observation::new(Required {
+            id: "signin.page",
+            provider: self.name(),
+            title: "Sign-in page",
+            modules: self.modules.iter().copied(),
+            evidence: Evidence::Probe,
+            state: examined.state,
+            checked_at: &context.checked_at(),
+            source: &page,
+        })?
         .with_scope(
             "Stalwart's sign-in page under the issuer's name, as a visitor's browser loads it, \
              with the scripts and style sheets it names; asked every five minutes, and in \

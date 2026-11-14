@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Observation, State};
+use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_core::time;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
@@ -393,16 +393,16 @@ fn after_run_with(
         (None, Some(_)) => State::Ok,
     };
     let names = channels.names().join(", ");
-    Observation::new(
-        "notifications.channels",
-        "notifications",
-        "Notifications",
-        [ModuleId::Alerts],
-        Evidence::Probe,
+    Observation::new(Required {
+        id: "notifications.channels",
+        provider: "notifications",
+        title: "Notifications",
+        modules: [ModuleId::Alerts],
+        evidence: Evidence::Probe,
         state,
-        time::isoformat(now),
-        names.clone(),
-    )
+        checked_at: &time::isoformat(now),
+        source: &names,
+    })
     .ok()
     .map(|observation| {
         observation

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use garrison_core::config::is_unit_name;
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Observation, State};
+use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use serde::{Deserialize, Serialize};
 
 mod packages;
@@ -130,16 +130,16 @@ impl HostCare {
         state: State,
         source: &str,
     ) -> Made {
-        Observation::new(
-            format!("host.{id}"),
-            self.name(),
+        Observation::new(Required {
+            id: &format!("host.{id}"),
+            provider: self.name(),
             title,
-            self.modules.iter().copied(),
-            Evidence::Probe,
+            modules: self.modules.iter().copied(),
+            evidence: Evidence::Probe,
             state,
-            context.checked_at(),
+            checked_at: &context.checked_at(),
             source,
-        )
+        })
         .map_err(ProviderError::from)
     }
 
