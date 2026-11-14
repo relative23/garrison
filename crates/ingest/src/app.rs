@@ -91,12 +91,45 @@ pub fn router_with_clock(store: Arc<EventStore>, key: &[u8], clock: fn() -> i64)
     };
     Router::new()
         .route("/webhook", post(webhook))
-        .route("/health", get(|| async { refuse(StatusCode::OK, "ok") }))
+        .route("/health", get(health))
         .fallback(|| async { detail(StatusCode::NOT_FOUND, "Not Found") })
         .method_not_allowed_fallback(|| async {
             detail(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed")
         })
         .with_state(receiver)
+}
+
+/// Whether the receiver stores what it is sent, and what it counted since
+/// it started. Always 200 while the process answers: that it runs is one
+/// thing, that it takes Stalwart's batches another, which the body says.
+async fn health(State(receiver): State<Receiver>) -> Response {
+    let health = receiver.store.health();
+    let mut extra = Map::new();
+    extra.insert("failingSince".into(), json!(health.failing_since));
+    extra.insert("refused".into(), json!(health.refused));
+    extra.insert("unreadable".into(), json!(health.unreadable));
+    extra.insert("duplicate".into(), json!(health.duplicate));
+    let status = if health.failing_since.is_some() {
+        "failing"
+    } else {
+        "ok"
+    };
+    answer(StatusCode::OK, status, extra)
+}
+
+/// A batch was refused: the store keeps since when, and the journal gets
+/// the first refusal and every hundredth, not one line for each.
+async fn refused(receiver: &Receiver, why: &str) {
+    let (store, at) = (receiver.store.clone(), (receiver.clock)());
+    let count = off_thread(move || Ok::<u64, String>(store.refused(at))).await;
+    if let Ok(count) = count
+        && (count == 1 || count.is_multiple_of(100))
+    {
+        log::warn!(
+            "Refused a webhook batch: {why} ({count} refused since the receiver started; \
+             /health says since when nothing was stored)"
+        );
+    }
 }
 
 /// The answer for unknown paths and methods.
@@ -132,7 +165,10 @@ async fn webhook(State(receiver): State<Receiver>, request: Request) -> Response
         return refuse(StatusCode::PAYLOAD_TOO_LARGE, "Body missing or too large");
     };
     if !signature_matches(&receiver.key, &body, &provided) {
-        log::warn!("Rejected a webhook batch with an invalid signature");
+        // Stalwart brings the batch again for an hour, then drops it: with
+        // a key that no longer matches, events go missing while the
+        // receiver runs.
+        refused(&receiver, "its signature is not of the configured key").await;
         return refuse(StatusCode::UNAUTHORIZED, "Invalid signature");
     }
     let Ok(payload) = json::parse(&body, MAX_BODY) else {
@@ -155,6 +191,7 @@ async fn webhook(State(receiver): State<Receiver>, request: Request) -> Response
         }
         Err(error) => {
             log::error!("Could not store a webhook batch; Stalwart will retry: {error}");
+            refused(&receiver, "it could not be stored").await;
             refuse(StatusCode::SERVICE_UNAVAILABLE, "Storage unavailable")
         }
     }
@@ -194,5 +231,7 @@ fn beat(store: &EventStore, count: u32, at: i64) -> Result<(), crate::store::Sql
     Ok(())
 }
 
+#[cfg(test)]
+mod refused_tests;
 #[cfg(test)]
 mod tests;

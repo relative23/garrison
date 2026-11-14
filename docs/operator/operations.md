@@ -47,8 +47,9 @@ it.
 
 In the interface, Services shows every unit and failed providers; Deliveries,
 Sessions and Event history (under Mail flow) warn in their banner when the
-event receiver stops reporting or when events may be missing inside the
-history (a recording gap). The same banner says, without a warning, when a
+event receiver stops reporting, when it runs but stores nothing of what
+Stalwart sends, or when events may be missing inside the history (a
+recording gap). The same banner says, without a warning, when a
 size limit made the history shorter than its retention; raise
 `ingest.max_events` or `ingest.max_database_mib` to keep more.
 
@@ -218,6 +219,7 @@ Stalwart WebUI if you no longer need them.
 | The TLS certificates card says Stalwart did not give its listeners | As above: run `garrison stalwart setup` again, which lets the collector's key read them; or name `endpoints` for the `tls` provider. |
 | A mail test says "not tested" | The mail server ended the session before the message, and the row says with which reply: usually the test mailbox does not exist, or the listener at `host` and `port` is not Stalwart's. |
 | A check shows as "Provider …" with "Not run" | A collection run has 70 seconds for its checks, so that systemd never ends it with nothing stored. Checks that could not begin in that time are Unknown for this run; the others are stored as usual. The collector's journal names a check that took ten seconds or more (`journalctl -u garrison-collect.service`): most often a resolver or a server that does not answer. |
+| The event views say the receiver runs but has not stored what Stalwart sends | Every batch is refused, or events arrive that it cannot read; the checks that count events are Unknown meanwhile. `curl -s http://127.0.0.1:8094/health` says since when and how many were refused or unreadable, and `journalctl -u garrison-ingest.service` why. A signature that does not match: run `garrison stalwart setup` again, which gives Stalwart and the receiver the same key. Storage: free space on the disk of `/var/lib/garrison/ingest`, or raise `ingest.max_database_mib`. Unreadable events after a Stalwart upgrade: that release writes them differently; see the supported releases. Once a batch is stored whole again, what was lost becomes a recording gap. |
 | A notification says the collector has stopped | No collection run has finished for ten minutes, so nothing is checked. `systemctl status garrison-collect.service garrison-collect.timer` shows whether it fails or was stopped; `garrison check-config` names a configuration it no longer loads. A second message follows when it runs again. |
 | No notification arrives | `garrison notify-test` says how each channel took the message. For ntfy and a webhook, 401 or 403 means the token in `/etc/garrison/credentials`; for mail, "did not sign in" means the account or its password, and a certificate error means that `mail_host` is not the name the server's certificate carries ([configuration](configuration.md#notifications)). The Alerts page shows the last failure. |
 | Incoming mail is deferred since the macro filter was switched on | Stalwart cannot reach the filter on `127.0.0.1:8096`: `garrison doctor` says whether it answers, `systemctl status garrison-milter` why not. A Stalwart in a container network of its own cannot reach this host's loopback; run it in the host network. To stop asking the filter at once, remove the `[milter]` section and run `garrison stalwart setup`. |

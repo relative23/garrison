@@ -352,6 +352,10 @@ pub struct Coverage {
     pub recording_since: Option<i64>,
     #[serde(default)]
     pub last_batch_at: Option<i64>,
+    /// Since when the receiver runs without storing what Stalwart sends
+    /// (`receiver` is then "refusing"); null while it stores.
+    #[serde(default)]
+    pub failing_since: Option<i64>,
     #[serde(default)]
     pub retention_days: Option<i64>,
     #[serde(default)]

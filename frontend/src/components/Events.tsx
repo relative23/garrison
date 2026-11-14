@@ -11,7 +11,7 @@ import { Notice } from "./Status";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
-const REASONS = ["receiver-offline"] as const;
+const REASONS = ["receiver-offline", "batches-refused", "events-unreadable"] as const;
 const LIMITS = ["events", "bytes"] as const;
 
 function isReason(reason: string): reason is (typeof REASONS)[number] {
@@ -46,7 +46,10 @@ export function CoverageBanner({ data }: { data: Coverage | null }) {
   }
   // What may be wrong: the receiver is quiet, or events are missing inside the history.
   const warnings = [];
-  if (data.receiver !== "running") {
+  if (data.receiver === "refusing") {
+    // It runs, so its heartbeat is fresh; what it does not do is store.
+    warnings.push(t("events.coverage.receiverRefusing", { time: dateTime(data.failingSince) }));
+  } else if (data.receiver !== "running") {
     warnings.push(
       data.heartbeatAt == null
         ? t("events.coverage.receiverQuiet")

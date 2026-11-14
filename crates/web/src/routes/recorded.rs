@@ -185,6 +185,7 @@ impl From<answers::Coverage> for Coverage {
             heartbeat_at,
             recording_since,
             last_batch_at,
+            failing_since,
             retention_days,
             event_count,
             trimmed,
@@ -202,6 +203,7 @@ impl From<answers::Coverage> for Coverage {
             heartbeat_at,
             recording_since,
             last_batch_at,
+            failing_since,
             retention_days,
             event_count,
             trimmed: trimmed.map(|answers::Trimmed { until, limit }| Trimmed {

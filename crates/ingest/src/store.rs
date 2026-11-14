@@ -20,6 +20,11 @@ use serde_json::Value;
 
 use crate::policy::{EventType, identifier, select_fields};
 
+mod failing;
+
+use failing::Failing;
+
+pub use failing::Health;
 pub use sqlite::SqliteError;
 
 /// The schema version this release writes; `self-check` accepts up to it.
@@ -109,13 +114,33 @@ pub struct EventStore {
 struct State {
     db: Connection,
     inserted_since_cleanup: u64,
+    /// Since when no batch was stored whole, while that lasts.
+    failing: Option<Failing>,
+    /// Counted since this process started.
+    health: Health,
 }
 
 /// What one batch did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
     pub stored: u64,
+    /// Everything that was not stored, for whatever reason.
     pub skipped: u64,
+    /// Of the skipped: stored already, by a batch that came before.
+    pub duplicate: u64,
+    /// Of the skipped: of a type that is recorded, but not readable.
+    pub unreadable: u64,
+}
+
+/// What became of one event of a batch.
+enum Taken {
+    Stored,
+    /// Stored already: Stalwart brought the batch again.
+    Duplicate,
+    /// No event, or of a type that is not recorded.
+    NotRecorded,
+    /// Of a type that is recorded, with a time or an id that does not read.
+    Unreadable,
 }
 
 impl EventStore {
@@ -129,6 +154,8 @@ impl EventStore {
             state: Mutex::new(State {
                 db,
                 inserted_since_cleanup: 0,
+                failing: None,
+                health: Health::default(),
             }),
         })
     }
@@ -143,7 +170,8 @@ impl EventStore {
 
     /// Record the receiver's start and any window in which events may have been lost.
     pub fn start(&self, now: i64) -> Result<(), SqliteError> {
-        let mut state = self.state();
+        let mut guard = self.state();
+        let state = &mut *guard;
         let transaction = state
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -165,8 +193,41 @@ impl EventStore {
             "retentionDays",
             i64::from(self.limits.retention_days),
         )?;
+        // A run that ended while it stored nothing: that time is not over.
+        let kept = failing::kept(&transaction);
         transaction.commit()?;
+        state.failing = state.failing.or(kept);
         Ok(())
+    }
+
+    /// A batch was refused at `now`: its signature did not match, or it
+    /// could not be stored. The receiver remembers since when; the database
+    /// is told if it takes it, which a full or read-only one does not.
+    pub fn refused(&self, now: i64) -> u64 {
+        let mut state = self.state();
+        state.health.refused += 1;
+        let count = state.health.refused;
+        if state.failing.is_some() {
+            return count;
+        }
+        let failing = Failing {
+            since: now,
+            kind: failing::Kind::Refused,
+        };
+        state.failing = Some(failing);
+        if let Err(error) = failing::keep(&state.db, failing) {
+            log::warn!("The event store did not take since when batches are refused: {error}");
+        }
+        count
+    }
+
+    /// What the receiver counted since it started.
+    pub fn health(&self) -> Health {
+        let state = self.state();
+        Health {
+            failing_since: state.failing.map(|failing| failing.since),
+            ..state.health
+        }
     }
 
     pub fn heartbeat(&self, now: i64) -> Result<(), SqliteError> {
@@ -177,25 +238,62 @@ impl EventStore {
 
     /// Store one webhook batch atomically.
     pub fn ingest(&self, events: &[Value], received: i64) -> Result<Outcome, SqliteError> {
-        let mut state = self.state();
+        let mut guard = self.state();
+        let state = &mut *guard;
+        let was = state.failing;
         let mut outcome = Outcome::default();
         let transaction = state
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         for event in events {
-            if insert(&transaction, event, received)? {
-                outcome.stored += 1;
-            } else {
-                outcome.skipped += 1;
+            match insert(&transaction, event, received)? {
+                Taken::Stored => outcome.stored += 1,
+                Taken::Duplicate => outcome.duplicate += 1,
+                Taken::Unreadable => outcome.unreadable += 1,
+                Taken::NotRecorded => {}
             }
         }
+        outcome.skipped = events.len() as u64 - outcome.stored;
         set_meta(&transaction, "lastBatchAt", received)?;
         set_meta(&transaction, "heartbeatAt", received)?;
+        // Events that could not be read are gone, since Stalwart is answered
+        // "stored": from now on something is missing. A batch that reads
+        // whole ends that, and what was lost until then becomes a gap.
+        let failing = match (was, outcome.unreadable > 0) {
+            (None, true) => {
+                let began = Failing {
+                    since: received,
+                    kind: failing::Kind::Unreadable,
+                };
+                failing::keep(&transaction, began)?;
+                Some(began)
+            }
+            (Some(failing), false) => {
+                failing::ended(
+                    &transaction,
+                    failing,
+                    received,
+                    self.limits.discard_after_seconds,
+                )?;
+                None
+            }
+            (unchanged, _) => unchanged,
+        };
         transaction.commit()?;
+        if outcome.unreadable > 0 && was.is_none() {
+            log::error!(
+                "{} events of a recorded type could not be read and are lost; Stalwart may \
+                 write them differently now",
+                outcome.unreadable
+            );
+        }
+        state.failing = failing;
+        state.health.unreadable += outcome.unreadable;
+        state.health.duplicate += outcome.duplicate;
         state.inserted_since_cleanup += outcome.stored;
         if state.inserted_since_cleanup >= CLEANUP_AFTER {
             // The batch is committed either way; a failed cleanup runs again later.
-            if let Err(error) = self.enforce(&mut state, received) {
+            if let Err(error) = self.enforce(state, received) {
                 log::error!("Event retention failed: {error}");
             }
         }
@@ -264,10 +362,10 @@ fn set_meta(db: &Connection, key: &str, value: i64) -> Result<(), SqliteError> {
     Ok(())
 }
 
-/// Insert one event; `false` if it is not recordable or already recorded.
-fn insert(db: &Connection, event: &Value, received: i64) -> Result<bool, SqliteError> {
+/// Insert one event, and say what became of it.
+fn insert(db: &Connection, event: &Value, received: i64) -> Result<Taken, SqliteError> {
     let Value::Object(event) = event else {
-        return Ok(false);
+        return Ok(Taken::NotRecorded);
     };
     let event_type = event
         .get("type")
@@ -280,8 +378,13 @@ fn insert(db: &Connection, event: &Value, received: i64) -> Result<bool, SqliteE
         _ => None,
     }
     .filter(|id| id.chars().count() <= MAX_EVENT_ID);
-    let (Some(event_type), Some(created), Some(event_id)) = (event_type, created, event_id) else {
-        return Ok(false);
+    // A type that is not recorded is left out on purpose. One that is, with
+    // a time or an id that does not read, is an event that goes missing.
+    let Some(event_type) = event_type else {
+        return Ok(Taken::NotRecorded);
+    };
+    let (Some(created), Some(event_id)) = (created, event_id) else {
+        return Ok(Taken::Unreadable);
     };
     let data = event.get("data").unwrap_or(&Value::Null);
     let fields = select_fields(event_type, data);
@@ -303,7 +406,7 @@ fn insert(db: &Connection, event: &Value, received: i64) -> Result<bool, SqliteE
         ],
     )?;
     if inserted != 1 {
-        return Ok(false); // A retried batch: the event is already recorded.
+        return Ok(Taken::Duplicate); // A retried batch: the event is already recorded.
     }
     if let Some(queue) = &queue {
         db.execute(
@@ -324,7 +427,7 @@ fn insert(db: &Connection, event: &Value, received: i64) -> Result<bool, SqliteE
             params![span, created, created, kind],
         )?;
     }
-    Ok(true)
+    Ok(Taken::Stored)
 }
 
 /// Remove the `count` oldest events to keep the size limit `limit`.
@@ -367,6 +470,8 @@ fn widen(db: &Connection, limit: &str, first: i64, last: i64) -> Result<(), Sqli
     Ok(())
 }
 
+#[cfg(test)]
+mod failing_tests;
 #[cfg(test)]
 mod limit_tests;
 #[cfg(test)]

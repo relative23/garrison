@@ -157,7 +157,7 @@ async fn coverage_states_where_the_history_begins_and_what_is_missing_inside() {
         setup.client.get(&api("coverage")).await.json(),
         json!({
             "available": true, "receiver": "running", "heartbeatAt": now,
-            "recordingSince": began, "lastBatchAt": now - 5000, "retentionDays": 30,
+            "recordingSince": began, "lastBatchAt": now - 5000, "failingSince": null, "retentionDays": 30,
             "eventCount": 1000,
             // The limit removed the hundred oldest: the history begins after them.
             "trimmed": {"until": first + 99, "limit": "events"},

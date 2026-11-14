@@ -83,4 +83,7 @@ brokers never repeat a job; pending jobs become "uncertain".
   can read mail metadata.
 - Events buffered inside Stalwart are lost if Stalwart restarts while the
   receiver is unreachable; receiver downtime beyond Stalwart's one-hour buffer is
-  recorded as a gap.
+  recorded as a gap. So is the time in which the receiver ran but took
+  nothing: batches it refused for longer than that hour, because the
+  signature key did not match or they could not be stored, and events of a
+  recorded type that it could not read.

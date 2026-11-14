@@ -75,6 +75,9 @@ pub enum Receiver {
     Running,
     /// The last heartbeat is older than 90 seconds.
     Stale,
+    /// It runs, but has stored no batch whole for a while: batches are
+    /// refused, or events arrive that it cannot read.
+    Refusing,
     /// There is no event database yet.
     Unavailable,
 }
@@ -84,6 +87,7 @@ impl Receiver {
         match self {
             Receiver::Running => "running",
             Receiver::Stale => "stale",
+            Receiver::Refusing => "refusing",
             Receiver::Unavailable => "unavailable",
         }
     }
@@ -134,6 +138,8 @@ pub struct Coverage {
     pub heartbeat_at: Option<i64>,
     pub recording_since: Option<i64>,
     pub last_batch_at: Option<i64>,
+    /// Since when the receiver runs without storing a batch whole.
+    pub failing_since: Option<i64>,
     pub retention_days: Option<i64>,
     pub event_count: i64,
     /// Set while a size limit, not the retention, decides where the history begins.

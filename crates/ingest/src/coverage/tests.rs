@@ -29,7 +29,7 @@ fn coverage_without_a_database_says_so() {
         json!(coverage),
         json!({
             "available": false, "receiver": "unavailable", "heartbeatAt": null,
-            "recordingSince": null, "lastBatchAt": null, "retentionDays": null,
+            "recordingSince": null, "lastBatchAt": null, "failingSince": null, "retentionDays": null,
             "eventCount": 0, "trimmed": null, "gapCount": 0, "gaps": [],
             "limitations": LIMITATIONS,
         })

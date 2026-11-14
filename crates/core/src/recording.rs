@@ -29,9 +29,19 @@ pub const RECORDING_SINCE: &str = "recordingSince";
 pub const LAST_BATCH_AT: &str = "lastBatchAt";
 pub const RETENTION_DAYS: &str = "retentionDays";
 
+/// Since when the receiver runs but stores no batch whole, while that
+/// lasts, and why (1: batches refused, 2: events that cannot be read).
+pub const FAILING_SINCE: &str = "failingSince";
+pub const FAILING_KIND: &str = "failingKind";
+
 /// The reasons a window in `gaps` may lack events. The receiver was away for
 /// longer than Stalwart keeps undelivered events.
 pub const OFFLINE: &str = "receiver-offline";
+/// The receiver ran and refused Stalwart's batches for longer than Stalwart
+/// keeps them: the signature key did not match, or storing failed.
+pub const REFUSED: &str = "batches-refused";
+/// Events of a recorded type arrived in a form the receiver could not read.
+pub const UNREADABLE: &str = "events-unreadable";
 /// The oldest events were removed to keep the event limit.
 pub const EVENT_LIMIT: &str = "capacity-events";
 /// The oldest events were removed to keep the storage budget.
@@ -128,6 +138,8 @@ pub enum Uncovered {
     Quiet { since: Option<i64> },
     /// Events of this window were lost while the receiver was away.
     Lost { start: i64, end: i64 },
+    /// The receiver runs, but has stored no batch whole since then.
+    Refusing { since: i64 },
 }
 
 fn moment(second: i64) -> String {
@@ -151,6 +163,11 @@ impl fmt::Display for Uncovered {
                 moment(*start),
                 moment(*end)
             ),
+            Uncovered::Refusing { since } => write!(
+                formatter,
+                "the event receiver runs, but has not stored Stalwart's events since {}",
+                moment(*since)
+            ),
         }
     }
 }
@@ -169,6 +186,9 @@ pub fn uncovered(
     let heartbeat = number(db, HEARTBEAT_AT)?;
     if heartbeat.is_none_or(|beat| now - beat > patience) {
         return Ok(Some(Uncovered::Quiet { since: heartbeat }));
+    }
+    if let Some(since) = number(db, FAILING_SINCE)? {
+        return Ok(Some(Uncovered::Refusing { since }));
     }
     let lost: Option<(i64, i64)> = db
         .query_row(
@@ -256,6 +276,20 @@ mod tests {
                 end: NOW - DAY
             })
         );
+        // While the receiver runs and stores nothing, no time up to now is
+        // covered, whatever its heartbeat says.
+        set(&db, FAILING_SINCE, NOW - 60).unwrap();
+        assert_eq!(
+            uncovered(&db, NOW - DAY, NOW, QUIET_AFTER).unwrap(),
+            Some(Uncovered::Refusing { since: NOW - 60 })
+        );
+        assert_eq!(
+            Uncovered::Refusing { since: NOW }.to_string(),
+            "the event receiver runs, but has not stored Stalwart's events since \
+             2026-11-13T12:00:00+00:00"
+        );
+        db.execute("DELETE FROM metadata WHERE key='failingSince'", [])
+            .unwrap();
         // The last day alone has none.
         assert_eq!(uncovered(&db, NOW - DAY, NOW, QUIET_AFTER).unwrap(), None);
         let listed = gaps(&db, 2).unwrap();

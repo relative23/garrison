@@ -211,6 +211,7 @@
       "received": "last received {{when}}",
       "receivedNever": "nothing received yet",
       "receiverQuiet": "The event receiver has not reported recently; recording may have stopped.",
+      "receiverRefusing": "The event receiver runs, but has not stored what Stalwart sends since {{time}}; events are missing from then on. The journal of garrison-ingest says why.",
       "receiverQuietSince": "The event receiver has not reported since {{time}}; recording may have stopped.",
       "retentionUnknown": "retention unknown",
       "retention_one": "retention {{count}} day",
@@ -224,6 +225,8 @@
       "unavailable": "The event history is not available yet. Check the receiver service."
     },
     "gapReason": {
+      "batches-refused": "The event receiver ran but refused Stalwart's batches for longer than Stalwart buffers events: the signature key did not match, or the events could not be stored.",
+      "events-unreadable": "Events arrived in a form the event receiver could not read and were not recorded.",
       "receiver-offline": "The event receiver was offline for longer than Stalwart buffers events."
     }
   },

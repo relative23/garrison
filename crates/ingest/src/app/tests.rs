@@ -10,7 +10,7 @@ const KEY: &[u8] = b"test-signature-key-0123456789";
 /// Request headers, and the status and message they lead to.
 type Case<'a> = (Vec<(&'a str, &'a str)>, StatusCode, &'a str);
 
-fn batch(events: &[Value]) -> Vec<u8> {
+pub(super) fn batch(events: &[Value]) -> Vec<u8> {
     json!({"events": events}).to_string().into_bytes()
 }
 
@@ -22,7 +22,7 @@ fn request(body: &[u8], headers: &[(&str, &str)]) -> Request<Body> {
     builder.body(Body::from(body.to_vec())).unwrap()
 }
 
-fn signed(body: &[u8]) -> Request<Body> {
+pub(super) fn signed(body: &[u8]) -> Request<Body> {
     let signature = signature(KEY, body);
     request(
         body,
@@ -33,7 +33,7 @@ fn signed(body: &[u8]) -> Request<Body> {
     )
 }
 
-async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
+pub(super) async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status();
     let body = to_bytes(response.into_body(), 1 << 20).await.unwrap();
@@ -151,13 +151,16 @@ async fn only_well_formed_batches_reach_the_store() {
 }
 
 #[tokio::test]
-async fn health_and_unknown_paths_answer_like_before() {
+async fn health_says_what_was_counted_and_unknown_paths_are_refused() {
     let directory = tempfile::tempdir().unwrap();
     let app = router(Arc::new(store(directory.path(), 1000)), KEY);
     let health = Request::get("/health").body(Body::empty()).unwrap();
     assert_eq!(
         call(&app, health).await,
-        (StatusCode::OK, json!({"status": "ok"}))
+        (
+            StatusCode::OK,
+            json!({"status": "ok", "failingSince": null, "refused": 0, "unreadable": 0, "duplicate": 0})
+        )
     );
     let missing = Request::get("/other").body(Body::empty()).unwrap();
     assert_eq!(

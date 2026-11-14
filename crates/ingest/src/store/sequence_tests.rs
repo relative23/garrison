@@ -40,6 +40,13 @@ struct Run {
     began: Option<i64>,
     /// The windows in which the receiver was away for longer than Stalwart buffers.
     away: Vec<(i64, i64)>,
+    /// Since when a batch held an event of a recorded type that did not
+    /// read, while no batch has read whole since; and the windows that
+    /// ended so.
+    unread_since: Option<i64>,
+    unread: Vec<(i64, i64)>,
+    /// Whether the batch being made holds such an event.
+    unreadable: bool,
     /// Events created before this were removed for their age at the last cleanup.
     cutoff: i64,
     since_cleanup: u64,
@@ -62,6 +69,9 @@ impl Run {
             heartbeat: None,
             began: None,
             away: Vec::new(),
+            unread_since: None,
+            unread: Vec::new(),
+            unreadable: false,
             cutoff: i64::MIN,
             since_cleanup: 0,
             seen: BTreeSet::new(),
@@ -94,6 +104,7 @@ impl Run {
         self.cutoff = self.clock - i64::from(self.limits.retention_days) * DAY;
         let cutoff = self.cutoff;
         self.away.retain(|(_, end)| *end >= cutoff);
+        self.unread.retain(|(_, end)| *end >= cutoff);
         self.since_cleanup = 0;
     }
 
@@ -111,6 +122,9 @@ impl Run {
             );
         }
         if choice < 6 {
+            // A recorded type with a time that does not read: the event is
+            // lost, and the store must say from when to when.
+            self.unreadable = true;
             return (event(number, "auth.failed", "yesterday", &json!({})), None);
         }
         if choice < 16 && !self.taken.is_empty() {
@@ -147,6 +161,7 @@ impl Run {
         let count = 1 + self.noise.below(120);
         let mut batch = Vec::new();
         let mut fresh = BTreeSet::new();
+        self.unreadable = false;
         for _ in 0..count {
             let (sent, id) = self.one();
             if let Some(id) = id.filter(|id| !held.contains_key(id)) {
@@ -162,6 +177,13 @@ impl Run {
             "what a batch stores and skips"
         );
         self.heartbeat = Some(self.clock);
+        if self.unreadable {
+            self.unread_since.get_or_insert(self.clock);
+        } else if let Some(since) = self.unread_since.take()
+            && self.clock > since
+        {
+            self.unread.push((since, self.clock));
+        }
         self.since_cleanup += outcome.stored;
         if self.since_cleanup >= CLEANUP_AFTER {
             self.cleaned();
@@ -194,6 +216,30 @@ impl Run {
             }
         }
         self.check();
+    }
+
+    /// The windows of lost events are those the model expects: the times the
+    /// receiver was away, and the times a batch did not read whole.
+    fn windows_are_as_recorded(&self, windows: &[(i64, i64, String)]) {
+        let away: Vec<(i64, i64)> = windows
+            .iter()
+            .filter(|window| window.2 == OFFLINE)
+            .map(|window| (window.0, window.1))
+            .collect();
+        assert_eq!(away, self.away, "the windows the receiver was away for");
+        let unread: Vec<(i64, i64)> = windows
+            .iter()
+            .filter(|window| window.2 == recording::UNREADABLE)
+            .map(|window| (window.0, window.1))
+            .collect();
+        let mut expected = self.unread.clone();
+        expected.sort_unstable();
+        assert_eq!(unread, expected, "the windows of events that did not read");
+        assert_eq!(
+            self.store().health().failing_since,
+            self.unread_since,
+            "since when a batch did not read whole"
+        );
     }
 
     fn check(&mut self) {
@@ -241,12 +287,7 @@ impl Run {
                 self.cutoff
             );
         }
-        let away: Vec<(i64, i64)> = windows
-            .iter()
-            .filter(|window| window.2 == OFFLINE)
-            .map(|window| (window.0, window.1))
-            .collect();
-        assert_eq!(away, self.away, "the windows the receiver was away for");
+        self.windows_are_as_recorded(&windows);
         let since: String = db
             .query_row(
                 "SELECT value FROM metadata WHERE key='recordingSince'",
@@ -258,7 +299,10 @@ impl Run {
 
         let covered = coverage::read(Some(&db), self.clock).unwrap();
         assert_eq!(covered.event_count, i64::try_from(held.len()).unwrap());
-        assert_eq!(covered.gap_count, i64::try_from(self.away.len()).unwrap());
+        assert_eq!(
+            covered.gap_count,
+            i64::try_from(self.away.len() + self.unread.len()).unwrap()
+        );
         assert_eq!(
             covered.trimmed.map(|trimmed| trimmed.until),
             trimmed.map(|(until, _)| until)

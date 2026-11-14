@@ -126,7 +126,7 @@ fn a_signed_webhook_records_a_complete_smtp_session() {
         .block_on(tokio::net::TcpListener::bind((callback.as_str(), 0)))
         .unwrap();
     let port = listener.local_addr().unwrap().port();
-    let app = router(store, key.as_bytes());
+    let app = router(Arc::clone(&store), key.as_bytes());
     runtime.spawn(async move { axum::serve(listener, app).await });
     create_webhook(&mut lab, &format!("http://{callback}:{port}/webhook"), &key);
     std::thread::sleep(Duration::from_secs(2));
@@ -227,13 +227,24 @@ fn a_signed_webhook_records_a_complete_smtp_session() {
     let known = |kind: &String| kind == "message-ingest.spam" || kind == "message-ingest.ham";
     assert!(filed.iter().any(known), "{filed:?}");
 
-    failed_sign_ins_are_recorded(&lab, &path);
+    failed_sign_ins_are_recorded(&lab, &path, &store);
+}
+
+/// Every event of a recorded type that this Stalwart sent could be read: an
+/// event it writes differently would go missing, and be counted here.
+fn every_event_could_be_read(store: &EventStore) {
+    let health = store.health();
+    assert_eq!(
+        (health.unreadable, health.failing_since),
+        (0, None),
+        "{health:?}"
+    );
 }
 
 /// What the attack summary relies on: Stalwart reports a refused sign-in with
 /// the address it came from, and names the account only where it found one.
 /// Two attempts stay far below the number that would ban this address.
-fn failed_sign_ins_are_recorded(lab: &Lab, path: &Path) {
+fn failed_sign_ins_are_recorded(lab: &Lab, path: &Path, store: &EventStore) {
     let account = lab.admin_name().to_owned();
     let stranger = format!("stranger-{}", random_hex(6));
     assert_eq!(
@@ -296,4 +307,6 @@ fn failed_sign_ins_are_recorded(lab: &Lab, path: &Path) {
         "{source:?}"
     );
     assert_eq!(source.listeners, ["http"]);
+    // The last events of the test are in: none of them all went missing.
+    every_event_could_be_read(store);
 }

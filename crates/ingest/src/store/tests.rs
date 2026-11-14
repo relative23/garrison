@@ -61,7 +61,8 @@ fn the_privacy_filter_keeps_identifiers_exact() {
         outcome,
         Outcome {
             stored: 2,
-            skipped: 1
+            skipped: 1,
+            ..Outcome::default()
         }
     );
     let db = read(directory.path());
@@ -96,14 +97,16 @@ fn a_retried_batch_is_stored_once() {
         events.ingest(&batch, 10).unwrap(),
         Outcome {
             stored: 1,
-            skipped: 0
+            ..Outcome::default()
         }
     );
     assert_eq!(
         events.ingest(&batch, 20).unwrap(),
         Outcome {
             stored: 0,
-            skipped: 1
+            skipped: 1,
+            duplicate: 1,
+            unreadable: 0
         }
     );
     let db = read(directory.path());
@@ -134,9 +137,12 @@ fn unrecordable_events_are_skipped() {
     ];
     assert_eq!(
         events.ingest(&batch, 1).unwrap(),
+        // Two are no event of a recorded type; five are, and do not read.
         Outcome {
             stored: 1,
-            skipped: 7
+            skipped: 7,
+            duplicate: 0,
+            unreadable: 5
         }
     );
     let db = read(directory.path());

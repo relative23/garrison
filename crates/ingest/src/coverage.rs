@@ -3,7 +3,7 @@
 //! alive. The web service shows this above every view of the history.
 
 use garrison_core::recording::{
-    self, EVENT_LIMIT, HEARTBEAT_AT, LAST_BATCH_AT, RECORDING_SINCE, RETENTION_DAYS,
+    self, EVENT_LIMIT, FAILING_SINCE, HEARTBEAT_AT, LAST_BATCH_AT, RECORDING_SINCE, RETENTION_DAYS,
 };
 use rusqlite::Connection;
 
@@ -55,6 +55,7 @@ pub fn read(db: Option<&Connection>, now: i64) -> Result<Coverage> {
             heartbeat_at: None,
             recording_since: None,
             last_batch_at: None,
+            failing_since: None,
             retention_days: None,
             event_count: 0,
             trimmed: None,
@@ -70,15 +71,18 @@ pub fn read(db: Option<&Connection>, now: i64) -> Result<Coverage> {
         .map(|recording::Gap { start, end, reason }| Gap { start, end, reason })
         .collect();
     let gap_count = recording::gap_count(db)?;
-    // The receiver writes a heartbeat every 30 seconds while it runs.
+    // The receiver writes a heartbeat every 30 seconds while it runs. One
+    // that runs may still store nothing: it keeps since when.
     let running = heartbeat.is_some_and(|beat| now - beat <= 90);
+    let failing_since = meta(db, FAILING_SINCE)?;
     Ok(Coverage {
         available: true,
-        receiver: if running {
-            Receiver::Running
-        } else {
-            Receiver::Stale
+        receiver: match (running, failing_since) {
+            (false, _) => Receiver::Stale,
+            (true, Some(_)) => Receiver::Refusing,
+            (true, None) => Receiver::Running,
         },
+        failing_since,
         heartbeat_at: heartbeat,
         recording_since: meta(db, RECORDING_SINCE)?,
         last_batch_at: meta(db, LAST_BATCH_AT)?,

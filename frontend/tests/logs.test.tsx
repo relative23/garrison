@@ -107,6 +107,19 @@ describe("history coverage", () => {
     expect(screen.getByText(/a-future-reason/)).toBeTruthy();
   });
 
+  it("warns when the receiver runs but stores nothing", async () => {
+    const since = Math.floor(Date.now() / 1000) - 7200;
+    const gaps = [{ start: 100, end: 200, reason: "batches-refused" }];
+    const value = coverage({ receiver: "refusing", failingSince: since, heartbeatAt: since + 7190, gapCount: 1, gaps });
+    serve({ "GET coverage": { body: value }, "GET events": { body: { items: [], next: null } } });
+    renderView(<Logs />);
+    const banner = await screen.findByText(/Recording since/);
+    expect(banner.textContent).toContain("The event receiver runs, but has not stored what Stalwart sends since");
+    expect(banner.textContent).not.toContain("has not reported since");
+    expect(banner.closest("[role]")?.getAttribute("role")).toBe("status");
+    expect(screen.getByText(/refused Stalwart's batches for longer than Stalwart buffers/)).toBeTruthy();
+  });
+
   it("says where a size limit made the history begin, without a warning", async () => {
     const limits: [string, string][] = [
       ["events", "to stay within the event limit"],

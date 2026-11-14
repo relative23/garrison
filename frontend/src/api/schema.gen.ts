@@ -414,6 +414,12 @@ export interface components {
             eventCount: number;
             /**
              * Format: int64
+             * @description Since when the receiver runs without storing what Stalwart sends
+             *     (`receiver` is then "refusing"); null while it stores.
+             */
+            failingSince?: number | null;
+            /**
+             * Format: int64
              * @description Windows inside the history in which events may be missing.
              * @default 0
              */

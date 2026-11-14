@@ -47,6 +47,17 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A receiver that runs but stores nothing no longer looks healthy.** With
+  a signature key that no longer matched, a database that was full or could
+  not be written, or events that Stalwart had begun to write differently,
+  the event receiver kept its heartbeat, Stalwart dropped what it could not
+  deliver after an hour, and nothing recorded that events were missing. The
+  receiver now keeps since when it stores nothing: the event views say so,
+  the checks that count events are Unknown meanwhile, and once a batch is
+  stored whole again the time that was lost is a recording gap, with its
+  reason. `/health` of the receiver names the time and counts refused
+  batches and unreadable events; the journal gets the first refusal and
+  every hundredth instead of one line each.
 - **Requests to Garrison are no longer written to nginx's access log.**
   The security model said so, but nothing configured it: with the access
   log that most distributions switch on for all of nginx, searched

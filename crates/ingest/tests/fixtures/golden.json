@@ -357,6 +357,14 @@
   "gaps": [],
   "metadata": [
    {
+    "key": "failingKind",
+    "value": "2"
+   },
+   {
+    "key": "failingSince",
+    "value": "1793000100"
+   },
+   {
     "key": "heartbeatAt",
     "value": "1793000100"
    },
@@ -1336,10 +1344,11 @@
   },
   "coverage": {
    "available": true,
-   "receiver": "running",
+   "receiver": "refusing",
    "heartbeatAt": 1793000100,
    "recordingSince": 1793000000,
    "lastBatchAt": 1793000100,
+   "failingSince": 1793000100,
    "retentionDays": 30,
    "eventCount": 27,
    "trimmed": null,
