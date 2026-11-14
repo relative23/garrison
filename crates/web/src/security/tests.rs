@@ -221,3 +221,85 @@ fn the_broker_client_carries_the_broker_answer() {
         "{\"op\":\"catalog\",\"token\":\"admin-token\"}\n"
     );
 }
+
+/// What the broker answers to every question.
+#[derive(Clone, Copy)]
+enum Answer {
+    /// Its socket cannot be reached.
+    Unreachable,
+    /// It runs, but cannot check rights: its policy or key is broken.
+    NotSetUp,
+    /// It grants subject "1".
+    Granting,
+}
+
+/// A broker whose answer the test sets.
+struct Settable(Mutex<Answer>);
+
+impl Broker for Settable {
+    fn call(&self, _: &Request) -> Result<Value, CallError> {
+        match *self.0.lock().unwrap() {
+            Answer::Unreachable => Err(CallError::Unavailable("connection refused")),
+            Answer::NotSetUp => Err(CallError::Refused(BrokerError {
+                status: 503,
+                message: "Garrison is not set up to check access rights; the broker's journal \
+                          says why"
+                    .into(),
+            })),
+            Answer::Granting => Ok(json!({
+                "subject": "1",
+                "email": "1@example.test",
+                "modules": ["dashboard"],
+                "actions": [],
+                "profiles": ["viewer"],
+                "checkedAt": "2026-10-29T00:00:00+00:00",
+            })),
+        }
+    }
+}
+
+#[test]
+fn a_broker_that_cannot_check_rights_ends_no_session() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = Arc::new(WebStore::open(&directory.path().join("web.sqlite")).unwrap());
+    let broker = Arc::new(Settable(Mutex::new(Answer::Unreachable)));
+    let revoked = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&revoked);
+    let gate = Gate::new(
+        Arc::clone(&store),
+        Arc::clone(&broker) as Arc<dyn Broker>,
+        "https://admin.example.test".into(),
+        BTreeSet::new(),
+        false,
+    )
+    .with_cache_time(Duration::ZERO)
+    .revoking_with(move |_| {
+        counted.fetch_add(1, Ordering::SeqCst);
+    });
+    let (identifier, _) = store
+        .create(&NewSession {
+            subject: "1",
+            email: "1@example.test",
+            token: "token-0123456789abcdef",
+            client_ip: None,
+            lifetime: 600,
+        })
+        .unwrap();
+    let visitor = Visitor {
+        cookies: HashMap::from([(SESSION_COOKIE.to_owned(), identifier)]),
+        ..Visitor::default()
+    };
+    // A broker that is down and one whose policy is broken: every request
+    // waits for it with 503, and the signed-in stay signed in.
+    for answer in [Answer::Unreachable, Answer::NotSetUp] {
+        *broker.0.lock().unwrap() = answer;
+        for _ in 0..3 {
+            assert_eq!(gate.caller(&visitor).unwrap_err().status.as_u16(), 503);
+        }
+        assert!(gate.session(&visitor).unwrap().is_some());
+    }
+    assert_eq!(revoked.load(Ordering::SeqCst), 0, "no token was revoked");
+    // Mended, the broker answers the same cookie at once.
+    *broker.0.lock().unwrap() = Answer::Granting;
+    assert_eq!(gate.caller(&visitor).unwrap().grant.subject, "1");
+}
