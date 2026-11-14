@@ -2,11 +2,13 @@
 //! begins, where events may be missing inside it, and whether the receiver is
 //! alive. The web service shows this above every view of the history.
 
-use rusqlite::{Connection, OptionalExtension};
+use garrison_core::recording::{
+    self, EVENT_LIMIT, HEARTBEAT_AT, LAST_BATCH_AT, RECORDING_SINCE, RETENTION_DAYS,
+};
+use rusqlite::Connection;
 
 use crate::answers::{Coverage, Gap, Limit, Receiver, Trimmed};
 use crate::queries::{QueryError, Result};
-use crate::store::{EVENT_LIMIT, STORAGE_BUDGET};
 
 pub const LIMITATIONS: [&str; 3] = [
     "Only events recorded after the webhook was enabled are available; earlier activity \
@@ -15,30 +17,26 @@ pub const LIMITATIONS: [&str; 3] = [
     "Sessions group events by Stalwart's span ID; only SMTP session milestones are recorded.",
 ];
 
-/// A number the receiver keeps about itself, or `None` before it wrote one.
-fn meta(db: &Connection, key: &str) -> Result<Option<i64>> {
-    let text: Option<String> = db
-        .query_row("SELECT value FROM metadata WHERE key=?", [key], |row| {
-            row.get(0)
-        })
-        .optional()?;
-    match text {
-        Some(text) => serde_json::from_str(&text).map_err(|_| QueryError::Invalid),
-        None => Ok(None),
+/// The newest windows of lost events that the answer lists.
+const LISTED_GAPS: u32 = 20;
+
+impl From<recording::Error> for QueryError {
+    fn from(error: recording::Error) -> Self {
+        match error {
+            recording::Error::Invalid => QueryError::Invalid,
+            recording::Error::Sqlite(error) => QueryError::Sqlite(error),
+        }
     }
 }
 
-/// Where a size limit made the history begin. The store keeps one window per
-/// limit; the one that ends last decides.
+/// A number the receiver keeps about itself, or `None` before it wrote one.
+fn meta(db: &Connection, key: &str) -> Result<Option<i64>> {
+    Ok(recording::number(db, key)?)
+}
+
+/// Where a size limit made the history begin.
 fn trimmed(db: &Connection) -> Result<Option<Trimmed>> {
-    let window: Option<(i64, String)> = db
-        .query_row(
-            "SELECT end_at,reason FROM gaps WHERE reason IN (?,?) ORDER BY end_at DESC LIMIT 1",
-            [EVENT_LIMIT, STORAGE_BUDGET],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    Ok(window.map(|(until, reason)| Trimmed {
+    Ok(recording::trimmed(db)?.map(|(until, reason)| Trimmed {
         until,
         limit: if reason == EVENT_LIMIT {
             Limit::Events
@@ -66,26 +64,12 @@ pub fn read(db: Option<&Connection>, now: i64) -> Result<Coverage> {
         });
     };
     let total: i64 = db.query_row("SELECT count(*) FROM events", [], |row| row.get(0))?;
-    let heartbeat = meta(db, "heartbeatAt")?;
-    // A window of a size limit lies before the history, not inside it.
-    let mut statement = db.prepare(
-        "SELECT start_at,end_at,reason FROM gaps WHERE reason NOT IN (?,?) \
-         ORDER BY end_at DESC LIMIT 20",
-    )?;
-    let gaps = statement
-        .query_map([EVENT_LIMIT, STORAGE_BUDGET], |row| {
-            Ok(Gap {
-                start: row.get(0)?,
-                end: row.get(1)?,
-                reason: row.get(2)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let gap_count: i64 = db.query_row(
-        "SELECT count(*) FROM gaps WHERE reason NOT IN (?,?)",
-        [EVENT_LIMIT, STORAGE_BUDGET],
-        |row| row.get(0),
-    )?;
+    let heartbeat = meta(db, HEARTBEAT_AT)?;
+    let gaps = recording::gaps(db, LISTED_GAPS)?
+        .into_iter()
+        .map(|recording::Gap { start, end, reason }| Gap { start, end, reason })
+        .collect();
+    let gap_count = recording::gap_count(db)?;
     // The receiver writes a heartbeat every 30 seconds while it runs.
     let running = heartbeat.is_some_and(|beat| now - beat <= 90);
     Ok(Coverage {
@@ -96,9 +80,9 @@ pub fn read(db: Option<&Connection>, now: i64) -> Result<Coverage> {
             Receiver::Stale
         },
         heartbeat_at: heartbeat,
-        recording_since: meta(db, "recordingSince")?,
-        last_batch_at: meta(db, "lastBatchAt")?,
-        retention_days: meta(db, "retentionDays")?,
+        recording_since: meta(db, RECORDING_SINCE)?,
+        last_batch_at: meta(db, LAST_BATCH_AT)?,
+        retention_days: meta(db, RETENTION_DAYS)?,
         event_count: total,
         trimmed: trimmed(db)?,
         gap_count,

@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use garrison_core::config::Database;
-use garrison_core::{sqlite, time};
+use garrison_core::{recording, sqlite, time};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
 
@@ -60,22 +60,14 @@ const MIGRATIONS: [sqlite::Migration; 1] = [&[
         protocol TEXT NOT NULL
     )",
     "CREATE INDEX spans_last ON spans(last_seen)",
-    "CREATE TABLE gaps(
-        id INTEGER PRIMARY KEY,
-        start_at INTEGER NOT NULL,
-        end_at INTEGER NOT NULL,
-        reason TEXT NOT NULL
-    )",
-    "CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+    // What the receiver records about its own recording; whoever reads the
+    // history asks `garrison_core::recording` what it covers.
+    recording::GAPS_TABLE,
+    recording::METADATA_TABLE,
 ]];
 
-/// The reasons a window in `gaps` may lack events. The receiver was away for
-/// longer than Stalwart keeps undelivered events.
-pub const OFFLINE: &str = "receiver-offline";
-/// The oldest events were removed to keep the event limit.
-pub const EVENT_LIMIT: &str = "capacity-events";
-/// The oldest events were removed to keep the storage budget.
-pub const STORAGE_BUDGET: &str = "capacity-bytes";
+/// The reasons a window in `gaps` may lack events.
+pub use recording::{EVENT_LIMIT, OFFLINE, STORAGE_BUDGET};
 
 const MAX_TIME_TEXT: usize = 40;
 const MAX_EVENT_ID: usize = 40;
@@ -268,10 +260,7 @@ fn meta(db: &Connection, key: &str) -> Result<Option<Value>, SqliteError> {
 }
 
 fn set_meta(db: &Connection, key: &str, value: i64) -> Result<(), SqliteError> {
-    db.execute(
-        "INSERT INTO metadata VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        params![key, value.to_string()],
-    )?;
+    recording::set(db, key, value)?;
     Ok(())
 }
 

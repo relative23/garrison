@@ -2,8 +2,8 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::*;
-use crate::store::OFFLINE;
 use crate::store::tests::{read as reader, store};
+use crate::store::{OFFLINE, STORAGE_BUDGET};
 
 /// Put a window into the history's `gaps`, as the store would.
 fn window(directory: &std::path::Path, start: i64, end: i64, reason: &str) {

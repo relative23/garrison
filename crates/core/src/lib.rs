@@ -14,6 +14,7 @@ pub mod json;
 pub mod logging;
 pub mod modules;
 pub mod observations;
+pub mod recording;
 pub mod sqlite;
 pub mod systemd;
 pub mod time;
