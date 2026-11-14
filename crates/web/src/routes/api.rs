@@ -205,13 +205,27 @@ async fn switch(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Resp
     Ok(response)
 }
 
+/// When an observation was checked; `None` for a time that cannot be read.
+fn checked_at(observation: &observations::Observation) -> Option<time::Timestamp> {
+    let text = observation.checked_at.as_str();
+    time::parse(text).or_else(|| time::parse_naive_utc(text))
+}
+
 /// Whether an observation is older than its `maxAge`; one without a time
 /// that can be read is.
 pub fn stale(observation: &observations::Observation, now: f64) -> bool {
-    let text = observation.checked_at.as_str();
-    time::parse(text)
-        .or_else(|| time::parse_naive_utc(text))
+    checked_at(observation)
         .is_none_or(|checked| now - time::unix(checked) > f64::from(observation.max_age))
+}
+
+/// How many seconds old an observation is at `now`, a begun second counted
+/// whole; `None` for one without a time that can be read. A page adds the
+/// time that passes without a new answer and so sees by itself when the
+/// observation goes stale.
+pub fn age(observation: &observations::Observation, now: time::Timestamp) -> Option<i64> {
+    let checked = checked_at(observation)?;
+    let micros = now.as_microsecond() - checked.as_microsecond();
+    Some((micros + 999_999).div_euclid(1_000_000))
 }
 
 /// The latest status snapshot, limited to the user's modules.
@@ -237,15 +251,16 @@ async fn status(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Json
                 provider_errors: Vec::new(),
             }));
         };
-        let now = time::unix(time::now());
+        let now = time::now();
         let granted = &caller.grant.modules;
         let observations = snapshot
             .observations
             .into_iter()
             .filter(|observation| observation.visible_to(granted))
             .map(|observation| {
-                let stale = stale(&observation, now);
-                shown(observation, granted, stale)
+                let stale = stale(&observation, time::unix(now));
+                let age = age(&observation, now);
+                shown(observation, granted, stale, age)
             })
             .collect();
         // Provider names are operational detail of the services module only.

@@ -14,15 +14,21 @@ export function openApp(path = "/admin/dashboard", shell?: ShellKind) {
   return render(<App shell={shell} />);
 }
 
-/** A view with a fixed session and status, outside the session bootstrap. */
-export function renderView(view: ReactNode, state: { session?: SessionInfo; status?: StatusResponse | Error | null } = {}) {
+/** A view with a fixed session and status, outside the session bootstrap.
+ * `status` is the answer or why there is none; `refreshError` is why a later
+ * refresh failed while `status` stays what the page has. */
+export function renderView(
+  view: ReactNode,
+  state: { session?: SessionInfo; status?: StatusResponse | Error | null; refreshError?: Error } = {},
+) {
   const status = state.status ?? null;
   const value: AppState = {
     session: state.session ?? session(),
     status: {
       data: status instanceof Error ? null : status,
-      error: status instanceof Error ? status : null,
+      error: status instanceof Error ? status : (state.refreshError ?? null),
       loading: false,
+      receivedAt: status === null || status instanceof Error ? null : 0,
       reload: () => undefined,
     },
     updatePreferences: async () => undefined,

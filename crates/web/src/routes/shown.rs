@@ -15,11 +15,12 @@ use crate::models::{
 };
 
 /// A stored observation as the API shows it to one user: with the modules
-/// they were granted only, and with whether it is stale now.
+/// they were granted only, and with how old it is and whether that is stale.
 pub(super) fn shown(
     observation: observations::Observation,
     granted: &BTreeSet<ModuleId>,
     stale: bool,
+    age: Option<i64>,
 ) -> Observation {
     let observations::Observation {
         id,
@@ -60,6 +61,7 @@ pub(super) fn shown(
         findings,
         value,
         max_age: i64::from(max_age),
+        age,
         stale,
     }
 }
@@ -216,7 +218,14 @@ mod tests {
         let mut expected = json!(stored);
         expected["modules"] = json!(["actions", "antivirus"]);
         expected["stale"] = json!(true);
+        expected["age"] = json!(700);
         let granted = BTreeSet::from([ModuleId::Antivirus, ModuleId::Logs, ModuleId::Actions]);
-        assert_eq!(json!(shown(stored, &granted, true)), expected);
+        assert_eq!(
+            json!(shown(stored.clone(), &granted, true, Some(700))),
+            expected
+        );
+        // A time that cannot be read has no age.
+        expected["age"] = json!(null);
+        assert_eq!(json!(shown(stored, &granted, true, None)), expected);
     }
 }

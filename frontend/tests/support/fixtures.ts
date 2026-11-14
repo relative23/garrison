@@ -68,6 +68,7 @@ export function observation(overrides: Partial<Observation> = {}): Observation {
     findings: [],
     value: {},
     maxAge: 300,
+    age: 0,
     stale: false,
     ...overrides,
   };

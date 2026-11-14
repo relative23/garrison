@@ -518,7 +518,8 @@
     "collected": "Status collected {{date}}.",
     "noObservations": "No provider reports observations for this module on this host.",
     "noSnapshot": "The collector has not produced a status snapshot yet.",
-    "providerErrors": "Providers failed in the last run: {{providers}}. See the collector journal."
+    "providerErrors": "Providers failed in the last run: {{providers}}. See the collector journal.",
+    "refreshFailed": "The status could not be refreshed. This is the status collected {{date}}; checks that have grown too old since are marked stale."
   },
   "summary": {
     "period": "Period",

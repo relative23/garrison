@@ -75,6 +75,16 @@ describe("status pages", () => {
     expect(screen.getByText("No provider reports observations for this module on this host.")).toBeTruthy();
   });
 
+  it("say that a refresh failed above the status they still have", () => {
+    renderView(<StatusPage moduleId="antivirus" detail={null} />, {
+      status: status([observation({ title: "Signatures" })]),
+      refreshError: new Error("The broker is not reachable"),
+    });
+    const notice = screen.getByText(/The status could not be refreshed/).closest("[role]");
+    expect(notice?.textContent).toContain("The broker is not reachable");
+    expect(screen.getByRole("heading", { name: "Signatures" })).toBeTruthy();
+  });
+
   it("show why the status is missing", () => {
     renderView(<StatusPage moduleId="antivirus" detail={null} />, { status: new Error("The status database is not readable") });
     expect(screen.getByText("The status database is not readable")).toBeTruthy();

@@ -69,14 +69,28 @@ export function Loading({ label }: { label?: string }) {
   );
 }
 
-export function ErrorState({ error, retry }: { error: Error; retry?: () => void }) {
+/** Why a request failed, with a way to try again. `lead` says what the
+ * failure means for what is still on the page; with data still in view the
+ * caller makes it a warning. */
+export function ErrorState({
+  error,
+  retry,
+  lead,
+  tone = "error",
+}: {
+  error: Error;
+  retry?: () => void;
+  lead?: string;
+  tone?: "warning" | "error";
+}) {
   const { t } = useTranslation();
   // Only an internal error is in the journal under its reference.
   const reference = error instanceof ApiError && error.status === 500 ? error.reference : null;
   return (
-    <Notice tone="error">
+    <Notice tone={tone}>
       <div className="flex items-center justify-between gap-4">
         <div>
+          {lead && <p>{lead}</p>}
           <p>{error.message || t("common.requestFailed")}</p>
           {reference && <p className="mt-1 text-xs opacity-80">{t("common.reference", { reference })}</p>}
         </div>

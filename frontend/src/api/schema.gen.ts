@@ -603,6 +603,13 @@ export interface components {
             label: string;
         };
         Observation: {
+            /**
+             * Format: int64
+             * @description Seconds from checkedAt to this answer, by the server's clock; null
+             *     when checkedAt cannot be read. A page that gets no newer answer adds
+             *     the time that passes and compares with maxAge.
+             */
+            age: number | null;
             checkedAt: string;
             /** @enum {string} */
             evidence: "configuration" | "process" | "probe" | "receipt" | "inventory" | "metric";

@@ -2,7 +2,8 @@
 // module. A new collector provider therefore appears here without new code.
 import type { Observation } from "../api/client";
 import { ObservationCard, ServiceTable, VersionList } from "../components/ObservationCard";
-import { ErrorState, Loading, Meta, Notice } from "../components/Status";
+import { Loading, Meta, Notice } from "../components/Status";
+import { StatusNotice } from "../components/StatusNotice";
 import { useTranslation } from "../i18n";
 import { useApp } from "../lib/context";
 import { dateTime } from "../lib/format";
@@ -24,17 +25,16 @@ function isWide(item: Observation): boolean {
 export function StatusPage({ moduleId }: ViewProps) {
   const { t } = useTranslation();
   const { status } = useApp();
-  if (status.error && !status.data) return <ErrorState error={status.error} retry={status.reload} />;
-  if (!status.data) return <Loading />;
-  if (!status.data.available) {
-    return <Notice>{t("statusPage.noSnapshot")}</Notice>;
-  }
+  if (!status.data && !status.error) return <Loading />;
+  // No status, or none yet: the notice says which, and there is nothing else.
+  if (!status.data?.available) return <StatusNotice />;
   const mine = status.data.observations.filter((item) => item.modules.includes(moduleId));
   const services = mine.filter((item) => item.kind === "service");
   const versions = mine.filter((item) => item.kind === "version");
   const details = mine.filter((item) => item.kind === "details").sort(byAttention);
   return (
     <>
+      <StatusNotice />
       <Meta>{t("statusPage.collected", { date: dateTime(status.data.collectedAt) })}</Meta>
       {moduleId === "services" && status.data.providerErrors.length > 0 && (
         <Notice tone="warning">

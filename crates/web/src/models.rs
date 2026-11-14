@@ -188,6 +188,11 @@ pub struct Observation {
     #[schema(value_type = HashMap<String, Value>)]
     pub value: Object,
     pub max_age: i64,
+    /// Seconds from checkedAt to this answer, by the server's clock; null
+    /// when checkedAt cannot be read. A page that gets no newer answer adds
+    /// the time that passes and compares with maxAge.
+    #[schema(required)]
+    pub age: Option<i64>,
     /// True when checkedAt is older than maxAge.
     pub stale: bool,
 }

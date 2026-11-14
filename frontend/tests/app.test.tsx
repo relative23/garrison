@@ -1,6 +1,6 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 
-import { coverage, metrics, session, status } from "./support/fixtures";
+import { coverage, metrics, observation, session, status } from "./support/fixtures";
 import { openApp } from "./support/render";
 import { serve } from "./support/server";
 
@@ -173,5 +173,33 @@ describe("sign-out", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeTruthy();
     await act(async () => vi.advanceTimersByTimeAsync(60_000));
     expect(screen.getByText(/Your session has ended/)).toBeTruthy();
+  });
+});
+
+describe("a status that stops arriving", () => {
+  it("is said, and its checks go stale by themselves once they are too old", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    // Checked 100 seconds before the answer, current for 300.
+    const check = observation({ modules: ["antivirus"], state: "ok", age: 100, maxAge: 300 });
+    const server = serve({ ...signedIn(), "GET status": { body: status([check]) } });
+    openApp();
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    const card = () => screen.getByRole("link", { name: /^Antivirus/ }).textContent;
+    expect(card()).toContain("OK");
+    // The next refreshes fail: the page says so and keeps what it has.
+    server.answer("GET status", { status: 503, body: { detail: "The broker is not reachable" } });
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(screen.getByText(/The status could not be refreshed/)).toBeTruthy();
+    expect(card()).toContain("OK");
+    // 100 seconds old when it arrived, and five minutes have passed since.
+    await act(async () => vi.advanceTimersByTimeAsync(240_000));
+    expect(card()).toContain("Unknown");
+    expect(card()).toContain("1 stale");
+    // A new answer makes it current again.
+    server.answer("GET status", { body: status([check]) });
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(card()).toContain("OK");
+    expect(screen.queryByText(/The status could not be refreshed/)).toBeNull();
   });
 });

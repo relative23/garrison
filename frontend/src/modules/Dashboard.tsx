@@ -5,6 +5,7 @@ import { lazy, Suspense, useDeferredValue, useState } from "react";
 import { api, type MetricsResponse, type Observation } from "../api/client";
 import { ObservationCard } from "../components/ObservationCard";
 import { ErrorState, Loading, Meta, Notice, StateBadge, type StateName } from "../components/Status";
+import { StatusNotice } from "../components/StatusNotice";
 import { CARD } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useTranslation } from "../i18n";
@@ -234,6 +235,9 @@ export function Dashboard() {
   if (!status.data && !status.error) return <Loading />;
   return (
     <>
+      {/* A status that is missing or was not refreshed is said: tiles that
+          keep their last "OK" without a word would show false calm. */}
+      <StatusNotice />
       <HealthGrid />
       <MailboxStorage />
       <History />

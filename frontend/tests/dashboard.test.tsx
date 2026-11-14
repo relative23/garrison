@@ -34,6 +34,34 @@ describe("dashboard", () => {
     await screen.findByText(/No samples were recorded in this period/);
   });
 
+  it("says that a refresh failed above the status it still has", async () => {
+    serve({ "GET metrics": { body: metrics() } });
+    const collected = "2026-10-29T12:00:00+00:00";
+    renderView(<Dashboard />, {
+      status: status(observations, { collectedAt: collected }),
+      refreshError: new Error("The broker is not reachable"),
+    });
+    const notice = screen.getByText(/The status could not be refreshed/).closest("[role]");
+    expect(notice?.textContent).toContain("The broker is not reachable");
+    expect(notice?.textContent).toContain("2026");
+    expect(within(notice as HTMLElement).getByRole("button", { name: "Try again" })).toBeTruthy();
+    // What it has stays in view below the notice.
+    expect(card("Antivirus").getByText("Warning")).toBeTruthy();
+    await screen.findByText(/No samples were recorded in this period/);
+  });
+
+  it("shows why there is no status, and that there is none yet", async () => {
+    serve({ "GET metrics": { body: metrics() } });
+    const failed = renderView(<Dashboard />, { status: new Error("The status database is not readable") });
+    expect(screen.getByText("The status database is not readable")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Health" })).toBeNull();
+    await screen.findByText(/No samples were recorded in this period/);
+    failed.unmount();
+    renderView(<Dashboard />, { status: status([], { available: false }) });
+    expect(screen.getByText("The collector has not produced a status snapshot yet.")).toBeTruthy();
+    await screen.findByText(/No samples were recorded in this period/);
+  });
+
   it("shows mailbox storage when the collector reports it", async () => {
     const table = { columns: [{ label: "Account", format: "text" as const }], rows: [["ann@example.test"]] };
     const mailboxes = observation({ id: "stalwart.mailboxes", title: "Mailbox storage", modules: ["dashboard"], table });

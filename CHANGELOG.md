@@ -40,6 +40,13 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A status that stops arriving no longer looks current.** When the status
+  could not be refreshed (the broker or the web service away, the network
+  down), the dashboard and the status pages kept their last tiles, "OK"
+  included, without a word. They now say that the refresh failed and of when
+  the status is, and each check turns stale on the page once it is older than
+  it may be, without a new answer and whatever the browser's clock says. The
+  dashboard also says when there is no status at all or none yet.
 - **A list no longer shows another filter's rows after a failed request.**
   When the request for a new search, category or page failed, the event
   history, Deliveries, Sessions, Attacks & bans and Delivery problems kept

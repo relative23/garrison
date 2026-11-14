@@ -6,6 +6,9 @@ export interface Resource<T> {
   data: T | null;
   error: Error | null;
   loading: boolean;
+  /** When `data` arrived, on the page's monotonic clock (`performance.now()`);
+   * null without data. A failed refresh keeps the data and this time. */
+  receivedAt: number | null;
   reload: () => void;
 }
 
@@ -13,6 +16,7 @@ interface Settled<T> {
   request: string;
   data: T | null;
   error: Error | null;
+  receivedAt: number | null;
 }
 
 /**
@@ -33,7 +37,9 @@ export function useResource<T>(
   const [tick, setTick] = useState(0);
   const request = `${key}#${tick}`;
   const [settled, setSettled] = useState<Settled<T>>(() =>
-    initial === undefined ? { request: "", data: null, error: null } : { request, data: initial, error: null },
+    initial === undefined
+      ? { request: "", data: null, error: null, receivedAt: null }
+      : { request, data: initial, error: null, receivedAt: performance.now() },
   );
   const answered = useRef(initial === undefined ? null : request);
 
@@ -49,7 +55,7 @@ export function useResource<T>(
     const controller = new AbortController();
     latest.current(controller.signal).then(
       (data) => {
-        if (!controller.signal.aborted) setSettled({ request, data, error: null });
+        if (!controller.signal.aborted) setSettled({ request, data, error: null, receivedAt: performance.now() });
       },
       (reason: unknown) => {
         if (controller.signal.aborted) return;
@@ -57,7 +63,10 @@ export function useResource<T>(
         // Keep the data visible while showing the error, but only data that
         // answered these same dependencies: after a failed request for a new
         // filter, the previous filter's rows are not this filter's.
-        setSettled((previous) => ({ request, data: previous.request.startsWith(`${key}#`) ? previous.data : null, error }));
+        setSettled((previous) => {
+          const kept = previous.request.startsWith(`${key}#`);
+          return { request, data: kept ? previous.data : null, error, receivedAt: kept ? previous.receivedAt : null };
+        });
       },
     );
     return () => controller.abort();
@@ -79,6 +88,7 @@ export function useResource<T>(
     data: sameQuery ? settled.data : null,
     error: sameQuery ? settled.error : null,
     loading: settled.request !== request,
+    receivedAt: sameQuery ? settled.receivedAt : null,
     reload,
   };
 }

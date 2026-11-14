@@ -82,6 +82,10 @@ async fn the_status_is_filtered_per_module() {
     assert_eq!(ids, ["a"]);
     assert_eq!(status["observations"][0]["modules"], json!(["dashboard"])); // Ungranted names removed.
     assert_eq!(status["observations"][0]["stale"], true);
+    assert!(
+        status["observations"][0]["age"].as_i64().unwrap() > 300,
+        "{status}"
+    );
     assert_eq!(
         status["providerErrors"],
         json!([]),

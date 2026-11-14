@@ -103,3 +103,22 @@ fn an_observation_is_stale_after_its_max_age() {
     );
     assert!(stale(&checked("yesterday", None), at));
 }
+
+#[test]
+fn an_observation_says_how_old_it_is_in_whole_seconds() {
+    let minute = checked("2026-10-29T12:00:00+00:00", Some(60));
+    let at = time::parse("2026-10-29T12:00:00+00:00").unwrap();
+    let after = |micros: i64| at + time::SignedDuration::from_micros(micros);
+    assert_eq!(age(&minute, at), Some(0));
+    // A begun second counts: the page is never later than the server.
+    assert_eq!(age(&minute, after(1)), Some(1));
+    assert_eq!(age(&minute, after(60_000_000)), Some(60));
+    assert_eq!(age(&minute, after(60_000_001)), Some(61));
+    assert_eq!(age(&minute, after(-10_000_000)), Some(-10));
+    assert_eq!(
+        age(&checked("2026-10-29 12:00:00", None), after(5_000_000)),
+        Some(5)
+    );
+    assert_eq!(age(&checked("", None), at), None);
+    assert_eq!(age(&checked("yesterday", None), at), None);
+}

@@ -961,6 +961,14 @@
       "Observation": {
         "additionalProperties": false,
         "properties": {
+          "age": {
+            "description": "Seconds from checkedAt to this answer, by the server's clock; null\nwhen checkedAt cannot be read. A page that gets no newer answer adds\nthe time that passes and compares with maxAge.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "checkedAt": {
             "type": "string"
           },
@@ -1069,6 +1077,7 @@
           "findings",
           "value",
           "maxAge",
+          "age",
           "stale"
         ],
         "type": "object"

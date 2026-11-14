@@ -10,6 +10,7 @@ import { ViewBoundary } from "./components/ViewBoundary";
 import { useTranslation } from "./i18n";
 import { AppContext, type AppState } from "./lib/context";
 import { navigate, useRoute } from "./lib/router";
+import { useCurrentStatus } from "./lib/staleness";
 import { applyTheme } from "./lib/theme";
 import { useResource } from "./lib/useResource";
 import { ChunkView, isPage, moduleText, PAGE_VIEWS, PAGES, VIEWS } from "./modules/registry";
@@ -18,7 +19,7 @@ function SignedIn({ initial, onSignedOut }: { initial: SessionInfo; onSignedOut:
   const { t } = useTranslation();
   const [session, setSession] = useState(initial);
   const route = useRoute();
-  const status = useResource((signal) => api.status(signal), [], 60);
+  const status = useCurrentStatus(useResource((signal) => api.status(signal), [], 60));
 
   useEffect(() => applyTheme(session.preferences.theme), [session.preferences.theme]);
   useEffect(() => {

@@ -24,6 +24,7 @@ const base: Observation = {
   findings: ["Detected malware is handled with Accept, not Reject."],
   value: {},
   maxAge: 300,
+  age: 0,
   stale: false,
 };
 
