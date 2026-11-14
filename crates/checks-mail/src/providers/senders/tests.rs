@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::testing::{Canned, Remembered, config, now, table};
+use crate::testing::{Canned, Receiver, Remembered, config, now, table};
 
 /// One event of the history: its type, how long before the tests' clock it
 /// came, and its fields.
@@ -36,6 +36,19 @@ fn observed(
     memory: &Remembered,
     later: i64,
 ) -> Observation {
+    let receiver = Receiver::default();
+    observed_from(&receiver, provider, events, days, memory, later)
+}
+
+/// The same over a history whose receiver recorded `receiver` about itself.
+fn observed_from(
+    receiver: &Receiver,
+    provider: &Senders,
+    events: &[Event],
+    days: i64,
+    memory: &Remembered,
+    later: i64,
+) -> Observation {
     let directory = tempfile::tempdir().unwrap();
     let config = config(directory.path());
     let path = config.database(garrison_core::config::Database::Events);
@@ -56,6 +69,7 @@ fn observed(
     for (kind, ago, fields) in events {
         insert(kind, *ago, fields);
     }
+    receiver.record(&db, now().as_second() + later);
     drop(db);
     let runner = Canned(String::new());
     let context = Context {
@@ -213,4 +227,80 @@ fn the_limits_can_be_set_and_are_checked() {
             "{wrong}"
         );
     }
+}
+
+#[test]
+fn a_history_that_is_not_current_is_no_quiet_day() {
+    let events = usual("anna@example.test", 20);
+    // The receiver last reported a day ago: nothing of today is in the
+    // history, and that is no day on which nobody sent.
+    let quiet = Receiver {
+        quiet_for: DAY,
+        ..Receiver::default()
+    };
+    let memory = Remembered::default();
+    let observation = observed_from(&quiet, &provider(), &events, 20, &memory, 0);
+    assert_eq!(observation.state, State::Unknown);
+    assert_eq!(
+        observation.findings,
+        [
+            "The event history is not current: the event receiver has not reported since \
+          2026-10-28T12:00:00+00:00. Mail that was handed in may be missing here."
+        ]
+    );
+    // Events lost within the last day say the same.
+    let lost = Receiver {
+        quiet_for: 0,
+        lost: vec![(6 * 3600, 3 * 3600)],
+    };
+    let observation = observed_from(&lost, &provider(), &events, 20, &Remembered::default(), 0);
+    assert_eq!(observation.state, State::Unknown);
+    assert!(observation.findings[0].contains("were lost while the event receiver was away"));
+    // With a receiver that reports, the same history is a quiet day.
+    let observation = observed(&provider(), &events, 20, &Remembered::default(), 0);
+    assert_eq!(observation.state, State::Ok);
+    assert_eq!(observation.findings, Vec::<String>::new());
+}
+
+#[test]
+fn what_was_seen_stays_a_warning_over_an_incomplete_history() {
+    let mut events = usual("anna@example.test", 20);
+    events.push(queued("anna@example.test", 1800, 300, "192.0.2.1"));
+    let lost = Receiver {
+        quiet_for: 0,
+        lost: vec![(6 * 3600, 3 * 3600)],
+    };
+    let observation = observed_from(&lost, &provider(), &events, 20, &Remembered::default(), 0);
+    assert_eq!(observation.state, State::Warning);
+    assert_eq!(observation.findings.len(), 2, "{:?}", observation.findings);
+    assert!(observation.findings[0].starts_with("anna@example.test: "));
+    assert!(observation.findings[1].starts_with("The event history is not current"));
+}
+
+#[test]
+fn events_lost_in_the_days_before_leave_no_usual_volume_to_compare_with() {
+    // Ten of the fourteen days before are missing: what is left of them is
+    // no average of fourteen days, and today's ordinary volume no outlier.
+    let events: Vec<Event> = (1..=4)
+        .map(|day| queued("anna@example.test", day * DAY + 3600, 100, "192.0.2.1"))
+        // Today 150, in three hours that are no burst.
+        .chain([1, 5, 9].map(|hour| queued("anna@example.test", hour * 3600, 50, "192.0.2.1")))
+        .collect();
+    let lost = Receiver {
+        quiet_for: 0,
+        lost: vec![(15 * DAY, 5 * DAY)],
+    };
+    let observation = observed_from(&lost, &provider(), &events, 20, &Remembered::default(), 0);
+    assert_eq!(observation.state, State::Ok);
+    assert_eq!(row(&observation, "anna@example.test")[3], Value::Null);
+    assert_eq!(
+        observation.findings,
+        [
+            "No usual volume is named: events between 2026-10-14T12:00:00+00:00 and \
+          2026-10-24T12:00:00+00:00 were lost while the event receiver was away."
+        ]
+    );
+    // Without the gap, the same four days would make 150 an outlier.
+    let observation = observed(&provider(), &events, 20, &Remembered::default(), 0);
+    assert_eq!(observation.state, State::Warning);
 }

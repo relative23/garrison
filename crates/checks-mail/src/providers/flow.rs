@@ -8,6 +8,10 @@
 //! which domains fail, and how much mail travels without TLS. They are read
 //! from the event history every ten minutes (`read.rs`) and shown as cards
 //! (`cards.rs`).
+//!
+//! A count is in order only over a history that holds the week: while the
+//! receiver does not report, or where it lost events within these days, a
+//! summary that would be in order is Unknown and says why. Its numbers stay.
 
 use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
@@ -22,7 +26,9 @@ use serde::{Deserialize, Serialize};
 mod cards;
 mod read;
 
-use read::{DAYS, Week};
+use read::{DAY, DAYS, Week};
+
+use super::history;
 
 use crate::context::{Collected, Context, Provider, ProviderError, Report};
 use crate::options::{Checked, Options, fail};
@@ -37,6 +43,9 @@ struct Read {
     at: i64,
     week: Week,
     problem: Option<String>,
+    /// Why the history does not hold the whole week, where it does not.
+    #[serde(default)]
+    uncovered: Option<String>,
 }
 
 #[derive(Debug)]
@@ -121,6 +130,11 @@ impl Flow {
             Ok(Some(db)) => match read::week(&db, now, &Self::accounts(context)) {
                 Ok(week) => Read {
                     at: now,
+                    uncovered: history::uncovered(
+                        &db,
+                        week.days.first().copied().unwrap_or(now - DAYS * DAY),
+                        now,
+                    ),
                     week,
                     problem: None,
                 },
@@ -136,7 +150,8 @@ impl Flow {
     }
 
     /// An observation of this provider; Unknown, with the reason, where the
-    /// history could not be read.
+    /// history could not be read, and where it would be in order over a
+    /// history that does not hold the week.
     fn observation(
         &self,
         context: &Context<'_>,
@@ -147,13 +162,15 @@ impl Flow {
         state: State,
     ) -> Made {
         let unknown = read.problem.as_ref();
+        // What was seen stays what it is; only "in order" needs all of it.
+        let incomplete = read.uncovered.as_ref().filter(|_| unknown.is_none());
         let observation = Observation::new(
             format!("flow.{id}"),
             self.name(),
             title,
             [module],
             Evidence::Probe,
-            if unknown.is_some() {
+            if unknown.is_some() || (incomplete.is_some() && state == State::Ok) {
                 State::Unknown
             } else {
                 state
@@ -162,11 +179,15 @@ impl Flow {
             "event history",
         )?
         .with_max_age(180);
-        Ok(match unknown {
-            Some(problem) => {
+        Ok(match (unknown, incomplete) {
+            (Some(problem), _) => {
                 observation.with_findings(vec![format!("Nothing could be counted: {problem}.")])
             }
-            None => observation,
+            (None, Some(reason)) => observation.with_findings(vec![format!(
+                "The event history is not current: {reason}. What is counted here may be too \
+                 little."
+            )]),
+            (None, None) => observation,
         })
     }
 }

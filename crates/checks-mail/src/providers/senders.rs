@@ -18,6 +18,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use super::history;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::options::{Checked, Options};
 
@@ -59,6 +60,12 @@ struct Read {
     /// More events were recorded than were read.
     truncated: bool,
     problem: Option<String>,
+    /// Why the history does not hold the last day, where it does not.
+    #[serde(default)]
+    uncovered: Option<String>,
+    /// Why no usual volume is named, where the days before have a gap.
+    #[serde(default)]
+    unusual_unknown: Option<String>,
 }
 
 #[derive(Debug)]
@@ -162,10 +169,19 @@ impl Senders {
     fn read(&self, db: &Connection, now: i64) -> rusqlite::Result<Read> {
         let since = now - (USUAL_DAYS + 1) * DAY;
         let today = now - DAY;
+        // A day's volume is in order only over a history that holds the day.
+        let uncovered = history::uncovered(db, today, now);
+        // Events lost in the days before would make every average too low,
+        // and an ordinary day an outlier: then no usual volume is named.
+        let unusual_unknown = uncovered
+            .is_none()
+            .then(|| history::uncovered(db, since, today))
+            .flatten();
         let begins: Option<i64> =
             db.query_row("SELECT MIN(created_at) FROM events", [], |row| row.get(0))?;
         // The whole days before the last one that the history holds.
         let known = begins.map_or(0, |begins| (today - begins.max(since)) / DAY);
+        let known = if unusual_unknown.is_some() { 0 } else { known };
         let mut sums: HashMap<String, Sums> = HashMap::new();
         let limit = i64::try_from(MAX_EVENTS + 1).unwrap_or(i64::MAX);
         let mut statement = db.prepare(
@@ -245,6 +261,8 @@ impl Senders {
             senders,
             truncated,
             problem: None,
+            uncovered,
+            unusual_unknown,
         })
     }
 
@@ -308,8 +326,19 @@ impl Provider for Senders {
                 State::Unknown
             }
             (None, false) => State::Warning,
+            // A quiet day only over a history that holds the day.
+            (None, true) if read.uncovered.is_some() => State::Unknown,
             (None, true) => State::Ok,
         };
+        if let Some(reason) = read.uncovered.as_ref().filter(|_| read.problem.is_none()) {
+            findings.push(format!(
+                "The event history is not current: {reason}. Mail that was handed in may be \
+                 missing here."
+            ));
+        }
+        if let Some(reason) = &read.unusual_unknown {
+            findings.push(format!("No usual volume is named: {reason}."));
+        }
         if read.truncated {
             findings.push("More mail was handed in than is counted here.".to_owned());
         }

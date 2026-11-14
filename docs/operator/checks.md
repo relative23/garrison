@@ -83,6 +83,13 @@ disabled, and its password changed, in the Stalwart WebUI. The check shows on
 the Attacks & bans page, and a warning goes out on the notification channels
 like any other.
 
+A quiet day counts only over a history that holds the day. While the event
+receiver has not reported for five minutes, or where it lost events within
+the last 24 hours, the check is Unknown and says since when; a warning it
+did see stays a warning. Where events were lost in the 14 days before, no
+usual number is named until that window has passed, since an average over
+days that are missing would make an ordinary day look like an outlier.
+
 ## `tls`
 
 Each endpoint is asked on this host with the host name as a browser or a mail
@@ -119,6 +126,14 @@ minutes. They count; none of them is a verdict, except where it says so.
 - `tls`: how much mail came in on port 25 with and without STARTTLS and how
   many deliveries went out to hosts that offered TLS, on the DNS & TLS page,
   with the sender domains and hosts without TLS.
+
+A summary is in order only over a history that holds the week. While the
+event receiver has not reported for five minutes, or where it lost events
+within these seven days (it was away for longer than Stalwart keeps events
+for it), every summary that would be in order is Unknown and names the
+reason; the numbers that were read stay in view, and a warning stays a
+warning. A history that only begins inside the week, on a new installation
+or after a size limit removed older events, is counted from where it begins.
 
 ## `backup-check`
 

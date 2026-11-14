@@ -21,10 +21,14 @@ use garrison_collector::snapshot::{SCHEMA, Snapshot};
 use garrison_collector::store::{StatusStore, history};
 use garrison_collector::{Context, build};
 use garrison_core::config::{self, Database};
+use garrison_core::recording::{self, GAPS_TABLE, HEARTBEAT_AT, METADATA_TABLE};
 use garrison_core::time;
 use garrison_testing::http::{answer, serve};
 use rusqlite::types::ValueRef;
 use serde_json::{Map, Value, json};
+
+/// The collection time of the test.
+const NOW: &str = "2026-10-29T12:00:00Z";
 
 const MTIMES: [(&str, u64); 3] = [
     ("daily.cld", 1_793_270_000_123_456_789),
@@ -91,6 +95,12 @@ fn prepare(work: &Path) {
                INSERT INTO events VALUES('server.startup',1793000000,'{"version":"1.1.1"}');"#,
         )
         .unwrap();
+    // A receiver that reports and lost nothing: the history is current.
+    events
+        .execute_batch(&format!("{GAPS_TABLE};{METADATA_TABLE};"))
+        .unwrap();
+    let now = time::parse(NOW).unwrap().as_second();
+    recording::set(&events, HEARTBEAT_AT, now).unwrap();
 }
 
 fn normalize(mut provider: Value, replacements: &[(String, &str)]) -> Value {
@@ -167,7 +177,7 @@ fn every_provider_reports_the_expected_observations() {
     let config = config::parse(&text.parse().unwrap()).unwrap();
     let context = Context {
         deployment: &config.deployment,
-        now: time::parse("2026-10-29T12:00:00Z").unwrap(),
+        now: time::parse(NOW).unwrap(),
         native_key: Some("native-key-0123456789".into()),
         metrics_credential: Some(("user".into(), "secret".into())),
         events_database: config.database(Database::Events),

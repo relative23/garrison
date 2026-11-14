@@ -40,6 +40,14 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A stale event history no longer reads as a quiet mail server.** The
+  mail-flow summaries and the sending accounts counted whatever the event
+  history held and called it in order, also when the event receiver had not
+  run for a day. They are now Unknown, with the reason and since when, while
+  the receiver has not reported for five minutes or where it lost events
+  inside the days they count; numbers that were read stay in view and a
+  warning stays a warning. The Stalwart version is Unknown likewise once a
+  later start of Stalwart may be missing from the history.
 - **A status that stops arriving no longer looks current.** When the status
   could not be refreshed (the broker or the web service away, the network
   down), the dashboard and the status pages kept their last tiles, "OK"

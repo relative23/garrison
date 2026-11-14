@@ -220,8 +220,18 @@ fn the_version_comes_from_a_recorded_server_start() {
     let path = config.database(Database::Events);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("CREATE TABLE events(created_at INTEGER, type TEXT, fields TEXT)")
-        .unwrap();
+    db.execute_batch(&format!(
+        "CREATE TABLE events(created_at INTEGER, type TEXT, fields TEXT);{};{};",
+        recording::GAPS_TABLE,
+        recording::METADATA_TABLE
+    ))
+    .unwrap();
+    recording::set(
+        &db,
+        recording::HEARTBEAT_AT,
+        crate::testing::now().as_second(),
+    )
+    .unwrap();
     let version = |reported: &str| {
         db.execute("DELETE FROM events", []).unwrap();
         db.execute(
@@ -236,4 +246,58 @@ fn the_version_comes_from_a_recorded_server_start() {
     for invalid in ["", "1.0 beta", &"9".repeat(41)] {
         assert_eq!(version(invalid), Value::Null, "{invalid:?}");
     }
+}
+
+#[test]
+fn a_recorded_start_is_the_running_version_only_while_the_history_is_current() {
+    use recording::{GAPS_TABLE, HEARTBEAT_AT, METADATA_TABLE, OFFLINE};
+    let directory = tempfile::tempdir().unwrap();
+    let (config, runner) = (config(directory.path()), Canned(String::new()));
+    let path = config.database(Database::Events);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(&format!(
+        "CREATE TABLE events(created_at INTEGER, type TEXT, fields TEXT);{GAPS_TABLE};{METADATA_TABLE};"
+    ))
+    .unwrap();
+    let now = crate::testing::now().as_second();
+    let started = now - 5 * 86_400;
+    db.execute(
+        "INSERT INTO events VALUES(?, 'server.startup', ?)",
+        (started, json!({ "version": "1.1.0" }).to_string()),
+    )
+    .unwrap();
+    let observed = || Stalwart::version(&context(&config, &runner)).unwrap();
+    // The receiver reports and lost nothing since the start: that start is
+    // the last one.
+    recording::set(&db, HEARTBEAT_AT, now - 30).unwrap();
+    let current = observed();
+    assert_eq!(current.state, State::Ok);
+    assert_eq!(current.findings, Vec::<String>::new());
+    // Events were lost after it: a later start may be among them.
+    db.execute(
+        "INSERT INTO gaps(start_at,end_at,reason) VALUES(?,?,?)",
+        (now - 2 * 86_400, now - 86_400, OFFLINE),
+    )
+    .unwrap();
+    let lost = observed();
+    assert_eq!(lost.state, State::Unknown);
+    assert_eq!(lost.value["version"], "1.1.0");
+    assert_eq!(
+        lost.findings,
+        [
+            "A later start of Stalwart may not be recorded: events between 2026-10-27T12:00:00+00:00 \
+          and 2026-10-28T12:00:00+00:00 were lost while the event receiver was away."
+        ]
+    );
+    // The receiver stopped reporting: what Stalwart did since is not known.
+    db.execute("DELETE FROM gaps", []).unwrap();
+    recording::set(&db, HEARTBEAT_AT, now - 3600).unwrap();
+    let quiet = observed();
+    assert_eq!(quiet.state, State::Unknown);
+    assert!(
+        quiet.findings[0].contains("has not reported since"),
+        "{:?}",
+        quiet.findings
+    );
 }

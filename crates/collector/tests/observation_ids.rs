@@ -131,6 +131,14 @@ fn events(path: &Path, now: i64) {
         "CREATE TABLE events(seq INTEGER PRIMARY KEY, created_at INTEGER, type TEXT, span_id TEXT, fields TEXT)",
     )
     .unwrap();
+    // A receiver that reports: the history is current.
+    db.execute_batch(&format!(
+        "{};{};",
+        garrison_core::recording::GAPS_TABLE,
+        garrison_core::recording::METADATA_TABLE
+    ))
+    .unwrap();
+    garrison_core::recording::set(&db, garrison_core::recording::HEARTBEAT_AT, now).unwrap();
     for (kind, fields) in [
         (
             "smtp.spf-from-fail",

@@ -3,6 +3,7 @@
 mod clamav;
 pub mod directives;
 mod flow;
+mod history;
 mod mailtest;
 mod senders;
 

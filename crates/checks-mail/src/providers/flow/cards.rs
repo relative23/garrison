@@ -203,7 +203,8 @@ impl Flow {
                 rows,
             });
         if read.problem.is_none() {
-            observation = observation.with_findings(findings);
+            // Before what the observation says of the history itself.
+            observation.findings.splice(0..0, findings);
         }
         report.observations.push(observation);
         Ok(())

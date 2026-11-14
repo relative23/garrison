@@ -15,4 +15,32 @@ mod testing {
     pub(crate) fn config(directory: &std::path::Path) -> Config {
         garrison_testing::config(directory, "http://127.0.0.1:9")
     }
+
+    /// What the event receiver recorded about itself in a history a test
+    /// made: how many seconds before `now` it last reported, and the windows
+    /// in which events were lost, as seconds before `now`.
+    #[derive(Debug, Default)]
+    pub(crate) struct Receiver {
+        pub(crate) quiet_for: i64,
+        pub(crate) lost: Vec<(i64, i64)>,
+    }
+
+    impl Receiver {
+        /// Write the receiver's own tables into `db`.
+        pub(crate) fn record(&self, db: &rusqlite::Connection, now: i64) {
+            use garrison_core::recording::{
+                self, GAPS_TABLE, HEARTBEAT_AT, METADATA_TABLE, OFFLINE,
+            };
+            db.execute_batch(&format!("{GAPS_TABLE};{METADATA_TABLE};"))
+                .unwrap();
+            recording::set(db, HEARTBEAT_AT, now - self.quiet_for).unwrap();
+            for (start, end) in &self.lost {
+                db.execute(
+                    "INSERT INTO gaps(start_at,end_at,reason) VALUES(?,?,?)",
+                    (now - start, now - end, OFFLINE),
+                )
+                .unwrap();
+            }
+        }
+    }
 }
