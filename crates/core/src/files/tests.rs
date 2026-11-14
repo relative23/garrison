@@ -115,6 +115,57 @@ fn secrets_are_one_printable_line_of_sane_length() {
         read_secret(&key, Privacy::Owned),
         Err(ProtectedFileError::TooLarge(_))
     ));
+    // A key is never optional.
+    write(&key, "\n", 0o600);
+    assert!(matches!(
+        read_secret(&key, Privacy::Owned),
+        Err(ProtectedFileError::InvalidSecret(_))
+    ));
+}
+
+#[test]
+fn an_empty_file_holds_no_secret_and_a_password_may_hold_spaces() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("secret");
+    let read = |form| read_optional_secret(&file, Privacy::Owned, form);
+    for empty in ["", "\n", "  \r\n"] {
+        write(&file, empty, 0o600);
+        for form in [Form::Token, Form::Password] {
+            assert_eq!(read(form).unwrap(), None, "{empty:?}");
+        }
+    }
+    write(&file, "pass word 1\n", 0o600);
+    assert_eq!(
+        read(Form::Password).unwrap().as_deref(),
+        Some("pass word 1")
+    );
+    write(&file, "pässwört", 0o600);
+    assert_eq!(read(Form::Password).unwrap().as_deref(), Some("pässwört"));
+    // A token keeps the stricter form of a key.
+    for (text, password) in [
+        ("pass word 1", true),
+        ("short", true),
+        ("pass\tword", false),
+        ("pass\0word", false),
+        ("two\nlines", false),
+    ] {
+        write(&file, text, 0o600);
+        assert!(
+            matches!(read(Form::Token), Err(ProtectedFileError::InvalidSecret(_))),
+            "{text:?}"
+        );
+        assert_eq!(read(Form::Password).is_ok(), password, "{text:?}");
+    }
+    write(&file, &"x".repeat(8193), 0o600);
+    assert!(read(Form::Password).is_err());
+    write(&file, SECRET, 0o600);
+    assert_eq!(read(Form::Token).unwrap().as_deref(), Some(SECRET));
+    // An empty file is no excuse for one that others can read.
+    write(&file, "", 0o644);
+    assert!(matches!(
+        read(Form::Password),
+        Err(ProtectedFileError::NotPrivate(_))
+    ));
 }
 
 #[test]

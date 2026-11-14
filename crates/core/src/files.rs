@@ -114,16 +114,48 @@ pub fn read_private(
         .ok_or_else(|| ProtectedFileError::TooLarge(path.into()))
 }
 
-/// Read a single-line secret such as an API key or an HMAC key.
-pub fn read_secret(path: &Path, privacy: Privacy) -> Result<String, ProtectedFileError> {
+/// What a secret's file holds, line ends and surrounding spaces aside.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Form {
+    /// An API key, an HMAC key or a bearer token: 16 to 8192 printable
+    /// ASCII characters without spaces, as a header carries it.
+    Token,
+    /// A password of a mail account: text on one line of at most 8192
+    /// bytes, spaces inside it included, without control characters (a NUL
+    /// would end it inside the sign-in).
+    Password,
+}
+
+/// Read a single-line secret that may be absent: an empty file holds none.
+pub fn read_optional_secret(
+    path: &Path,
+    privacy: Privacy,
+    form: Form,
+) -> Result<Option<String>, ProtectedFileError> {
     let data = read_private(path, 16384, privacy)?;
     let invalid = || ProtectedFileError::InvalidSecret(path.into());
     let text = std::str::from_utf8(&data).map_err(|_| invalid())?.trim();
-    let printable = text.bytes().all(|byte| (0x21..=0x7e).contains(&byte));
-    if !(16..=8192).contains(&text.len()) || !printable {
-        return Err(invalid());
+    if text.is_empty() {
+        return Ok(None);
     }
-    Ok(text.to_owned())
+    let fits = match form {
+        Form::Token => {
+            (16..=8192).contains(&text.len())
+                && text.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+        }
+        Form::Password => text.len() <= 8192 && !text.chars().any(char::is_control),
+    };
+    if fits {
+        Ok(Some(text.to_owned()))
+    } else {
+        Err(invalid())
+    }
+}
+
+/// Read a single-line secret such as an API key or an HMAC key.
+pub fn read_secret(path: &Path, privacy: Privacy) -> Result<String, ProtectedFileError> {
+    read_optional_secret(path, privacy, Form::Token)?
+        .ok_or_else(|| ProtectedFileError::InvalidSecret(path.into()))
 }
 
 /// Read an authorization file that only root (or this user) can change.

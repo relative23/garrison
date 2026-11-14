@@ -24,7 +24,7 @@ use garrison_core::time;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 
-pub use channels::{Address, Channels, Level, Note, Secrets, taken};
+pub use channels::{Address, Channels, Level, Note, Secret, Secrets, taken};
 
 use crate::context::{Deadline, Memory};
 use crate::fetch;
@@ -373,13 +373,24 @@ fn after_run_with(
     let never = "No message has gone out on these channels yet, so it is not known whether one \
                  would arrive. `garrison notify-test` sends a test message; this check is in \
                  order once the first notification has gone out.";
-    let (state, finding) = match (&problem, &last) {
-        (Some(problem), _) => (
-            State::Failed,
-            Some(format!("The last notification did not go out: {problem}.")),
-        ),
-        (None, None) => (State::Unknown, Some(never.to_owned())),
-        (None, Some(_)) => (State::Ok, None),
+    // A channel whose secret cannot be used cannot send, whatever it did
+    // before: that is known in every run, without a message to send.
+    let mut findings: Vec<String> = channels
+        .unusable()
+        .into_iter()
+        .map(|line| format!("{line}."))
+        .collect();
+    let state = match (&problem, &last) {
+        (Some(problem), _) => {
+            findings.push(format!("The last notification did not go out: {problem}."));
+            State::Failed
+        }
+        _ if !findings.is_empty() => State::Failed,
+        (None, None) => {
+            findings.push(never.to_owned());
+            State::Unknown
+        }
+        (None, Some(_)) => State::Ok,
     };
     let names = channels.names().join(", ");
     Observation::new(
@@ -404,11 +415,13 @@ fn after_run_with(
                 Field::new("Checks not in order", waiting, Format::Number),
                 Field::new("Last notification", last, Format::Datetime),
             ])
-            .with_findings(finding.into_iter().collect())
+            .with_findings(findings)
             .with_max_age(180)
     })
 }
 
+#[cfg(test)]
+mod secret_tests;
 #[cfg(test)]
 mod state_tests;
 #[cfg(test)]

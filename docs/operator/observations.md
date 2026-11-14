@@ -34,7 +34,7 @@ changelog, and for one more release the observation carries its old id in
 | `host.firewall` | `host-care` | The firewall service or units |
 | `http.<id>` | `http` | One endpoint |
 | `mailtest.results` | `mail-test` | Test messages through the mail server |
-| `notifications.channels` | `[notifications]` | Whether the channels took the last message |
+| `notifications.channels` | `[notifications]` | Whether the channels took the last message, and, in every run, whether each one's secret can be used |
 | `prometheus.exporter` | `prometheus` | Stalwart's metrics exporter |
 | `receipt.<id>` | `receipt` | One job's receipt |
 | `release.garrison` | `releases` | Newer releases of Garrison |

@@ -15,6 +15,7 @@ use garrison_core::time;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 
+use super::channels::Secret;
 use crate::fetch::{WITHIN, secure_stream_until, tls_error};
 
 /// Where the mail goes and who submits it.
@@ -27,7 +28,7 @@ pub struct Mail {
     pub user: String,
     /// Read from its credential, never kept with the rest.
     #[serde(skip)]
-    pub password: String,
+    pub password: Secret,
     pub from: String,
     pub to: String,
 }
@@ -134,6 +135,8 @@ pub fn submit_until(
     roots: &Arc<RootCertStore>,
     until: Instant,
 ) -> Result<(), String> {
+    // A password that cannot be used is said before anything is sent.
+    mail.password.text()?;
     let stream = secure_stream_until(&mail.host, mail.port, roots, until)?;
     submit_over(stream, mail, name, &message(mail, name, subject, text, now))
 }
@@ -147,7 +150,7 @@ pub fn submit_over(
     message: &str,
 ) -> Result<(), String> {
     let mut session = BufReader::new(stream);
-    let login = STANDARD.encode(format!("\0{}\0{}", mail.user, mail.password));
+    let login = STANDARD.encode(format!("\0{}\0{}", mail.user, mail.password.text()?));
     let steps = [
         (None, 220, "greet"),
         (Some(format!("EHLO {name}\r\n")), 250, "greet"),

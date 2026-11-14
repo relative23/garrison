@@ -8,7 +8,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::files::{self, Privacy, ProtectedFileError};
+use crate::files::{self, Form, Privacy, ProtectedFileError};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SecretSource {
@@ -95,6 +95,16 @@ impl Credentials {
     pub fn read_secret(&self, source: &SecretSource) -> Result<String, ProtectedFileError> {
         let path = self.path(source);
         files::read_secret(&path, self.privacy(&path))
+    }
+
+    /// Read a secret whose file may be empty, which means there is none.
+    pub fn read_optional_secret(
+        &self,
+        source: &SecretSource,
+        form: Form,
+    ) -> Result<Option<String>, ProtectedFileError> {
+        let path = self.path(source);
+        files::read_optional_secret(&path, self.privacy(&path), form)
     }
 }
 

@@ -53,6 +53,7 @@ impl rustls::client::danger::ServerCertVerifier for AnyCertificate {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn stalwart_takes_a_notification_its_own_account_submits_past_the_spam_filter() {
+    use garrison_collector::notify::Secret;
     use garrison_collector::notify::mail::{Mail, message, submit_over};
 
     let _guard = one_at_a_time();
@@ -64,7 +65,7 @@ fn stalwart_takes_a_notification_its_own_account_submits_past_the_spam_filter() 
         host: smtp.clone(),
         port: 465,
         user: user.to_owned(),
-        password: password.to_owned(),
+        password: Secret::Text(password.to_owned()),
         from: user.to_owned(),
         to: user.to_owned(),
     };
@@ -100,7 +101,7 @@ fn stalwart_takes_a_notification_its_own_account_submits_past_the_spam_filter() 
 
     // A wrong password is refused, and the refusal does not repeat it.
     let wrong = Mail {
-        password: format!("wrong-{}", random_hex(8)),
+        password: Secret::Text(format!("wrong-{}", random_hex(8))),
         ..mail.clone()
     };
     let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());

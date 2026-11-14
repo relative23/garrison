@@ -5,7 +5,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use garrison_core::config::{Config, Notifications};
-use garrison_core::credentials::Credentials;
+use garrison_core::credentials::{Credentials, SecretSource};
+use garrison_core::files::{Form, ProtectedFileError};
 use garrison_core::time;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
@@ -15,13 +16,71 @@ use super::mail::{self, Mail};
 use crate::context::Deadline;
 use crate::fetch::{self, Request};
 
-/// An address with the token that goes with it; an empty token sends none.
+/// A channel's secret as its file holds it.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub enum Secret {
+    /// The file is empty: the channel sends none.
+    #[default]
+    Empty,
+    Text(String),
+    /// The file cannot be used, and why; never what it holds.
+    Unusable(String),
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Nothing of a secret belongs in a log or a panic message.
+        formatter.write_str(match self {
+            Secret::Empty => "Secret::Empty",
+            Secret::Text(_) => "Secret::Text(..)",
+            Secret::Unusable(_) => "Secret::Unusable(..)",
+        })
+    }
+}
+
+impl Secret {
+    /// The secret that `setting` names, read in its form.
+    fn read(credentials: &Credentials, source: &SecretSource, setting: &str, form: Form) -> Self {
+        match credentials.read_optional_secret(source, form) {
+            Ok(None) => Secret::Empty,
+            Ok(Some(text)) => Secret::Text(text),
+            Err(error) => Secret::Unusable(unusable(setting, form, &error)),
+        }
+    }
+
+    /// What to send: the secret, nothing for an empty file, or why the
+    /// channel cannot send at all.
+    pub(crate) fn text(&self) -> Result<&str, String> {
+        match self {
+            Secret::Empty => Ok(""),
+            Secret::Text(text) => Ok(text),
+            Secret::Unusable(why) => Err(why.clone()),
+        }
+    }
+}
+
+/// Why the file `setting` names cannot be used. The error names the file
+/// and what is wrong with it, never what it holds.
+fn unusable(setting: &str, form: Form, error: &ProtectedFileError) -> String {
+    let wanted = match (error, form) {
+        (ProtectedFileError::InvalidSecret(_), Form::Token) => {
+            ". A token is one line of 16 to 8192 printable characters without spaces"
+        }
+        (ProtectedFileError::InvalidSecret(_), Form::Password) => {
+            ". A password is one line of text without control characters, at most 8192 bytes"
+        }
+        _ => "",
+    };
+    format!("{setting} cannot be used: {error}{wanted}")
+}
+
+/// An address with the token that goes with it; an empty file sends none.
 #[derive(Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Address {
     pub url: String,
     /// Read from its credential, never kept with the address.
     #[serde(skip)]
-    pub token: String,
+    pub token: Secret,
 }
 
 impl std::fmt::Debug for Address {
@@ -36,9 +95,9 @@ impl std::fmt::Debug for Address {
 /// What the channels need beside their addresses.
 #[derive(Clone, Default)]
 pub struct Secrets {
-    pub ntfy: String,
-    pub webhook: String,
-    pub mail: String,
+    pub ntfy: Secret,
+    pub webhook: Secret,
+    pub mail: Secret,
 }
 
 impl std::fmt::Debug for Secrets {
@@ -49,21 +108,49 @@ impl std::fmt::Debug for Secrets {
 }
 
 impl Secrets {
-    /// The secrets of a configuration. One that is missing or unreadable
-    /// reads as none: a topic or a webhook may need no token.
+    /// The secrets of a configuration. An empty file means that a topic or
+    /// a webhook needs no token; a file that cannot be used is that
+    /// channel's error, and so is an empty password, since mail is always
+    /// submitted signed in.
     #[must_use]
     pub fn read(credentials: &Credentials, notifications: &Notifications) -> Self {
-        let read = |source| {
-            credentials
-                .read_secret(source)
-                .unwrap_or_default()
-                .trim()
-                .to_owned()
+        Self::from_sources(
+            credentials,
+            [
+                &notifications.token,
+                &notifications.webhook_token,
+                &notifications.mail_password,
+            ],
+        )
+    }
+
+    /// The secrets the units load by name, for a watch whose configuration
+    /// does not load: the three settings' defaults.
+    #[must_use]
+    pub fn loaded(credentials: &Credentials) -> Self {
+        let [ntfy, webhook, mail] = ["ntfy-token", "notify-webhook-token", "notify-mail-password"]
+            .map(|name| SecretSource::Credential(name.to_owned()));
+        Self::from_sources(credentials, [&ntfy, &webhook, &mail])
+    }
+
+    fn from_sources(credentials: &Credentials, [ntfy, webhook, mail]: [&SecretSource; 3]) -> Self {
+        const PASSWORD: &str = "notifications.mail_password";
+        let mail = match Secret::read(credentials, mail, PASSWORD, Form::Password) {
+            Secret::Empty => Secret::Unusable(format!(
+                "{PASSWORD} is empty, and mail is submitted signed in: write the account's \
+                 password into the file it names"
+            )),
+            secret => secret,
         };
         Secrets {
-            ntfy: read(&notifications.token),
-            webhook: read(&notifications.webhook_token),
-            mail: read(&notifications.mail_password),
+            ntfy: Secret::read(credentials, ntfy, "notifications.token", Form::Token),
+            webhook: Secret::read(
+                credentials,
+                webhook,
+                "notifications.webhook_token",
+                Form::Token,
+            ),
+            mail,
         }
     }
 }
@@ -150,17 +237,17 @@ impl Channels {
             host: host_of(&config.deployment.public_origin).to_owned(),
             ntfy: notifications.ntfy_url.clone().map(|url| Address {
                 url,
-                token: String::new(),
+                token: Secret::Empty,
             }),
             webhook: notifications.webhook_url.clone().map(|url| Address {
                 url,
-                token: String::new(),
+                token: Secret::Empty,
             }),
             mail: notifications.mail.as_ref().map(|mail| Mail {
                 host: mail.host.clone(),
                 port: mail.port,
                 user: mail.user.clone(),
-                password: String::new(),
+                password: Secret::Empty,
                 from: mail.from.clone(),
                 to: mail.to.clone(),
             }),
@@ -186,6 +273,23 @@ impl Channels {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.ntfy.is_none() && self.webhook.is_none() && self.mail.is_none()
+    }
+
+    /// The channels that cannot send, as their secret's file stands now,
+    /// each with why: `ntfy: notifications.token cannot be used: …`.
+    #[must_use]
+    pub fn unusable(&self) -> Vec<String> {
+        [
+            ("ntfy", self.ntfy.as_ref().map(|ntfy| &ntfy.token)),
+            ("webhook", self.webhook.as_ref().map(|hook| &hook.token)),
+            ("mail", self.mail.as_ref().map(|mail| &mail.password)),
+        ]
+        .into_iter()
+        .filter_map(|(channel, secret)| match secret {
+            Some(Secret::Unusable(why)) => Some(format!("{channel}: {why}")),
+            _ => None,
+        })
+        .collect()
     }
 
     /// Each channel as a page names it, without anything secret.
@@ -252,7 +356,7 @@ impl Channels {
                 "sentAt": time::isoformat(now),
             });
             let sent = in_time()
-                .and_then(|until| post(&webhook.url, &webhook.token, &body, roots, until))
+                .and_then(|until| post(&webhook.url, webhook.token.text()?, &body, roots, until))
                 .and_then(|status| {
                     if (200..300).contains(&status) {
                         Ok(())
@@ -296,7 +400,7 @@ fn to_ntfy(
         "priority": priority,
         "tags": [tag],
     });
-    match post(&format!("{base}/"), &ntfy.token, &body, roots, until)? {
+    match post(&format!("{base}/"), ntfy.token.text()?, &body, roots, until)? {
         200 => Ok(()),
         status => Err(format!("it answered {status}")),
     }

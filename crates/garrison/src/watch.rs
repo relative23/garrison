@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use garrison_collector::notify::{Channels, Secrets};
 use garrison_collector::watch::{Outcome, Watch};
 use garrison_core::config::{self, Database};
-use garrison_core::credentials::{Credentials, SecretSource};
+use garrison_core::credentials::Credentials;
 use garrison_core::time;
 
 use crate::units;
@@ -39,21 +39,9 @@ pub(crate) fn run(path: &Path) -> u8 {
         ),
     };
     // Without a configuration the secrets are those the units load by name.
-    let read = |name: &str| {
-        let source = SecretSource::Credential(name.to_owned());
-        credentials
-            .read_secret(&source)
-            .unwrap_or_default()
-            .trim()
-            .to_owned()
-    };
     let secrets = match &loaded {
         Ok(config) => Secrets::read(&credentials, &config.notifications),
-        Err(_) => Secrets {
-            ntfy: read("ntfy-token"),
-            webhook: read("notify-webhook-token"),
-            mail: read("notify-mail-password"),
-        },
+        Err(_) => Secrets::loaded(&credentials),
     };
     // systemd names the unit's own state directory; without it, where it is.
     let state = std::env::var_os("STATE_DIRECTORY")

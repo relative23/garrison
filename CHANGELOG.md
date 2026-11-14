@@ -77,6 +77,18 @@ Notable changes for operators and users. The format follows
   with what does not follow it and what to do, and also when nginx's include
   names another port than `web.port`. The settings stay, so that a file that
   names them still loads.
+- **A notification secret that cannot be used is that channel's error.** A
+  token or password file that other users could read, that was missing, or
+  that did not hold what a token holds was read as if it were empty: ntfy
+  and the webhook were asked without their token, mail signed in with an
+  empty password, and whatever then failed named neither the setting nor the
+  file. Only an empty file now means "no token". Any other file that cannot
+  be used stops that channel with an error that names the setting and the
+  file, never what it holds: the channels' check on the Alerts page is
+  Failed with it in every run, and `garrison notify-test` says it, as the
+  journal does for a message that did not go out.
+  A mail password may now be shorter than 16 characters and hold spaces; an
+  empty one is an error, since mail is always submitted signed in.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser

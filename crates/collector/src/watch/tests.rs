@@ -5,7 +5,7 @@ use garrison_testing::http::{answer, serve};
 use serde_json::Value;
 
 use super::*;
-use crate::notify::Address;
+use crate::notify::{Address, Secret};
 use crate::snapshot::{SCHEMA, Snapshot};
 use crate::store::StatusStore;
 use crate::testing::now;
@@ -68,7 +68,7 @@ impl Host {
             marker: &self.marker(),
             configured: configured.map(Option::unwrap_or_default),
             secrets: Secrets {
-                ntfy: "token-1".to_owned(),
+                ntfy: Secret::Text("token-1".to_owned()),
                 ..Secrets::default()
             },
             now: now(),
@@ -83,7 +83,7 @@ fn channel(server: &str) -> Channels {
         host: "garrison.example.org".to_owned(),
         ntfy: Some(Address {
             url: format!("{server}/mailserver"),
-            token: "token-1".to_owned(),
+            token: Secret::Text("token-1".to_owned()),
         }),
         ..Channels::default()
     }
@@ -219,8 +219,8 @@ fn a_run_leaves_the_channel_and_takes_it_back() {
     assert_eq!(
         left.ntfy
             .as_ref()
-            .map(|ntfy| (ntfy.url.as_str(), ntfy.token.as_str())),
-        Some(("https://ntfy.example.org/mailserver", ""))
+            .map(|ntfy| (ntfy.url.as_str(), &ntfy.token)),
+        Some(("https://ntfy.example.org/mailserver", &Secret::Empty))
     );
     assert_eq!(left.host, "garrison.example.org");
     let store = StatusStore::open(&host.database(), 90).unwrap();

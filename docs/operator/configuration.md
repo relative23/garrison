@@ -115,13 +115,24 @@ sudo garrison notify-test
 ```
 
 The secrets are files in `/etc/garrison/credentials` (root, mode 0600). The
-installer keeps an empty file for each, which means that none is needed. To
-write one, run this with the file's name, paste the secret, press Enter and
-then Ctrl-D:
+installer keeps an empty file for each, which means that none is needed: a
+topic or a webhook without a token. Mail is always submitted signed in, so
+its password file must hold the password. To write one, run this with the
+file's name, paste the secret, press Enter and then Ctrl-D:
 
 ```sh
 sudo sh -c 'cat > /etc/garrison/credentials/ntfy-token'
 ```
+
+A token is one line of 16 to 8192 printable characters without spaces. A
+password is one line of text, which may be short and hold spaces, without
+control characters such as a tab; spaces before and after it are not part
+of it. A file that cannot be used, because other users may read it, it is
+missing or it holds something else, is that channel's error: nothing goes out
+on the channel, the channels' check on the Alerts page is Failed with it from
+the next collection run on, and `garrison notify-test`, like the collector's
+journal for a message that did not go out, names the setting and the file,
+never what it holds.
 
 ### ntfy
 
@@ -186,7 +197,9 @@ The Alerts page shows the channels, how many checks are not in order and when
 the last message went out. Until a first notification has gone out, its
 check of the channels is Unknown: that a channel is named does not show that
 a message arrives. `garrison notify-test` shows that at once; the check
-itself is in order with the first notification of a collection run.
+itself is in order with the first notification of a collection run. A
+channel whose secret cannot be used makes the check Failed in every run,
+whether a message is due or not.
 
 ## `[milter]`
 

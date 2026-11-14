@@ -88,7 +88,7 @@ pub(crate) fn mail(port: u16) -> Mail {
         host: "localhost".to_owned(),
         port,
         user: "garrison@example.test".to_owned(),
-        password: "app-password-of-sixteen".to_owned(),
+        password: Secret::Text("app-password-of-sixteen".to_owned()),
         from: "garrison@example.test".to_owned(),
         to: "anna@example.test".to_owned(),
     }
