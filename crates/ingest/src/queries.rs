@@ -15,7 +15,11 @@ use serde_json::{Map, Value};
 
 use crate::answers::{DeliverySummary, Detail, EventItem, Page, SessionSummary};
 use crate::deliveries::{Event, MAX_SUMMARY_EVENTS, summarize_queue, summarize_session};
-use crate::policy::{EventType, identifier};
+use crate::policy::identifier;
+
+mod select;
+
+use select::{chosen, clause, conditions, searched};
 
 const MAX_RESPONSE_BYTES: usize = 768 * 1024;
 
@@ -100,39 +104,6 @@ fn event_item(row: &Row<'_>) -> Result<EventItem> {
     })
 }
 
-/// `WHERE` terms for the event columns, with their values. The category is
-/// not among them: no index leads to a category's events ([`chosen`]).
-fn conditions(filter: &Filter) -> (Vec<String>, Vec<Sql>) {
-    let mut terms = Vec::new();
-    let mut values = Vec::new();
-    if !filter.event_type.is_empty() {
-        terms.push("type=?".to_owned());
-        values.push(Sql::Text(filter.event_type.clone()));
-    }
-    if let Some(since) = filter.since {
-        terms.push("created_at>=?".to_owned());
-        values.push(Sql::Integer(since));
-    }
-    if let Some(until) = filter.until {
-        terms.push("created_at<=?".to_owned());
-        values.push(Sql::Integer(until));
-    }
-    if !filter.search.is_empty() {
-        let needle = filter.search.to_lowercase();
-        terms.push("(instr(lower(type),?)>0 OR instr(lower(fields),?)>0)".to_owned());
-        values.extend([Sql::Text(needle.clone()), Sql::Text(needle)]);
-    }
-    (terms, values)
-}
-
-fn clause(terms: &[String]) -> String {
-    if terms.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", terms.join(" AND "))
-    }
-}
-
 /// At most `limit` items within the response budget, and whether more exist.
 /// The budget counts each item as the JSON it goes out as.
 fn bounded(items: Vec<EventItem>, limit: usize) -> (Vec<EventItem>, bool) {
@@ -148,61 +119,6 @@ fn bounded(items: Vec<EventItem>, limit: usize) -> (Vec<EventItem>, bool) {
         kept.push(item);
     }
     (kept, more)
-}
-
-/// The query that chooses a page's events by their numbers, newest first,
-/// and its values; `None` for a category that has no type.
-///
-/// A category has no index of its own, and walking the events from the
-/// newest until a page of a rare category is full would pass the whole
-/// history. A category is a known set of types, and each type's newest
-/// events come straight from the index by type: the page is the newest of
-/// what each type gives.
-fn chosen(filter: &Filter, terms: &[String], values: Vec<Sql>) -> Option<(String, Vec<Sql>)> {
-    let limit = Sql::Integer(limit_plus_one(filter.limit));
-    if filter.category.is_empty() || !filter.event_type.is_empty() {
-        let mut terms = terms.to_vec();
-        let mut values = values;
-        if !filter.category.is_empty() {
-            // With a type named, the category only has to agree with it.
-            terms.push("category=?".to_owned());
-            values.push(Sql::Text(filter.category.clone()));
-        }
-        values.push(limit);
-        return Some((
-            format!(
-                "SELECT seq FROM events{} ORDER BY seq DESC LIMIT ?",
-                clause(&terms)
-            ),
-            values,
-        ));
-    }
-    let types: Vec<&str> = EventType::ALL
-        .iter()
-        .filter(|kind| kind.category() == filter.category)
-        .map(|kind| kind.as_str())
-        .collect();
-    if types.is_empty() {
-        return None;
-    }
-    let mut of_type = terms.to_vec();
-    of_type.push("type=?".to_owned());
-    let one = format!(
-        "SELECT seq FROM (SELECT seq FROM events{} ORDER BY seq DESC LIMIT ?)",
-        clause(&of_type)
-    );
-    let mut all = Vec::new();
-    for kind in &types {
-        all.extend(values.iter().cloned());
-        all.push(Sql::Text((*kind).to_owned()));
-        all.push(limit.clone());
-    }
-    all.push(limit);
-    let parts = vec![one; types.len()].join(" UNION ALL ");
-    Some((
-        format!("SELECT seq FROM ({parts}) ORDER BY seq DESC LIMIT ?"),
-        all,
-    ))
 }
 
 pub fn list_events(db: &Connection, filter: &Filter) -> Result<Page<EventItem>> {
@@ -365,12 +281,11 @@ fn grouped(db: &Connection, group: Group, filter: &Filter) -> Result<Vec<GroupRo
     }
     if !filter.search.is_empty() {
         // Match groups that contain at least one event with the literal text.
-        let needle = filter.search.to_lowercase();
+        let (term, found) = searched(&filter.search);
         terms.push(format!(
-            "{key} IN (SELECT {key} FROM events WHERE {key} IS NOT NULL AND \
-             (instr(lower(fields),?)>0 OR instr(lower(type),?)>0))"
+            "{key} IN (SELECT {key} FROM events WHERE {key} IS NOT NULL AND {term})"
         ));
-        values.extend([Sql::Text(needle.clone()), Sql::Text(needle)]);
+        values.extend(found);
     }
     values.push(Sql::Integer(limit_plus_one(filter.limit)));
     let sql = format!(

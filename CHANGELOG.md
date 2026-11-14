@@ -53,6 +53,13 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Searching the events finds what they say.** A search also matched the
+  names of the stored fields, so a word such as "domain" found nearly every
+  event; it never found a quote or a backslash; and capital letters beyond
+  ASCII in the search term were folded where stored ones were not. A search
+  now reads the recorded values and the type's name, finds every character
+  as it was written, and treats ASCII letters alike in either case and
+  other letters as written.
 - **The event history finds a rare category without reading everything.**
   Choosing a category with few events, such as Security, walked the whole
   history from its newest event and could run into the two seconds a query

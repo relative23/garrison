@@ -286,6 +286,70 @@ fn filters_narrow_the_event_list() {
 }
 
 #[test]
+fn a_search_reads_what_was_recorded_not_how_it_is_stored() {
+    let directory = tempfile::tempdir().unwrap();
+    let events = store(directory.path(), 100);
+    events
+        .ingest(
+            &[event(
+                1,
+                "smtp.ehlo",
+                AT,
+                &json!({"spanId": SPAN, "domain": "client.example.net", "remoteIp": "192.0.2.7"}),
+            )],
+            1,
+        )
+        .unwrap();
+    drop(events);
+    // A value with a quote, a backslash and letters beyond ASCII, as a
+    // field may hold them.
+    Connection::open(directory.path().join("events.sqlite"))
+        .unwrap()
+        .execute(
+            "INSERT INTO events(event_id,created_at,received_at,type,category,fields) \
+             VALUES('odd',1,1,'smtp.ehlo','smtp',?)",
+            [
+                json!({"domain": "MÜLLER.example", "reason": "said \"no\" twice \\ back"})
+                    .to_string(),
+            ],
+        )
+        .unwrap();
+    let db = read(directory.path());
+    let found = |search: &str| {
+        let filter = Filter {
+            search: search.into(),
+            ..Filter::default()
+        };
+        list_events(&db, &filter).unwrap().items.len()
+    };
+    // The names of the fields are how an event is stored, not what it says:
+    // "remoteip" is in every event's text and in no event's values.
+    assert_eq!(found("remoteip"), 0);
+    assert_eq!(found("spanid"), 0);
+    assert_eq!(found("192.0.2"), 1);
+    // A type is searched by its name as before.
+    assert_eq!(found("EHLO"), 2);
+    // Quotes and backslashes are found as they were written.
+    assert_eq!(found("said \"no\""), 1);
+    assert_eq!(found("twice \\ back"), 1);
+    assert_eq!(found("\\\""), 0);
+    // Letters of ASCII match in either case, in the needle and in what is
+    // stored alike; other letters as they are written.
+    assert_eq!(found("müller.EXAMPLE"), 0);
+    assert_eq!(found("MÜLLER.EXAMPLE"), 1);
+    assert_eq!(found("mÜller.example"), 1);
+    // Sessions and deliveries are searched the same way.
+    let sessions = |search: &str| {
+        let filter = Filter {
+            search: search.into(),
+            ..Filter::default()
+        };
+        list_sessions(&db, &filter).unwrap().items.len()
+    };
+    assert_eq!((sessions("remoteip"), sessions("client.EXAMPLE")), (0, 1));
+}
+
+#[test]
 fn every_recorded_event_has_a_native_label() {
     let labelled: Vec<&String> = LABELS.keys().collect();
     assert_eq!(labelled, crate::policy::event_types());
