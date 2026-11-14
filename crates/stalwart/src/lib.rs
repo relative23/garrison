@@ -27,6 +27,12 @@ pub enum Error {
     /// Stalwart refused the request or answered with something unusable.
     #[error("{0}")]
     Denied(String),
+    /// Garrison's own side cannot decide: its policy does not read, its key
+    /// is missing or is not taken, or an answer about rights cannot be used.
+    /// This grants nothing and refuses nobody: it needs the operator, and a
+    /// signed-in user stays signed in meanwhile.
+    #[error("{0}")]
+    Misconfigured(String),
 }
 
 impl Error {

@@ -36,9 +36,11 @@ pub const ACTION_PERMISSIONS: [&str; 2] = ["authenticate", "sysActionCreate"];
 #[error("Garrison access policy: {0}")]
 pub struct PolicyError(pub String);
 
+/// A policy that does not read is the operator's to mend, not a refusal of
+/// whoever asks while it is broken.
 impl From<PolicyError> for Error {
     fn from(error: PolicyError) -> Self {
-        Error::Denied(error.to_string())
+        Error::Misconfigured(error.to_string())
     }
 }
 

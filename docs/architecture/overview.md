@@ -55,8 +55,10 @@ identifier in a `__Host-` cookie of Garrison's own host name.
 The broker resolves the identity through UserInfo, applies the policy (denial
 first), reads the account's roles with its own read-only API key, evaluates
 permissions and returns modules and actions. The web service caches this for
-five seconds per session. 401 ends the session, 403 means not authorized, 503
-(Stalwart or broker unavailable) keeps it.
+five seconds per session. 401 (the token is no longer valid) and 403 (the
+policy refuses this user) end the session; 503 keeps it: Stalwart or the
+broker is unavailable, or Garrison's own setup cannot decide
+([failure behavior](security.md#failure-behavior)).
 
 **Actions.** Web checks Origin, CSRF and the grant; the broker checks the grant
 again, the confirmation phrase, idempotency (UUID4 request ID), concurrency and

@@ -421,7 +421,9 @@ impl Provider for Stalwart {
             Err(error) => {
                 let kind = match error {
                     Error::Unavailable(_) => "Stalwart unavailable",
-                    Error::Denied(_) | Error::InvalidToken(_) => "access denied",
+                    Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
+                        "access denied"
+                    }
                 };
                 report
                     .observations

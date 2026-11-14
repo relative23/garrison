@@ -37,10 +37,27 @@ differences found that way are documented in
 
 ## Failure behavior
 
-Unknown configuration keys, malformed policies, unknown modules or actions and
-ambiguous broker answers deny access. A temporarily unavailable Stalwart or
-broker returns 503 and grants nothing. Restarted brokers never repeat a job;
-pending jobs become "uncertain".
+Nothing is granted unless it could be decided, and the answer says which of
+two things kept it from being granted.
+
+A refusal (403) is what the policy says of a user: the subject is on the deny
+list, has no binding, belongs to an account that is not allowed, or lacks the
+rights its profile requires. It ends that user's session, as an invalid token
+does (401).
+
+Everything else grants nothing and refuses nobody, and is answered 503: a
+Stalwart or a broker that is temporarily unavailable, and a setup of
+Garrison's own that is broken. That is a policy that does not read, is not
+protected or names an action the configuration does not have; a broker key
+that is missing or that Stalwart no longer takes; and an answer about an
+account's rights that cannot be used. Signed-in users stay signed in and see
+that their rights cannot be checked, nobody new can sign in, and the
+broker's journal names the cause as an error. A typo in the policy so does
+not sign everyone out.
+
+A configuration with unknown keys, modules or actions keeps the services
+from starting, and ambiguous broker answers count as no grant. Restarted
+brokers never repeat a job; pending jobs become "uncertain".
 
 ## Known limits
 

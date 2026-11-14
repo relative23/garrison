@@ -47,6 +47,14 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A broken setup no longer signs everyone out.** A typo in the access
+  policy, a broker key that was rotated or removed, or an answer of
+  Stalwart's about rights that Garrison could not use was answered as "not
+  authorized": every signed-in user was signed out, nobody could sign in,
+  and the cause stood in the broker's journal as an informational line. It
+  is now answered as unavailable (503): sessions stay, the page says that
+  rights cannot be checked, and the journal names the cause as an error.
+  Only what the policy says of a user is a refusal.
 - **An answer that arrived counts, also where the server ends TLS without
   its closing notice.** Many servers just close the connection. Garrison
   then threw away what it had read: a notification that ntfy or a webhook

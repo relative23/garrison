@@ -318,6 +318,35 @@ fn an_unavailable_authority_is_a_temporary_error() {
 }
 
 #[test]
+fn a_broken_setup_is_answered_as_unavailable_and_a_refusal_as_a_refusal() {
+    let setup = make(false);
+    // The policy has a typo, or Stalwart no longer takes the broker's key:
+    // nobody was refused, and nobody's session ends for it.
+    setup.tokens.set(
+        "admin-token",
+        Err(Error::Misconfigured(
+            "Garrison access policy: no profiles".into(),
+        )),
+    );
+    let broken = setup.broker.authorize("admin-token").unwrap_err();
+    assert_eq!(broken.status, 503);
+    assert!(broken.message.contains("not set up"), "{}", broken.message);
+    assert!(
+        !broken.message.contains("no profiles"),
+        "{}",
+        broken.message
+    );
+    setup.tokens.set(
+        "admin-token",
+        Err(Error::Denied("This identity has no Garrison grant".into())),
+    );
+    assert_eq!(
+        setup.broker.authorize("admin-token").unwrap_err().status,
+        403
+    );
+}
+
+#[test]
 fn a_queued_job_blocks_others_until_it_finishes() {
     let setup = make(true);
     submit(

@@ -104,7 +104,55 @@ fn failures_keep_their_meaning() {
     let config = config(directory.path(), "http://127.0.0.1:9");
     let policy = &config.broker.policy;
     std::fs::set_permissions(policy, std::os::unix::fs::PermissionsExt::from_mode(0o666)).unwrap();
-    assert!(matches!(authority.policy(), Err(Error::Denied(_))));
+    assert!(matches!(authority.policy(), Err(Error::Misconfigured(_))));
+}
+
+/// What `authorize` says where Garrison's own setup is broken in `broken`.
+fn with_broken_setup(responses: Vec<String>, broken: impl Fn(&Config)) -> Error {
+    let (authority, server, directory) = authority(responses);
+    broken(&config(directory.path(), &server.url));
+    let error = authority.authorize(TOKEN).unwrap_err();
+    drop(server);
+    error
+}
+
+#[test]
+fn a_broken_setup_is_no_refusal_of_the_user() {
+    let rights = ["authenticate", "sysActionCreate", "sysRoleUpdate"];
+    // A typo in the policy: it no longer reads as one.
+    let typo = with_broken_setup(native("e", &rights), |config| {
+        std::fs::write(&config.broker.policy, "{\"schemaVersion\": 1,").unwrap();
+    });
+    assert!(
+        matches!(&typo, Error::Misconfigured(reason) if reason.contains("policy")),
+        "{typo:?}"
+    );
+    // A profile that names an action the configuration no longer has.
+    let stale = with_broken_setup(native("e", &rights), |config| {
+        let mut document = policy_document();
+        document["profiles"]["administrator"]["actions"] = json!(["run_backup", "gone"]);
+        write_policy(config, &document);
+    });
+    assert!(matches!(stale, Error::Misconfigured(_)), "{stale:?}");
+    // The broker's key is gone, or Stalwart no longer takes it.
+    let keyless = with_broken_setup(native("e", &rights), |config| {
+        let directory = config.broker.policy.parent().unwrap();
+        std::fs::remove_file(directory.join("credentials").join("broker-native-key")).unwrap();
+    });
+    assert!(matches!(keyless, Error::Misconfigured(_)), "{keyless:?}");
+    let userinfo = respond(&json!({"sub": "1", "email": "ann@example.test"}));
+    let rotated = with_broken_setup(vec![userinfo.clone(), answer(401, "")], |_| {});
+    assert!(
+        matches!(&rotated, Error::Misconfigured(reason) if reason.contains("key was rejected")),
+        "{rotated:?}"
+    );
+    // An answer of Stalwart's that cannot be used.
+    let changed = with_broken_setup(vec![userinfo, answer(200, "<html>")], |_| {});
+    assert!(matches!(changed, Error::Misconfigured(_)), "{changed:?}");
+    // Someone who has no profile is refused, and that is no setup problem.
+    let (authority, server, _directory) = authority(native("e", &["authenticate"]));
+    assert!(matches!(authority.authorize(TOKEN), Err(Error::Denied(_))));
+    server.requests();
 }
 
 #[test]

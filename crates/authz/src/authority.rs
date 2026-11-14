@@ -64,7 +64,7 @@ impl Authority {
     /// The current policy file, validated.
     pub fn policy(&self) -> Result<Policy, Error> {
         let raw = files::read_protected(&self.policy_path, MAX_POLICY)
-            .map_err(|error| Error::Denied(error.to_string()))?;
+            .map_err(|error| Error::Misconfigured(format!("Garrison access policy: {error}")))?;
         Ok(parse_policy(&raw, &self.action_ids())?)
     }
 
@@ -73,7 +73,7 @@ impl Authority {
         let key = self
             .credentials
             .read_secret(&self.native_key)
-            .map_err(|error| Error::Denied(error.to_string()))?;
+            .map_err(|error| Error::Misconfigured(format!("the broker's API key: {error}")))?;
         Ok(JmapClient::new(&self.stalwart_url, &key))
     }
 
@@ -90,7 +90,16 @@ impl Authority {
         let identity = self.provider.userinfo(token, None)?;
         let policy = self.policy()?;
         let account_id = policy.account_for(&identity.subject)?;
-        let rights = native_rights(&self.native_client()?, &account_id)?;
+        // The broker asks with its own key. What Stalwart refuses or answers
+        // unusably here is about that key or that answer, never about the
+        // user, who is refused only by the policy.
+        let rights =
+            native_rights(&self.native_client()?, &account_id).map_err(|error| match error {
+                Error::Denied(reason) => Error::Misconfigured(format!(
+                    "the account's rights could not be read from Stalwart: {reason}"
+                )),
+                other => other,
+            })?;
         let result = policy.capabilities(&identity.subject, &rights.permissions, &rights.roles)?;
         let modules: BTreeSet<ModuleId> = result
             .modules

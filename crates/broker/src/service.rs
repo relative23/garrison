@@ -137,6 +137,15 @@ impl Broker {
                     log::info!("Garrison access denied: {reason}");
                     refuse(403, "Garrison access is not authorized")
                 }
+                // No refusal: a 403 would end the session of everyone who
+                // is signed in, for a typo in the policy.
+                Error::Misconfigured(reason) => {
+                    log::error!("Access rights cannot be checked: {reason}");
+                    refuse(
+                        503,
+                        "Garrison is not set up to check access rights; the broker's journal says why",
+                    )
+                }
             })
     }
 

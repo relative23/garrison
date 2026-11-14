@@ -136,6 +136,7 @@ fn kind(error: &Error) -> &'static str {
     match error {
         Error::Unavailable(_) => "Stalwart unavailable",
         Error::Denied(_) | Error::InvalidToken(_) => "denied",
+        Error::Misconfigured(_) => "Garrison's own setup",
     }
 }
 
