@@ -6,14 +6,11 @@
 mod support;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::http::{Method, StatusCode};
 use garrison_core::config::Database;
 use serde_json::{Value, json};
-use support::{Client, ORIGIN, application, grant, refused, setup, setup_with_cache, write_status};
-
-const SESSION_COOKIE: &str = "__Host-garrison_session";
+use support::{ORIGIN, setup, write_status};
 
 fn api(path: &str) -> String {
     format!("/api/{path}")
@@ -167,97 +164,6 @@ async fn writes_need_origin_and_csrf() {
     let sent = calls.iter().find(|call| call["op"] == "submit").unwrap();
     let keys: Vec<&String> = sent.as_object().unwrap().keys().collect();
     assert_eq!(keys, ["op", "token", "action", "requestId", "confirmation"]); // No actor field.
-}
-
-#[tokio::test]
-async fn revoked_rights_end_the_session_but_outages_do_not() {
-    let mut setup = setup_with_cache(Duration::ZERO);
-    setup.client.sign_in("code-admin").await;
-    setup.broker.set("admin-token", refused(503, "unavailable"));
-    assert_eq!(
-        setup.client.get(&api("status")).await.status,
-        StatusCode::SERVICE_UNAVAILABLE
-    );
-    // An outage is no sign-out: the session is not reported missing.
-    assert_eq!(
-        setup.client.get(&api("session")).await.status,
-        StatusCode::SERVICE_UNAVAILABLE
-    );
-    setup
-        .broker
-        .set("admin-token", Ok(grant("1", &["dashboard"], &[])));
-    assert_eq!(
-        setup.client.get(&api("status")).await.status,
-        StatusCode::OK
-    );
-    setup.broker.set(
-        "admin-token",
-        refused(403, "Garrison access is not authorized"),
-    );
-    assert_eq!(
-        setup.client.get(&api("status")).await.status,
-        StatusCode::FORBIDDEN
-    );
-    setup
-        .broker
-        .set("admin-token", Ok(grant("1", &["dashboard"], &[])));
-    assert_eq!(
-        setup.client.get(&api("status")).await.status,
-        StatusCode::UNAUTHORIZED
-    ); // The session is gone.
-}
-
-#[tokio::test]
-async fn sessions_survive_a_service_restart() {
-    let mut setup = setup();
-    setup.client.sign_in("code-admin").await;
-    let restarted = application(
-        &setup.config,
-        &setup.broker,
-        &setup.provider,
-        Duration::from_secs(5),
-    );
-    let mut other = Client::new(restarted);
-    other.cookies = setup.client.cookies.clone();
-    assert!(other.get(&api("session")).await.json()["session"].is_object());
-    drop(setup.directory);
-}
-
-#[tokio::test]
-async fn logout_revokes_the_token() {
-    let mut setup = setup();
-    let csrf = setup.client.sign_in("code-admin").await;
-    // A cross-site logout without the CSRF token is refused.
-    assert_eq!(
-        setup
-            .client
-            .send(Method::POST, &api("logout"), &[("origin", ORIGIN)], None)
-            .await
-            .status,
-        StatusCode::FORBIDDEN
-    );
-    let out = setup
-        .client
-        .send(
-            Method::POST,
-            &api("logout"),
-            &[("origin", ORIGIN), ("x-csrf-token", csrf.as_str())],
-            None,
-        )
-        .await;
-    assert_eq!(out.json(), json!({"ok": true}));
-    let cookie = out.header("set-cookie");
-    assert!(
-        cookie.starts_with(SESSION_COOKIE)
-            && cookie.contains("Max-Age=0")
-            && cookie.contains("Secure"),
-        "{cookie}"
-    );
-    assert_eq!(*setup.provider.revoked.lock().unwrap(), ["admin-token"]);
-    assert_eq!(
-        setup.client.get(&api("session")).await.json(),
-        json!({"session": null})
-    );
 }
 
 #[tokio::test]

@@ -128,7 +128,14 @@ pub struct Gate {
     bind_client_ip: bool,
     cache_time: Duration,
     cache: Mutex<HashMap<String, (Instant, Grant)>>,
+    /// Revokes a token at the provider; the application that holds the
+    /// provider sets it.
+    revoke: Option<Revoker>,
 }
+
+/// What revokes a token at the provider. It reports nothing back: a
+/// revocation that could not be confirmed is logged where it is made.
+type Revoker = Box<dyn Fn(&str) + Send + Sync>;
 
 impl std::fmt::Debug for Gate {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -155,7 +162,15 @@ impl Gate {
             bind_client_ip,
             cache_time: Duration::from_secs(5),
             cache: Mutex::new(HashMap::new()),
+            revoke: None,
         }
+    }
+
+    /// The gate with what revokes the token of a session that ends here.
+    #[must_use]
+    pub fn revoking_with(mut self, revoke: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        self.revoke = Some(Box::new(revoke));
+        self
     }
 
     /// For tests: how long a confirmed grant is reused.
@@ -190,10 +205,23 @@ impl Gate {
         self.cache.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// End a session here; the token is returned for revocation.
-    pub fn forget(&self, session: &Session) -> Option<String> {
+    /// End a session: its grant is forgotten, its row deleted and, with
+    /// `revoke`, its token revoked at the provider.
+    ///
+    /// Only a deleted row is an ended session, and a row that could not be
+    /// deleted is an error: whoever holds a copy of the cookie could go on
+    /// using it. The token is revoked either way, so that such a session is
+    /// one whose token Stalwart no longer takes.
+    pub fn end(&self, session: &Session, revoke: bool) -> ApiResult<()> {
         self.cached().remove(&session.id_hash);
-        self.store.delete(&session.id_hash).ok().flatten()
+        let deleted = self.store.delete(&session.id_hash);
+        if let (true, Some(revoker)) = (revoke, &self.revoke) {
+            revoker(&session.token);
+        }
+        deleted.map(drop).map_err(|error| {
+            log::error!("A session could not be deleted: {error}");
+            ApiError::new(503, "The session could not be ended here; sign out again.")
+        })
     }
 
     pub fn session(&self, visitor: &Visitor) -> ApiResult<Option<Session>> {
@@ -219,14 +247,16 @@ impl Gate {
             Ok(grant) => grant,
             Err(error) => {
                 // Revoked or expired rights end the session; 503 keeps it.
+                // A refusal leaves a token that Stalwart still takes: it is
+                // revoked. One Stalwart no longer takes needs none.
                 if matches!(error.status.as_u16(), 401 | 403) {
-                    self.forget(&session);
+                    let _ = self.end(&session, error.status.as_u16() == 403);
                 }
                 return Err(error);
             }
         };
         if grant.subject != session.subject {
-            self.forget(&session);
+            let _ = self.end(&session, true);
             return Err(unknown());
         }
         let mut cache = self.cached();

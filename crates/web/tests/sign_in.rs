@@ -6,6 +6,7 @@
 mod support;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -13,7 +14,9 @@ use garrison_web::attempts::BUDGET;
 use garrison_web::routes::auth::challenge;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use support::{Client, refused, setup};
+use support::{Client, application, refused, setup};
+
+const SESSION_COOKIE: &str = "__Host-garrison_session";
 
 const STATE_COOKIE: &str = "__Host-garrison_login";
 
@@ -231,4 +234,51 @@ async fn a_session_lasts_the_configured_minutes_at_most() {
         session.contains(&format!("Max-Age={}", minutes * 60)),
         "{session}"
     );
+}
+
+#[tokio::test]
+async fn a_new_sign_in_ends_the_session_its_browser_came_with() {
+    let mut setup = setup();
+    setup.client.sign_in("code-admin").await;
+    let first = setup.client.cookies[SESSION_COOKIE].clone();
+    // The same browser signs in again, as someone else.
+    setup.client.sign_in("code-viewer").await;
+    assert_ne!(setup.client.cookies[SESSION_COOKIE], first);
+    // The first session is gone with its token, not left to expire.
+    assert_eq!(*setup.provider.revoked.lock().unwrap(), ["admin-token"]);
+    let mut copy = Client::new(application(
+        &setup.config,
+        &setup.broker,
+        &setup.provider,
+        Duration::from_secs(5),
+    ));
+    copy.cookies.insert(SESSION_COOKIE.to_owned(), first);
+    assert_eq!(
+        copy.get("/api/session").await.json(),
+        json!({"session": null})
+    );
+}
+
+#[tokio::test]
+async fn a_token_whose_session_could_not_be_stored_is_revoked() {
+    let mut setup = setup();
+    let login = setup.client.get("/auth/login").await;
+    let location = url::Url::parse(login.header("location")).unwrap();
+    let state = location
+        .query_pairs()
+        .find(|(key, _)| key == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    let database = setup.config.web.state_directory.join("web.sqlite");
+    let holder = rusqlite::Connection::open(&database).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let callback =
+        format!("/auth/callback?state={state}&code=code-admin&iss=https%3A%2F%2Fmail.example.test");
+    let answer = setup.client.get(&callback).await;
+    holder.execute_batch("ROLLBACK").unwrap();
+    // No session, and no token left behind that nothing here would ever end.
+    assert_ne!(answer.header("location"), "/admin/");
+    assert!(!setup.client.cookies.contains_key(SESSION_COOKIE));
+    assert_eq!(*setup.provider.revoked.lock().unwrap(), ["admin-token"]);
 }

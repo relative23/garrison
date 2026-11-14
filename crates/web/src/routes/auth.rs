@@ -219,14 +219,28 @@ fn finish(
     let lifetime = token
         .expires_in
         .min(u64::from(app.config.web.session_minutes) * 60);
-    let (identifier, _) = app.store.create(&NewSession {
+    // A browser that signs in again brings the cookie of its session so
+    // far: that one ends now, with its token, instead of lasting out its
+    // time under a cookie the new one replaces.
+    if let Ok(Some(before)) = app.gate.session(visitor) {
+        let _ = app.gate.end(&before, true);
+    }
+    let created = app.store.create(&NewSession {
         subject: &grant.subject,
         email: &grant.email,
         token: &token.access_token,
         client_ip: address.as_deref(),
         // At most the configured minutes, far inside the type.
         lifetime: i64::try_from(lifetime).unwrap_or_default(),
-    })?;
+    });
+    let (identifier, _) = match created {
+        Ok(created) => created,
+        Err(error) => {
+            // No session holds this token: nothing here would ever end it.
+            revoke(app, &token.access_token);
+            return Err(error.into());
+        }
+    };
     log::info!("Sign-in successful");
     Ok(Some((identifier, lifetime)))
 }

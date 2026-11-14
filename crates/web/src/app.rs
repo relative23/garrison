@@ -77,7 +77,7 @@ pub struct App {
     pub config: Config,
     pub store: Arc<WebStore>,
     pub gate: Gate,
-    pub identity: Box<dyn Identity>,
+    pub identity: Arc<dyn Identity>,
     /// The built interface: index.html, assets/, favicon.svg, the switch script.
     pub static_directory: PathBuf,
     pub query_slots: Semaphore,
@@ -102,6 +102,17 @@ impl App {
         identity: Box<dyn Identity>,
         static_directory: PathBuf,
     ) -> Arc<Self> {
+        let identity: Arc<dyn Identity> = Arc::from(identity);
+        // The gate ends sessions; the provider revokes their tokens.
+        let gate = {
+            let identity = Arc::clone(&identity);
+            let client = client_id(&config.deployment.public_origin);
+            gate.revoking_with(move |token| {
+                if identity.revoke(&client, token).is_err() {
+                    log::warn!("Token revocation could not be confirmed");
+                }
+            })
+        };
         Arc::new(App {
             config,
             store,

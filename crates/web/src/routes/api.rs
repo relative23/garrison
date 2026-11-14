@@ -20,7 +20,7 @@ use garrison_core::{json, time};
 use serde::Deserialize;
 use serde_json::{Map, Value, json as object};
 
-use super::auth::{delete_cookie, revoke};
+use super::auth::delete_cookie;
 use super::shown::shown;
 use crate::app::App;
 use crate::error::{ApiError, ApiResult, blocking};
@@ -137,8 +137,9 @@ async fn logout(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Resp
         // Logout needs Origin and CSRF like every write, but tolerates a dead grant.
         if let Some(session) = app.gate.session(&visitor)? {
             app.gate.check_write(&visitor, &session)?;
-            app.gate.forget(&session);
-            revoke(&app, &session.token);
+            // "ok" only for a session that is gone here; its token is
+            // revoked whether or not it is.
+            app.gate.end(&session, true)?;
         }
         let mut response = Json(object!({"ok": true})).into_response();
         delete_cookie(&mut response, SESSION_COOKIE);

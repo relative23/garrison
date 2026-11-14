@@ -47,6 +47,13 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Signing out says when it did not work.** Where the session could not
+  be deleted, because the database was busy or could not be written, the
+  sign-out still answered "ok" and removed the cookie, while a copy of the
+  cookie went on working. It now answers with an error, keeps the cookie
+  for another try and revokes the token at Stalwart either way. A session
+  that the policy ends, and the one a browser held when it signs in again,
+  now have their tokens revoked as well.
 - **A second collection run within a minute no longer erases what the
   first one counted.** The charts keep one value a minute, and a run by
   hand (`systemctl start garrison-collect.service`) right after the timer's
