@@ -114,9 +114,11 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        "fixed bottom-3 left-3 top-16 z-30 flex w-60 flex-col overflow-hidden rounded-2xl bg-card text-card-foreground shadow-tile transition-transform md:translate-x-0",
-        // Closed on a small screen it leaves with its margin.
-        open ? "translate-x-0" : "-translate-x-[calc(100%+0.75rem)]",
+        "fixed bottom-3 left-3 top-16 z-30 flex w-60 flex-col overflow-hidden rounded-2xl bg-card text-card-foreground shadow-tile transition-[translate,visibility] md:translate-x-0",
+        // Closed on a small screen it leaves with its margin, and once out of
+        // sight it is hidden, so Tab and screen readers pass it by. From md on
+        // it is always open.
+        open ? "translate-x-0" : "-translate-x-[calc(100%+0.75rem)] max-md:invisible",
       )}
     >
       <div className="flex-1 overflow-y-auto py-2.5 [scrollbar-width:thin]">

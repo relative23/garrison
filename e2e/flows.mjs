@@ -130,6 +130,22 @@ try {
   await page.getByRole("button", { name: "Search", exact: true }).click();
   expect((await searched).status() === 200, "the event history answers a search");
 
+  step = "menu on a phone";
+  await page.setViewportSize(PHONE);
+  await page.goto(`${origin}/admin/dashboard`);
+  await heading();
+  const menu = page.getByRole("navigation", { name: "Garrison" });
+  expect(!(await menu.isVisible()), "the closed menu is out of sight");
+  // From the header's last entry, Tab goes on to the page, past the closed menu.
+  await page.locator("header").getByRole("link", { name: "Account" }).focus();
+  await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => !document.activeElement?.closest("aside")), "the closed menu takes no focus");
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await menu.getByRole("link", { name: "Services", exact: true }).click();
+  await page.waitForURL(`${origin}/admin/services`);
+  expect((await heading()) === "Services", "the open menu leads to its pages");
+  await page.setViewportSize(DESKTOP);
+
   step = "settings";
   await page.goto(`${origin}/admin/preferences`);
   await heading();

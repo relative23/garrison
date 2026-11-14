@@ -53,6 +53,11 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **The closed menu on a narrow screen is out of the way.** Where the menu
+  folds away, on a phone or in a narrow window, it was only moved out of
+  sight while closed: Tab led through every one of its entries before the
+  page, and screen readers read them. While closed it is now hidden from
+  both, and Tab goes from the header straight to the page.
 - **Attacks & bans says how complete its numbers are.** The page asked for
   what the event history covers, which only Event history, Deliveries and
   Sessions could read: a profile with Attacks & bans but none of them got a
