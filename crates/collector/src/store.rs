@@ -6,7 +6,7 @@
 //! Intervals longer than three minutes produce no increase, so a collection
 //! gap never becomes a spike. Samples older than eight days are thinned to
 //! one per ten minutes (thinning.rs); the history reads both (history.rs).
-//! What is old is counted from the time the store believes (clock.rs), so a
+//! What is old is counted from the collector's own run time (clock.rs), so a
 //! clock that jumps ahead takes nothing with it.
 
 use std::collections::BTreeMap;
@@ -117,7 +117,7 @@ impl StatusStore {
             counter(&transaction, name, collected_at, minute, *value)?;
         }
         // The snapshot and the samples keep the run's own time; what is old
-        // goes by the time the store believes.
+        // goes by the collector's run time.
         let by = clock::cleaned_by(&transaction, collected_at, previous)?;
         let cutoff = by.saturating_sub(i64::from(self.history_days) * 86400);
         transaction.execute("DELETE FROM samples WHERE ts < ?", [cutoff])?;

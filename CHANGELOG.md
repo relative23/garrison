@@ -101,13 +101,16 @@ Notable changes for operators and users. The format follows
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year
   ahead removed all of it in one run, and one a few days ahead thinned
-  minutes that the 24-hour and 7-day views still draw. A run dated more than
-  ten minutes after the last one the history was cleaned up by is still
-  stored, but removes and thins nothing more, and the collector's journal
-  says so. Once the clock has kept its new time for a day, as after a long
-  downtime, the history is cleaned up by it again, and at once where the
-  clock comes back. Where a clock that ran ahead had carried the thinning
-  past the present, it takes up again from the clock's time, so the minutes
+  minutes that the 24-hour and 7-day views still draw. The history is now
+  cleaned up by the collector's own run time: each step from one run to the
+  next of at most ten minutes counts, a longer one, a pause or a jump, does
+  not. A run's own time counts again once it is within ten minutes of that,
+  as when a clock is put right, or once the collector has run at the new
+  time for a day, as after a long downtime; the collector's journal says
+  when such a stretch begins and ends. No pattern of pauses, a host that is
+  off every night included, stops the clean-up: it lags by the pauses not
+  yet counted. Where a clock that ran ahead had carried the thinning past
+  the present, it takes up again from the clock's time, so the minutes
   written since are thinned as well.
 - **A `systemd` entry may name an alias.** systemd answers for an alias,
   such as `sshd.service` where the unit is `ssh.service`, under the name of

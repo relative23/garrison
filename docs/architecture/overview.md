@@ -84,10 +84,12 @@ returns observations (what, when, how, scope, findings) and metric samples.
 The metric history keeps every minute for eight days, which the 24-hour and
 7-day views draw; older samples are thinned to one per ten minutes, each
 counting for the minutes it holds, so the longer views read the same.
-Both ages count from the last run whose time the collector believed: a run
-more than ten minutes after it is stored like any other but removes and
-thins nothing more until the clock has kept its new time for a day, so a
-clock that jumps ahead takes no history with it.
+Both ages count from the collector's own run time, which each step of at
+most ten minutes from one run to the next moves on, and a longer one, a
+pause or a jump, does not. A run's own time is taken again once it is within
+ten minutes of that, or once the collector has run at the new time for a
+day. So a clock that jumps ahead takes no history with it, and no pattern of
+pauses stops the clean-up.
 The web service filters observations by the modules the user may see. Every
 observation has an id that notifications and operators' scripts rely on, so
 the ids are kept like an interface ([observation ids](../operator/observations.md)).

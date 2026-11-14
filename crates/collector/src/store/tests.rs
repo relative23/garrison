@@ -267,17 +267,61 @@ fn a_clock_days_ahead_thins_no_minute_the_views_still_draw() {
 #[test]
 fn after_a_long_downtime_the_clock_is_believed_within_a_day() {
     let (_directory, mut store) = history_of(90, 3600);
-    // Back a month later, with a run every ten minutes: for a day nothing goes.
+    // Back a month later, with a run every ten minutes. The month is not
+    // counted: for a day the history goes by the time the collector has run
+    // since, so the hourly samples go one in six runs.
     let back = T0 + 30 * DAY;
     for run in 0..144 {
         run_at(&mut store, back + run * 600);
-        assert_eq!(samples_from(&store, 0), 90 * 24, "run {run}");
+        assert_eq!(
+            samples_from(&store, 0),
+            90 * 24 - (run + 5) / 6,
+            "run {run}"
+        );
     }
     // Then the clock has kept its time for a day, and the history keeps 90
     // days by it.
     run_at(&mut store, back + DAY);
     let kept = samples_from(&store, back + DAY - 90 * DAY);
     assert_eq!((samples_from(&store, 0), kept), (59 * 24, 59 * 24));
+}
+
+/// A host that is off every night: sixteen hours of runs every ten minutes,
+/// each sampling the load, then eight hours of nothing, for twenty days.
+/// Every pause is longer than the ten minutes a step between two runs may
+/// take, and the history is cleaned up all the same.
+#[test]
+fn a_host_that_is_off_every_night_still_has_its_history_cleaned_up() {
+    let (_directory, mut store) = history_of(90, 3600);
+    let load = BTreeMap::from([("load".to_owned(), 1.0)]);
+    let mut last = T0;
+    for day in 0..20 {
+        for run in 0..96 {
+            last = T0 + day * DAY + run * 600;
+            store
+                .write(last, &snapshot(""), &load, &BTreeMap::new())
+                .unwrap();
+        }
+    }
+    // What is more than 90 days old by the last run is gone, and what is
+    // more than eight days old is thinned, but for the pauses of at most two
+    // nights not yet counted.
+    let older = samples_from(&store, 0) - samples_from(&store, last - 92 * DAY);
+    let thinned_to: i64 = store
+        .db
+        .query_row(
+            "SELECT value FROM memory WHERE key = 'store.thinned-to'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        (older, (last - thinned_to) / DAY),
+        (0, 8),
+        "samples older than 92 days, and whole days not thinned before the last run"
+    );
 }
 
 #[test]
