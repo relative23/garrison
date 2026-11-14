@@ -368,10 +368,18 @@ fn after_run_with(
         .and_then(|text| text.parse().ok())
         .and_then(|second| time::Timestamp::from_second(second).ok())
         .map(time::isoformat);
-    let state = if problem.is_some() {
-        State::Failed
-    } else {
-        State::Ok
+    // Channels that are named have not yet carried a message: only one that
+    // went out shows that they work.
+    let never = "No message has gone out on these channels yet, so it is not known whether one \
+                 would arrive. `garrison notify-test` sends a test message; this check is in \
+                 order once the first notification has gone out.";
+    let (state, finding) = match (&problem, &last) {
+        (Some(problem), _) => (
+            State::Failed,
+            Some(format!("The last notification did not go out: {problem}.")),
+        ),
+        (None, None) => (State::Unknown, Some(never.to_owned())),
+        (None, Some(_)) => (State::Ok, None),
     };
     let names = channels.names().join(", ");
     Observation::new(
@@ -396,15 +404,12 @@ fn after_run_with(
                 Field::new("Checks not in order", waiting, Format::Number),
                 Field::new("Last notification", last, Format::Datetime),
             ])
-            .with_findings(
-                problem
-                    .map(|problem| format!("The last notification did not go out: {problem}."))
-                    .into_iter()
-                    .collect(),
-            )
+            .with_findings(finding.into_iter().collect())
             .with_max_age(180)
     })
 }
 
+#[cfg(test)]
+mod state_tests;
 #[cfg(test)]
 mod tests;

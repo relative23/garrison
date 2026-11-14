@@ -167,7 +167,10 @@ server is what failed. Name a mailbox elsewhere, or a second channel, for
 what must reach you then.
 
 The Alerts page shows the channels, how many checks are not in order and when
-the last message went out.
+the last message went out. Until a first notification has gone out, its
+check of the channels is Unknown: that a channel is named does not show that
+a message arrives. `garrison notify-test` shows that at once; the check
+itself is in order with the first notification of a collection run.
 
 ## `[milter]`
 

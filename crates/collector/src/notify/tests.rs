@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::testing::{Remembered, now};
 
-fn observed(id: &str, state: State, finding: &str) -> Observation {
+pub(super) fn observed(id: &str, state: State, finding: &str) -> Observation {
     Observation::new(
         id,
         "test",
@@ -24,7 +24,7 @@ fn observed(id: &str, state: State, finding: &str) -> Observation {
 }
 
 /// The channel's observation after one run against a stand-in for ntfy.
-fn run(url: &str, memory: &Remembered, observations: &[Observation]) -> Observation {
+pub(super) fn run(url: &str, memory: &Remembered, observations: &[Observation]) -> Observation {
     after_run(&ntfy(url), observations, memory, now(), Deadline::NONE).unwrap()
 }
 
@@ -40,7 +40,7 @@ fn ntfy(url: &str) -> Channels {
     }
 }
 
-fn body(request: &str) -> Value {
+pub(super) fn body(request: &str) -> Value {
     serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap()
 }
 
@@ -57,7 +57,8 @@ fn a_check_is_told_after_two_runs_and_its_return_once() {
     ];
     // The first run tells nothing yet; the second tells both, a third nothing more.
     let first = run(&url, &memory, &failing);
-    assert_eq!(first.state, State::Ok);
+    // No message has gone out yet: the channel is not known to work.
+    assert_eq!(first.state, State::Unknown);
     assert_eq!(first.fields[1].value, 2);
     assert_eq!(first.fields[2].value, Value::Null);
     run(&url, &memory, &failing);
@@ -152,109 +153,6 @@ fn a_blip_of_one_run_and_a_check_that_was_never_told_say_nothing() {
     run(&url, &memory, &[]);
     run(&url, &memory, &[observed("flaky", State::Ok, "")]);
     assert_eq!(server.requests().len(), 0);
-}
-
-/// The titles of the messages a stand-in for ntfy was sent.
-fn titles(requests: &[String]) -> Vec<String> {
-    requests
-        .iter()
-        .map(|request| body(request)["title"].as_str().unwrap().to_owned())
-        .collect()
-}
-
-#[test]
-fn a_return_to_order_is_told_whatever_the_check_was_last() {
-    let server = serve(vec![answer(200, "{}"), answer(200, "{}")]);
-    let url = format!("{}/topic", server.url);
-    let memory = Remembered::default();
-    // Told as failed, then one run of a warning, then in order.
-    for state in [State::Failed, State::Failed, State::Warning, State::Ok] {
-        run(&url, &memory, &[observed("disk", state, "Nearly full.")]);
-    }
-    assert_eq!(
-        titles(&server.requests()),
-        [
-            "Garrison on garrison.example.org: 1 failed",
-            "Garrison on garrison.example.org: 1 in order again"
-        ]
-    );
-}
-
-#[test]
-fn a_check_that_fails_and_warns_by_turns_is_told_and_only_once() {
-    let server = serve(vec![answer(200, "{}"), answer(200, "{}")]);
-    let url = format!("{}/topic", server.url);
-    let memory = Remembered::default();
-    // Never the same state twice in a row, and never in order.
-    for state in [State::Warning, State::Failed, State::Warning, State::Failed] {
-        run(&url, &memory, &[observed("queue", state, "")]);
-    }
-    let last = run(&url, &memory, &[observed("queue", State::Ok, "")]);
-    // In the second run it was not in order twice, and it failed just then:
-    // told there, once, and its return after it.
-    assert_eq!(
-        titles(&server.requests()),
-        [
-            "Garrison on garrison.example.org: 1 failed",
-            "Garrison on garrison.example.org: 1 in order again"
-        ]
-    );
-    assert_eq!(last.fields[1].value, json!(0));
-}
-
-#[test]
-fn a_check_that_is_missing_from_a_run_keeps_its_place_and_its_return() {
-    let server = serve(vec![answer(200, "{}"), answer(200, "{}")]);
-    let url = format!("{}/topic", server.url);
-    let memory = Remembered::default();
-    let failing = [observed("stalwart.queue", State::Failed, "Stuck.")];
-    run(&url, &memory, &failing);
-    run(&url, &memory, &failing);
-    // Stalwart's API is away: only another observation is left of the run.
-    let away = [observed("stalwart.api", State::Unknown, "")];
-    for _ in 0..3 {
-        let during = run(&url, &memory, &away);
-        assert_eq!(during.fields[1].value, json!(1), "still not in order");
-    }
-    run(&url, &memory, &[observed("stalwart.queue", State::Ok, "")]);
-    assert_eq!(
-        titles(&server.requests()),
-        [
-            "Garrison on garrison.example.org: 1 failed",
-            "Garrison on garrison.example.org: 1 in order again"
-        ]
-    );
-}
-
-#[test]
-fn a_check_that_stays_away_is_forgotten_after_a_day_of_runs() {
-    let entry = |missing| Open {
-        state: "failed".to_owned(),
-        title: "Check gone".to_owned(),
-        detail: String::new(),
-        runs: 5,
-        failed_runs: 5,
-        told: true,
-        told_as: Some("failed".to_owned()),
-        due: None,
-        missing,
-    };
-    let open = Opens::from([("gone".to_owned(), entry(FORGOTTEN - 1))]);
-    let (next, news) = compare(&open, &[]);
-    assert_eq!(next["gone"].missing, FORGOTTEN);
-    assert!(news.is_empty());
-    // One run more and it is no longer among the checks that are not in
-    // order: a check that was taken out of the configuration says nothing.
-    let (next, news) = compare(&next, &[]);
-    assert!(next.is_empty() && news.is_empty());
-    // What the status database kept before these fields existed still reads.
-    let kept: Opens = serde_json::from_str(
-        r#"{"disk": {"state": "warning", "title": "Disk", "detail": "", "runs": 4, "told": true}}"#,
-    )
-    .unwrap();
-    assert_eq!(kept["disk"].severity_told(), Some("warning"));
-    let (_, news) = compare(&kept, &[observed("disk", State::Ok, "")]);
-    assert_eq!(news.recovered, ["Disk"]);
 }
 
 #[test]

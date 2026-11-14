@@ -53,6 +53,10 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Notification channels are in order only once a message went out.** The
+  Alerts page called the channels in order as soon as they were named.
+  Their check is now Unknown until the first notification has gone out;
+  `garrison notify-test` shows at once whether a message arrives.
 - **A date from the future is no fresh date.** A receipt, a backup's newest
   snapshot or a backup report dated ahead of the host's clock counted as
   just written, however long that state lasted. More than five minutes
