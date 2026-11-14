@@ -66,6 +66,11 @@ Notable changes for operators and users. The format follows
   execution" also stood for a Stalwart that did not answer, a sign-in that
   had ended and an access policy that could not be read. Each has its own
   message now.
+- **A user who may not speak to the broker takes none of its places.**
+  The broker looked at who had connected only after it had given the
+  connection one of its sixteen places and a thread, and wrote a line to
+  the journal for each. It looks where it accepts the connection, and the
+  journal gets the first such connection and every hundredth.
 - **The macro filter counts the memory it holds.** The 256 MiB for arriving
   messages counted what was written into their buffers, which held up to
   twice that; the scan decoded every attachment of a message before it

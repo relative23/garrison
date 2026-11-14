@@ -4,6 +4,10 @@
 //! `garrison` and mode 0660. In addition, the broker reads the peer's
 //! kernel-verified UID (`SO_PEERCRED`) and accepts only the configured service
 //! users. No shared token exists that could leak from a configuration file.
+//!
+//! The peer is checked where the connection is accepted, before it gets one
+//! of the places or a thread: a user who may not speak to the broker costs
+//! it one system call, and takes no place from one who may.
 
 use std::collections::BTreeSet;
 use std::io::{self, Write};
@@ -60,17 +64,18 @@ fn failure(error: &BrokerError) -> Value {
     json!({"ok": false, "status": error.status, "error": error.message})
 }
 
-/// Serve one connection: check the peer, answer one request.
-fn handle(broker: &Arc<Broker>, allowed: &BTreeSet<u32>, mut stream: UnixStream) {
+/// Whether the user at the other end of `stream`, as the kernel names it, is
+/// one of `allowed`.
+fn peer_allowed(stream: &UnixStream, allowed: &BTreeSet<u32>) -> bool {
+    rustix::net::sockopt::socket_peercred(stream)
+        .is_ok_and(|credentials| allowed.contains(&credentials.uid.as_raw()))
+}
+
+/// Serve one connection whose peer was admitted: answer one request.
+fn handle(broker: &Arc<Broker>, mut stream: UnixStream) {
     if stream.set_read_timeout(Some(TIMEOUT)).is_err()
         || stream.set_write_timeout(Some(TIMEOUT)).is_err()
     {
-        return;
-    }
-    let peer =
-        rustix::net::sockopt::socket_peercred(&stream).map(|credentials| credentials.uid.as_raw());
-    if !peer.is_ok_and(|uid| allowed.contains(&uid)) {
-        log::warn!("Rejected a broker connection from an unexpected user");
         return;
     }
     let request = match read_line(&mut stream, MAX_REQUEST) {
@@ -120,22 +125,35 @@ impl Drop for Place {
 
 /// Accept connections forever, one thread each.
 pub fn serve_on(listener: &UnixListener, broker: &Arc<Broker>, allowed: &BTreeSet<u32>) {
-    serve(listener.incoming(), broker, allowed, &thread::sleep);
+    serve(
+        listener.incoming(),
+        broker,
+        &|stream| peer_allowed(stream, allowed),
+        &thread::sleep,
+    );
 }
 
-/// Serve `connections` until they end; `pause` waits after a failed accept.
+/// Whether the `count`-th connection of an unexpected user is worth a line
+/// in the journal: the first is, and then every hundredth.
+const fn worth_a_line(count: u64) -> bool {
+    count == 1 || count.is_multiple_of(100)
+}
+
+/// Serve those of `connections` that `admits` lets in, until they end;
+/// `pause` waits after a failed accept.
 ///
 /// The journal gets one line when accepting starts to fail or the places run
 /// out, and none for each further connection until a request is served again.
 fn serve(
     connections: impl Iterator<Item = io::Result<UnixStream>>,
     broker: &Arc<Broker>,
-    allowed: &BTreeSet<u32>,
+    admits: &dyn Fn(&UnixStream) -> bool,
     pause: &dyn Fn(Duration),
 ) {
     let taken = Arc::new(AtomicUsize::new(0));
     let mut wait = FIRST_PAUSE;
     let (mut failing, mut full) = (false, false);
+    let mut strangers: u64 = 0;
     for connection in connections {
         let stream = match connection {
             Ok(stream) => stream,
@@ -153,6 +171,17 @@ fn serve(
             log::info!("Accepting broker connections again");
         }
         (failing, wait) = (false, FIRST_PAUSE);
+        // Closed unanswered, here and now: no place, no thread.
+        if !admits(&stream) {
+            strangers += 1;
+            if worth_a_line(strangers) {
+                log::warn!(
+                    "Rejected a broker connection from an unexpected user ({strangers} since \
+                     the broker started)"
+                );
+            }
+            continue;
+        }
         let Some(place) = Place::take(&taken) else {
             if !full {
                 log::warn!(
@@ -163,12 +192,12 @@ fn serve(
             continue;
         };
         full = false;
-        let (broker, allowed) = (Arc::clone(broker), allowed.clone());
+        let broker = Arc::clone(broker);
         let started = thread::Builder::new()
             .name("broker-request".into())
             .spawn(move || {
                 let _place = place;
-                handle(&broker, &allowed, stream);
+                handle(&broker, stream);
             });
         if let Err(error) = started {
             log::error!("Could not handle a broker connection: {error}");
@@ -210,8 +239,9 @@ mod tests {
 
     const CATALOG: &[u8] = b"{\"op\": \"catalog\", \"token\": \"admin-token\"}\n";
 
-    fn own_user() -> BTreeSet<u32> {
-        BTreeSet::from([rustix::process::geteuid().as_raw()])
+    /// Everyone is let in: the tests' connections are all this user's.
+    fn anyone(_: &UnixStream) -> bool {
+        true
     }
 
     /// One request on a new connection handed to `serve`: the answer, or
@@ -245,12 +275,9 @@ mod tests {
         connections.push(Ok(server));
         connections.push(failed());
         let pauses = Mutex::new(Vec::new());
-        serve(
-            connections.into_iter(),
-            &setup.broker,
-            &own_user(),
-            &|time| pauses.lock().unwrap().push(time.as_millis()),
-        );
+        serve(connections.into_iter(), &setup.broker, &anyone, &|time| {
+            pauses.lock().unwrap().push(time.as_millis());
+        });
         assert_eq!(
             *pauses.lock().unwrap(),
             [5, 10, 20, 40, 80, 160, 320, 640, 1000, 1000, 5]
@@ -266,8 +293,7 @@ mod tests {
         let setup = make(false);
         let (connections, incoming) = mpsc::channel();
         let broker = Arc::clone(&setup.broker);
-        let server =
-            thread::spawn(move || serve(incoming.into_iter(), &broker, &own_user(), &|_| {}));
+        let server = thread::spawn(move || serve(incoming.into_iter(), &broker, &anyone, &|_| {}));
         // Clients that send nothing keep every place taken.
         let mut silent = Vec::new();
         for _ in 0..MAX_CONNECTIONS {
@@ -295,10 +321,9 @@ mod tests {
     fn an_oversized_request_gets_an_answer() {
         let broker = make(false).broker;
         let (mut client, server) = UnixStream::pair().unwrap();
-        let uid = rustix::process::geteuid().as_raw();
         client.write_all(&vec![b'x'; MAX_REQUEST + 1]).unwrap();
         client.shutdown(std::net::Shutdown::Write).unwrap();
-        handle(&broker, &BTreeSet::from([uid]), server);
+        handle(&broker, server);
         let answer: Value = serde_json::from_slice(&read_line(&mut client, 4096).unwrap()).unwrap();
         assert_eq!(
             answer,
@@ -307,13 +332,64 @@ mod tests {
     }
 
     #[test]
-    fn a_stranger_gets_no_answer() {
-        let broker = make(false).broker;
-        let (mut client, server) = UnixStream::pair().unwrap();
-        client.write_all(b"{}\n").unwrap();
-        handle(&broker, &BTreeSet::new(), server);
-        // Closed unread, or reset because the request was never read.
-        assert!(!read_line(&mut client, 4096).is_ok_and(|line| !line.is_empty()));
+    fn the_peer_is_who_the_kernel_says_it_is() {
+        let (_client, server) = UnixStream::pair().unwrap();
+        let own = rustix::process::geteuid().as_raw();
+        assert!(peer_allowed(&server, &BTreeSet::from([own])));
+        assert!(!peer_allowed(&server, &BTreeSet::from([own + 1])));
+        assert!(!peer_allowed(&server, &BTreeSet::new()));
+    }
+
+    #[test]
+    fn a_stranger_is_sent_away_where_it_is_accepted_and_takes_no_place() {
+        let setup = make(false);
+        let (connections, incoming) = mpsc::channel();
+        let broker = Arc::clone(&setup.broker);
+        // Where each connection was looked at, and whether it was let in:
+        // the first hundred are strangers.
+        let looked_at = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&looked_at);
+        let server = thread::spawn(move || {
+            let admits = |_: &UnixStream| {
+                let mut seen = seen.lock().unwrap();
+                seen.push(thread::current().id());
+                seen.len() > 100
+            };
+            serve(incoming.into_iter(), &broker, &admits, &|_| {});
+        });
+        // Each sends a request that would be answered, and stays connected.
+        let mut strangers = Vec::new();
+        for _ in 0..100 {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            client
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            client.write_all(CATALOG).unwrap();
+            connections.send(Ok(server)).unwrap();
+            strangers.push(client);
+        }
+        // A hundred of them, far more than there are places, keep nobody
+        // out who may speak to the broker.
+        let answer = asked(&connections).expect("an answer for an admitted peer");
+        assert_eq!(answer["ok"], true, "{answer}");
+        for mut stranger in strangers {
+            // Closed unanswered, or reset because the request was never read.
+            assert!(!read_line(&mut stranger, MAX_ANSWER).is_ok_and(|line| !line.is_empty()));
+        }
+        drop(connections);
+        let accepting = server.thread().id();
+        server.join().unwrap();
+        // Every connection was looked at by the thread that accepts them:
+        // none got a thread of its own for that.
+        let looked_at = looked_at.lock().unwrap();
+        assert_eq!(looked_at.len(), 101);
+        assert!(looked_at.iter().all(|thread| *thread == accepting));
+    }
+
+    #[test]
+    fn the_journal_gets_the_first_stranger_and_every_hundredth() {
+        let said: Vec<u64> = (1..=250).filter(|count| worth_a_line(*count)).collect();
+        assert_eq!(said, [1, 100, 200]);
     }
 
     #[test]
