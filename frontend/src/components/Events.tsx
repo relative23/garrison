@@ -7,7 +7,7 @@ import { useTranslation } from "../i18n";
 import { dateTime, milliseconds, number, relative, text } from "../lib/format";
 import { follow, href } from "../lib/router";
 import { useResource, type Resource } from "../lib/useResource";
-import { Notice } from "./Status";
+import { ErrorState, Notice } from "./Status";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -37,9 +37,13 @@ export function useCoverage(): Resource<Coverage> {
   return useResource((signal) => api.coverage(signal), [], 60);
 }
 
-/** The coverage on every event view. */
-export function CoverageBanner({ data }: { data: Coverage | null }) {
+/** The coverage on every view of the event history. Without a current answer
+ * the page cannot tell whether events are missing from what it shows, so it
+ * says that, and not what an earlier answer said. */
+export function CoverageBanner({ coverage }: { coverage: Resource<Coverage> }) {
   const { t } = useTranslation();
+  const { data, error } = coverage;
+  if (error) return <ErrorState tone="warning" lead={t("events.coverage.unknown")} error={error} retry={coverage.reload} />;
   if (!data) return null;
   if (!data.available) {
     return <Notice tone="warning">{t("events.coverage.unavailable")}</Notice>;

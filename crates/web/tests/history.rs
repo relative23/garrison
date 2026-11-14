@@ -6,11 +6,12 @@
 
 mod support;
 
+use axum::http::StatusCode;
 use garrison_core::config::Database;
 use garrison_core::time;
 use garrison_ingest::store::{EventStore, Limits};
 use serde_json::json;
-use support::setup;
+use support::{grant, setup};
 
 fn api(path: &str) -> String {
     format!("/api/{path}")
@@ -168,6 +169,27 @@ async fn coverage_states_where_the_history_begins_and_what_is_missing_inside() {
             "limitations": garrison_ingest::coverage::LIMITATIONS,
         })
     );
+}
+
+#[tokio::test]
+async fn every_view_of_the_event_history_may_read_its_coverage_and_no_other() {
+    // Each of these modules shows what the history holds, so its users are
+    // told how complete it is. Coverage holds no mail metadata.
+    for (modules, expected) in [
+        (["dashboard", "logs"], StatusCode::OK),
+        (["dashboard", "deliveries"], StatusCode::OK),
+        (["dashboard", "sessions"], StatusCode::OK),
+        (["dashboard", "attacks"], StatusCode::OK),
+        (["dashboard", "services"], StatusCode::FORBIDDEN),
+    ] {
+        let mut setup = setup();
+        setup
+            .broker
+            .set("viewer-token", Ok(grant("2", &modules, &[])));
+        setup.client.sign_in("code-viewer").await;
+        let answer = setup.client.get(&api("coverage")).await;
+        assert_eq!(answer.status, expected, "{modules:?}");
+    }
 }
 
 #[tokio::test]

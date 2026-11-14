@@ -125,7 +125,7 @@ function Views() {
   if (!coverage.data && !coverage.error) return <Loading />;
   return (
     <>
-      <CoverageBanner data={coverage.data} />
+      <CoverageBanner coverage={coverage} />
       <Tabs defaultValue="messages" className="space-y-4">
         <TabsList aria-label={t("deliveries.views")}>
           <TabsTrigger value="messages">{t("deliveries.view.messages")}</TabsTrigger>

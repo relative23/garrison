@@ -53,6 +53,13 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Attacks & bans says how complete its numbers are.** The page asked for
+  what the event history covers, which only Event history, Deliveries and
+  Sessions could read: a profile with Attacks & bans but none of them got a
+  refusal every minute, no banner, and numbers that looked complete. Attacks
+  & bans may now read it. Where it cannot be read, every view of the event
+  history says that completeness is unknown, with the reason and a retry,
+  instead of showing no banner or the one it read before.
 - **An address with a stray "%" no longer leaves the page blank.** A link
   to Garrison whose path holds a "%" that starts no escape, such as
   `/admin/logs/%zz` from a link cut short or typed by hand, stopped the

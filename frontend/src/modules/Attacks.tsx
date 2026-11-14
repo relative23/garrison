@@ -141,7 +141,7 @@ export function Attacks() {
   const checks = (status.data?.observations ?? []).filter((item) => item.modules.includes("attacks"));
   return (
     <>
-      <CoverageBanner data={coverage.data} />
+      <CoverageBanner coverage={coverage} />
       <PeriodTabs period={period} onChange={setPeriod}>
         {summary.error && <ErrorState error={summary.error} retry={summary.reload} />}
         {!data && !summary.error && <Loading />}

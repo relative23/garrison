@@ -73,6 +73,19 @@ describe("Attacks & bans", () => {
     expect(screen.queryByText("Clock synchronisation")).toBeNull();
   });
 
+  it("say that completeness is unknown when the coverage cannot be read", async () => {
+    serve({
+      "GET coverage": { status: 403, body: { detail: "This Garrison module is not authorized" } },
+      "GET attacks": { body: attacks() },
+    });
+    renderView(<Attacks />);
+    // The numbers are shown, and that nothing tells how complete they are.
+    expect(await screen.findByRole("table", { name: "Addresses" })).toBeTruthy();
+    expect(screen.getByText(/Completeness unknown/)).toBeTruthy();
+    expect(screen.getByText("This Garrison module is not authorized")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
   it("show the error of a summary that cannot be read", async () => {
     serve({
       "GET coverage": { body: coverage() },

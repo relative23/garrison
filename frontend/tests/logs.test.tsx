@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 
 import { Logs } from "../src/modules/Logs";
 import { coverage, event } from "./support/fixtures";
@@ -145,6 +145,26 @@ describe("history coverage", () => {
     const banner = await screen.findByText(/Recording since/);
     expect(banner.textContent).toContain("nothing received yet");
     expect(banner.textContent).toContain("has not reported recently");
+  });
+
+  it("says that completeness is unknown, not the coverage it read before, when a refresh fails", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const server = serve({ "GET coverage": { body: coverage() }, "GET events": { body: { items: [], next: null } } });
+    renderView(<Logs />);
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    expect(screen.getByText(/Recording since/)).toBeTruthy();
+    server.answer("GET coverage", { status: 503, body: { detail: "Authorization is temporarily unavailable" } });
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(screen.getByText(/Completeness unknown/)).toBeTruthy();
+    expect(screen.getByText("Authorization is temporarily unavailable")).toBeTruthy();
+    expect(screen.queryByText(/Recording since/)).toBeNull();
+    // The next answer brings the coverage back.
+    server.answer("GET coverage", { body: coverage() });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    expect(screen.getByText(/Recording since/)).toBeTruthy();
+    expect(screen.queryByText(/Completeness unknown/)).toBeNull();
   });
 
   it("is calm when the history is complete", async () => {

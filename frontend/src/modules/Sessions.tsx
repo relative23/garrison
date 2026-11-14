@@ -108,7 +108,7 @@ function List() {
   if (!coverage.data && !coverage.error) return <Loading />;
   return (
     <>
-      <CoverageBanner data={coverage.data} />
+      <CoverageBanner coverage={coverage} />
       <Toolbar>
         <SearchForm
           value={search}

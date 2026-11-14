@@ -46,12 +46,13 @@ update of Stalwart, of the proxy in front of it or of an application beside
 it.
 
 In the interface, Services shows every unit and failed providers; Deliveries,
-Sessions and Event history (under Mail flow) warn in their banner when the
-event receiver stops reporting, when it runs but stores nothing of what
-Stalwart sends, or when events may be missing inside the history (a
-recording gap). The same banner says, without a warning, when a
-size limit made the history shorter than its retention; raise
-`ingest.max_events` or `ingest.max_database_mib` to keep more.
+Sessions and Event history (under Mail flow) and Attacks & bans warn in their
+banner when the event receiver stops reporting, when it runs but stores
+nothing of what Stalwart sends, or when events may be missing inside the
+history (a recording gap). Where the banner cannot learn what the history
+covers, it says that completeness is unknown. The same banner says, without
+a warning, when a size limit made the history shorter than its retention;
+raise `ingest.max_events` or `ingest.max_database_mib` to keep more.
 
 ## Backup and restore
 

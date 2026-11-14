@@ -168,9 +168,16 @@ fn failure(error: QueryError) -> ApiError {
 )]
 async fn coverage(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Json<Coverage>> {
     blocking(move || {
+        // Every module that shows what the history holds; the coverage
+        // itself holds no mail metadata.
         app.gate.require(
             &visitor,
-            &[ModuleId::Logs, ModuleId::Deliveries, ModuleId::Sessions],
+            &[
+                ModuleId::Logs,
+                ModuleId::Deliveries,
+                ModuleId::Sessions,
+                ModuleId::Attacks,
+            ],
         )?;
         let db = reading(&app.config.database(Database::Events), READ_BUDGET)?;
         let coverage = history::read(db.as_deref(), time::now().as_second())

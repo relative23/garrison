@@ -225,7 +225,8 @@
         "events": "Events before {{time}} were removed to stay within the event limit, so the history is shorter than its retention.",
         "other": "Events before {{time}} were removed to stay within a size limit, so the history is shorter than its retention."
       },
-      "unavailable": "The event history is not available yet. Check the receiver service."
+      "unavailable": "The event history is not available yet. Check the receiver service.",
+      "unknown": "Completeness unknown: what the event history covers could not be read, so this page cannot say whether events are missing."
     },
     "gapReason": {
       "batches-refused": "The event receiver ran but refused Stalwart's batches for longer than Stalwart buffers events: the signature key did not match, or the events could not be stored.",
