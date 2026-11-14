@@ -47,6 +47,10 @@ fuzz_target!(|data: &[u8]| {
         );
         // A frame is at least five bytes, and the longest answer to one is
         // the refusal with its header.
-        assert!(wire.answered <= 256 * (data.len() / 5 + 1), "{}", wire.answered);
+        assert!(
+            wire.answered <= 256 * (data.len() / 5 + 1),
+            "{}",
+            wire.answered
+        );
     }
 });
