@@ -46,22 +46,24 @@ fn reload_nginx() -> Step {
     Ok(())
 }
 
+/// Write what a command of `release` prints, where it succeeds; whether it did.
 fn write_output(
     release: &Path,
-    command: &str,
+    command: &[&str],
     target: &Path,
     installed: &mut Vec<PathBuf>,
-) -> Step {
-    let output = cli(release, &[command])?;
-    if output.status.success() {
-        io(fs::write(target, &output.stdout), target)?;
-        io(
-            fs::set_permissions(target, fs::Permissions::from_mode(0o644)),
-            target,
-        )?;
-        installed.push(target.to_owned());
+) -> Step<bool> {
+    let output = cli(release, command)?;
+    if !output.status.success() {
+        return Ok(false);
     }
-    Ok(())
+    io(fs::write(target, &output.stdout), target)?;
+    io(
+        fs::set_permissions(target, fs::Permissions::from_mode(0o644)),
+        target,
+    )?;
+    installed.push(target.to_owned());
+    Ok(true)
 }
 
 /// Where a unit of Garrison's is installed.
@@ -103,9 +105,13 @@ pub(super) fn install_system_files(release: &Path) -> Step {
             Path::new("/etc/nginx/snippets"),
         )?;
         let before = nginx_files();
-        let target = PathBuf::from("/etc/nginx/snippets/garrison.conf");
-        place(&share.join("nginx/garrison.conf"), &target, 0o644)?;
-        installed.push(target);
+        // For the configured web port. Before a configuration exists, and
+        // for a release that cannot write it, the include as shipped.
+        let target = PathBuf::from(crate::nginx::SNIPPET);
+        if !write_output(release, &["nginx", "--snippet"], &target, &mut installed)? {
+            place(&share.join("nginx/garrison.conf"), &target, 0o644)?;
+            installed.push(target);
+        }
         // Keeps the exporter that `stalwart setup` enables off Stalwart's public hosts.
         let private = PathBuf::from("/etc/nginx/snippets/garrison-stalwart-server.conf");
         place(
@@ -117,13 +123,13 @@ pub(super) fn install_system_files(release: &Path) -> Step {
         // The optional "Switch to Garrison WebUI" row in the Stalwart WebUI; the
         // operator includes this file where the Stalwart WebUI is served.
         let switch = PathBuf::from("/etc/nginx/snippets/garrison-stalwart-switch.conf");
-        write_output(release, "stalwart-switch", &switch, &mut installed)?;
+        write_output(release, &["stalwart-switch"], &switch, &mut installed)?;
         if nginx_files() != before {
             reload_nginx()?;
         }
     }
     let rule = PathBuf::from("/etc/polkit-1/rules.d/50-garrison.rules");
-    write_output(release, "polkit-rule", &rule, &mut installed)?;
+    write_output(release, &["polkit-rule"], &rule, &mut installed)?;
     relabel(&installed);
     super::selinux::install()?;
     protect_policy()?;

@@ -60,6 +60,13 @@ Notable changes for operators and users. The format follows
   ten minutes is in order, longer ago is a problem, no run yet a warning,
   and a status database it cannot read is unknown. A last run that failed is
   still named as a warning.
+- **The nginx include follows `web.port`.** The include
+  `/etc/nginx/snippets/garrison.conf` sent every request to port 8091,
+  whatever `web.port` said, so a Garrison on another port got only 502 from
+  nginx. The installer now writes it for the configured port, as it already
+  did the SELinux module, and reloads nginx when it changes;
+  `garrison nginx --snippet` prints it. An installation on another port gets
+  it with the next run of the installer.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser

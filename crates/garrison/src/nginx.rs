@@ -2,7 +2,11 @@
 //! for the nginx installed here, and the lines that belong in Stalwart's
 //! server blocks. It prints and changes nothing: the nginx configuration
 //! stays the operator's.
+//!
+//! `garrison nginx --snippet` prints the include that block names, for the
+//! configured web port; the installer writes it to [`SNIPPET`].
 
+use std::io::Write;
 use std::process::Command;
 
 use garrison_core::config::Config;
@@ -13,6 +17,24 @@ const NGINX: &str = "/usr/sbin/nginx";
 /// From nginx 1.25.1 on, `http2 on;` replaces `listen ... http2`; older
 /// releases (Debian 12, Ubuntu 24.04, the RHEL 9 family) refuse it.
 const HTTP2_DIRECTIVE: (u32, u32, u32) = (1, 25, 1);
+/// Where the installer writes the include of Garrison's server block.
+pub(crate) const SNIPPET: &str = "/etc/nginx/snippets/garrison.conf";
+/// The include as the release ships it, for the default web port.
+const SHIPPED: &str = include_str!("../../../deploy/nginx/garrison.conf");
+/// The port the shipped include names, `web.port`'s default.
+const SHIPPED_PORT: u16 = 8091;
+/// The line of it that names the web service's port.
+const UPSTREAM: (&str, &str) = ("proxy_pass http://127.0.0.1:", ";");
+
+/// The include for a web service on `port`: the shipped one with that port.
+pub(crate) fn snippet(port: u16) -> String {
+    let (before, after) = UPSTREAM;
+    SHIPPED.replacen(
+        &format!("{before}{SHIPPED_PORT}{after}"),
+        &format!("{before}{port}{after}"),
+        1,
+    )
+}
 
 /// `nginx version: nginx/1.22.1` (nginx writes it to standard error).
 fn version(text: &str) -> Option<(u32, u32, u32)> {
@@ -100,8 +122,14 @@ server {{
     )
 }
 
-pub(crate) fn run(config: &Config) -> u8 {
-    say(site(config, installed()).trim_end());
+pub(crate) fn run(config: &Config, include: bool) -> u8 {
+    if include {
+        let _ = std::io::stdout()
+            .lock()
+            .write_all(snippet(config.web.port).as_bytes());
+    } else {
+        say(site(config, installed()).trim_end());
+    }
     0
 }
 
@@ -155,9 +183,22 @@ mod tests {
         }
         // The snippet every installation includes says so for itself, in
         // case the server block around it is the operator's own.
-        let snippet = include_str!("../../../deploy/nginx/garrison.conf");
-        let location = snippet.split("location / {").nth(1).unwrap();
+        let location = SHIPPED.split("location / {").nth(1).unwrap();
         assert!(location.contains("\n    access_log off;\n"), "{location}");
+    }
+
+    #[test]
+    fn the_include_sends_requests_to_the_configured_web_port() {
+        // The shipped file is the include for the default port, byte for byte.
+        assert_eq!(snippet(config().web.port), SHIPPED);
+        assert_eq!(SHIPPED.matches("127.0.0.1:8091").count(), 1);
+        let moved = snippet(9443);
+        assert!(
+            moved.contains("\n    proxy_pass http://127.0.0.1:9443;\n"),
+            "{moved}"
+        );
+        // Nothing but the port differs.
+        assert_eq!(moved.replace("9443", "8091"), SHIPPED);
     }
 
     #[test]

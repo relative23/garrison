@@ -206,6 +206,9 @@ server {
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+The installer writes that include for the configured `web.port`;
+`garrison nginx --snippet` prints it.
+
 On SELinux systems, such as the RHEL family, nginx may not connect to an
 unlabelled port. The installer loads a small policy module, `garrison`, that
 lets nginx reach Garrison's web port and nothing else (`semodule -l` lists it).

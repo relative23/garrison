@@ -178,6 +178,23 @@ fn the_polkit_rule_allows_exactly_the_actions() {
 }
 
 #[test]
+fn the_nginx_include_sends_requests_to_the_configured_web_port() {
+    let directory = prepared();
+    let shipped = include_str!("../../../deploy/nginx/garrison.conf");
+    let default = run(directory.path(), &["nginx", "--snippet"]);
+    assert_eq!(default.status.code(), Some(0), "{}", text(&default.stderr));
+    assert_eq!(text(&default.stdout), shipped);
+    let path = directory.path().join("garrison.toml");
+    let config = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, config.replace("[web]\n", "[web]\nport = 9443\n")).unwrap();
+    let moved = run(directory.path(), &["nginx", "--snippet"]);
+    assert_eq!(
+        text(&moved.stdout),
+        shipped.replace("127.0.0.1:8091;", "127.0.0.1:9443;")
+    );
+}
+
+#[test]
 fn a_backup_drops_sessions_and_passes_its_self_check() {
     let directory = prepared();
     let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");

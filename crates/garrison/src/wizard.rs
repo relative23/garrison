@@ -203,7 +203,7 @@ fn guided(path: &Path) -> Result<(), String> {
         format!("Starting Garrison failed: {error}; run `garrison setup` again.")
     })?;
     say("\nLast, publish Garrison through nginx:\n");
-    nginx::run(&load(path)?);
+    nginx::run(&load(path)?, false);
     say("\nThen check everything with: garrison doctor");
     Ok(())
 }

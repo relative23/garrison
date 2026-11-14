@@ -148,7 +148,12 @@ enum Task {
     /// Print the nginx include for the Stalwart WebUI.
     StalwartSwitch,
     /// Print the nginx server block for Garrison's host name, for the nginx installed here.
-    Nginx,
+    Nginx {
+        /// Print the include that block names instead (/etc/nginx/snippets/garrison.conf),
+        /// for the configured web port.
+        #[arg(long)]
+        snippet: bool,
+    },
     /// Manage Garrison access policy (root).
     Access {
         #[command(subcommand)]
@@ -351,7 +356,7 @@ fn dispatch(task: Task, config: &Config, path: &Path) -> u8 {
             0
         }
         Task::StalwartSwitch => stalwart_switch(config),
-        Task::Nginx => nginx::run(config),
+        Task::Nginx { snippet } => nginx::run(config, snippet),
         Task::Access { command } => access::run(config, &command),
         Task::Stalwart { command } => setup::run(config, &command),
         Task::Backup { to } => ops::backup(config, &to),

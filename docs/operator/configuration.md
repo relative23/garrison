@@ -31,7 +31,7 @@ with `LoadCredential=`.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `web.port` | 8091 | Loopback port behind nginx. |
+| `web.port` | 8091 | Loopback port behind nginx; see below. |
 | `web.session_minutes` | 30 | Session lifetime (never longer than the token). |
 | `web.bind_client_ip` | false | End the session when the client IP changes. Breaks mobile users. |
 | `ingest.port` | 8094 | Loopback port that Stalwart's webhook calls. |
@@ -47,6 +47,17 @@ with `LoadCredential=`.
 
 State directories default to `/var/lib/garrison/<service>`
 (`state_directory` in each of the four sections).
+
+The installer writes `web.port` into nginx's include,
+`/etc/nginx/snippets/garrison.conf`, and into the SELinux module that lets
+nginx reach it. After changing the port, run the installer again. Without it,
+restart `garrison-web` and write the include anew; the SELinux module then
+moves with the next run of the installer:
+
+```sh
+sudo sh -c 'garrison nginx --snippet > /etc/nginx/snippets/garrison.conf'
+sudo nginx -t && sudo systemctl reload nginx
+```
 
 ## `[notifications]`
 
