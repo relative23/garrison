@@ -53,6 +53,14 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **The evidence labels are explained once on a page, not at a tab stop
+  each.** Every label beside a check's state, such as Configuration or
+  Probe, was a stop for the keyboard that only showed what the label means;
+  on a status page they were all the stops it had. The labels are no stops
+  now. Each page that shows them explains the kinds it shows once, in "What
+  the evidence labels mean" below its checks, which a keyboard, a screen
+  reader and a touch screen reach as well; a pointer that rests on a label
+  still shows its meaning.
 - **Screen readers announce news, not the page.** Every notice was a live
   region, so screen readers announced text that belongs to a page as if it
   had just happened: the coverage of the event history, for one, again each

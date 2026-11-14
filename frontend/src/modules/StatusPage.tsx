@@ -2,7 +2,7 @@
 // module. A new collector provider therefore appears here without new code.
 import type { Observation } from "../api/client";
 import { ObservationCard, ServiceTable, VersionList } from "../components/ObservationCard";
-import { Loading, Meta, Notice } from "../components/Status";
+import { EvidenceLegend, Loading, Meta, Notice } from "../components/Status";
 import { StatusNotice } from "../components/StatusNotice";
 import { useTranslation } from "../i18n";
 import { useApp } from "../lib/context";
@@ -50,6 +50,7 @@ export function StatusPage({ moduleId }: ViewProps) {
         <VersionList versions={versions} />
       </div>
       <ServiceTable services={services} />
+      <EvidenceLegend kinds={mine.map((item) => item.evidence)} />
     </>
   );
 }

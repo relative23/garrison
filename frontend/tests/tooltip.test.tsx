@@ -9,7 +9,8 @@ describe("tooltips", () => {
     // The first render does not wait for the tooltip's code.
     expect(badge().getAttribute("data-state")).toBeNull();
     await waitFor(() => expect(badge().getAttribute("data-state")).toBe("closed"));
-    fireEvent.focus(badge());
+    // A label is no tab stop; its explanation opens for a pointer that rests on it.
+    fireEvent.pointerMove(badge());
     expect((await screen.findByRole("tooltip")).textContent).toBe("The collector performed an active check, such as a TLS handshake.");
   });
 });

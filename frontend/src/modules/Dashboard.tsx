@@ -4,7 +4,7 @@ import { lazy, Suspense, useDeferredValue, useState } from "react";
 
 import { api, type MetricsResponse, type Observation } from "../api/client";
 import { ObservationCard } from "../components/ObservationCard";
-import { ErrorState, Loading, Meta, Notice, StateBadge, type StateName } from "../components/Status";
+import { ErrorState, EvidenceLegend, Loading, Meta, Notice, StateBadge, type StateName } from "../components/Status";
 import { StatusNotice } from "../components/StatusNotice";
 import { CARD } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
@@ -90,9 +90,12 @@ function MailboxStorage() {
   const { status } = useApp();
   const observation = status.data?.observations.find((item) => item.id === "stalwart.mailboxes");
   if (!observation) return null;
+  // The card carries its own "Mailbox storage" title.
   return (
-    // The card carries its own "Mailbox storage" title.
-    <ObservationCard observation={observation} limit={MAILBOX_ROWS} />
+    <>
+      <ObservationCard observation={observation} limit={MAILBOX_ROWS} />
+      <EvidenceLegend kinds={[observation.evidence]} />
+    </>
   );
 }
 

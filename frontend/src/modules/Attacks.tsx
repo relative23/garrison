@@ -5,7 +5,7 @@ import { useState } from "react";
 import { api, type Attacks as Summary } from "../api/client";
 import { CoverageBanner, useCoverage } from "../components/Events";
 import { ObservationCard } from "../components/ObservationCard";
-import { ErrorState, Loading, Meta, Notice } from "../components/Status";
+import { ErrorState, EvidenceLegend, Loading, Meta, Notice } from "../components/Status";
 import { COUNT, Figures, PeriodTabs, Section, type Period } from "../components/Summary";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableHeadRow, TableRow } from "../components/ui/table";
 import { useTranslation } from "../i18n";
@@ -176,7 +176,14 @@ export function Attacks() {
       </PeriodTabs>
       {/* What the collector's checks say of this module, such as the sender addresses that send unusually much.
           They come with the summary above them, not before it: nothing on the page moves down later. */}
-      {(data || summary.error) && checks.map((item) => <ObservationCard key={item.id} observation={item} />)}
+      {(data || summary.error) && (
+        <>
+          {checks.map((item) => (
+            <ObservationCard key={item.id} observation={item} />
+          ))}
+          <EvidenceLegend kinds={checks.map((item) => item.evidence)} />
+        </>
+      )}
     </>
   );
 }

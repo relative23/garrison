@@ -1,7 +1,7 @@
 // State and evidence labels. Colors are never the only signal: every badge
 // has an icon and a word, so it reads the same for color-blind users.
 import { CircleAlert, CircleCheck, CircleDashed, CircleHelp, CircleX, Clock, LoaderCircle } from "lucide-react";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 import { ApiError } from "../api/client";
 import { useTranslation } from "../i18n";
@@ -43,16 +43,40 @@ function isEvidence(kind: string): kind is (typeof EVIDENCE)[number] {
   return (EVIDENCE as readonly string[]).includes(kind);
 }
 
+/** A label is no tab stop: on a status page the labels would be nearly every
+ * stop there is. A pointer that rests on one sees what it means; everyone
+ * else reads that in the page's EvidenceLegend. */
 export function EvidenceLabel({ kind }: { kind: string }) {
   const { t } = useTranslation();
   // An evidence kind this build does not know is shown as the server named it.
   const known = isEvidence(kind);
   return (
     <Tooltip content={known ? t(`evidence.${kind}.explanation`) : ""}>
-      <span tabIndex={0} className="cursor-help rounded-full border border-dashed px-2.5 py-0.5 text-xs text-muted-foreground">
+      <span className="cursor-help rounded-full border border-dashed px-2.5 py-0.5 text-xs text-muted-foreground">
         {known ? t(`evidence.${kind}.label`) : kind}
       </span>
     </Tooltip>
+  );
+}
+
+/** What the evidence labels of a page mean, once for the page: the kinds in
+ * `kinds` that this build knows. */
+export function EvidenceLegend({ kinds }: { kinds: readonly string[] }) {
+  const { t } = useTranslation();
+  const shown = EVIDENCE.filter((kind) => kinds.includes(kind));
+  if (shown.length === 0) return null;
+  return (
+    <details className="text-xs text-muted-foreground">
+      <summary className="w-fit cursor-pointer hover:text-foreground">{t("evidence.legend")}</summary>
+      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+        {shown.map((kind) => (
+          <Fragment key={kind}>
+            <dt className="font-medium text-foreground">{t(`evidence.${kind}.label`)}</dt>
+            <dd>{t(`evidence.${kind}.explanation`)}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </details>
   );
 }
 

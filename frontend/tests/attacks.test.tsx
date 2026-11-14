@@ -71,6 +71,7 @@ describe("Attacks & bans", () => {
     expect(await screen.findByText("Sending addresses")).toBeTruthy();
     expect(screen.getByText("anna@example.test: 300 recipients in 24 hours, where 20 a day is usual.")).toBeTruthy();
     expect(screen.queryByText("Clock synchronisation")).toBeNull();
+    expect(screen.getByText("What the evidence labels mean").tagName).toBe("SUMMARY");
   });
 
   it("say that completeness is unknown when the coverage cannot be read", async () => {

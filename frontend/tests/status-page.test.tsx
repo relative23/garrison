@@ -1,5 +1,6 @@
 import { screen, within } from "@testing-library/react";
 
+import type { Observation } from "../src/api/client";
 import { StatusPage } from "../src/modules/StatusPage";
 import { observation, status } from "./support/fixtures";
 import { renderView } from "./support/render";
@@ -77,6 +78,24 @@ describe("status pages", () => {
     const row = within(screen.getByRole("row", { name: /Backup job/ }));
     expect(row.getByText("No run since the host started.")).toBeTruthy();
     expect(row.getByText("Load state: not-found · Active state: inactive (dead) · Last run: Unknown")).toBeTruthy();
+  });
+
+  it("explain the evidence labels once for the page, not at a stop for each", () => {
+    const value = status([
+      observation({ id: "a", title: "A", evidence: "configuration" }),
+      observation({ id: "b", title: "B", evidence: "probe" }),
+      observation({ id: "c", title: "C", evidence: "configuration" }),
+      observation({ id: "d", title: "D", evidence: "survey" as Observation["evidence"] }),
+    ]);
+    renderView(<StatusPage moduleId="antivirus" detail={null} />, { status: value });
+    // On a status page each card's label was a tab stop, and they were all the page had.
+    for (const card of ["A", "B", "C", "D"]) {
+      expect(within(screen.getByRole("region", { name: card })).getByText(/^(Configuration|Probe|survey)$/).tabIndex).toBe(-1);
+    }
+    const legend = screen.getByText("What the evidence labels mean").closest("details") as HTMLElement;
+    // The kinds this page shows, each once and in a fixed order, with what each means.
+    expect([...legend.querySelectorAll("dt")].map((term) => term.textContent)).toEqual(["Configuration", "Probe"]);
+    expect(within(legend).getByText("A file or API setting was read. It does not prove that a running process uses it.")).toBeTruthy();
   });
 
   it("name failed providers on the services page only", () => {

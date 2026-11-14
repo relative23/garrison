@@ -243,6 +243,7 @@
       "explanation": "Installed files, versions or directory entries were listed.",
       "label": "Inventory"
     },
+    "legend": "What the evidence labels mean",
     "metric": {
       "explanation": "A value exported by a running service.",
       "label": "Metric"

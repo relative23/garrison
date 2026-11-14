@@ -69,6 +69,9 @@ describe("dashboard", () => {
     renderView(<Dashboard />, { status: status([mailboxes]) });
     expect(screen.getByRole("heading", { name: "Mailbox storage" })).toBeTruthy();
     expect(screen.getByText("ann@example.test")).toBeTruthy();
+    // Its evidence label is explained below it, not at a tab stop of its own.
+    expect(screen.getByText("Configuration", { selector: "span" }).tabIndex).toBe(-1);
+    expect(screen.getByText("What the evidence labels mean").tagName).toBe("SUMMARY");
     await screen.findByText("Queued messages");
   });
 
