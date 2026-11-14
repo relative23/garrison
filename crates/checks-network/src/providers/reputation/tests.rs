@@ -363,7 +363,7 @@ fn the_lists_are_asked_every_six_hours_and_a_silent_resolver_is_unknown() {
     assert_dated(&kept, 0, EVERY);
     assert_dated(&reverse, 0, EVERY);
 
-    let (resolver, _) = resolver_that_never_answers();
+    let (resolver, _socket) = resolver_that_never_answers();
     let silent = Reputation::new(&table(&format!(
         "type = \"reputation\"\nresolver = \"{resolver}\"\nhosts = [\"mail.example.test\"]"
     )))
