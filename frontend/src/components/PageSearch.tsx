@@ -51,17 +51,22 @@ export function PageSearch({ modules }: { modules: ModuleInfo[] }) {
   };
   return (
     <>
-      <button
-        type="button"
-        onClick={open}
-        className="flex h-10 w-full max-w-md items-center gap-2.5 rounded-full bg-card pl-4 pr-2 text-sm text-muted-foreground shadow-tile transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      >
-        <Search aria-hidden className="h-4 w-4" />
-        <span className="flex-1 text-left">{t("pageSearch.button")}</span>
-        <kbd className="flex h-6 items-center rounded-full bg-muted px-2.5 font-mono text-[11px] font-medium">
-          {t("pageSearch.shortcut")}
-        </kbd>
-      </button>
+      {/* The button has room from md on. The dialog stays outside its hidden
+          frame: Ctrl+K works at every width, and a modal dialog in a frame that
+          is not drawn would block the page without being seen. */}
+      <div className="hidden min-w-0 flex-1 items-center md:flex">
+        <button
+          type="button"
+          onClick={open}
+          className="flex h-10 w-full max-w-md items-center gap-2.5 rounded-full bg-card pl-4 pr-2 text-sm text-muted-foreground shadow-tile transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <Search aria-hidden className="h-4 w-4" />
+          <span className="flex-1 text-left">{t("pageSearch.button")}</span>
+          <kbd className="flex h-6 items-center rounded-full bg-muted px-2.5 font-mono text-[11px] font-medium">
+            {t("pageSearch.shortcut")}
+          </kbd>
+        </button>
+      </div>
       <dialog
         ref={dialog}
         aria-label={t("pageSearch.title")}

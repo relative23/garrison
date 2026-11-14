@@ -82,9 +82,7 @@ export function Layout({
         <a href={href(home)} className="flex shrink-0 items-center md:w-[228px]" onClick={(event) => follow(event, home)}>
           <Brand />
         </a>
-        <div className="hidden min-w-0 flex-1 items-center md:flex">
-          <PageSearch modules={visible} />
-        </div>
+        <PageSearch modules={visible} />
         <div className="ml-auto flex items-center gap-1.5">
           {Object.entries(session?.links.other ?? {}).map(([name, url]) => {
             const target = safeUrl(url);

@@ -53,6 +53,11 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Ctrl+K opens the page search on a narrow screen too.** Where the header
+  has no room for the search button, on a phone or in a narrow window, the
+  shortcut opened the search where it was not drawn: nothing could be seen,
+  and the page took no click until Escape was pressed. The search now opens
+  at every width.
 - **The evidence labels are explained once on a page, not at a tab stop
   each.** Every label beside a check's state, such as Configuration or
   Probe, was a stop for the keyboard that only showed what the label means;

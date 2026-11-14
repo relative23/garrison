@@ -159,6 +159,23 @@ try {
   );
   expect(back, `Back returns to the page before (it is at ${new URL(page.url()).pathname})`);
 
+  step = "page search on a phone";
+  await page.setViewportSize(PHONE);
+  await page.goto(`${origin}/admin/dashboard`);
+  await heading();
+  // The header has no room for the search button here; the shortcut still works.
+  await page.keyboard.press("Control+k");
+  expect(await page.getByRole("dialog", { name: "Search pages" }).isVisible(), "Ctrl+K shows the page search on a small screen too");
+  await page.keyboard.type("spam");
+  await page.keyboard.press("Enter");
+  const found = await page.waitForURL(`${origin}/admin/spam`, { timeout: 3000 }).then(
+    () => true,
+    () => false,
+  );
+  expect(found, "the page search leads to the page typed");
+  if (!found) await page.keyboard.press("Escape");
+  await page.setViewportSize(DESKTOP);
+
   step = "settings";
   await page.goto(`${origin}/admin/preferences`);
   await heading();
