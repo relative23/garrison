@@ -269,12 +269,16 @@ target fails on a panic, on an answer "Internal error", and where what was
 stored cannot be read again. The targets need a nightly compiler and
 cargo-fuzz, so they are no part of the checks before a commit;
 `.github/workflows/fuzz.yml` runs each for five minutes every week and
-whenever `fuzz/` changes.
+whenever `fuzz/` changes. The two milter targets get inputs of up to a
+megabyte there (`-max_len=1048576`), and an input that takes longer than 20
+seconds fails the run: the time a scan takes must not grow faster than its
+message.
 
 ```sh
 cargo install --locked cargo-fuzz@0.13.2
 cd fuzz
 cargo +nightly fuzz run web_request corpus/web_request seeds/web_request -- -max_total_time=300
+cargo +nightly fuzz run milter_scan corpus/milter_scan seeds/milter_scan -- -max_total_time=300 -max_len=1048576
 ```
 
 `seeds/` holds the inputs to start from, such as one request for every route;

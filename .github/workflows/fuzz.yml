@@ -20,8 +20,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          [json, broker_request, prometheus, dns_answer, events, web_request, milter_scan, milter_session]
+        target: [json, broker_request, prometheus, dns_answer, events, web_request]
+        # The fuzzer's own limit for an input it makes.
+        max_len: [4096]
+        include:
+          # A message is scanned in time whatever its size: these two get
+          # inputs of up to a megabyte, and -timeout fails a slow one.
+          - target: milter_scan
+            max_len: 1048576
+          - target: milter_session
+            max_len: 1048576
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,10 +44,11 @@ jobs:
         working-directory: fuzz
         env:
           TARGET: ${{ matrix.target }}
+          MAX_LEN: ${{ matrix.max_len }}
         run: |
           mkdir -p "corpus/$TARGET"
           cargo +nightly-2026-11-07 fuzz run "$TARGET" "corpus/$TARGET" "seeds/$TARGET" -- \
-            -max_total_time=300 -rss_limit_mb=2048 -timeout=20
+            -max_total_time=300 -rss_limit_mb=2048 -timeout=20 "-max_len=$MAX_LEN"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
