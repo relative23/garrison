@@ -71,6 +71,10 @@ Notable changes for operators and users. The format follows
   connection one of its sixteen places and a thread, and wrote a line to
   the journal for each. It looks where it accepts the connection, and the
   journal gets the first such connection and every hundredth.
+- **A page costs the broker one question.** When a session's rights had to
+  be confirmed again, every request of a page asked the broker on its own;
+  two such pages took all sixteen places. Requests of one session that
+  arrive together now share one question and its answer.
 - **The macro filter counts the memory it holds.** The 256 MiB for arriving
   messages counted what was written into their buffers, which held up to
   twice that; the scan decoded every attachment of a message before it

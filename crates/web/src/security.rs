@@ -4,7 +4,9 @@
 //! from the broker, which re-derives them from the user's token and the current
 //! native roles. They are cached for at most five seconds per session so that
 //! one page load does not trigger a dozen identical checks; actions are always
-//! re-checked by the broker itself, uncached.
+//! re-checked by the broker itself, uncached. Requests of one session that
+//! arrive while its rights are being asked for wait for that answer
+//! (`flights`), so a page costs the broker one question, not a dozen.
 //!
 //! Write requests additionally need the exact public Origin and the session's
 //! CSRF token. Menu visibility never grants anything: every route names its
@@ -28,6 +30,10 @@ use serde_json::Value;
 
 use crate::error::{ApiError, ApiResult};
 use crate::store::{Session, WebStore};
+
+mod flights;
+
+use flights::Flights;
 
 /// `__Host-` cookies belong to Garrison's own host name alone: no other
 /// host of the domain, Stalwart's included, can set or replace them.
@@ -128,6 +134,8 @@ pub struct Gate {
     bind_client_ip: bool,
     cache_time: Duration,
     cache: Mutex<HashMap<String, (Instant, Grant)>>,
+    /// The sessions whose rights are being asked for at this moment.
+    asking: Flights<ApiResult<Grant>>,
     /// Revokes a token at the provider; the application that holds the
     /// provider sets it.
     revoke: Option<Revoker>,
@@ -162,6 +170,7 @@ impl Gate {
             bind_client_ip,
             cache_time: Duration::from_secs(5),
             cache: Mutex::new(HashMap::new()),
+            asking: Flights::new(),
             revoke: None,
         }
     }
@@ -230,19 +239,37 @@ impl Gate {
             .map_err(ApiError::from)
     }
 
+    /// The session's grant, if it was confirmed within the cache time.
+    fn fresh(&self, session: &Session) -> Option<Grant> {
+        let (at, grant) = self.cached().get(&session.id_hash).cloned()?;
+        (at.elapsed() < self.cache_time).then_some(grant)
+    }
+
     pub fn caller(&self, visitor: &Visitor) -> ApiResult<Caller> {
         let unknown = || ApiError::new(401, "Sign-in required");
         let session = self.session(visitor)?.ok_or_else(unknown)?;
         if self.bind_client_ip && session.client_ip != visitor.client_ip() {
             return Err(unknown());
         }
-        let now = Instant::now();
-        let cached = self.cached().get(&session.id_hash).cloned();
-        if let Some((at, grant)) = cached
-            && now.duration_since(at) < self.cache_time
-        {
+        if let Some(grant) = self.fresh(&session) {
             return Ok(Caller { session, grant });
         }
+        // One question to the broker for a session at a time: what arrives
+        // meanwhile takes that answer, a refusal as well as a grant.
+        let grant = self
+            .asking
+            .share(&session.id_hash, || self.confirmed(&session))?;
+        Ok(Caller { session, grant })
+    }
+
+    /// Ask the broker for the session's rights, and keep or end the session
+    /// by its answer.
+    fn confirmed(&self, session: &Session) -> ApiResult<Grant> {
+        // A request of the session that asked just before may have the answer.
+        if let Some(grant) = self.fresh(session) {
+            return Ok(grant);
+        }
+        let now = Instant::now();
         let grant = match self.grant_for(&session.token) {
             Ok(grant) => grant,
             Err(error) => {
@@ -250,21 +277,21 @@ impl Gate {
                 // A refusal leaves a token that Stalwart still takes: it is
                 // revoked. One Stalwart no longer takes needs none.
                 if matches!(error.status.as_u16(), 401 | 403) {
-                    let _ = self.end(&session, error.status.as_u16() == 403);
+                    let _ = self.end(session, error.status.as_u16() == 403);
                 }
                 return Err(error);
             }
         };
         if grant.subject != session.subject {
-            let _ = self.end(&session, true);
-            return Err(unknown());
+            let _ = self.end(session, true);
+            return Err(ApiError::new(401, "Sign-in required"));
         }
         let mut cache = self.cached();
         if cache.len() > MAX_CACHED {
             cache.clear();
         }
         cache.insert(session.id_hash.clone(), (now, grant.clone()));
-        Ok(Caller { session, grant })
+        Ok(grant)
     }
 
     /// A session with at least one of the named modules.
@@ -296,5 +323,7 @@ impl Gate {
     }
 }
 
+#[cfg(test)]
+mod flight_tests;
 #[cfg(test)]
 mod tests;
