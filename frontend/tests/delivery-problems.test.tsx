@@ -71,6 +71,24 @@ describe("Delivery problems", () => {
     expect(screen.getByText(/More events were recorded in this period/)).toBeTruthy();
   });
 
+  it("show the characters that hide or reorder text by their code point", async () => {
+    // A receiving server writes its own reply, and its domain's DNS names the hosts.
+    const at = Math.floor(Date.now() / 1000) - 600;
+    const cause = "450 ‮deyaled";
+    open(
+      destinations({
+        destinations: [{ domain: "pay​.example", delivered: 0, delays: 1, bounces: 0, lastProblem: at, cause, hosts: ["mx⁦.pay.example"] }],
+        causes: [{ cause, delays: 1, bounces: 0, domains: 1, lastSeen: at }],
+      }),
+    );
+    await problems();
+    const byDomain = within(await screen.findByRole("table", { name: "Destinations with problems" }));
+    expect(byDomain.getByText("pay[U+200B].example")).toBeTruthy();
+    expect(byDomain.getByText("mx[U+2066].pay.example")).toBeTruthy();
+    expect(byDomain.getByText("450 [U+202E]deyaled")).toBeTruthy();
+    expect(within(screen.getByRole("table", { name: "Causes" })).getByText("450 [U+202E]deyaled")).toBeTruthy();
+  });
+
   it("ask again for another period", async () => {
     const server = open();
     await problems();

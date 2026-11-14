@@ -8,7 +8,7 @@ import { ErrorState, Loading, Meta, Notice } from "../components/Status";
 import { COUNT, Figures, PeriodTabs, Section, type Period } from "../components/Summary";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableHeadRow, TableRow } from "../components/ui/table";
 import { useTranslation } from "../i18n";
-import { dateTime, duration, number } from "../lib/format";
+import { dateTime, duration, number, text } from "../lib/format";
 import { useResource } from "../lib/useResource";
 
 function ByDestination({ destinations }: { destinations: Destinations["destinations"] }) {
@@ -30,16 +30,16 @@ function ByDestination({ destinations }: { destinations: Destinations["destinati
         {destinations.map((destination) => (
           <TableRow key={destination.domain}>
             <TableCell>
-              <span className="wrap-anywhere">{destination.domain}</span>
+              <span className="wrap-anywhere">{text(destination.domain)}</span>
               {destination.hosts.length > 0 && (
-                <span className="block text-xs text-muted-foreground wrap-anywhere">{destination.hosts.join(", ")}</span>
+                <span className="block text-xs text-muted-foreground wrap-anywhere">{text(destination.hosts)}</span>
               )}
             </TableCell>
             <TableCell className={COUNT}>{number(destination.bounces)}</TableCell>
             <TableCell className={COUNT}>{number(destination.delays)}</TableCell>
             <TableCell className={COUNT}>{number(destination.delivered)}</TableCell>
             <TableCell>
-              <span className="block min-w-48 wrap-anywhere">{destination.cause}</span>
+              <span className="block min-w-48 wrap-anywhere">{text(destination.cause)}</span>
             </TableCell>
             <TableCell className="whitespace-nowrap">{dateTime(destination.lastProblem)}</TableCell>
           </TableRow>
@@ -67,7 +67,7 @@ function ByCause({ causes }: { causes: Destinations["causes"] }) {
         {causes.map((cause) => (
           <TableRow key={cause.cause}>
             <TableCell>
-              <span className="block min-w-48 wrap-anywhere">{cause.cause}</span>
+              <span className="block min-w-48 wrap-anywhere">{text(cause.cause)}</span>
             </TableCell>
             <TableCell className={COUNT}>{number(cause.bounces)}</TableCell>
             <TableCell className={COUNT}>{number(cause.delays)}</TableCell>

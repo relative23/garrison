@@ -95,6 +95,12 @@ describe("ObservationCard", () => {
     expect(screen.getByText("survey")).toBeTruthy();
   });
 
+  it("shows the characters in a finding that hide or reorder text by their code point", () => {
+    // A finding may quote what another server sent, such as a certificate's name.
+    show({ ...base, findings: ["The certificate names ‮lpmaxe.liam"] });
+    expect(screen.getByText("The certificate names [U+202E]lpmaxe.liam")).toBeTruthy();
+  });
+
   it("renders values as text, never as markup", () => {
     show({ ...base, fields: [{ label: "Name", value: "<img src=x onerror=alert(1)>", format: "text" }] });
     expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeTruthy();

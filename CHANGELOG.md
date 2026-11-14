@@ -53,6 +53,14 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Delivery problems and the checks' findings show hidden characters.**
+  A receiving server writes its own replies, and a domain's DNS names its
+  mail hosts. Delivery problems showed such text as it came, so a character
+  that hides or reorders text, such as a right-to-left override, could make
+  a reply or a host name read as something else; so did the findings of
+  the checks, which may quote what another server sent. Both now show such
+  a character as its code point, such as `[U+202E]`, as the event history
+  already did.
 - **The table of processes and schedules shows all that the check found.**
   Its Details column left out a unit's findings, such as "No run since the
   host started.", its first property, the load state, which is where a

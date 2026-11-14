@@ -91,7 +91,7 @@ export function ObservationCard({ observation, limit, className }: { observation
         {findings.length > 0 && (
           <ul className="list-disc space-y-1 pl-5 text-sm">
             {findings.map((finding) => (
-              <li key={finding}>{finding}</li>
+              <li key={finding}>{text(finding)}</li>
             ))}
           </ul>
         )}
