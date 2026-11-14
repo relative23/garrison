@@ -15,7 +15,7 @@ use serde_json::{Map, Value};
 
 use crate::answers::{DeliverySummary, Detail, EventItem, Page, SessionSummary};
 use crate::deliveries::{Event, MAX_SUMMARY_EVENTS, summarize_queue, summarize_session};
-use crate::policy::identifier;
+use crate::policy::{EventType, identifier};
 
 const MAX_RESPONSE_BYTES: usize = 768 * 1024;
 
@@ -100,14 +100,11 @@ fn event_item(row: &Row<'_>) -> Result<EventItem> {
     })
 }
 
-/// `WHERE` terms for the event columns, with their values.
+/// `WHERE` terms for the event columns, with their values. The category is
+/// not among them: no index leads to a category's events ([`chosen`]).
 fn conditions(filter: &Filter) -> (Vec<String>, Vec<Sql>) {
     let mut terms = Vec::new();
     let mut values = Vec::new();
-    if !filter.category.is_empty() {
-        terms.push("category=?".to_owned());
-        values.push(Sql::Text(filter.category.clone()));
-    }
     if !filter.event_type.is_empty() {
         terms.push("type=?".to_owned());
         values.push(Sql::Text(filter.event_type.clone()));
@@ -153,6 +150,61 @@ fn bounded(items: Vec<EventItem>, limit: usize) -> (Vec<EventItem>, bool) {
     (kept, more)
 }
 
+/// The query that chooses a page's events by their numbers, newest first,
+/// and its values; `None` for a category that has no type.
+///
+/// A category has no index of its own, and walking the events from the
+/// newest until a page of a rare category is full would pass the whole
+/// history. A category is a known set of types, and each type's newest
+/// events come straight from the index by type: the page is the newest of
+/// what each type gives.
+fn chosen(filter: &Filter, terms: &[String], values: Vec<Sql>) -> Option<(String, Vec<Sql>)> {
+    let limit = Sql::Integer(limit_plus_one(filter.limit));
+    if filter.category.is_empty() || !filter.event_type.is_empty() {
+        let mut terms = terms.to_vec();
+        let mut values = values;
+        if !filter.category.is_empty() {
+            // With a type named, the category only has to agree with it.
+            terms.push("category=?".to_owned());
+            values.push(Sql::Text(filter.category.clone()));
+        }
+        values.push(limit);
+        return Some((
+            format!(
+                "SELECT seq FROM events{} ORDER BY seq DESC LIMIT ?",
+                clause(&terms)
+            ),
+            values,
+        ));
+    }
+    let types: Vec<&str> = EventType::ALL
+        .iter()
+        .filter(|kind| kind.category() == filter.category)
+        .map(|kind| kind.as_str())
+        .collect();
+    if types.is_empty() {
+        return None;
+    }
+    let mut of_type = terms.to_vec();
+    of_type.push("type=?".to_owned());
+    let one = format!(
+        "SELECT seq FROM (SELECT seq FROM events{} ORDER BY seq DESC LIMIT ?)",
+        clause(&of_type)
+    );
+    let mut all = Vec::new();
+    for kind in &types {
+        all.extend(values.iter().cloned());
+        all.push(Sql::Text((*kind).to_owned()));
+        all.push(limit.clone());
+    }
+    all.push(limit);
+    let parts = vec![one; types.len()].join(" UNION ALL ");
+    Some((
+        format!("SELECT seq FROM ({parts}) ORDER BY seq DESC LIMIT ?"),
+        all,
+    ))
+}
+
 pub fn list_events(db: &Connection, filter: &Filter) -> Result<Page<EventItem>> {
     let (mut terms, mut values) = conditions(filter);
     if let Some(before) = &filter.before {
@@ -161,16 +213,19 @@ pub fn list_events(db: &Connection, filter: &Filter) -> Result<Page<EventItem>> 
             before.parse().map_err(|_| QueryError::Invalid)?,
         ));
     }
-    values.push(Sql::Integer(limit_plus_one(filter.limit)));
+    let Some((choice, values)) = chosen(filter, &terms, values) else {
+        // A category that has no type: nothing is recorded under it.
+        return Ok(Page {
+            items: Vec::new(),
+            next: None,
+        });
+    };
     // The page's events are chosen by their numbers alone and read afterwards.
     // For a type, with or without a time range, the choice then needs only
     // the index that holds a type's events newest first with their time, and
     // ends with the page; only the page's events are read.
-    let sql = format!(
-        "SELECT {EVENT_COLUMNS} FROM events WHERE seq IN \
-         (SELECT seq FROM events{} ORDER BY seq DESC LIMIT ?) ORDER BY seq DESC",
-        clause(&terms)
-    );
+    let sql =
+        format!("SELECT {EVENT_COLUMNS} FROM events WHERE seq IN ({choice}) ORDER BY seq DESC");
     let mut statement = db.prepare(&sql)?;
     let mut rows = statement.query(params_from_iter(values))?;
     let mut items = Vec::new();

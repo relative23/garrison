@@ -53,6 +53,11 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **The event history finds a rare category without reading everything.**
+  Choosing a category with few events, such as Security, walked the whole
+  history from its newest event and could run into the two seconds a query
+  has. The page is now read through the index by event type, in the same
+  time whatever the history's size.
 - **Mail a milter refused no longer counts as waiting.** Delivery problems
   listed a message that a milter or a hook had refused among the messages
   waiting for delivery, for seven days. Such a message never reached the

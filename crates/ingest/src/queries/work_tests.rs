@@ -37,6 +37,17 @@ fn history(directory: &Path, count: i64) -> Connection {
     let path = directory.join("events.sqlite");
     let store = EventStore::open(&path, Limits::new(30, 10_000_000, 4 << 30)).unwrap();
     let mut batch = Vec::new();
+    // A category that is rare: a few bans when recording began, and none
+    // since.
+    for index in 0..5 {
+        let at = time::isoformat(time::Timestamp::from_second(BEGINNING).unwrap());
+        batch.push(event(
+            90_000_000 + index,
+            "security.authentication-ban",
+            &at,
+            &json!({}),
+        ));
+    }
     for index in 0..count {
         let at = time::isoformat(time::Timestamp::from_second(BEGINNING + index).unwrap());
         let session = index / 4;
@@ -147,6 +158,20 @@ fn a_page_of_events_costs_the_same_in_a_larger_history() {
                 ..Filter::default()
             };
             assert_eq!(list_events(db, &filter).unwrap().items.len(), 50);
+        }),
+    );
+    // The few events of a rare category lie at the history's beginning:
+    // finding them must not mean passing every event that came after.
+    flat(
+        "the events of a rare category",
+        compared(|db| {
+            let filter = Filter {
+                category: "security".into(),
+                ..Filter::default()
+            };
+            let page = list_events(db, &filter).unwrap();
+            assert_eq!(page.items.len(), 5);
+            assert!(page.items.iter().all(|item| item.category == "security"));
         }),
     );
 }
