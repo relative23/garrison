@@ -40,7 +40,7 @@ changelog, and for one more release the observation carries its old id in
 | `release.stalwart` | `releases` | Newer releases of Stalwart |
 | `reputation.blocklists` | `reputation` | Blocklists of the addresses the server sends from |
 | `reputation.reverse` | `reputation` | Their reverse names |
-| `senders.accounts` | `senders` | Accounts that send unusually much |
+| `senders.accounts` | `senders` | Sender addresses that send unusually much (the card "Sending addresses"; the id keeps its name) |
 | `signin.page` | `sign-in` | Stalwart's sign-in page and the files it loads |
 | `stalwart.api` | `stalwart` | Stands in while Stalwart's API does not answer |
 | `stalwart.spam` | `stalwart` | Spam filter settings and the classifier |

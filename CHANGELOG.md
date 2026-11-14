@@ -21,6 +21,13 @@ Notable changes for operators and users. The format follows
   `garrison install --rollback --restore-state` and that the data recorded
   since the upgrade would be lost. Before, it named the plain rollback, which
   then refused and only named `--restore-state` when it was run.
+- **"Sending accounts" is called "Sending addresses".** The check counts by
+  the sender address of a message, since Stalwart's event for mail that a
+  signed-in account hands in names that address and not the account: an
+  account that sends under two of its addresses always was two rows, each
+  with its own usual volume. The card, its table, its findings, the
+  notifications and the documentation now say so. Nothing is counted
+  differently, and the observation keeps the id `senders.accounts`.
 - **The README's title is Garrison**, as the logo has been since 0.1.2.
   Stalwart is named where the text says what Garrison is for; the Ansible
   role's description says the same.

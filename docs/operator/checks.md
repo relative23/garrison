@@ -28,7 +28,7 @@ observation the checks report is in [observation ids](observations.md).
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
 | `version-command` | `component`, `command`, `pattern`, `modules` | Installed version from a command; it runs in the collector's sandbox, so a program that compiles code at run time (a JIT) fails there |
 | `reputation` | `hosts` (default: the mail hosts Stalwart names), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
-| `senders` | `min_recipients` (50), `factor` (5), `burst` (100), `bounces` (10), `modules` | The accounts that send unusually much; see below |
+| `senders` | `min_recipients` (50), `factor` (5), `burst` (100), `bounces` (10), `modules` | The sender addresses that send unusually much; see below |
 | `releases` | `products` (`garrison`, `stalwart`; default both) | Whether a newer release exists; see below |
 | `sign-in` | `modules` | Whether Stalwart's sign-in page loads under the issuer's name, with its scripts and style sheets; see below |
 | `mail-test` | `recipient`, `sender` (default: none, as a bounce is sent), `host` (`127.0.0.1`), `port` (25), `every_hours` (24), `macro_document` (false) | Test messages through the mail server itself; see below |
@@ -66,22 +66,30 @@ changes nothing; one that cannot be made is Unknown.
 ## `senders`
 
 An account whose password was guessed or stolen shows in what it sends. From
-the event history, read every ten minutes, the check takes what each
-signed-in account handed in during the last 24 hours and holds it against
-that account's own average of the 14 days before. A warning names the account
-and the figures when
+the event history, read every ten minutes, the check takes what signed-in
+accounts handed in during the last 24 hours under each sender address and
+holds it against that address's own average of the 14 days before. The card
+is called Sending addresses, and a warning names the address and the figures
+when
 
 - it sent to at least `min_recipients` recipients and to at least `factor`
   times its usual number (once the history holds three days to compare with),
 - it sent to `burst` recipients or more within one hour, or
 - `bounces` or more of its recipients bounced, and they are a fifth of all.
 
-The table lists the 20 accounts that need a look first, with messages,
-recipients, their usual number a day, the busiest hour, bounces and the
+The check counts by address, not by account: Stalwart's event for a message
+that a signed-in account hands in names the message's sender address and
+not the account. An account that sends under several of its addresses shows
+once for each, and each has its own usual number. A mailbox with many
+aliases can so stay below a threshold that it would pass as one account;
+lower `factor` or `burst` where that matters.
+
+The table lists the 20 addresses that need a look first, with messages,
+recipients, their usual number a day, the busiest hour, bounces and the IP
 addresses the mail was handed in from. Garrison blocks nothing: an account is
 disabled, and its password changed, in the Stalwart WebUI. The check shows on
 the Attacks & bans page, and a warning goes out on the notification channels
-like any other.
+like any other. Its observation keeps the id `senders.accounts`.
 
 A quiet day counts only over a history that holds the day. While the event
 receiver has not reported for five minutes, or where it lost events within

@@ -1,6 +1,6 @@
 [package]
 name = "garrison-checks-mail"
-description = "Checks of the mail flow: recorded events, sending accounts, test messages and the antivirus scanner."
+description = "Checks of the mail flow: recorded events, sending addresses, test messages and the antivirus scanner."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

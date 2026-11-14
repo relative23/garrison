@@ -268,7 +268,7 @@ fn incoming_session(events: &mut Events, number: i64) {
     );
 }
 
-/// One message an account sent a week or less ago and what became of it at
+/// One message that was sent a week or less ago and what became of it at
 /// its destination.
 fn outgoing_message(events: &mut Events, number: i64) {
     let ago = events.random.below(7 * DAY as u64) as i64 + 600;

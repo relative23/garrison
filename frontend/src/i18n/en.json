@@ -324,7 +324,7 @@
       "label": "Antivirus"
     },
     "attacks": {
-      "description": "Failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account; accounts that send unusually much.",
+      "description": "Failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account; sender addresses that send unusually much.",
       "intro": "Who fails to sign in, whom Stalwart banned, whose TLS handshakes fail and which accounts send unusually much, from the recorded events.",
       "label": "Attacks & bans"
     },

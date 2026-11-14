@@ -58,7 +58,7 @@ pub const MODULES: [Module; 12] = [
     Module {
         id: ModuleId::Attacks,
         label: "Attacks & bans",
-        description: "Failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account; accounts that send unusually much.",
+        description: "Failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account; sender addresses that send unusually much.",
     },
     Module {
         id: ModuleId::Deliveries,

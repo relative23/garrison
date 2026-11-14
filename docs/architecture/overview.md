@@ -26,7 +26,7 @@ ingest/          webhook app, privacy policy, event store, queries, summaries of
 checks/          what every check is built from: Provider, Context, options, commands, HTTPS and DNS clients
 checks-host/     checks of the host: resources, host care, systemd units, versions, receipts, endpoints, backups
 checks-stalwart/ checks of Stalwart: management API, mailboxes, metrics exporter, releases
-checks-mail/     checks of the mail flow: event numbers, sending accounts, test mail, antivirus
+checks-mail/     checks of the mail flow: event numbers, sending addresses, test mail, antivirus
 checks-network/  checks of the network: DNS records, blocklists and reverse names, TLS certificates
 collector/       provider registry, status store, notifications, one collection run
 milter/          the macro filter: scan of a message, milter protocol, listener

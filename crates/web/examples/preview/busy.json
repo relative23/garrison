@@ -1528,17 +1528,17 @@
   {
     "id": "senders.accounts",
     "provider": "senders",
-    "title": "Sending accounts",
+    "title": "Sending addresses",
     "modules": ["attacks"],
     "evidence": "probe",
     "state": "warning",
     "checkedAt": "2026-10-29T12:00:00+00:00",
     "source": "event history",
     "kind": "details",
-    "scope": "Mail that signed-in accounts handed in during the last 24 hours, against each account's own average of the 14 days before. Read every ten minutes; nothing is blocked.",
+    "scope": "Mail that signed-in accounts handed in during the last 24 hours, by sender address, against each address's own average of the 14 days before. An account that sends under several addresses shows once for each. Read every ten minutes; nothing is blocked.",
     "fields": [
       {
-        "label": "Accounts that sent",
+        "label": "Addresses that sent",
         "value": 173,
         "format": "number"
       },
@@ -1556,7 +1556,7 @@
     "table": {
       "columns": [
         {
-          "label": "Account",
+          "label": "Sender address",
           "format": "text"
         },
         {
@@ -1580,7 +1580,7 @@
           "format": "number"
         },
         {
-          "label": "Addresses",
+          "label": "IP addresses",
           "format": "number"
         }
       ],
@@ -1600,7 +1600,7 @@
       ]
     },
     "findings": [
-      "jonas.weber@example.org: 2,984 recipients in 24 hours, where 38 a day are usual; 1,422 of them bounced; handed in from 14 addresses.",
+      "jonas.weber@example.org: 2,984 recipients in 24 hours, where 38 a day are usual; 1,422 of them bounced; handed in from 14 IP addresses.",
       "newsletter@example.net: 48,210 recipients in 24 hours, where 6,120 a day are usual."
     ],
     "value": {},

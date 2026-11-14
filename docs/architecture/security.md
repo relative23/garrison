@@ -61,9 +61,9 @@ pending jobs become "uncertain".
   module.
 - Rights are cached for up to five seconds in the web service.
 - The collector reads the event history through the shared group (for the
-  running Stalwart version, how a test message was filed, what each account
-  sent and the mail flow's numbers), so a compromised collector can read mail
-  metadata.
+  running Stalwart version, how a test message was filed, what was sent
+  under each address and the mail flow's numbers), so a compromised collector
+  can read mail metadata.
 - Events buffered inside Stalwart are lost if Stalwart restarts while the
   receiver is unreachable; receiver downtime beyond Stalwart's one-hour buffer is
   recorded as a gap.

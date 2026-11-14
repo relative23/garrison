@@ -54,7 +54,7 @@ const SHOTS = [
     },
   },
   { name: "attacks", view: "attacks", theme: "dark", before: (page) => page.getByRole("tab", { name: "7 days" }).click() },
-  { name: "sending-accounts", view: "attacks", theme: "light", before: (page) => bringUp(page, "Sending accounts") },
+  { name: "sending-addresses", view: "attacks", theme: "light", before: (page) => bringUp(page, "Sending addresses") },
   {
     name: "delivery-problems",
     view: "deliveries",

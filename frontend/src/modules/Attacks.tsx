@@ -174,7 +174,7 @@ export function Attacks() {
           </>
         )}
       </PeriodTabs>
-      {/* What the collector's checks say of this module, such as the accounts that send unusually much.
+      {/* What the collector's checks say of this module, such as the sender addresses that send unusually much.
           They come with the summary above them, not before it: nothing on the page moves down later. */}
       {(data || summary.error) && checks.map((item) => <ObservationCard key={item.id} observation={item} />)}
     </>

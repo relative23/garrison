@@ -51,7 +51,7 @@ Status: 0.1.2. Supported Stalwart releases:
 | Menu | Content |
 |---|---|
 | Services | Process and schedule states, installed versions, newer releases of Garrison and Stalwart; pending security updates, a restart that is due, the clock, a disk forecast and the firewall service |
-| Protection ▸ Antivirus, Spam filter, Attacks & bans | Scanner, signatures, the milters' verdicts by day, test messages through the mail server, an optional filter for Office macros; spam filter, classifier and rule updates, spam and ham by day and domain, how incoming senders fare with SPF, DKIM, DMARC and ARC; failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account, and accounts that send unusually much |
+| Protection ▸ Antivirus, Spam filter, Attacks & bans | Scanner, signatures, the milters' verdicts by day, test messages through the mail server, an optional filter for Office macros; spam filter, classifier and rule updates, spam and ham by day and domain, how incoming senders fare with SPF, DKIM, DMARC and ARC; failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account, and sender addresses that send unusually much |
 | Backups | Backup jobs with their last run and result, schedules, receipts and restore tests; a restic or borg repository with its newest snapshot, size, integrity check and test restore |
 | DNS & TLS | Each domain's DNS records against what Stalwart names, with its MTA-STS policy and TLSA records; blocklists (IPv4 and IPv6) and reverse names of the sending addresses; the certificate of every listener that speaks TLS; how much mail travels without TLS; resolver process |
 | Alerts | Notifications through ntfy, a webhook or mail when a check fails, warns or is in order again, and when the collector itself stops; monitor receipts |
@@ -74,7 +74,7 @@ success.
     <td width="50%"><a href=".github/screenshots/attacks.png"><img src=".github/screenshots/attacks.png" alt="Attacks and bans: 9,000 failed sign-ins in seven days, listed by address with the accounts tried and the bans Stalwart imposed"></a><br>Attacks &amp; bans: failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account.</td>
   </tr>
   <tr>
-    <td><a href=".github/screenshots/sending-accounts.png"><img src=".github/screenshots/sending-accounts.png" alt="Sending accounts: two accounts named because they sent far more than usual, with messages, recipients, bounces and addresses per account"></a><br>Sending accounts: each account's last day against its usual volume. A sudden jump is how a stolen password shows.</td>
+    <td><a href=".github/screenshots/sending-addresses.png"><img src=".github/screenshots/sending-addresses.png" alt="Sending addresses: two sender addresses named because they sent far more than usual, with messages, recipients, bounces and IP addresses for each"></a><br>Sending addresses: each sender address's last day against its usual volume. A sudden jump is how a stolen password shows.</td>
     <td><a href=".github/screenshots/delivery-problems.png"><img src=".github/screenshots/delivery-problems.png" alt="Delivery problems: bounces and delayed attempts of a week, summed by destination domain with the most frequent cause"></a><br>Deliveries: which destinations delay or bounce your mail, and what their servers answered.</td>
   </tr>
   <tr>

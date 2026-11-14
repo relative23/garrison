@@ -1,11 +1,18 @@
-//! Sending accounts: what each signed-in account handed in during the last
-//! day, against its own average of the two weeks before.
+//! Sending addresses: what signed-in accounts handed in under each sender
+//! address during the last day, against that address's own average of the
+//! two weeks before.
 //!
 //! An account whose password was guessed or stolen shows in what it sends:
 //! many times its usual volume, a burst within one hour, or a large share of
-//! recipients that do not exist. Each of these is a warning, with the account
-//! and the figures; Garrison blocks nothing. The figures come from the event
-//! history, read every ten minutes.
+//! recipients that do not exist. Each of these is a warning, with the
+//! address and the figures; Garrison blocks nothing. The figures come from
+//! the event history, read every ten minutes.
+//!
+//! The events name the sender address of a message, not the account that
+//! signed in to hand it in. So the check counts by address: an account that
+//! sends under two of its addresses shows as two rows, each with its own
+//! usual volume. The observation keeps the id it always had,
+//! `senders.accounts`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
@@ -25,7 +32,7 @@ use crate::options::{Checked, Options};
 const QUEUED: &str = "queue.authenticated-message-queued";
 const BOUNCED: &str = "delivery.dsn-perm-fail";
 const DAY: i64 = 86_400;
-/// The days before the last one that make an account's usual volume, and how
+/// The days before the last one that make an address's usual volume, and how
 /// many of them the history must hold before a usual volume is named.
 const USUAL_DAYS: i64 = 14;
 const KNOWN_DAYS: i64 = 3;
@@ -34,21 +41,21 @@ const EVERY: i64 = 600;
 const MAX_EVENTS: usize = 200_000;
 const ROWS: usize = 20;
 const MEMORY: &str = "senders.accounts";
-/// Bounces count once they are this share of an account's recipients.
+/// Bounces count once they are this share of an address's recipients.
 const BOUNCE_SHARE: u64 = 5;
 
-/// What one account sent in the last day.
+/// What was sent under one address in the last day.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 struct Sender {
-    account: String,
+    address: String,
     messages: u64,
     recipients: u64,
     /// Its recipients a day before that; `None` while the history is short.
     usual: Option<u64>,
     busiest_hour: u64,
     bounces: u64,
-    /// The addresses it handed mail in from.
-    addresses: u64,
+    /// The IP addresses its mail was handed in from.
+    clients: u64,
     reasons: Vec<String>,
 }
 
@@ -73,7 +80,7 @@ pub struct Senders {
     modules: BTreeSet<ModuleId>,
     /// Below this many recipients in a day nothing counts as unusual.
     min_recipients: u64,
-    /// So many times an account's usual volume is a warning.
+    /// So many times an address's usual volume is a warning.
     factor: u64,
     /// So many recipients within one hour are a warning.
     burst: u64,
@@ -87,13 +94,14 @@ struct Sums {
     recipients: u64,
     before: u64,
     hours: BTreeMap<i64, u64>,
-    addresses: BTreeSet<String>,
+    clients: BTreeSet<String>,
     bounces: u64,
 }
 
-/// The account an event names as its sender, in lower case; `None` for a
-/// bounce's empty sender.
-fn account(fields: &Value) -> Option<String> {
+/// The address an event names as its sender, in lower case; `None` for a
+/// bounce's empty sender. It is the message's sender address, not the
+/// account that signed in: the event does not name that one.
+fn sender_address(fields: &Value) -> Option<String> {
     let from = fields["from"]
         .as_str()?
         .trim_matches(['<', '>'])
@@ -129,7 +137,7 @@ impl Senders {
         })
     }
 
-    /// Why an account's day is unusual; nothing where it is not.
+    /// Why an address's day is unusual; nothing where it is not.
     fn reasons(&self, sender: &Sender) -> Vec<String> {
         let mut reasons = Vec::new();
         if let Some(usual) = sender.usual
@@ -138,7 +146,7 @@ impl Senders {
         {
             reasons.push(if usual == 0 {
                 format!(
-                    "{} recipients in 24 hours from an account that sent nothing in the {USUAL_DAYS} days before",
+                    "{} recipients in 24 hours from an address that sent nothing in the {USUAL_DAYS} days before",
                     sender.recipients
                 )
             } else {
@@ -202,17 +210,17 @@ impl Senders {
             let Ok(fields) = serde_json::from_str::<Value>(&text) else {
                 continue;
             };
-            let Some(account) = account(&fields) else {
+            let Some(address) = sender_address(&fields) else {
                 continue;
             };
             let count = recipients(&fields);
-            let entry = sums.entry(account).or_default();
+            let entry = sums.entry(address).or_default();
             if at >= today {
                 entry.messages += 1;
                 entry.recipients += count;
                 *entry.hours.entry((now - at) / 3600).or_default() += count;
                 entry
-                    .addresses
+                    .clients
                     .extend(fields["remoteIp"].as_str().map(str::to_owned));
             } else {
                 entry.before += count;
@@ -224,7 +232,7 @@ impl Senders {
             let text: String = row.get(1)?;
             let sender = serde_json::from_str::<Value>(&text)
                 .ok()
-                .and_then(|fields| account(&fields));
+                .and_then(|fields| sender_address(&fields));
             if let Some(entry) = sender.and_then(|sender| sums.get_mut(&sender)) {
                 entry.bounces += 1;
             }
@@ -232,16 +240,16 @@ impl Senders {
         let mut senders: Vec<Sender> = sums
             .into_iter()
             .filter(|(_, sums)| sums.messages > 0)
-            .map(|(account, sums)| {
+            .map(|(address, sums)| {
                 let mut sender = Sender {
-                    account,
+                    address,
                     messages: sums.messages,
                     recipients: sums.recipients,
                     usual: (known >= KNOWN_DAYS)
                         .then(|| sums.before / u64::try_from(known).unwrap_or(1).max(1)),
                     busiest_hour: sums.hours.values().copied().max().unwrap_or(0),
                     bounces: sums.bounces,
-                    addresses: sums.addresses.len() as u64,
+                    clients: sums.clients.len() as u64,
                     reasons: Vec::new(),
                 };
                 sender.reasons = self.reasons(&sender);
@@ -254,7 +262,7 @@ impl Senders {
             quiet
                 .cmp(&other)
                 .then_with(|| right.recipients.cmp(&left.recipients))
-                .then_with(|| left.account.cmp(&right.account))
+                .then_with(|| left.address.cmp(&right.address))
         });
         Ok(Read {
             at: now,
@@ -315,14 +323,14 @@ impl Provider for Senders {
         let mut findings: Vec<String> = unusual
             .iter()
             .take(5)
-            .map(|sender| format!("{}: {}.", sender.account, sender.reasons.join("; ")))
+            .map(|sender| format!("{}: {}.", sender.address, sender.reasons.join("; ")))
             .collect();
         if unusual.len() > 5 {
-            findings.push(format!("And {} more accounts.", unusual.len() - 5));
+            findings.push(format!("And {} more addresses.", unusual.len() - 5));
         }
         let state = match (&read.problem, unusual.is_empty()) {
             (Some(problem), _) => {
-                findings = vec![format!("The sending accounts are not known: {problem}.")];
+                findings = vec![format!("The sending addresses are not known: {problem}.")];
                 State::Unknown
             }
             (None, false) => State::Warning,
@@ -352,7 +360,7 @@ impl Provider for Senders {
         let observation = Observation::new(
             "senders.accounts",
             self.name(),
-            "Sending accounts",
+            "Sending addresses",
             self.modules.iter().copied(),
             Evidence::Probe,
             state,
@@ -360,23 +368,25 @@ impl Provider for Senders {
             "event history",
         )?
         .with_scope(
-            "Mail that signed-in accounts handed in during the last 24 hours, against each \
-             account's own average of the 14 days before. Read every ten minutes; nothing is blocked.",
+            "Mail that signed-in accounts handed in during the last 24 hours, by sender address, \
+             against each address's own average of the 14 days before. An account that sends \
+             under several addresses shows once for each. Read every ten minutes; nothing is \
+             blocked.",
         )
         .with_fields(vec![
-            Field::new("Accounts that sent", read.senders.len(), Format::Number),
+            Field::new("Addresses that sent", read.senders.len(), Format::Number),
             Field::new("Unusual", unusual.len(), Format::Number),
             Field::new("Read", at, Format::Datetime),
         ])
         .with_table(Table {
             columns: vec![
-                column("Account", Format::Text),
+                column("Sender address", Format::Text),
                 column("Messages", Format::Number),
                 column("Recipients", Format::Number),
                 column("Usual a day", Format::Number),
                 column("Busiest hour", Format::Number),
                 column("Bounces", Format::Number),
-                column("Addresses", Format::Number),
+                column("IP addresses", Format::Number),
             ],
             rows: read
                 .senders
@@ -384,13 +394,13 @@ impl Provider for Senders {
                 .take(ROWS)
                 .map(|sender| {
                     vec![
-                        json!(sender.account),
+                        json!(sender.address),
                         json!(sender.messages),
                         json!(sender.recipients),
                         json!(sender.usual),
                         json!(sender.busiest_hour),
                         json!(sender.bounces),
-                        json!(sender.addresses),
+                        json!(sender.clients),
                     ]
                 })
                 .collect(),

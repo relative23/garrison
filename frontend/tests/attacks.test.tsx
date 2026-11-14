@@ -61,14 +61,14 @@ describe("Attacks & bans", () => {
     serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks() } });
     const senders = observation({
       id: "senders.accounts",
-      title: "Sending accounts",
+      title: "Sending addresses",
       modules: ["attacks"],
       state: "warning",
       findings: ["anna@example.test: 300 recipients in 24 hours, where 20 a day is usual."],
     });
     const elsewhere = observation({ id: "host.clock", title: "Clock synchronisation", modules: ["services"] });
     renderView(<Attacks />, { status: status([senders, elsewhere]) });
-    expect(await screen.findByText("Sending accounts")).toBeTruthy();
+    expect(await screen.findByText("Sending addresses")).toBeTruthy();
     expect(screen.getByText("anna@example.test: 300 recipients in 24 hours, where 20 a day is usual.")).toBeTruthy();
     expect(screen.queryByText("Clock synchronisation")).toBeNull();
   });

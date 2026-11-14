@@ -7,23 +7,24 @@ use crate::testing::{Canned, Receiver, Remembered, config, now, table};
 /// came, and its fields.
 type Event = (&'static str, i64, Value);
 
-/// A message `account` handed in `ago` seconds ago to `count` recipients.
-fn queued(account: &str, ago: i64, count: usize, address: &str) -> Event {
+/// A message handed in under the address `sender` `ago` seconds ago to
+/// `count` recipients, from the IP address `client`.
+fn queued(sender: &str, ago: i64, count: usize, client: &str) -> Event {
     let to: Vec<String> = (0..count)
         .map(|index| format!("r{index}@example.org"))
         .collect();
     (
         QUEUED,
         ago,
-        json!({"from": account, "to": to, "remoteIp": address}),
+        json!({"from": sender, "to": to, "remoteIp": client}),
     )
 }
 
-fn bounced(account: &str, ago: i64) -> Event {
+fn bounced(sender: &str, ago: i64) -> Event {
     (
         BOUNCED,
         ago,
-        json!({"from": account, "to": "gone@example.org"}),
+        json!({"from": sender, "to": "gone@example.org"}),
     )
 }
 
@@ -84,20 +85,20 @@ fn provider() -> Senders {
     Senders::new(&table("type = \"senders\"")).unwrap()
 }
 
-fn row<'a>(observation: &'a Observation, account: &str) -> &'a Vec<Value> {
+fn row<'a>(observation: &'a Observation, sender: &str) -> &'a Vec<Value> {
     let rows = &observation.table.as_ref().unwrap().rows;
-    rows.iter().find(|row| row[0] == account).unwrap()
+    rows.iter().find(|row| row[0] == sender).unwrap()
 }
 
-/// Two weeks in which `account` sent to `a_day` recipients each day.
-fn usual(account: &str, a_day: usize) -> Vec<Event> {
+/// Two weeks in which `sender` sent to `a_day` recipients each day.
+fn usual(sender: &str, a_day: usize) -> Vec<Event> {
     (1..=USUAL_DAYS)
-        .map(|day| queued(account, day * DAY + 3600, a_day, "192.0.2.1"))
+        .map(|day| queued(sender, day * DAY + 3600, a_day, "192.0.2.1"))
         .collect()
 }
 
 #[test]
-fn an_account_far_above_its_own_usual_volume_is_a_warning() {
+fn an_address_far_above_its_own_usual_volume_is_a_warning() {
     let mut events = usual("anna@example.test", 20);
     events.extend(usual("news@example.test", 400));
     // Today anna sends to 300, the newsletter to its usual 400.
@@ -120,7 +121,7 @@ fn an_account_far_above_its_own_usual_volume_is_a_warning() {
     );
     assert_eq!(observation.id, "senders.accounts");
     assert_eq!(observation.modules, [ModuleId::Attacks].into());
-    // The unusual account comes first, then the busiest.
+    // The unusual address comes first, then the busiest.
     let rows = &observation.table.as_ref().unwrap().rows;
     assert_eq!(
         rows[0],
@@ -145,7 +146,7 @@ fn a_burst_and_a_share_of_bounces_are_warnings_of_their_own() {
     events.push(queued("shop@example.test", 600, 150, "192.0.2.1"));
     events.push(queued("shop@example.test", 50_000, 100, "192.0.2.1"));
     events.extend((0..60).map(|index| bounced("shop@example.test", 500 - index)));
-    // Bounces of mail no account handed in today count for nobody.
+    // Bounces of mail nobody handed in today count for nobody.
     events.push(bounced("ghost@example.test", 100));
     events.push((
         "delivery.dsn-perm-fail",
@@ -171,7 +172,7 @@ fn without_three_days_of_history_no_usual_volume_is_named() {
     let observation = observed(&provider(), &events, 2, &Remembered::default(), 0);
     assert_eq!(observation.state, State::Ok);
     assert_eq!(row(&observation, "anna@example.test")[3], Value::Null);
-    // A quiet account and an empty history are in order too.
+    // A quiet address and an empty history are in order too.
     let quiet = observed(&provider(), &[], 20, &Remembered::default(), 0);
     assert_eq!((quiet.state, quiet.findings.len()), (State::Ok, 0));
 }
@@ -184,7 +185,7 @@ fn the_history_is_read_every_ten_minutes_and_its_absence_is_unknown() {
     assert_eq!(
         first.findings,
         [
-            "anna@example.test: 120 recipients in 24 hours from an account that sent nothing in the \
+            "anna@example.test: 120 recipients in 24 hours from an address that sent nothing in the \
              14 days before; 120 recipients within one hour."
         ]
     );
@@ -202,7 +203,7 @@ fn the_history_is_read_every_ten_minutes_and_its_absence_is_unknown() {
     assert_eq!(missing.state, State::Unknown);
     assert_eq!(
         missing.findings,
-        ["The sending accounts are not known: no events are recorded yet."]
+        ["The sending addresses are not known: no events are recorded yet."]
     );
 }
 
@@ -303,4 +304,47 @@ fn events_lost_in_the_days_before_leave_no_usual_volume_to_compare_with() {
     // Without the gap, the same four days would make 150 an outlier.
     let observation = observed(&provider(), &events, 20, &Remembered::default(), 0);
     assert_eq!(observation.state, State::Warning);
+}
+
+#[test]
+fn the_check_counts_by_sender_address_and_says_so() {
+    // One account sends under two of its addresses, signed in once: the
+    // events name the address, not the account, so each address is a row.
+    let events: Vec<Event> = ["anna@example.test", "sales@example.test"]
+        .iter()
+        .map(|address| {
+            (
+                QUEUED,
+                600,
+                json!({"accountId": 42, "from": address, "to": ["r@example.org"], "remoteIp": "192.0.2.1"}),
+            )
+        })
+        .collect();
+    let observation = observed(&provider(), &events, 20, &Remembered::default(), 0);
+    // The id is the one scripts and notifications know.
+    assert_eq!(observation.id, "senders.accounts");
+    assert_eq!(observation.title, "Sending addresses");
+    let table = observation.table.as_ref().unwrap();
+    assert_eq!(table.rows.len(), 2);
+    let labels: Vec<&str> = table
+        .columns
+        .iter()
+        .map(|column| column.label.as_str())
+        .collect();
+    assert_eq!(labels[0], "Sender address");
+    assert_eq!(labels[6], "IP addresses");
+    assert_eq!(observation.fields[0].label, "Addresses that sent");
+    assert_eq!(observation.fields[0].value, json!(2));
+    assert!(
+        observation.scope.contains("by sender address"),
+        "{}",
+        observation.scope
+    );
+    assert!(
+        observation
+            .scope
+            .contains("An account that sends under several addresses shows once for each"),
+        "{}",
+        observation.scope
+    );
 }

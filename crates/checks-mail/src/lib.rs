@@ -1,5 +1,6 @@
-//! Checks of the mail flow: the recorded events in numbers, accounts that send
-//! unusually much, test messages through the server and the antivirus scanner.
+//! Checks of the mail flow: the recorded events in numbers, sender addresses
+//! that send unusually much, test messages through the server and the
+//! antivirus scanner.
 
 pub mod providers;
 
