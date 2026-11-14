@@ -5,12 +5,14 @@
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Router;
 use axum::body::{Body, to_bytes};
+use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use garrison_broker::client::CallError;
 use garrison_broker::protocol::{self, BrokerError};
@@ -264,7 +266,30 @@ impl Client {
         headers: &[(&str, &str)],
         body: Option<Value>,
     ) -> Answer {
+        self.send_by(None, method, uri, headers, body).await
+    }
+
+    /// A GET as nginx forwards it for a client at `address`: from loopback,
+    /// with the one header that names the client.
+    pub(crate) async fn get_from(&mut self, uri: &str, address: &str) -> Answer {
+        let nginx = SocketAddr::from((Ipv4Addr::LOCALHOST, 40000));
+        let headers = [("x-garrison-client-ip", address)];
+        self.send_by(Some(nginx), Method::GET, uri, &headers, None)
+            .await
+    }
+
+    async fn send_by(
+        &mut self,
+        peer: Option<SocketAddr>,
+        method: Method,
+        uri: &str,
+        headers: &[(&str, &str)],
+        body: Option<Value>,
+    ) -> Answer {
         let mut builder = Request::builder().method(method).uri(uri);
+        if let Some(peer) = peer {
+            builder = builder.extension(ConnectInfo(peer));
+        }
         let cookie: Vec<String> = self
             .cookies
             .iter()

@@ -6,6 +6,7 @@ import { Button } from "./ui/button";
 // Shown when there is no valid session. Sign-in always happens at Stalwart.
 const MESSAGES = {
   "1": "signIn.error.failed",
+  busy: "signIn.error.busy",
   "cross-site": "signIn.error.crossSite",
   rate: "signIn.error.rate",
 } as const;

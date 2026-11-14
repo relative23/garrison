@@ -11,7 +11,7 @@ incoming message while the filter judges it.
 
 | Boundary | Control |
 |---|---|
-| Internet → web | nginx TLS on Garrison's own host name, which serves nothing else; `/metrics/` blocked in Stalwart's server blocks; strict CSP without inline code or styles, except the build's own stylesheet in the drawn pages, allowed by its SHA-256 hash, which the web service takes from the page it sends; JSON answers go out gzipped when the browser accepts it, except `/api/session`, which carries the CSRF token (a compressed secret next to text an attacker chose leaks by its length, BREACH); `X-Frame-Options: DENY`; no access log; at most 10 sign-in code exchanges per minute and client network. |
+| Internet → web | nginx TLS on Garrison's own host name, which serves nothing else; `/metrics/` blocked in Stalwart's server blocks; strict CSP without inline code or styles, except the build's own stylesheet in the drawn pages, allowed by its SHA-256 hash, which the web service takes from the page it sends; JSON answers go out gzipped when the browser accepts it, except `/api/session`, which carries the CSRF token (a compressed secret next to text an attacker chose leaks by its length, BREACH); `X-Frame-Options: DENY`; no access log; at most 10 sign-in code exchanges a minute per client network (an IPv4 address or an IPv6 /64 of the address nginx names; requests it names none for count as one network), for up to 4096 networks within a minute, and 10 a minute together for all networks beyond those, so at most 40 970 a minute in all; a refused callback goes back to the sign-in page, which says to wait a minute, and its code never reaches Stalwart. |
 | Browser → API | Session cookie (`__Host-`: this host name only, HttpOnly, SameSite=Lax); writes need the exact Origin and the CSRF token; every route names its module. |
 | Garrison ↔ Stalwart WebUI | Separate host names: `check-config` refuses an origin shared with the issuer or the Stalwart WebUI, and the web service answers other host names only with a redirect to its own. Neither interface's scripts can act in the other or read its storage. |
 | Web → broker | Unix socket, group `garrison`, mode 0660; the broker accepts only allowed peer UIDs (SO_PEERCRED). The web service sends the user's token, never an identity: a compromised web service can act only as a user who is signed in at that moment, within that user's rights. The broker serves at most 16 requests at once and closes further connections unanswered (the web service then answers 503), so a flood of connections cannot use up the tasks its unit allows (`TasksMax=32`) and a maintenance job needs. |
@@ -74,6 +74,13 @@ brokers never repeat a job; pending jobs become "uncertain".
   within 20 seconds. By default (`on_incomplete = "tag"`) it arrives with the
   header `X-Garrison-Scan: unscanned`, and it is up to a Sieve rule or the
   mail program to act on that; `"defer"` and `"refuse"` keep it out.
+- A flood of sign-in callbacks from more than 4096 networks within a minute
+  (a single IPv6 /48 holds 65 536 of them) leaves everyone signing in from a
+  network that has not tried within that minute 10 exchanges a minute,
+  shared with the flood, so such a person is likely to be turned away while
+  it lasts. Networks already counted keep their own budget, signed-in users
+  stay signed in, the table holds no more than 4096 networks, and a minute
+  after the flood ends everyone can sign in again.
 - Profiles are server-wide; the event history of all domains is visible to
   anyone with the Event history, Deliveries, Sessions or Attacks & bans
   module.

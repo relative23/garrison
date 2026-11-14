@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use garrison_web::attempts::BUDGET;
+use garrison_web::attempts::{BUDGET, MAX_NETWORKS};
 use garrison_web::routes::auth::challenge;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -166,6 +166,42 @@ async fn code_exchanges_per_network_are_limited() {
         assert_eq!(limited, round >= budget, "round {round}");
     }
     assert_eq!(setup.provider.verifiers.lock().unwrap().len(), budget);
+
+    // A flood from many networks: every /64 of one IPv6 /48 is a network of
+    // its own. With the one network so far, these fill the table.
+    let flood = format!(
+        "/auth/callback?state={state}&code=code-expired&iss=https%3A%2F%2Fmail.example.test"
+    );
+    for index in 1..MAX_NETWORKS {
+        setup
+            .client
+            .cookies
+            .insert(STATE_COOKIE.into(), value.clone());
+        let address = format!("2001:db8:0:{index:x}::1");
+        let answer = setup.client.get_from(&flood, &address).await;
+        assert!(
+            answer.header("location").ends_with("login_error=1"),
+            "{address}"
+        );
+    }
+    assert_eq!(
+        setup.provider.verifiers.lock().unwrap().len(),
+        budget + MAX_NETWORKS - 1
+    );
+    // Networks beyond the table share one budget instead of passing unlimited.
+    let (mut exchanged, mut crowded) = (0, 0);
+    for index in 0..100 {
+        setup
+            .client
+            .cookies
+            .insert(STATE_COOKIE.into(), value.clone());
+        let address = format!("2001:db8:1:{index:x}::1");
+        let before = setup.provider.verifiers.lock().unwrap().len();
+        let answer = setup.client.get_from(&flood, &address).await;
+        exchanged += setup.provider.verifiers.lock().unwrap().len() - before;
+        crowded += usize::from(answer.header("location").ends_with("login_error=busy"));
+    }
+    assert_eq!((exchanged, crowded), (budget, 100 - budget));
 }
 
 /// The provider's sign-in URL parameters of a fresh login.

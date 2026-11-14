@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256};
 use url::form_urlencoded;
 
 use crate::app::{App, INTERFACE};
-use crate::attempts;
+use crate::attempts::{self, Refusal};
 use crate::error::{ApiResult, blocking};
 use crate::security::{SESSION_COOKIE, STATE_COOKIE, Visitor};
 use crate::store::{NewSession, random_token};
@@ -156,8 +156,11 @@ async fn callback(
     }
     // Only a matching state reaches Stalwart, so only it uses the budget.
     let network = attempts::network(visitor.client_ip().as_deref());
-    if !app.sign_ins.allow(network, Instant::now()) {
-        return sign_in_again("rate");
+    if let Err(refusal) = app.sign_ins.allow(network, Instant::now()) {
+        return sign_in_again(match refusal {
+            Refusal::Network => "rate",
+            Refusal::Crowded => "busy",
+        });
     }
     let verifier = verifier.to_owned();
     let outcome = blocking(move || finish(&app, &visitor, &verifier, &params)).await;

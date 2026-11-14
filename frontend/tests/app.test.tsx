@@ -36,6 +36,13 @@ describe("sign-in", () => {
     expect(await screen.findByText(/Too many sign-ins from your network/)).toBeTruthy();
   });
 
+  it("asks to wait while sign-ins come from too many networks at once", async () => {
+    serve({ "GET session": { body: { session: null } } });
+    openApp("/admin/?login_error=busy");
+    expect(await screen.findByText(/Too many sign-ins from many networks/)).toBeTruthy();
+    expect(screen.queryByText(/from your network/)).toBeNull();
+  });
+
   it("reads an unknown sign-in error as a failed sign-in", async () => {
     serve({ "GET session": { body: { session: null } } });
     openApp("/admin/?login_error=%3Cscript%3E");

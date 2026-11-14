@@ -43,6 +43,17 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **Sign-ins from more networks than the web service counts are limited
+  too.** The web service lets each client network (an IPv4 address or an
+  IPv6 /64) exchange 10 sign-in codes a minute at Stalwart and counts up to
+  4096 networks at once; while all of them had tried within the last minute,
+  any further network passed without a limit, and a single IPv6 /48 holds
+  65 536 networks. All networks beyond those 4096 now share 10 exchanges a
+  minute, so such a flood reaches Stalwart with at most 40 970 a minute, and
+  a sign-in it turns away is told so on the sign-in page. While a flood
+  lasts, people signing in from a network that has not tried within the
+  minute are likely to be turned away; people already signed in stay signed
+  in, and a minute after the flood ends sign-in works again.
 - **The macro filter no longer passes what it could not scan as clean.** A
   message larger than `max_message_mib`, an archive that unpacks to more than
   the filter unpacks (16 MiB a file, 64 MiB together), and a zip archive

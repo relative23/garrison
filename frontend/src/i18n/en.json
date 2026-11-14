@@ -509,6 +509,7 @@
     "expired": "Your session has ended. Sign in again to continue.",
     "intro": "Status, history and maintenance for Stalwart. Sign in with your Stalwart account.",
     "error": {
+      "busy": "Too many sign-ins from many networks in the last minute. Wait a minute and try again.",
       "crossSite": "Sign-in must start from this page.",
       "failed": "Sign-in could not be completed. Your account may not have Garrison access, or the sign-in expired.",
       "rate": "Too many sign-ins from your network in the last minute. Wait a minute and try again."

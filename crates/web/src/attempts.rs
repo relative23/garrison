@@ -6,6 +6,12 @@
 //! send Stalwart failed exchanges without end, all from its loopback address.
 //! A network is an IPv4 address or an IPv6 /64 prefix, which one client
 //! usually holds whole.
+//!
+//! The table of networks is bounded, and anyone with a large IPv6 prefix has
+//! more networks than it holds. The networks beyond a full table therefore
+//! share one budget: a flood from many networks reaches Stalwart with a
+//! bounded number of exchanges, keeps no network it counts from its own
+//! budget, and is forgotten one window after it ends.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
@@ -15,9 +21,10 @@ use std::time::{Duration, Instant};
 /// Code exchanges per network and window; a person needs one per sign-in.
 pub const BUDGET: u32 = 10;
 const WINDOW: Duration = Duration::from_secs(60);
-/// Networks tracked at once. When all of them are recent, a further network
-/// passes untracked: a full table must never refuse everybody.
-const MAX_NETWORKS: usize = 4096;
+/// Networks tracked at once. When all of them are recent, further networks
+/// share one more budget of [`BUDGET`]: a full table must never refuse
+/// everybody new, nor let everybody pass.
+pub const MAX_NETWORKS: usize = 4096;
 
 /// The network of a client address; `None` when nginx sent none.
 pub fn network(address: Option<&str>) -> Option<IpAddr> {
@@ -29,30 +36,91 @@ pub fn network(address: Option<&str>) -> Option<IpAddr> {
     }
 }
 
+/// Why a code exchange may not start now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// This network has used its budget in the current window.
+    Network,
+    /// The table is full of networks seen within the window, and the networks
+    /// beyond it have used the budget they share.
+    Crowded,
+}
+
+/// The exchanges of one window, which starts with its first exchange.
+#[derive(Debug)]
+struct Window {
+    start: Instant,
+    count: u32,
+}
+
+impl Window {
+    fn new(now: Instant) -> Self {
+        Window {
+            start: now,
+            count: 0,
+        }
+    }
+
+    fn recent(&self, now: Instant) -> bool {
+        now.duration_since(self.start) < WINDOW
+    }
+
+    /// Count one more exchange at `now`: how many the window holds with it.
+    fn take(&mut self, now: Instant) -> u32 {
+        if !self.recent(now) {
+            *self = Window::new(now);
+        }
+        self.count = self.count.saturating_add(1);
+        self.count
+    }
+}
+
+#[derive(Debug, Default)]
+struct Table {
+    networks: HashMap<Option<IpAddr>, Window>,
+    /// What the networks beyond a full table used together.
+    others: Option<Window>,
+}
+
 #[derive(Debug, Default)]
 pub struct Attempts {
-    recent: Mutex<HashMap<Option<IpAddr>, (Instant, u32)>>,
+    table: Mutex<Table>,
 }
 
 impl Attempts {
     /// Whether `network` may start one more code exchange at `now`.
-    pub fn allow(&self, network: Option<IpAddr>, now: Instant) -> bool {
-        let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
-        if recent.len() >= MAX_NETWORKS && !recent.contains_key(&network) {
-            recent.retain(|_, (start, _)| now.duration_since(*start) < WINDOW);
-            if recent.len() >= MAX_NETWORKS {
-                return true;
+    pub fn allow(&self, network: Option<IpAddr>, now: Instant) -> Result<(), Refusal> {
+        let mut table = self.table.lock().unwrap_or_else(PoisonError::into_inner);
+        let Table { networks, others } = &mut *table;
+        if networks.len() >= MAX_NETWORKS && !networks.contains_key(&network) {
+            networks.retain(|_, window| window.recent(now));
+            if networks.len() >= MAX_NETWORKS {
+                let count = others.get_or_insert_with(|| Window::new(now)).take(now);
+                if count == BUDGET + 1 {
+                    log::warn!(
+                        "Sign-in exchanges from more than {MAX_NETWORKS} networks in a minute; \
+                         the others share {BUDGET} per minute, more wait"
+                    );
+                }
+                return if count <= BUDGET {
+                    Ok(())
+                } else {
+                    Err(Refusal::Crowded)
+                };
             }
         }
-        let (start, count) = recent.entry(network).or_insert((now, 0));
-        if now.duration_since(*start) >= WINDOW {
-            (*start, *count) = (now, 0);
-        }
-        *count = count.saturating_add(1);
-        if *count == BUDGET + 1 {
+        let count = networks
+            .entry(network)
+            .or_insert_with(|| Window::new(now))
+            .take(now);
+        if count == BUDGET + 1 {
             log::warn!("Sign-in exchanges from one network exceed {BUDGET} per minute; more wait");
         }
-        *count <= BUDGET
+        if count <= BUDGET {
+            Ok(())
+        } else {
+            Err(Refusal::Network)
+        }
     }
 }
 
@@ -78,36 +146,81 @@ mod tests {
         let (one, two) = (network(Some("192.0.2.1")), network(Some("192.0.2.2")));
         let start = Instant::now();
         for _ in 0..BUDGET {
-            assert!(attempts.allow(one, start));
+            assert_eq!(attempts.allow(one, start), Ok(()));
         }
-        assert!(!attempts.allow(one, start));
-        assert!(attempts.allow(two, start));
-        assert!(attempts.allow(one, start + WINDOW));
+        assert_eq!(attempts.allow(one, start), Err(Refusal::Network));
+        assert_eq!(attempts.allow(two, start), Ok(()));
+        assert_eq!(attempts.allow(one, start + WINDOW), Ok(()));
+    }
+
+    /// A table holding `MAX_NETWORKS` networks of one IPv6 /48, seen at `now`.
+    fn full_table(attempts: &Attempts, now: Instant) {
+        for index in 0..MAX_NETWORKS {
+            assert_eq!(attempts.allow(prefix(index), now), Ok(()));
+        }
+    }
+
+    /// The `index`th /64 of `2001:db8::/48`.
+    fn prefix(index: usize) -> Option<IpAddr> {
+        network(Some(&format!("2001:db8:0:{index:x}::1")))
+    }
+
+    fn newcomer(index: usize) -> Option<IpAddr> {
+        network(Some(&format!("198.51.100.{index}")))
+    }
+
+    fn budget() -> usize {
+        usize::try_from(BUDGET).unwrap()
     }
 
     #[test]
-    fn a_full_table_lets_new_networks_pass_instead_of_refusing_them() {
+    fn a_full_table_gives_further_networks_one_budget_together() {
         let attempts = Attempts::default();
         let start = Instant::now();
-        for index in 0..MAX_NETWORKS {
-            let address = IpAddr::V6(Ipv6Addr::from((index as u128) << 64));
-            assert!(attempts.allow(Some(address), start));
+        full_table(&attempts, start);
+        // Each newcomer is another network; together they get one budget.
+        for index in 0..budget() {
+            assert_eq!(attempts.allow(newcomer(index), start), Ok(()));
         }
-        let newcomer = network(Some("198.51.100.9"));
-        for _ in 0..=BUDGET {
-            assert!(attempts.allow(newcomer, start));
+        for index in 0..20 {
+            assert_eq!(
+                attempts.allow(newcomer(index), start),
+                Err(Refusal::Crowded)
+            );
         }
-        // A network already counted keeps its budget while the table is full.
-        let known = Some(IpAddr::V6(Ipv6Addr::from(0)));
+        // A network already counted keeps its own budget while the table is full.
+        let known = prefix(0);
         for _ in 1..BUDGET {
-            assert!(attempts.allow(known, start));
+            assert_eq!(attempts.allow(known, start), Ok(()));
         }
-        assert!(!attempts.allow(known, start));
-        // Once the old entries expire, the newcomer is tracked again.
+        assert_eq!(attempts.allow(known, start), Err(Refusal::Network));
+        // A second before the window ends, the flood still fills the table.
+        let late = start + WINDOW.saturating_sub(Duration::from_secs(1));
+        assert_eq!(attempts.allow(newcomer(0), late), Err(Refusal::Crowded));
+        // Once the old entries expire, a newcomer is tracked with its own budget.
         let later = start + WINDOW;
         for _ in 0..BUDGET {
-            assert!(attempts.allow(newcomer, later));
+            assert_eq!(attempts.allow(newcomer(0), later), Ok(()));
         }
-        assert!(!attempts.allow(newcomer, later));
+        assert_eq!(attempts.allow(newcomer(0), later), Err(Refusal::Network));
+    }
+
+    #[test]
+    fn a_lasting_flood_leaves_further_networks_a_budget_each_window() {
+        let attempts = Attempts::default();
+        let start = Instant::now();
+        full_table(&attempts, start);
+        for index in 0..=budget() {
+            attempts.allow(newcomer(index), start).ok();
+        }
+        assert_eq!(attempts.allow(newcomer(0), start), Err(Refusal::Crowded));
+        // The flood comes back from all its networks as their windows end, so
+        // the table stays full; the shared budget is new all the same.
+        let next = start + WINDOW;
+        full_table(&attempts, next);
+        for index in 0..budget() {
+            assert_eq!(attempts.allow(newcomer(index), next), Ok(()));
+        }
+        assert_eq!(attempts.allow(newcomer(0), next), Err(Refusal::Crowded));
     }
 }
