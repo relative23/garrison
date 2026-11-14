@@ -40,6 +40,20 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A failed upgrade returns to a release that can read its data.** A new
+  release that changed a database schema and then failed to start, or to
+  stay up, left that database behind: the old release started again, the
+  installer said so, and its collector could no longer open the status
+  database. The installer now stops every writer first, a collection run
+  included, puts each database whose schema rose back to its copy from
+  before the upgrade (the others keep their data), and counts the old
+  release as running only after its own self-check and start. Where the old
+  release does not start either, the links stay as the upgrade set them, so
+  `garrison install --rollback --restore-state` is the second attempt; the
+  installer names it. The macro filter must now stay up after a start like
+  the other services, and a backup names the release that wrote it:
+  `--restore-state` refuses a state written by a newer release than the one
+  it returns to, and removes a database that did not exist at the backup.
 - **A stale event history no longer reads as a quiet mail server.** The
   mail-flow summaries and the sending accounts counted whatever the event
   history held and called it in order, also when the event receiver had not

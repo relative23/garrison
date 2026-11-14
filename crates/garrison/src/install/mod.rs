@@ -12,12 +12,15 @@
 //! mail data or unrelated services.
 
 mod command;
+mod fallback;
 mod files;
 mod housekeeping;
 mod milter;
 mod requirements;
 mod rollback;
 mod selinux;
+mod settle;
+mod state;
 mod system;
 mod uninstall;
 mod verify;
@@ -59,13 +62,18 @@ const ENABLE: [&str; 5] = [
     units::COLLECT_TIMER,
     units::WATCH_TIMER,
 ];
-// The macro milter is not among them: it keeps nothing, and while it is
-// down Stalwart defers mail. It starts anew with the others.
-const STOP: [&str; 6] = [
+// Everything that writes Garrison's state: the services, the timers, and a
+// collection run or a watch that a timer started, which stopping the timer
+// alone would leave running. The macro milter is not among them: it keeps
+// nothing, and while it is down Stalwart defers mail. It starts anew with
+// the others.
+const STOP: [&str; 8] = [
     units::WEB,
     units::INGEST,
     units::COLLECT_TIMER,
     units::WATCH_TIMER,
+    units::COLLECT,
+    units::WATCH,
     units::BROKER,
     units::BROKER_SOCKET,
 ];
@@ -130,10 +138,11 @@ fn install_release(here: &Path, version: &str) -> Step<PathBuf> {
     Ok(target)
 }
 
-/// Back up the running state. Only a change of release moves `last-pre-upgrade`,
-/// the state `--rollback --restore-state` returns to: a reinstall of the running
-/// release would otherwise replace it with data the previous release cannot read.
-fn backup_state(current: &Path, upgrade: bool) -> Step {
+/// Back up the running state, and say where to. Only a change of release moves
+/// `last-pre-upgrade`, the state `--rollback --restore-state` returns to: a
+/// reinstall of the running release would otherwise replace it with data the
+/// previous release cannot read.
+fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
     let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
     let kind = if upgrade {
         "pre-upgrade"
@@ -153,10 +162,10 @@ fn backup_state(current: &Path, upgrade: bool) -> Step {
         ));
     }
     copy_config(Path::new(CONFIG), &target.join("etc"))?;
-    if !upgrade {
-        return Ok(());
+    if upgrade {
+        switch(&Path::new(BACKUPS).join(LAST), &target)?;
     }
-    switch(&Path::new(BACKUPS).join(LAST), &target)
+    Ok(target)
 }
 
 /// The configuration without credentials, which have their own protected backup.
@@ -263,7 +272,8 @@ fn start(release: &Path) -> Step {
     // Only what this release ships: an older one has fewer units.
     let shipped = ENABLE.into_iter().filter(|unit| unit_file(unit).exists());
     let mut shipped: Vec<&str> = shipped.collect();
-    if milter::runs() {
+    let milter = milter::runs();
+    if milter {
         shipped.push(units::MILTER);
     }
     let mut enable = vec!["enable"];
@@ -276,47 +286,7 @@ fn start(release: &Path) -> Step {
     restart.extend(&shipped);
     must(SYSTEMCTL, &restart)?;
     must(SYSTEMCTL, &["start", units::BROKER])?;
-    settle()
-}
-
-/// The services must also stay up: one that reports ready and falls over at
-/// once would otherwise pass as started and restart forever.
-const SETTLE: std::time::Duration = std::time::Duration::from_secs(8);
-const WATCHED: [&str; 3] = [units::WEB, units::INGEST, units::BROKER];
-
-fn settle() -> Step {
-    std::thread::sleep(SETTLE);
-    for unit in WATCHED {
-        let output = run(
-            SYSTEMCTL,
-            &["show", "-p", "ActiveState", "-p", "NRestarts", unit],
-        )?;
-        if let Some(reason) = unsettled(&String::from_utf8_lossy(&output.stdout)) {
-            return Err(format!(
-                "{unit} {reason} within {} s of starting",
-                SETTLE.as_secs()
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Why `systemctl show -p ActiveState -p NRestarts` describes a unit that did not stay up.
-fn unsettled(properties: &str) -> Option<String> {
-    let value = |key: &str| {
-        properties
-            .lines()
-            .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
-            .unwrap_or_default()
-    };
-    match (value("ActiveState"), value("NRestarts")) {
-        ("active", "0") => None,
-        ("active", restarts) => Some(format!("restarted {restarts} times")),
-        (state, _) => Some(format!(
-            "is {}",
-            if state.is_empty() { "unknown" } else { state }
-        )),
-    }
+    settle::settle(milter)
 }
 
 /// Forget failures and systemd's start limit (5 starts in 10 s) left by a
@@ -331,27 +301,6 @@ fn stop_services() {
     let mut stop = vec!["stop"];
     stop.extend(STOP);
     let _ = run(SYSTEMCTL, &stop);
-}
-
-/// Switch back after a failed upgrade, with `previous` as it was before, and
-/// report whether the previous release runs again, rather than assume it.
-fn start_previous(old: &Path, earlier: Option<&Path>) -> Step<&'static str> {
-    announce("Start failed; switching back to the previous release.");
-    let base = Path::new(BASE);
-    switch(&base.join("current"), old)?;
-    let previous = base.join("previous");
-    match earlier {
-        Some(earlier) => switch(&previous, earlier)?,
-        None => {
-            let _ = fs::remove_file(&previous);
-        }
-    }
-    install_system_files(old)?;
-    Ok(if start(old).is_ok() {
-        "the previous release is running"
-    } else {
-        "the previous release did not start either"
-    })
 }
 
 /// Make `release` current, install its system files and, once configured,
@@ -386,6 +335,7 @@ fn install() -> Step {
     room(&needs)?;
     let release = install_release(&here, &version)?;
     let mut restore = false;
+    let mut backup = None;
     if old.is_some() && configured {
         // The installer sets the policy's owner and mode anyway; the check must
         // not refuse what it is about to correct.
@@ -393,7 +343,7 @@ fn install() -> Step {
         // A configuration the new release refuses leaves the running one alone.
         check_config(&release)
             .map_err(|error| format!("{error}; the running release was not touched"))?;
-        backup_state(&current, old.as_ref() != Some(&release))?;
+        backup = Some(backup_state(&current, old.as_ref() != Some(&release))?);
         // Compared with the state --restore-state returns to, the one from
         // before the upgrade to this release: a reinstall keeps it, and the
         // previous release still cannot read what this one migrated.
@@ -406,10 +356,11 @@ fn install() -> Step {
         if !configured {
             return Err(error);
         }
-        // Garrison is stopped now: whatever failed, the release that ran goes back.
+        // Garrison is stopped now: whatever failed, the release that ran goes
+        // back, with the databases the new one migrated as they were before.
         let outcome = match changed {
-            Some(old) => start_previous(old, earlier.as_deref())?,
-            None => "no other release was started",
+            Some(old) => fallback::fall_back(old, earlier.as_deref(), &release, backup.as_deref()),
+            None => "no other release was started".to_owned(),
         };
         return Err(format!(
             "The new release did not start ({error}); {outcome}. See the journal."
@@ -473,24 +424,5 @@ pub(crate) fn run_installer(rollback_requested: bool, with_state: bool) -> u8 {
             crate::complain(&error);
             1
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::unsettled;
-
-    #[test]
-    fn a_service_must_stay_active_without_restarts() {
-        assert_eq!(unsettled("NRestarts=0\nActiveState=active\n"), None);
-        assert_eq!(
-            unsettled("ActiveState=active\nNRestarts=2\n").unwrap(),
-            "restarted 2 times"
-        );
-        assert_eq!(
-            unsettled("ActiveState=activating\nNRestarts=1\n").unwrap(),
-            "is activating"
-        );
-        assert_eq!(unsettled("").unwrap(), "is unknown");
     }
 }

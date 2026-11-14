@@ -99,10 +99,37 @@ The installer backs up the state to `/var/backups/garrison/pre-upgrade-*`,
 switches `/opt/garrison/current` to the new release and starts it. The
 services report ready only once they serve, and they must then stay up
 without a restart for eight seconds, so a release that fails right after it
-starts, or keeps restarting, counts as not started. If the new release does not start, or
-anything fails after the old one stopped, the installer switches back and
-starts the old release again. Installing the running release again backs up to
-`pre-reinstall-*` and keeps the pre-upgrade copy that a rollback restores.
+starts, or keeps restarting, counts as not started; where the macro filter
+runs, it must stay up as well. Installing the running release again backs up
+to `pre-reinstall-*` and keeps the pre-upgrade copy that a rollback restores.
+
+If the new release does not start, or anything fails after the old one
+stopped, the installer switches back by itself:
+
+1. It stops everything of Garrison that writes: the services, the timers and
+   a collection run that is under way.
+2. A new release may already have changed the schema of a database before it
+   failed, and the old release refuses to open such a database. Each database
+   whose schema rose goes back to its copy in `pre-upgrade-*`, and one that
+   did not exist before the upgrade is removed; the installer names them.
+   What they recorded between the backup and the stop, seconds as a rule, is
+   lost. Every other database keeps its data.
+3. It checks with the old release's own `self-check` that it reads every
+   database, starts it and waits until it stays up. Only then does the
+   installer say `the previous release is running`, and `previous` is again
+   what it was before the upgrade.
+
+If the old release does not start either, the installer says so and stops
+what did start. `/opt/garrison/current` then still names the new release and
+`previous` the old one, so that
+
+```sh
+sudo /opt/garrison/current/bin/garrison install --rollback --restore-state
+```
+
+returns to the old release with the whole state from before the upgrade. The
+installer exits with 1 in both cases; the journal says why the new release
+failed.
 
 Before it changes anything, the installer checks that systemd, polkit and the
 free space suffice: the release and a backup as large as the databases must
@@ -132,8 +159,11 @@ cannot load today's configuration, for example because of a `modules` line it
 does not know: remove that setting, or put back the file from before the
 upgrade (`/var/backups/garrison/last-pre-upgrade/etc/garrison.toml`). With
 `--restore-state` it first checks that the state from before the upgrade is
-there. If a rollback fails after the services stopped, it starts the release
-that ran before.
+there and that no release newer than the one it returns to wrote it
+(`backup.json` in a backup names the release); it then puts back every
+database and the access policy and removes a database that did not exist
+when the backup was made. If a rollback fails after the services stopped, it
+starts the release that ran before.
 
 ## Rotating secrets
 

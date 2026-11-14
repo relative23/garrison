@@ -99,7 +99,12 @@ fn write_backup(config: &Config, target: &Path) -> Result<(), String> {
         fs::set_permissions(&copied, fs::Permissions::from_mode(0o600))
             .map_err(|error| error.to_string())?;
     }
-    let report = json!({"createdAt": time::now_isoformat(), "databases": databases});
+    // The release that wrote the copies: only it and newer ones read them.
+    let report = json!({
+        "createdAt": time::now_isoformat(),
+        "release": env!("CARGO_PKG_VERSION"),
+        "databases": databases,
+    });
     let text = serde_json::to_string_pretty(&report).unwrap_or_default();
     atomic_write(&target.join("backup.json"), text.as_bytes(), 0o600)
         .map_err(|error| error.to_string())?;

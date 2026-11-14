@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 
 use garrison_core::config::{self, Database};
 
-use super::files::{Step, announce, io, lock, place, relabel, replace_in, switch};
+use super::files::{Step, announce, io, lock, switch};
 use super::system::install_system_files;
-use super::{BACKUPS, BASE, CONFIG, LAST, LOCK, cli, preflight, start, stop_services};
+use super::{BACKUPS, BASE, CONFIG, LAST, LOCK, cli, preflight, start, state, stop_services};
 
 /// Whether this release will raise the schema of a database whose copy from
 /// before the upgrade is in `backup`. The release that ran before cannot read
@@ -26,15 +26,22 @@ pub(super) fn schema_rises(backup: &Path) -> bool {
     })
 }
 
-/// The backup `--restore-state` returns to, found before anything stops.
-fn restore_source() -> Step<PathBuf> {
+/// The backup `--restore-state` returns to, found before anything stops. It
+/// must suit the release `name` that will read it.
+fn restore_source(name: &str) -> Step<PathBuf> {
     let last = Path::new(BACKUPS).join(LAST);
-    match fs::canonicalize(&last) {
-        Ok(source) if source.is_dir() => Ok(source),
-        _ => Err(format!(
-            "There is no state from before an upgrade to restore ({}); nothing was changed.",
-            last.display()
-        )),
+    let source = match fs::canonicalize(&last) {
+        Ok(source) if source.is_dir() => source,
+        _ => {
+            return Err(format!(
+                "There is no state from before an upgrade to restore ({}); nothing was changed.",
+                last.display()
+            ));
+        }
+    };
+    match state::unsuited(&source, name) {
+        Some(reason) => Err(format!("{reason} Nothing was changed.")),
+        None => Ok(source),
     }
 }
 
@@ -44,35 +51,7 @@ fn restore_state(source: &Path) -> Step {
     let settings = Path::new(CONFIG).join("garrison.toml");
     let config = config::load(&settings)
         .map_err(|error| format!("Cannot load {}: {error}", settings.display()))?;
-    announce(&format!(
-        "Restoring Garrison state from {}",
-        source.display()
-    ));
-    for database in Database::ALL {
-        let copy = source.join(database.writer()).join(database.file_name());
-        let destination = config.database(database);
-        let Some(folder) = destination.parent().filter(|_| copy.exists()) else {
-            continue;
-        };
-        // A WAL or journal of the replaced file must not survive.
-        let journal = format!("{}-", database.file_name());
-        for stale in fs::read_dir(folder).into_iter().flatten().flatten() {
-            if stale.file_name().to_string_lossy().starts_with(&journal) {
-                let _ = fs::remove_file(stale.path());
-            }
-        }
-        // The service user owns this directory: replace the file without
-        // following anything planted there, and keep the directory's owner.
-        replace_in(folder, database.file_name(), &copy, database.mode())?;
-        relabel(std::slice::from_ref(&destination));
-    }
-    let policy = source.join(crate::ops::POLICY_COPY);
-    if policy.exists() {
-        let target = config.broker.policy.clone();
-        place(&policy, &target, 0o640)?;
-        relabel(&[target]);
-    }
-    Ok(())
+    state::restore_all(source, &config)
 }
 
 /// Make `target` current and `current` previous, then start `target`.
@@ -121,7 +100,7 @@ pub(super) fn rollback(with_state: bool) -> Step {
         ));
     }
     let source = if with_state {
-        Some(restore_source()?)
+        Some(restore_source(&name)?)
     } else {
         None
     };

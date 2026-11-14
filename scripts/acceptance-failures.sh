@@ -1,8 +1,10 @@
 #!/bin/sh
 # The installer's failure paths on a disposable host: a refusal changes
 # nothing, a failure after the services stopped ends with a running Garrison,
-# and an installer killed at any point leaves nothing a later run cannot
-# finish. Beside the installer: a collector that stops is reported.
+# a release that migrated a database before it failed leaves the old one a
+# state it can read, and an installer killed at any point leaves nothing a
+# later run cannot finish. Beside the installer: a collector that stops is
+# reported.
 #
 #   [DISTRO=debian-13] [SCENARIOS="refusals failed_start"] \
 #       scripts/acceptance-failures.sh \
@@ -118,6 +120,62 @@ scenario_crash_loop() {
     refused "a release whose web service keeps restarting is switched back" \
         '/root/unsteady/bin/garrison install' "the previous release is running"
     running "after the unsteady release" "$current"
+}
+
+# The schema of the status database, which a migration raises.
+status_schema() { inside 'sqlite3 /var/lib/garrison/collector/status.sqlite "PRAGMA user_version"'; }
+
+scenario_migrated_then_failed() {
+    step "A release that migrated a database and then failed is switched back with the state from before"
+    # What a release with a migration does when it first opens a database:
+    # it raises the schema, and the release before cannot read it any more.
+    inside_input 'cat > /usr/local/bin/acceptance-migrate && chmod 755 /usr/local/bin/acceptance-migrate' <<'MIGRATE'
+#!/bin/sh
+exec sqlite3 /var/lib/garrison/collector/status.sqlite 'PRAGMA user_version = 99'
+MIGRATE
+    # The web service of this copy migrates before it starts, as root, and
+    # systemd ends it after three seconds every time: started, then failed.
+    inside 'cp -a /root/release /root/migrating && cd /root/migrating &&
+        printf "%s+migrating\n" "$(cat VERSION)" > VERSION &&
+        sed -i "s|^\[Service\]$|[Service]\nRuntimeMaxSec=3s\nExecStartPre=+/usr/local/bin/acceptance-migrate|" \
+            deploy/systemd/garrison-web.service &&
+        grep -q "^ExecStartPre=+/usr/local/bin/acceptance-migrate$" deploy/systemd/garrison-web.service &&
+        find . -type f ! -name SHA256SUMS | sed "s|^\./||" | sort | xargs sha256sum > SHA256SUMS'
+    check "a collection run wrote the status database" 'systemctl start garrison-collect.service'
+    current=$(inside 'basename "$(readlink -f /opt/garrison/current)"')
+    earlier=$(inside 'readlink -f /opt/garrison/previous 2>/dev/null || true')
+    schema=$(status_schema)
+    before=$(events)
+    refused "a release that migrated and then kept falling over is switched back" \
+        '/root/migrating/bin/garrison install' "the previous release is running"
+    check "the migrated database is the one from before again" \
+        "test '$schema' = \"\$(sqlite3 /var/lib/garrison/collector/status.sqlite 'PRAGMA user_version')\""
+    check "the other databases kept their data" \
+        "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -ge $before"
+    check "previous is what it was before the upgrade" \
+        "test \"\$(readlink -f /opt/garrison/previous 2>/dev/null || true)\" = '$earlier'"
+    # The old writers work: among the checks, a collection run of the old
+    # release on the database that went back, and its self-check.
+    running "after the failed upgrade with a migration" "$current"
+
+    step "Where the release that ran does not start either, a second attempt returns to it"
+    # A start that fails for both releases, for as long as the flag is there.
+    inside 'mkdir -p /etc/systemd/system/garrison-web.service.d &&
+        printf "[Service]\nExecStartPre=+/bin/sh -c \"! test -e /run/garrison-acceptance-fail\"\n" \
+            > /etc/systemd/system/garrison-web.service.d/acceptance-fail.conf &&
+        systemctl daemon-reload && touch /run/garrison-acceptance-fail'
+    refused "the installer says that neither release started, and what returns to the old one" \
+        '/root/migrating/bin/garrison install' "install --rollback --restore-state"
+    check "the migrated database went back all the same" \
+        "test '$schema' = \"\$(sqlite3 /var/lib/garrison/collector/status.sqlite 'PRAGMA user_version')\""
+    check "previous names the release to return to" \
+        "test \"\$(basename \"\$(readlink -f /opt/garrison/previous)\")\" = '$current'"
+    check "nothing of a release that is not current keeps running" \
+        '! systemctl is-active --quiet garrison-web.service garrison-ingest.service garrison-collect.timer'
+    inside 'rm /run/garrison-acceptance-fail /etc/systemd/system/garrison-web.service.d/acceptance-fail.conf &&
+        rmdir /etc/systemd/system/garrison-web.service.d && systemctl daemon-reload'
+    installer '/opt/garrison/current/bin/garrison install --rollback --restore-state'
+    running "after the second attempt" "$current"
 }
 
 scenario_concurrent() {
@@ -260,8 +318,8 @@ install_previous
 old=$(inside 'cat /root/previous/VERSION')
 new=$(inside 'cat /root/release/VERSION')
 running "installed" "$old"
-for scenario in ${SCENARIOS:-refusals failed_start crash_loop concurrent interrupted reinstall rollback_without_state \
-    stopped_collector}; do
+for scenario in ${SCENARIOS:-refusals failed_start crash_loop migrated_then_failed concurrent interrupted reinstall \
+    rollback_without_state stopped_collector}; do
     "scenario_$scenario"
 done
 
