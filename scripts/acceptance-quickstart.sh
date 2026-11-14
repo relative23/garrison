@@ -259,6 +259,16 @@ check "a document without one is taken" \
     'python3 /root/document-mail.py plain | tee /root/plain-on.log | grep -q "^250 accepted"'
 check "the filter's journal names what it refused" \
     'journalctl -u garrison-milter.service --no-pager | grep -q "Refused a message with"'
+# Killed after it said it was ready, as the kernel kills a process out of
+# memory, the filter is started again by systemd and judges as before.
+inside 'systemctl show -p MainPID --value garrison-milter.service > /root/milter-pid &&
+    kill -KILL "$(cat /root/milter-pid)"'
+check "systemd starts the killed filter again" \
+    'now=$(systemctl show -p MainPID --value garrison-milter.service) &&
+        test "$now" != 0 && test "$now" != "$(cat /root/milter-pid)" &&
+        systemctl is-active --quiet garrison-milter.service'
+check "the filter started again refuses a document with a macro project" \
+    'python3 /root/document-mail.py macro | grep -q "^550 .*contains macros"'
 check "an upgrade to the same release leaves the filter running" \
     "/root/release/bin/garrison install < /dev/null > /root/reinstall.log 2>&1 &&
         systemctl is-active --quiet garrison-milter.service &&
