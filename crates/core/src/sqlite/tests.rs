@@ -128,6 +128,57 @@ fn readers_see_one_snapshot_and_cannot_write() {
     );
 }
 
+/// With the rollback journal, which a database another service reads uses,
+/// a reader's snapshot holds the writer's commit back: the writer waits for
+/// it to end, the snapshot stays as it was meanwhile, and a reader that comes
+/// while the writer waits gets the write once it is committed.
+#[test]
+fn a_writer_waits_for_a_snapshot_of_the_rollback_journal_and_new_readers_for_the_writer() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("items.sqlite");
+    let writer = open_writer(&path, MIGRATIONS, Sharing::WithReaders, 0o600).unwrap();
+    writer
+        .execute("INSERT INTO item (name) VALUES ('a')", [])
+        .unwrap();
+    let count = |db: &Connection| -> i64 {
+        db.query_row("SELECT count(*) FROM item", [], |row| row.get(0))
+            .unwrap()
+    };
+    let reader = reading(&path, Duration::from_secs(2)).unwrap().unwrap();
+    assert_eq!(count(&reader), 1);
+    let (wrote, written) = mpsc::channel();
+    let writing = thread::spawn(move || {
+        let result = writer.execute("INSERT INTO item (name) VALUES ('b')", []);
+        wrote
+            .send(result.map_err(|error| error.to_string()))
+            .unwrap();
+    });
+    let patience = Duration::from_millis(300);
+    assert_eq!(
+        written.recv_timeout(patience),
+        Err(mpsc::RecvTimeoutError::Timeout),
+        "the writer waits while the snapshot is open"
+    );
+    assert_eq!(count(&reader), 1);
+    let later = path.clone();
+    let (read, seen) = mpsc::channel();
+    let reading_later = thread::spawn(move || {
+        let db = reading(&later, Duration::from_secs(2)).unwrap().unwrap();
+        read.send(count(&db)).unwrap();
+    });
+    assert_eq!(
+        seen.recv_timeout(patience),
+        Err(mpsc::RecvTimeoutError::Timeout),
+        "a new reader waits for the write that waits"
+    );
+    drop(reader);
+    // Well within the writer's five seconds and the new reader's two.
+    assert_eq!(written.recv_timeout(Duration::from_secs(4)), Ok(Ok(1)));
+    assert_eq!(seen.recv_timeout(Duration::from_secs(2)), Ok(2));
+    writing.join().unwrap();
+    reading_later.join().unwrap();
+}
+
 #[test]
 fn reader_queries_stop_at_the_time_budget() {
     let directory = tempfile::tempdir().unwrap();
