@@ -1,9 +1,13 @@
 // Typed access to Garrison API. Types come from schema.gen.ts, which is
 // generated from the server's OpenAPI document (`npm run api`).
 import { i18n } from "../i18n";
-import type { components } from "./schema.gen";
+import type { components, operations } from "./schema.gen";
 
 type Schemas = components["schemas"];
+/** The query parameters of an operation, as the OpenAPI document states them. */
+type QueryOf<Operation extends keyof operations> = NonNullable<operations[Operation]["parameters"]["query"]>;
+/** A period of the summaries; the tabs of a page offer some of them. */
+type Period = Schemas["Period"];
 export type SessionInfo = Schemas["SessionInfo"];
 export type SessionState = Schemas["SessionState"];
 export type ModuleInfo = Schemas["ModuleInfo"];
@@ -81,7 +85,8 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
   if (!response.ok) {
     let detail = response.statusText;
     try {
-      const body = (await response.json()) as { detail?: unknown };
+      // The service's own errors are ErrorDetail; a proxy's need not be.
+      const body = (await response.json()) as Partial<Record<keyof Schemas["ErrorDetail"], unknown>>;
       if (typeof body.detail === "string") detail = body.detail;
     } catch {
       // A non-JSON error body keeps the status text.
@@ -100,41 +105,29 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
 const get = <T>(path: string, query?: Query, signal?: AbortSignal) =>
   request<T>(withQuery(path, query), {}, signal);
 
-export interface EventFilter {
-  search?: string;
-  category?: string;
-  type?: string;
-  since?: number;
-  until?: number;
-  before?: string | null;
-  limit?: number;
-}
-
 export const api = {
   /** The signed-in user, or `session: null` before a sign-in. */
   session: (signal?: AbortSignal) => get<SessionState>("session", undefined, signal),
   status: (signal?: AbortSignal) => get<StatusResponse>("status", undefined, signal),
-  metrics: (query: { period: string; from?: number; to?: number }, signal?: AbortSignal) =>
-    get<MetricsResponse>("metrics", query, signal),
+  metrics: (query: QueryOf<"getMetrics">, signal?: AbortSignal) => get<MetricsResponse>("metrics", query, signal),
   coverage: (signal?: AbortSignal) => get<Coverage>("coverage", undefined, signal),
-  events: (filter: EventFilter, signal?: AbortSignal) =>
-    get<EventsPage>("events", { ...filter }, signal),
-  deliveries: (filter: EventFilter, signal?: AbortSignal) =>
-    get<DeliveriesPage>("deliveries", { ...filter }, signal),
+  events: (filter: QueryOf<"listEvents">, signal?: AbortSignal) => get<EventsPage>("events", filter, signal),
+  deliveries: (filter: QueryOf<"listDeliveries">, signal?: AbortSignal) =>
+    get<DeliveriesPage>("deliveries", filter, signal),
   delivery: (queueId: string, signal?: AbortSignal) =>
     get<DeliveryDetail>(`deliveries/${encodeURIComponent(queueId)}`, undefined, signal),
-  sessions: (filter: EventFilter, signal?: AbortSignal) =>
-    get<SessionsPage>("sessions", { ...filter }, signal),
+  sessions: (filter: QueryOf<"listSmtpSessions">, signal?: AbortSignal) =>
+    get<SessionsPage>("sessions", filter, signal),
   sessionDetail: (spanId: string, signal?: AbortSignal) =>
     get<SessionDetail>(`sessions/${encodeURIComponent(spanId)}`, undefined, signal),
-  attacks: (period: "24h" | "7d" | "30d", signal?: AbortSignal) => get<Attacks>("attacks", { period }, signal),
-  destinations: (period: "24h" | "7d" | "30d", signal?: AbortSignal) => get<Destinations>("destinations", { period }, signal),
+  attacks: (period: Period, signal?: AbortSignal) => get<Attacks>("attacks", { period }, signal),
+  destinations: (period: Period, signal?: AbortSignal) => get<Destinations>("destinations", { period }, signal),
   actions: (signal?: AbortSignal) => get<ActionsResponse>("actions", undefined, signal),
   job: (id: string, signal?: AbortSignal) =>
     get<Job>(`actions/jobs/${encodeURIComponent(id)}`, undefined, signal),
-  submitAction: (body: { action: string; requestId: string; confirmation: string }) =>
+  submitAction: (body: Schemas["SubmitRequest"]) =>
     request<SubmitResponse>("actions", { method: "POST", body: JSON.stringify(body) }),
   savePreferences: (preferences: Preferences) =>
     request<Preferences>("preferences", { method: "PUT", body: JSON.stringify(preferences) }),
-  logout: () => request<{ ok: boolean }>("logout", { method: "POST", body: "{}" }),
+  logout: () => request<Schemas["LogoutResponse"]>("logout", { method: "POST", body: "{}" }),
 };

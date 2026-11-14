@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Bytes;
+use axum::extract::rejection::BytesRejection;
 use axum::extract::{Query, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
@@ -18,16 +19,19 @@ use garrison_core::observations;
 use garrison_core::sqlite::reading;
 use garrison_core::{json, time};
 use serde::Deserialize;
-use serde_json::{Map, Value, json as object};
+use serde_json::{Map, Value};
 
 use super::auth::delete_cookie;
 use super::events::checked;
 use super::shown::shown;
 use crate::app::App;
 use crate::error::{ApiError, ApiResult, blocking};
+use crate::models::errors::{
+    BadAnswer, Busy, Internal, Invalid, Refused, SignInRequired, TooLarge, Unavailable,
+};
 use crate::models::{
-    Links, MetricsResponse, ModuleInfo, Preferences, SessionInfo, SessionState, StatusResponse,
-    SwitchInfo,
+    Links, LogoutResponse, MetricsResponse, ModuleInfo, Preferences, SessionInfo, SessionState,
+    StatusResponse, SwitchInfo,
 };
 use crate::security::{SESSION_COOKIE, Visitor};
 
@@ -42,6 +46,18 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/status", get(status))
         .route("/api/metrics", get(metrics))
         .route("/api/switch", get(switch))
+}
+
+/// The body as axum read it. One it could not read gets the API's error
+/// answer, as every refusal does, and only after the caller was checked.
+pub fn read(data: Result<Bytes, BytesRejection>) -> ApiResult<Bytes> {
+    data.map_err(|rejection| {
+        if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            ApiError::new(413, "The request body is larger than the service reads")
+        } else {
+            ApiError::invalid()
+        }
+    })
 }
 
 /// A JSON body for `T`: a JSON media type, strict JSON (no duplicate keys),
@@ -69,7 +85,13 @@ pub fn body<T: serde::de::DeserializeOwned>(visitor: &Visitor, data: &[u8]) -> A
     get,
     path = "/api/session",
     operation_id = "getSession",
-    responses((status = 200, body = SessionState)),
+    responses(
+        (status = 200, body = SessionState),
+        (status = 403, response = Refused),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn session(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Json<SessionState>> {
     blocking(move || {
@@ -131,7 +153,12 @@ async fn session(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Jso
     post,
     path = "/api/logout",
     operation_id = "logout",
-    responses((status = 200, body = Value)),
+    responses(
+        (status = 200, body = LogoutResponse),
+        (status = 403, response = Refused),
+        (status = 500, response = Internal),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn logout(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Response> {
     blocking(move || {
@@ -142,7 +169,7 @@ async fn logout(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Resp
             // revoked whether or not it is.
             app.gate.end(&session, true)?;
         }
-        let mut response = Json(object!({"ok": true})).into_response();
+        let mut response = Json(LogoutResponse { ok: true }).into_response();
         delete_cookie(&mut response, SESSION_COOKIE);
         Ok(response)
     })
@@ -155,16 +182,25 @@ async fn logout(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Resp
     path = "/api/preferences",
     operation_id = "savePreferences",
     request_body = Preferences,
-    responses((status = 200, body = Preferences)),
+    responses(
+        (status = 200, body = Preferences),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 413, response = TooLarge),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn save_preferences(
     State(app): State<Arc<App>>,
     visitor: Visitor,
-    data: Bytes,
+    data: Result<Bytes, BytesRejection>,
 ) -> ApiResult<Json<Preferences>> {
     blocking(move || {
         let caller = app.gate.writer(&visitor)?;
-        let value: Preferences = body(&visitor, &data)?;
+        let value: Preferences = body(&visitor, &read(data)?)?;
         app.store
             .save_preferences(&caller.grant.subject, value)?
             .map(Json)
@@ -181,7 +217,10 @@ async fn save_preferences(
     get,
     path = "/api/switch",
     operation_id = "getSwitch",
-    responses((status = 200, body = SwitchInfo)),
+    responses(
+        (status = 200, body = SwitchInfo),
+        (status = 500, response = Internal),
+    ),
 )]
 async fn switch(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Response> {
     let stalwart = crate::switch::origin(&app.config.deployment.admin_url);
@@ -235,7 +274,14 @@ pub fn age(observation: &observations::Observation, now: time::Timestamp) -> Opt
     get,
     path = "/api/status",
     operation_id = "getStatus",
-    responses((status = 200, body = StatusResponse)),
+    responses(
+        (status = 200, body = StatusResponse),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn status(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Json<StatusResponse>> {
     blocking(move || {
@@ -312,7 +358,16 @@ pub struct MetricsQuery {
     path = "/api/metrics",
     operation_id = "getMetrics",
     params(MetricsQuery),
-    responses((status = 200, body = MetricsResponse)),
+    responses(
+        (status = 200, body = MetricsResponse),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 429, response = Busy),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn metrics(
     State(app): State<Arc<App>>,

@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
+use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::Uri;
 use axum::routing::get;
@@ -20,6 +21,9 @@ use serde::Deserialize;
 
 use crate::app::App;
 use crate::error::{ApiError, ApiResult, blocking};
+use crate::models::errors::{
+    BadAnswer, Busy, Internal, Invalid, NotFound, Refused, SignInRequired, Unavailable,
+};
 use crate::models::{
     Coverage, DeliveriesPage, DeliveryDetail, EventsPage, SessionDetail, SessionsPage,
 };
@@ -179,7 +183,14 @@ fn failure(error: QueryError) -> ApiError {
     get,
     path = "/api/coverage",
     operation_id = "getCoverage",
-    responses((status = 200, body = Coverage)),
+    responses(
+        (status = 200, body = Coverage),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn coverage(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Json<Coverage>> {
     blocking(move || {
@@ -208,7 +219,16 @@ async fn coverage(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Js
     path = "/api/events",
     operation_id = "listEvents",
     params(EventsQuery),
-    responses((status = 200, body = EventsPage)),
+    responses(
+        (status = 200, body = EventsPage),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 429, response = Busy),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn events(
     State(app): State<Arc<App>>,
@@ -255,7 +275,16 @@ fn grouped_filter(uri: &Uri) -> ApiResult<Filter> {
     path = "/api/deliveries",
     operation_id = "listDeliveries",
     params(GroupQuery),
-    responses((status = 200, body = DeliveriesPage)),
+    responses(
+        (status = 200, body = DeliveriesPage),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 429, response = Busy),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn deliveries(
     State(app): State<Arc<App>>,
@@ -270,12 +299,16 @@ async fn deliveries(
     Ok(Json(page.into()))
 }
 
-/// A queue or span ID: 1 to 20 ASCII digits.
-fn identifier(text: &str) -> ApiResult<()> {
-    if (1..=20).contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_digit()) {
-        Ok(())
-    } else {
-        Err(ApiError::invalid())
+/// A queue or span ID: 1 to 20 ASCII digits. A path segment axum could not
+/// decode is refused as any other one is, with the API's error answer.
+fn identifier(path: Result<Path<String>, PathRejection>) -> ApiResult<String> {
+    match path {
+        Ok(Path(text))
+            if (1..=20).contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            Ok(text)
+        }
+        _ => Err(ApiError::invalid()),
     }
 }
 
@@ -285,15 +318,25 @@ fn identifier(text: &str) -> ApiResult<()> {
     path = "/api/deliveries/{queue_id}",
     operation_id = "getDelivery",
     params(("queue_id" = String, Path, pattern = "^[0-9]{1,20}$")),
-    responses((status = 200, body = DeliveryDetail)),
+    responses(
+        (status = 200, body = DeliveryDetail),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 404, response = NotFound),
+        (status = 429, response = Busy),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn delivery(
     State(app): State<Arc<App>>,
     visitor: Visitor,
-    Path(queue_id): Path<String>,
+    queue_id: Result<Path<String>, PathRejection>,
 ) -> ApiResult<Json<DeliveryDetail>> {
     let queue_id = checked(&app, visitor, &[ModuleId::Deliveries], move || {
-        identifier(&queue_id).map(|()| queue_id)
+        identifier(queue_id)
     })
     .await?;
     run(&app, move |db| queries::delivery_detail(db, &queue_id))
@@ -308,7 +351,16 @@ async fn delivery(
     path = "/api/sessions",
     operation_id = "listSmtpSessions",
     params(GroupQuery),
-    responses((status = 200, body = SessionsPage)),
+    responses(
+        (status = 200, body = SessionsPage),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 429, response = Busy),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn sessions(
     State(app): State<Arc<App>>,
@@ -329,15 +381,25 @@ async fn sessions(
     path = "/api/sessions/{span_id}",
     operation_id = "getSmtpSession",
     params(("span_id" = String, Path, pattern = "^[0-9]{1,20}$")),
-    responses((status = 200, body = SessionDetail)),
+    responses(
+        (status = 200, body = SessionDetail),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 404, response = NotFound),
+        (status = 429, response = Busy),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn session(
     State(app): State<Arc<App>>,
     visitor: Visitor,
-    Path(span_id): Path<String>,
+    span_id: Result<Path<String>, PathRejection>,
 ) -> ApiResult<Json<SessionDetail>> {
     let span_id = checked(&app, visitor, &[ModuleId::Sessions], move || {
-        identifier(&span_id).map(|()| span_id)
+        identifier(span_id)
     })
     .await?;
     run(&app, move |db| queries::session_detail(db, &span_id))

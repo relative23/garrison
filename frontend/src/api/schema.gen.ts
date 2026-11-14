@@ -532,6 +532,13 @@ export interface components {
             /** @description The messages that wait longest first. */
             waiting: components["schemas"]["WaitingMessage"][];
         };
+        /**
+         * @description Every error answer of the API: a fixed text for people. For an internal
+         *     error the journal names the cause under the answer's `X-Request-Id`.
+         */
+        ErrorDetail: {
+            detail: string;
+        };
         EventItem: {
             category: string;
             /** Format: int64 */
@@ -579,6 +586,13 @@ export interface components {
             other: {
                 [key: string]: string;
             };
+        };
+        /**
+         * @description The answer to a sign-out: the session is gone here. An error answers
+         *     otherwise, so `ok` is always true.
+         */
+        LogoutResponse: {
+            ok: boolean;
         };
         MetricsResponse: {
             /** Format: int64 */
@@ -650,6 +664,11 @@ export interface components {
             columns: components["schemas"]["Column"][];
             rows: unknown[][];
         };
+        /**
+         * @description The stretch a summary covers, up to now.
+         * @enum {string}
+         */
+        Period: "24h" | "7d" | "30d";
         Preferences: {
             hiddenModules: string[];
             /**
@@ -751,7 +770,135 @@ export interface components {
             queuedAt: number;
         };
     };
-    responses: never;
+    responses: {
+        /** @description The broker gave an answer the web service cannot use. */
+        BadAnswer: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+        /**
+         * @description Too many history queries at once: eight wait for a turn already, or none
+         *     came within two seconds. Try again.
+         */
+        Busy: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+        /**
+         * @description Another maintenance operation is in progress or may still be running,
+         *     the unit is busy with an operation of its own, or the request ID belongs
+         *     to another operation.
+         */
+        Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+        /**
+         * @description Something failed inside the service; the journal names the cause under
+         *     the answer's `X-Request-Id`.
+         */
+        Internal: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+        /**
+         * @description A parameter, a path segment or the body does not match the API, or a
+         *     history query cannot be answered as asked.
+         */
+        Invalid: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+        /**
+         * @description No recorded events for this ID, or no job of this ID that the user may
+         *     see.
+         */
+        NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+        /**
+         * @description Not authorized: the policy refuses this user, which ends the session;
+         *     the user's rights do not include this module or action; or a write lacks
+         *     the exact Origin and the session's CSRF token.
+         */
+        Refused: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+        /**
+         * @description Too soon: the previous operation is settling, or this action is in its
+         *     cooldown.
+         */
+        Settling: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+        /** @description No valid session: sign in again. */
+        SignInRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+        /** @description The request body is larger than the service reads. */
+        TooLarge: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+        /**
+         * @description Not available now, as the detail says: the user's rights cannot be
+         *     checked (Stalwart or the broker is away, or Garrison's setup is broken;
+         *     the session stays), what the route reads or runs is not there or took too
+         *     long, or the session could not be ended.
+         */
+        Unavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorDetail"];
+            };
+        };
+    };
     parameters: never;
     requestBodies: never;
     headers: never;
@@ -776,6 +923,11 @@ export interface operations {
                     "application/json": components["schemas"]["ActionsResponse"];
                 };
             };
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     submitAction: {
@@ -799,6 +951,15 @@ export interface operations {
                     "application/json": components["schemas"]["SubmitResponse"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["TooLarge"];
+            429: components["responses"]["Settling"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getJob: {
@@ -820,12 +981,19 @@ export interface operations {
                     "application/json": components["schemas"]["Job"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getAttacks: {
         parameters: {
             query?: {
-                period?: ("24h" | "7d" | "30d") & Record<string, never>;
+                period?: components["schemas"]["Period"];
             };
             header?: never;
             path?: never;
@@ -841,6 +1009,13 @@ export interface operations {
                     "application/json": components["schemas"]["Attacks"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            429: components["responses"]["Busy"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getCoverage: {
@@ -860,6 +1035,11 @@ export interface operations {
                     "application/json": components["schemas"]["Coverage"];
                 };
             };
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     listDeliveries: {
@@ -885,6 +1065,13 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveriesPage"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            429: components["responses"]["Busy"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getDelivery: {
@@ -906,12 +1093,20 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryDetail"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["Busy"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getDestinations: {
         parameters: {
             query?: {
-                period?: ("24h" | "7d" | "30d") & Record<string, never>;
+                period?: components["schemas"]["Period"];
             };
             header?: never;
             path?: never;
@@ -927,6 +1122,13 @@ export interface operations {
                     "application/json": components["schemas"]["Destinations"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            429: components["responses"]["Busy"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     listEvents: {
@@ -954,6 +1156,13 @@ export interface operations {
                     "application/json": components["schemas"]["EventsPage"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            429: components["responses"]["Busy"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     logout: {
@@ -970,9 +1179,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["LogoutResponse"];
                 };
             };
+            403: components["responses"]["Refused"];
+            500: components["responses"]["Internal"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getMetrics: {
@@ -996,6 +1208,13 @@ export interface operations {
                     "application/json": components["schemas"]["MetricsResponse"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            429: components["responses"]["Busy"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     savePreferences: {
@@ -1019,6 +1238,13 @@ export interface operations {
                     "application/json": components["schemas"]["Preferences"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            413: components["responses"]["TooLarge"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getSession: {
@@ -1038,6 +1264,10 @@ export interface operations {
                     "application/json": components["schemas"]["SessionState"];
                 };
             };
+            403: components["responses"]["Refused"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     listSmtpSessions: {
@@ -1063,6 +1293,13 @@ export interface operations {
                     "application/json": components["schemas"]["SessionsPage"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            429: components["responses"]["Busy"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getSmtpSession: {
@@ -1084,6 +1321,14 @@ export interface operations {
                     "application/json": components["schemas"]["SessionDetail"];
                 };
             };
+            400: components["responses"]["Invalid"];
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["Busy"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getStatus: {
@@ -1103,6 +1348,11 @@ export interface operations {
                     "application/json": components["schemas"]["StatusResponse"];
                 };
             };
+            401: components["responses"]["SignInRequired"];
+            403: components["responses"]["Refused"];
+            500: components["responses"]["Internal"];
+            502: components["responses"]["BadAnswer"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getSwitch: {
@@ -1122,6 +1372,7 @@ export interface operations {
                     "application/json": components["schemas"]["SwitchInfo"];
                 };
             };
+            500: components["responses"]["Internal"];
         };
     };
 }

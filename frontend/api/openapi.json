@@ -1,5 +1,117 @@
 {
   "components": {
+    "responses": {
+      "BadAnswer": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "The broker gave an answer the web service cannot use."
+      },
+      "Busy": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "Too many history queries at once: eight wait for a turn already, or none\ncame within two seconds. Try again."
+      },
+      "Conflict": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "Another maintenance operation is in progress or may still be running,\nthe unit is busy with an operation of its own, or the request ID belongs\nto another operation."
+      },
+      "Internal": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "Something failed inside the service; the journal names the cause under\nthe answer's `X-Request-Id`."
+      },
+      "Invalid": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "A parameter, a path segment or the body does not match the API, or a\nhistory query cannot be answered as asked."
+      },
+      "NotFound": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "No recorded events for this ID, or no job of this ID that the user may\nsee."
+      },
+      "Refused": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "Not authorized: the policy refuses this user, which ends the session;\nthe user's rights do not include this module or action; or a write lacks\nthe exact Origin and the session's CSRF token."
+      },
+      "Settling": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "Too soon: the previous operation is settling, or this action is in its\ncooldown."
+      },
+      "SignInRequired": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "No valid session: sign in again."
+      },
+      "TooLarge": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "The request body is larger than the service reads."
+      },
+      "Unavailable": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "description": "Not available now, as the detail says: the user's rights cannot be\nchecked (Stalwart or the broker is away, or Garrison's setup is broken;\nthe session stays), what the route reads or runs is not there or took too\nlong, or the session could not be ended."
+      }
+    },
     "schemas": {
       "ActionInfo": {
         "additionalProperties": false,
@@ -674,6 +786,19 @@
         ],
         "type": "object"
       },
+      "ErrorDetail": {
+        "additionalProperties": false,
+        "description": "Every error answer of the API: a fixed text for people. For an internal\nerror the journal names the cause under the answer's `X-Request-Id`.",
+        "properties": {
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "type": "object"
+      },
       "EventItem": {
         "additionalProperties": false,
         "properties": {
@@ -860,6 +985,19 @@
         "required": [
           "admin",
           "other"
+        ],
+        "type": "object"
+      },
+      "LogoutResponse": {
+        "additionalProperties": false,
+        "description": "The answer to a sign-out: the session is gone here. An error answers\notherwise, so `ok` is always true.",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
         ],
         "type": "object"
       },
@@ -1139,6 +1277,15 @@
           "rows"
         ],
         "type": "object"
+      },
+      "Period": {
+        "description": "The stretch a summary covers, up to now.",
+        "enum": [
+          "24h",
+          "7d",
+          "30d"
+        ],
+        "type": "string"
       },
       "Preferences": {
         "additionalProperties": false,
@@ -1539,6 +1686,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "The maintenance actions the user may start, and recent jobs.",
@@ -1567,6 +1729,33 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/Settling"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "Start a maintenance action after its typed confirmation.",
@@ -1598,6 +1787,27 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "One maintenance job and its result.",
@@ -1615,21 +1825,8 @@
             "name": "period",
             "required": false,
             "schema": {
-              "allOf": [
-                {
-                  "description": "The stretch a summary covers, up to now.",
-                  "enum": [
-                    "24h",
-                    "7d",
-                    "30d"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "default": "24h",
-                  "type": "object"
-                }
-              ]
+              "$ref": "#/components/schemas/Period",
+              "default": "24h"
             }
           }
         ],
@@ -1642,6 +1839,27 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "429": {
+            "$ref": "#/components/responses/Busy"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "Failed sign-ins, Stalwart's bans and TLS handshake errors of the last day,\nweek or 30 days, by address, network and account.",
@@ -1662,6 +1880,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "How complete the recorded event history is.",
@@ -1747,6 +1980,27 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "429": {
+            "$ref": "#/components/responses/Busy"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "Queue lifecycles reconstructed from recorded events, newest first.",
@@ -1778,6 +2032,30 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/Busy"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "Every recorded event of one queued message.",
@@ -1795,21 +2073,8 @@
             "name": "period",
             "required": false,
             "schema": {
-              "allOf": [
-                {
-                  "description": "The stretch a summary covers, up to now.",
-                  "enum": [
-                    "24h",
-                    "7d",
-                    "30d"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "default": "24h",
-                  "type": "object"
-                }
-              ]
+              "$ref": "#/components/schemas/Period",
+              "default": "24h"
             }
           }
         ],
@@ -1822,6 +2087,27 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "429": {
+            "$ref": "#/components/responses/Busy"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "Outgoing deliveries of the last day, week or 30 days by destination and\nby the cause of their delays and bounces, and the messages that wait.",
@@ -1927,6 +2213,27 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "429": {
+            "$ref": "#/components/responses/Busy"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "Recorded events, newest first.",
@@ -1942,9 +2249,20 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutResponse"
+                }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "Sign out: end the session and revoke its access token.",
@@ -2003,6 +2321,27 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "429": {
+            "$ref": "#/components/responses/Busy"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "Recorded metric history for the dashboard charts.",
@@ -2033,6 +2372,27 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "Save the signed-in user's theme and hidden modules.",
@@ -2053,6 +2413,18 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "The signed-in user: modules, actions, preferences and links; `null`\nwithout a valid session.",
@@ -2138,6 +2510,27 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "429": {
+            "$ref": "#/components/responses/Busy"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "SMTP sessions reconstructed from recorded events, newest first.",
@@ -2169,6 +2562,30 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/Busy"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "Every recorded event of one SMTP session.",
@@ -2189,6 +2606,21 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/SignInRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadAnswer"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "summary": "The latest status snapshot, limited to the user's modules.",
@@ -2209,6 +2641,9 @@
                 }
               }
             }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
           }
         },
         "summary": "Whether the signed-in user wants the switch rows. The \"Switch to Garrison\nWebUI\" script asks from the Stalwart WebUI's origin, so this answer, and no\nother, may be read there with the user's cookie. The rows are off until a\nuser turns them on, so without a session they stay hidden.",

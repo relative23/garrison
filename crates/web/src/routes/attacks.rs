@@ -15,6 +15,9 @@ use utoipa::ToSchema;
 use super::events::{checked, parsed, run};
 use crate::app::App;
 use crate::error::{ApiError, ApiResult};
+use crate::models::errors::{
+    BadAnswer, Busy, Internal, Invalid, Refused, SignInRequired, Unavailable,
+};
 use crate::models::{
     AttackNetwork, AttackSource, AttackTotals, AttackedAccount, Attacks, Ban, BanReason,
 };
@@ -52,7 +55,7 @@ impl Period {
 #[serde(deny_unknown_fields)]
 pub struct PeriodQuery {
     #[serde(default)]
-    #[param(inline, default = "24h")]
+    #[param(default = "24h")]
     period: Period,
 }
 
@@ -209,7 +212,16 @@ fn stated(summary: found::Attacks) -> ApiResult<Attacks> {
     path = "/api/attacks",
     operation_id = "getAttacks",
     params(PeriodQuery),
-    responses((status = 200, body = Attacks)),
+    responses(
+        (status = 200, body = Attacks),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 429, response = Busy),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn attacks(
     State(app): State<Arc<App>>,

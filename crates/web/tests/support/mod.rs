@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use axum::Router;
@@ -286,7 +286,7 @@ impl Client {
         headers: &[(&str, &str)],
         body: Option<Value>,
     ) -> Answer {
-        let mut builder = Request::builder().method(method).uri(uri);
+        let mut builder = Request::builder().method(method.clone()).uri(uri);
         if let Some(peer) = peer {
             builder = builder.extension(ConnectInfo(peer));
         }
@@ -325,11 +325,13 @@ impl Client {
                 self.cookies.insert(name.into(), value.into());
             }
         }
-        Answer {
+        let answer = Answer {
             status: parts.status,
             headers: parts.headers,
             body: to_bytes(body, 1 << 24).await.unwrap().to_vec(),
-        }
+        };
+        declared(&method, uri, &answer);
+        answer
     }
 
     pub(crate) async fn get(&mut self, uri: &str) -> Answer {
@@ -359,6 +361,50 @@ impl Client {
             .as_str()
             .unwrap()
             .to_owned()
+    }
+}
+
+/// The OpenAPI document the interface's types are generated from.
+static DOCUMENT: LazyLock<Value> = LazyLock::new(garrison_web::openapi::document);
+
+/// An answer of an operation of the OpenAPI document has a status the
+/// document declares for it, and an error answer its `{"detail": "..."}`:
+/// a route that starts to answer another code fails the test that meets it.
+fn declared(method: &Method, uri: &str, answer: &Answer) {
+    let path = uri.split('?').next().unwrap_or(uri);
+    let paths = DOCUMENT["paths"].as_object().unwrap();
+    let Some((template, operations)) = paths.iter().find(|(template, _)| matches(template, path))
+    else {
+        return;
+    };
+    let Some(operation) = operations.get(method.as_str().to_ascii_lowercase()) else {
+        return;
+    };
+    let status = answer.status.as_str();
+    assert!(
+        operation["responses"].get(status).is_some(),
+        "{method} {template} answered {status}, which the OpenAPI document does not declare"
+    );
+    let failed = answer.status.is_client_error() || answer.status.is_server_error();
+    if failed && answer.header("content-encoding").is_empty() {
+        let body = answer.json();
+        let detail = body.as_object().is_some_and(|fields| {
+            fields.len() == 1 && fields.get("detail").is_some_and(Value::is_string)
+        });
+        assert!(detail, "{method} {template} answered {status} with {body}");
+    }
+}
+
+/// Whether `path` is one of `template`'s, where `{name}` stands for a segment.
+fn matches(template: &str, path: &str) -> bool {
+    let (mut wanted, mut given) = (template.split('/'), path.split('/'));
+    loop {
+        match (wanted.next(), given.next()) {
+            (None, None) => return true,
+            (Some(part), Some(segment))
+                if part == segment || (part.starts_with('{') && !segment.is_empty()) => {}
+            _ => return false,
+        }
     }
 }
 

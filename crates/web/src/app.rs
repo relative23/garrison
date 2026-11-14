@@ -185,7 +185,7 @@ async fn reference(request: Request, next: Next) -> Response {
 
 /// The answer outside the routes.
 fn detail(status: StatusCode, text: &'static str) -> Response {
-    (status, axum::Json(serde_json::json!({"detail": text}))).into_response()
+    ApiError::new(status.as_u16(), text).into_response()
 }
 
 /// Every route of the web service on Garrison's own host name: the interface

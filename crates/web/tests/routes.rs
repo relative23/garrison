@@ -221,6 +221,38 @@ async fn action_requests_have_length_limits() {
     }
 }
 
+/// What axum cannot decode or read gets the API's error answer as well, and
+/// only after the caller's rights were checked.
+#[tokio::test]
+async fn an_undecodable_segment_and_a_body_too_large_get_the_error_answer() {
+    let mut setup = setup();
+    let stranger = setup.client.get(&api("deliveries/%FF")).await;
+    assert_eq!(stranger.status, StatusCode::UNAUTHORIZED);
+    let csrf = setup.client.sign_in("code-admin").await;
+    for path in ["deliveries/%FF", "sessions/%FF", "actions/jobs/%FF"] {
+        let answer = setup.client.get(&api(path)).await;
+        let invalid = json!({"detail": "Invalid request parameters"});
+        assert_eq!(
+            (answer.status, answer.json()),
+            (StatusCode::BAD_REQUEST, invalid)
+        );
+    }
+    // Larger than the 2 MiB axum reads of a body.
+    let large = json!({"theme": "x".repeat(3 << 20)});
+    let headers = [("origin", ORIGIN), ("x-csrf-token", csrf.as_str())];
+    for (method, path) in [(Method::PUT, "preferences"), (Method::POST, "actions")] {
+        let answer = setup
+            .client
+            .send(method, &api(path), &headers, Some(large.clone()))
+            .await;
+        let detail = json!({"detail": "The request body is larger than the service reads"});
+        assert_eq!(
+            (answer.status, answer.json()),
+            (StatusCode::PAYLOAD_TOO_LARGE, detail)
+        );
+    }
+}
+
 #[tokio::test]
 async fn the_stalwart_webui_may_read_the_switch_setting_and_nothing_else() {
     let mut setup = setup();

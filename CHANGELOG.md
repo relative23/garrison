@@ -43,6 +43,13 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **The API answers every error with its detail, after the caller's
+  rights.** A path segment that does not decode and a request body over
+  2 MiB were answered by the web framework in plain text, before the
+  caller's rights were checked; they now get `{"detail": "..."}` like every
+  other refusal, and a stranger gets 401 first. The OpenAPI document,
+  `frontend/api/openapi.json`, names for every route the status codes it
+  can answer, and the web tests fail on one that a route does not declare.
 - **Rotating the API keys no longer interrupts the checks of users'
   rights.** `garrison stalwart setup --rotate` removed the broker's old key
   in Stalwart as soon as it had written the new one, while the running

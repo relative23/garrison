@@ -353,7 +353,10 @@ an outdated comment is worse than none.
 ### Changing the API
 
 1. Change the response types in `crates/web/src/models.rs` and the routes
-   with their `#[utoipa::path]`.
+   with their `#[utoipa::path]`. A route lists in `responses(...)` every
+   status code it can answer, its errors with the shared responses of
+   `crates/web/src/models/errors.rs`, which carry `{"detail": "..."}`. The
+   web tests fail on an answer that a route does not declare.
 2. `cargo xtask api` writes `frontend/api/openapi.json` and `modules.json`.
 3. `npm run api` in `frontend/` regenerates `src/api/schema.gen.ts`; never edit
    it by hand.

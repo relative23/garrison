@@ -13,6 +13,9 @@ use super::attacks::PeriodQuery;
 use super::events::{checked, run};
 use crate::app::App;
 use crate::error::ApiResult;
+use crate::models::errors::{
+    BadAnswer, Busy, Internal, Invalid, Refused, SignInRequired, Unavailable,
+};
 use crate::models::{DeliveryCause, Destination, DestinationTotals, Destinations, WaitingMessage};
 use crate::security::Visitor;
 
@@ -128,7 +131,16 @@ impl From<found::Destinations> for Destinations {
     path = "/api/destinations",
     operation_id = "getDestinations",
     params(PeriodQuery),
-    responses((status = 200, body = Destinations)),
+    responses(
+        (status = 200, body = Destinations),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 429, response = Busy),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn destinations(
     State(app): State<Arc<App>>,

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use axum::body::Bytes;
+use axum::extract::rejection::{BytesRejection, PathRejection};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::get;
@@ -14,9 +15,13 @@ use garrison_broker::store::{self, JobView};
 use garrison_core::config::PublicAction;
 use garrison_core::modules::ModuleId;
 
-use super::api::body;
+use super::api::{body, read};
 use crate::app::App;
 use crate::error::{ApiError, ApiResult, blocking};
+use crate::models::errors::{
+    BadAnswer, Conflict, Internal, Invalid, NotFound, Refused, Settling, SignInRequired, TooLarge,
+    Unavailable,
+};
 use crate::models::{
     ActionInfo, ActionsResponse, Job, JobStatus, SubmitRequest, SubmitResponse, typed,
 };
@@ -44,7 +49,14 @@ fn call<T: serde::de::DeserializeOwned>(app: &App, request: &Request) -> ApiResu
     get,
     path = "/api/actions",
     operation_id = "listActions",
-    responses((status = 200, body = ActionsResponse)),
+    responses(
+        (status = 200, body = ActionsResponse),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn catalog(
     State(app): State<Arc<App>>,
@@ -67,18 +79,29 @@ async fn catalog(
     path = "/api/actions/jobs/{job_id}",
     operation_id = "getJob",
     params(("job_id" = String, Path, pattern = "^[0-9a-f]{32}$")),
-    responses((status = 200, body = Job)),
+    responses(
+        (status = 200, body = Job),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 404, response = NotFound),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn job(
     State(app): State<Arc<App>>,
     visitor: Visitor,
-    Path(job_id): Path<String>,
+    path: Result<Path<String>, PathRejection>,
 ) -> ApiResult<Json<Job>> {
     blocking(move || {
         let caller = app.gate.require(&visitor, &[ModuleId::Actions])?;
-        if !is_job_id(&job_id) {
-            return Err(ApiError::invalid());
-        }
+        // A segment axum could not decode is refused like any other one.
+        let job_id = match path {
+            Ok(Path(job_id)) if is_job_id(&job_id) => job_id,
+            _ => return Err(ApiError::invalid()),
+        };
         let request = Request::Job {
             token: caller.session.token,
             id: job_id,
@@ -95,16 +118,27 @@ async fn job(
     path = "/api/actions",
     operation_id = "submitAction",
     request_body = SubmitRequest,
-    responses((status = 202, body = SubmitResponse)),
+    responses(
+        (status = 202, body = SubmitResponse),
+        (status = 400, response = Invalid),
+        (status = 401, response = SignInRequired),
+        (status = 403, response = Refused),
+        (status = 409, response = Conflict),
+        (status = 413, response = TooLarge),
+        (status = 429, response = Settling),
+        (status = 500, response = Internal),
+        (status = 502, response = BadAnswer),
+        (status = 503, response = Unavailable),
+    ),
 )]
 async fn submit(
     State(app): State<Arc<App>>,
     visitor: Visitor,
-    data: Bytes,
+    data: Result<Bytes, BytesRejection>,
 ) -> ApiResult<(StatusCode, Json<SubmitResponse>)> {
     blocking(move || {
         let caller = app.gate.writer(&visitor)?;
-        let request: SubmitRequest = body(&visitor, &data)?;
+        let request: SubmitRequest = body(&visitor, &read(data)?)?;
         if !request.is_within_limits() {
             return Err(ApiError::invalid());
         }

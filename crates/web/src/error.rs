@@ -9,8 +9,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use garrison_collector::store::{HistoryError, SnapshotError};
 use garrison_core::sqlite::{SqliteError, out_of_time};
-use serde_json::json;
 
+use crate::models::ErrorDetail;
 use crate::store::StoreError;
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -56,7 +56,10 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let mut response = (self.status, Json(json!({"detail": self.detail}))).into_response();
+        let body = ErrorDetail {
+            detail: self.detail,
+        };
+        let mut response = (self.status, Json(body)).into_response();
         if let Some(cause) = self.cause {
             response.extensions_mut().insert(Cause(cause));
         }

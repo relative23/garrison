@@ -7,6 +7,7 @@
 
 mod attacks;
 mod destinations;
+pub mod errors;
 
 use std::collections::BTreeMap;
 
@@ -16,6 +17,7 @@ pub use attacks::{
 pub use destinations::{
     DeliveryCause, Destination, DestinationTotals, Destinations, WaitingMessage,
 };
+pub use errors::ErrorDetail;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use utoipa::ToSchema;
@@ -53,6 +55,14 @@ pub struct Preferences {
     #[serde(default)]
     #[schema(default = false)]
     pub show_switch: bool,
+}
+
+/// The answer to a sign-out: the session is gone here. An error answers
+/// otherwise, so `ok` is always true.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LogoutResponse {
+    pub ok: bool,
 }
 
 /// Whether the signed-in user wants the switch row in the Stalwart WebUI.
