@@ -28,7 +28,7 @@ export function SignIn({ expired = false }: { expired?: boolean }) {
       <div className="grid w-full max-w-md justify-items-center gap-5 rounded-2xl bg-card p-8 text-center text-card-foreground shadow-tile">
         <BrandLarge />
         <p className="text-sm text-muted-foreground">{t("signIn.intro")}</p>
-        {expired && <Notice>{t("signIn.expired")}</Notice>}
+        {expired && <Notice live>{t("signIn.expired")}</Notice>}
         {error && (
           <Notice tone="error">
             {t(message(error))} {t("signIn.askAdministrator")}

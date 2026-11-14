@@ -116,7 +116,9 @@ describe("history coverage", () => {
     const banner = await screen.findByText(/Recording since/);
     expect(banner.textContent).toContain("The event receiver runs, but has not stored what Stalwart sends since");
     expect(banner.textContent).not.toContain("has not reported since");
-    expect(banner.closest("[role]")?.getAttribute("role")).toBe("status");
+    // Part of the page, and read again every minute: no live region, which
+    // would read it out each time its "last received" changes.
+    expect(banner.closest("[role]")).toBeNull();
     expect(screen.getByText(/refused Stalwart's batches for longer than Stalwart buffers/)).toBeTruthy();
   });
 
@@ -133,7 +135,7 @@ describe("history coverage", () => {
       expect(banner.textContent).toContain(`retention 30 days. Events before `);
       expect(banner.textContent).toContain(`were removed ${wording}, so the history is shorter than its retention.`);
       // Working as configured: no gap, no warning.
-      expect(banner.closest("[role]")?.getAttribute("role")).toBe("status");
+      expect(banner.closest("[role]")).toBeNull();
       expect(screen.queryByText("Recording gaps")).toBeNull();
       view.unmount();
     }
@@ -156,7 +158,13 @@ describe("history coverage", () => {
     expect(screen.getByText(/Recording since/)).toBeTruthy();
     server.answer("GET coverage", { status: 503, body: { detail: "Authorization is temporarily unavailable" } });
     await act(async () => vi.advanceTimersByTimeAsync(60_000));
-    expect(screen.getByText(/Completeness unknown/)).toBeTruthy();
+    // A change the page reports: that is announced.
+    expect(
+      screen
+        .getByText(/Completeness unknown/)
+        .closest("[role]")
+        ?.getAttribute("role"),
+    ).toBe("status");
     expect(screen.getByText("Authorization is temporarily unavailable")).toBeTruthy();
     expect(screen.queryByText(/Recording since/)).toBeNull();
     // The next answer brings the coverage back.
@@ -172,7 +180,7 @@ describe("history coverage", () => {
     renderView(<Logs />);
     const banner = await screen.findByText(/Recording since/);
     expect(banner.textContent).toContain("retention 30 days.");
-    expect(banner.closest("[role]")?.getAttribute("role")).toBe("status");
+    expect(banner.closest("[role]")).toBeNull();
     expect(screen.queryByText("Recording gaps")).toBeNull();
   });
 });

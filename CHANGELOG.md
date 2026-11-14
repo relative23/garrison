@@ -53,6 +53,12 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Screen readers announce news, not the page.** Every notice was a live
+  region, so screen readers announced text that belongs to a page as if it
+  had just happened: the coverage of the event history, for one, again each
+  minute as its "last received" time changed. Only what reports a change is
+  announced now: an error, a failed refresh, a saved setting, the state of a
+  started job and the end of a session.
 - **Delivery problems and the checks' findings show hidden characters.**
   A receiving server writes its own replies, and a domain's DNS names its
   mail hosts. Delivery problems showed such text as it came, so a character

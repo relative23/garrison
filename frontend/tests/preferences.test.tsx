@@ -33,7 +33,8 @@ describe("settings", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Backups" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Antivirus" }));
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
-    expect(await screen.findByText("Settings saved.")).toBeTruthy();
+    // The answer to what the user did is announced.
+    expect((await screen.findByText("Settings saved.")).closest("[role]")?.getAttribute("role")).toBe("status");
     expect(server.requests("PUT preferences")[0]?.body).toEqual({
       theme: "dark",
       hiddenModules: ["antivirus", "backups"],

@@ -56,8 +56,22 @@ export function EvidenceLabel({ kind }: { kind: string }) {
   );
 }
 
-export function Notice({ tone = "info", children }: { tone?: "info" | "warning" | "error"; children: ReactNode }) {
-  return <Alert tone={tone}>{children}</Alert>;
+/** A message on the page. `live` has it announced (see Alert), as an error
+ * always is. */
+export function Notice({
+  tone = "info",
+  live = tone === "error",
+  children,
+}: {
+  tone?: "info" | "warning" | "error";
+  live?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Alert tone={tone} live={live}>
+      {children}
+    </Alert>
+  );
 }
 
 export function Loading({ label }: { label?: string }) {
@@ -87,7 +101,7 @@ export function ErrorState({
   // Only an internal error is in the journal under its reference.
   const reference = error instanceof ApiError && error.status === 500 ? error.reference : null;
   return (
-    <Notice tone={tone}>
+    <Notice tone={tone} live>
       <div className="flex items-center justify-between gap-4">
         <div>
           {lead && <p>{lead}</p>}

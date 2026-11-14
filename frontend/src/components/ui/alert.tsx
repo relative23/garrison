@@ -16,6 +16,15 @@ const alertVariants = cva("relative w-full rounded-2xl border px-4 py-3 text-sm 
   defaultVariants: { tone: "info" },
 });
 
-export function Alert({ className, tone, ...props }: ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
-  return <div role={tone === "error" ? "alert" : "status"} className={cn(alertVariants({ tone }), className)} {...props} />;
+/** `live` makes the message a live region, which screen readers announce when
+ * it appears or changes: for news, such as an error or a saved setting. Text
+ * that is part of the page is none; it would be read out each time it changes. */
+export function Alert({
+  className,
+  tone,
+  live = false,
+  ...props
+}: ComponentProps<"div"> & VariantProps<typeof alertVariants> & { live?: boolean }) {
+  const role = live ? (tone === "error" ? "alert" : "status") : undefined;
+  return <div role={role} className={cn(alertVariants({ tone }), className)} {...props} />;
 }

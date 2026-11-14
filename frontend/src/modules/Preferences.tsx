@@ -122,7 +122,11 @@ export function Preferences() {
           </Choice>
         </CardContent>
       </Card>
-      {message && <Notice tone={message.tone}>{message.text}</Notice>}
+      {message && (
+        <Notice tone={message.tone} live>
+          {message.text}
+        </Notice>
+      )}
       {/* aria-disabled, not disabled: a disabled button would drop the focus. */}
       <Button type="submit" aria-disabled={saving || undefined}>
         {saving ? t("preferences.saving") : t("preferences.save")}

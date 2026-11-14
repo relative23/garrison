@@ -92,10 +92,11 @@ describe("status pages", () => {
 
   it("say when there is no snapshot or no observation yet", () => {
     const view = renderView(<StatusPage moduleId="antivirus" detail={null} />, { status: status([], { available: false }) });
-    expect(screen.getByText("The collector has not produced a status snapshot yet.")).toBeTruthy();
+    // What the page is about, not news: no live region that announces it.
+    expect(screen.getByText("The collector has not produced a status snapshot yet.").closest("[role]")).toBeNull();
     view.unmount();
     renderView(<StatusPage moduleId="backups" detail={null} />, { status: status([observation()]) });
-    expect(screen.getByText("No provider reports observations for this module on this host.")).toBeTruthy();
+    expect(screen.getByText("No provider reports observations for this module on this host.").closest("[role]")).toBeNull();
   });
 
   it("say that a refresh failed above the status they still have", () => {

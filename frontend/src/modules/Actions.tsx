@@ -164,7 +164,7 @@ export function Actions() {
       {intro}
       {catalog.error && <ErrorState tone="warning" lead={t("actions.refreshFailed")} error={catalog.error} retry={catalog.reload} />}
       {watched && (
-        <Notice tone={watched.status === "failed" ? "error" : "info"}>
+        <Notice tone={watched.status === "failed" ? "error" : "info"} live>
           {t("actions.job", { id: watched.id.slice(0, 8), status: label(watched.status), message: watched.message })}
         </Notice>
       )}
