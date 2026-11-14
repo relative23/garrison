@@ -4,9 +4,11 @@
 // nginx adds this script to the Stalwart WebUI only where the operator includes
 // the file from `garrison stalwart-switch`; the tag pins it by hash. It
 // reads no page data, tokens or storage. It asks Garrison one thing, with
-// the user's Garrison cookie: whether that user turned the row off; when the
-// answer is missing the row is shown. Garrison has a host name of its own, so
-// the include names its HTTPS address; without one the row is not shown.
+// the user's Garrison cookie: whether that user turned the row on; only that
+// answer shows it. The cookie is SameSite=Lax, so it comes along only where
+// Garrison and the Stalwart WebUI are the same site. Garrison has a host name
+// of its own, so the include names its HTTPS address; without one the row is
+// not shown.
 // Elements are built with DOM calls only (no HTML parsing). If Stalwart's
 // layout changes, it shows nothing.
 (() => {
@@ -52,8 +54,9 @@
   }
 
   /**
-   * Whether the user signed in to Garrison wants the row; yes unless it
-   * says no, so a signed-out user or an unreachable Garrison keeps it.
+   * Whether the user signed in to Garrison turned the row on. The rows are
+   * off until then, so only Garrison's yes shows it: a signed-out user, an
+   * unreachable Garrison or any other answer shows none.
    * @param {string} base
    * @returns {Promise<boolean>}
    */
@@ -62,10 +65,10 @@
       // The API sits at the root of Garrison's host, beside the interface.
       return fetch(new URL("/api/switch", base), { credentials: "include", cache: "no-store" })
         .then((answer) => (answer.ok ? answer.json() : null))
-        .then((answer) => !(answer && answer.show === false))
-        .catch(() => true);
+        .then((answer) => answer?.show === true)
+        .catch(() => false);
     } catch {
-      return Promise.resolve(true);
+      return Promise.resolve(false);
     }
   }
 

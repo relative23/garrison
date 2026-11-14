@@ -242,7 +242,10 @@ location ^~ /admin/ {
 
 Both switch rows stay hidden until a user turns them on in Garrison's
 settings; the row in the Stalwart WebUI then shows while that user is signed
-in to Garrison.
+in to Garrison. It needs both host names under one registered domain, such
+as `garrison.example.org` and `mail.example.org`: only then does the browser
+send Garrison's session cookie with the row's question to Garrison. With two
+different domains the row does not appear.
 
 The installer writes that file with a hash of the script and reloads nginx when
 it changes. The `*` keeps nginx valid when Garrison is not installed; the

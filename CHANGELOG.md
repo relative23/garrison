@@ -53,6 +53,16 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
+  The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
+  when Garrison could not be reached, answered with an error or the browser
+  blocked the question, although the switch rows are off until a user turns
+  them on. It now appears only when Garrison answers that the signed-in user
+  turned it on. That needs Garrison and the Stalwart WebUI under one
+  registered domain, such as `garrison.example.org` and `mail.example.org`:
+  across two domains the browser does not send Garrison's session cookie
+  with the question, and the row stays away, as it did before for a user
+  who was signed in.
 - **Pages start in the system's theme, and follow it.** Every page started
   light and turned dark only once its session had arrived, and with "Follow
   the system" a change of the system's theme while a page was open was not

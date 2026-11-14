@@ -147,14 +147,28 @@ describe("Stalwart WebUI switch row", () => {
     expect(asked).toEqual([{ url: "https://admin.example.test/api/switch", init: { credentials: "include", cache: "no-store" } }]);
   });
 
+  // The rows are off until the user turns them on, so only Garrison's word
+  // that this user did shows one. Without the cookie, which the browser sends
+  // only where Garrison and the Stalwart WebUI are the same site, Garrison
+  // answers as for a user who is not signed in.
   it.each([
     ["Garrison is unreachable", () => Promise.reject(new Error("offline"))],
-    ["the answer is an error", () => Promise.resolve({ ok: false, json: () => Promise.resolve({ show: false }) })],
+    [
+      "the request cannot be made",
+      () => {
+        throw new TypeError("fetch is not available");
+      },
+    ],
+    ["the answer is an error, whatever it says", () => Promise.resolve({ ok: false, json: () => Promise.resolve({ show: true }) })],
     ["the answer is not JSON", () => Promise.resolve({ ok: true, json: () => Promise.reject(new SyntaxError("x")) })],
-  ])("keeps the row when %s", async (_, reply) => {
+    ["the answer says nothing of the row", () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) })],
+    ["the answer is not plainly yes", () => Promise.resolve({ ok: true, json: () => Promise.resolve({ show: "true" }) })],
+    ["the answer is null", () => Promise.resolve({ ok: true, json: () => Promise.resolve(null) })],
+  ])("shows no row when %s", async (_, reply) => {
     answer(reply);
     document.body.innerHTML = STALWART;
     await run("https://admin.example.test/admin/");
-    expect(document.getElementById("garrison-switch")).not.toBeNull();
+    expect(asked).toHaveLength(1);
+    expect(document.getElementById("garrison-switch")).toBeNull();
   });
 });
