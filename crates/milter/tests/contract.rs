@@ -119,8 +119,8 @@ fn stalwart_asks_the_filter_and_refuses_what_it_refuses() {
         serve(
             &listener,
             Settings {
-                tag: false,
                 max_bytes: 16 * 1024 * 1024,
+                ..Default::default()
             },
         );
     });
@@ -159,6 +159,7 @@ fn stalwart_asks_the_filter_and_refuses_what_it_refuses() {
             Settings {
                 tag: true,
                 max_bytes: 16 * 1024 * 1024,
+                ..Default::default()
             },
         );
     });

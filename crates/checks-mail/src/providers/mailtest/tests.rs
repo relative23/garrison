@@ -217,7 +217,10 @@ fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
     assert!(message.ends_with("\r\n--garrison-mail-test--\r\n.\r\nQUIT\r\n"));
     // What travels is what the milter's scan finds, in lines a mail may have.
     let body = message.split_once("\r\nDATA\r\n").unwrap().1;
-    assert!(garrison_milter::scan::macros(body.as_bytes()).is_some());
+    assert!(matches!(
+        garrison_milter::scan::macros(body.as_bytes()),
+        garrison_milter::scan::Outcome::Macros(_)
+    ));
     // No line near the 998 bytes a mail's line may have.
     assert!(body.lines().all(|line| line.len() <= 100), "{body}");
 

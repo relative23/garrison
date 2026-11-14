@@ -42,6 +42,7 @@ fuzz_target!(|data: &[u8]| {
             Settings {
                 tag,
                 max_bytes: 64 * 1024,
+                ..Default::default()
             },
         );
         // A frame is at least five bytes, and the longest answer to one is

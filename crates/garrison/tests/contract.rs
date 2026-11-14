@@ -198,8 +198,8 @@ fn macro_filter(lab: &mut Lab, directory: &std::path::Path, credential: &str, ga
         garrison_milter::server::serve(
             &listener,
             garrison_milter::Settings {
-                tag: false,
                 max_bytes: 1024,
+                ..Default::default()
             },
         );
     });

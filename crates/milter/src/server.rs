@@ -10,17 +10,21 @@
 //! being received may hold so much and no more, and one message is scanned
 //! at a time. A message that finds no room is answered with a temporary
 //! failure, so the sending server brings it again; the filter itself stays up.
+//!
+//! Time is bounded too: from a message's end the filter answers within
+//! [`SCAN_TIME`], the wait for its turn included. A message whose scan is
+//! not done by then was not looked at completely, and is not taken as clean.
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use crate::protocol::{
     self, Command, NO_REPLY_BODY, NO_REPLY_END_OF_HEADERS, NO_REPLY_HEADER, Reply,
 };
-use crate::scan;
+use crate::scan::{self, Gap, Outcome};
 
 /// The header a tagged message gets.
 pub const HEADER: &str = "X-Garrison-Macro";
@@ -34,6 +38,10 @@ const MOST_SESSIONS: usize = 64;
 /// What the messages being received may hold together, unless one message
 /// alone may be larger.
 const HELD: usize = 256 * 1024 * 1024;
+/// A message's answer comes within this time of its end, the wait for the
+/// scan's turn included. A mail server waits for a milter's answer for half
+/// a minute or more.
+pub const SCAN_TIME: Duration = Duration::from_secs(20);
 
 /// How the filter was set up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +50,57 @@ pub struct Settings {
     pub tag: bool,
     /// A message larger than this is not scanned, and is taken.
     pub max_bytes: usize,
+    /// What a message's wait and scan may take together.
+    pub scan_time: Duration,
+}
+
+impl Default for Settings {
+    /// The filter as an empty `[milter]` section sets it up.
+    fn default() -> Self {
+        Settings {
+            tag: false,
+            max_bytes: 64 * 1024 * 1024,
+            scan_time: SCAN_TIME,
+        }
+    }
+}
+
+/// The turn to scan, which one connection has at a time: a scan holds
+/// copies of the message it unpacks.
+#[derive(Debug, Default)]
+struct Turn {
+    taken: Mutex<bool>,
+    free: Condvar,
+}
+
+/// The turn, until it is dropped.
+struct Taken<'a>(&'a Turn);
+
+impl Turn {
+    /// Wait for the turn, but not beyond `until`.
+    fn take(&self, until: Instant) -> Option<Taken<'_>> {
+        let mut taken = self.taken.lock().unwrap_or_else(PoisonError::into_inner);
+        while *taken {
+            let left = until.checked_duration_since(Instant::now())?;
+            if left.is_zero() {
+                return None;
+            }
+            taken = self
+                .free
+                .wait_timeout(taken, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        *taken = true;
+        Some(Taken(self))
+    }
+}
+
+impl Drop for Taken<'_> {
+    fn drop(&mut self) {
+        *self.0.taken.lock().unwrap_or_else(PoisonError::into_inner) = false;
+        self.0.free.notify_one();
+    }
 }
 
 /// What all connections of one filter share: the room their messages take
@@ -51,7 +110,7 @@ pub struct Shared {
     /// The bytes all messages together may hold.
     room: usize,
     held: AtomicUsize,
-    scanning: Mutex<()>,
+    scanning: Turn,
 }
 
 impl Shared {
@@ -66,7 +125,7 @@ impl Shared {
         Shared {
             room,
             held: AtomicUsize::new(0),
-            scanning: Mutex::new(()),
+            scanning: Turn::default(),
         }
     }
 
@@ -233,15 +292,22 @@ fn verdict(message: &Message<'_>, settings: Settings) -> Vec<Reply> {
         );
         return vec![Reply::TempFail];
     }
-    // One scan at a time: a scan holds copies of the message it unpacks.
-    let _turn = message
-        .shared
-        .scanning
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    match scan::macros(&message.data) {
-        None => vec![Reply::Accept],
-        Some(found) if settings.tag => {
+    let until = Instant::now() + settings.scan_time;
+    let outcome = match message.shared.scanning.take(until) {
+        Some(_turn) => scan::macros_until(&message.data, until),
+        None => Outcome::Incomplete(Gap::Deadline),
+    };
+    match outcome {
+        Outcome::Clean => vec![Reply::Accept],
+        Outcome::Incomplete(gap) => {
+            log::warn!(
+                "A message was not scanned completely: {}. The sending server was told to \
+                 bring it again.",
+                gap.name()
+            );
+            vec![Reply::TempFail]
+        }
+        Outcome::Macros(found) if settings.tag => {
             log::info!("Tagged a message with {}", found.name());
             vec![
                 Reply::AddHeader {
@@ -251,7 +317,7 @@ fn verdict(message: &Message<'_>, settings: Settings) -> Vec<Reply> {
                 Reply::Accept,
             ]
         }
-        Some(found) => {
+        Outcome::Macros(found) => {
             log::info!("Refused a message with {}", found.name());
             vec![Reply::Refuse(REFUSAL.to_owned())]
         }

@@ -31,6 +31,7 @@ impl Write for Wire {
 const SETTINGS: Settings = Settings {
     tag: false,
     max_bytes: 8 * 1024 * 1024,
+    scan_time: SCAN_TIME,
 };
 /// Everything a mail server of protocol 6 can leave out or do without.
 const MODERN: u32 = 0x001f_ffff;
@@ -238,4 +239,41 @@ fn steps_that_were_not_asked_for_pass_and_broken_frames_end_the_connection() {
         answered: Vec::new(),
     };
     let _ = session(&mut wire, SETTINGS);
+}
+
+#[test]
+fn a_message_whose_scan_has_no_time_left_is_deferred() {
+    // No time at all: the scan ends before it looked at anything.
+    let hurried = Settings {
+        scan_time: Duration::ZERO,
+        ..SETTINGS
+    };
+    let replies = conversation(&message("invoice.docm", &document()), MODERN, hurried);
+    assert_eq!(replies[1..], [(b't', Vec::new())]);
+}
+
+#[test]
+fn a_message_waits_for_its_turn_no_longer_than_its_time() {
+    let shared = Shared::new(SETTINGS);
+    let turn = shared.scanning.take(Instant::now()).unwrap();
+    // Another connection is scanning: this message's time passes in the wait.
+    let hurried = Settings {
+        scan_time: Duration::from_millis(50),
+        ..SETTINGS
+    };
+    let mut frames = opening(MODERN);
+    frames.extend(sent(&message("letter.txt", b"Nothing but text."), 1000));
+    let began = Instant::now();
+    let deferred = answers_among(frames.clone(), hurried, &shared);
+    assert_eq!(deferred[1..], [(b't', Vec::new())]);
+    assert!(began.elapsed() >= Duration::from_millis(50));
+    assert!(began.elapsed() < Duration::from_secs(10));
+    // The turn comes back, also to a connection that is waiting for it.
+    std::thread::scope(|scope| {
+        let waiting = scope.spawn(|| answers_among(frames.clone(), SETTINGS, &shared));
+        std::thread::sleep(Duration::from_millis(50));
+        drop(turn);
+        assert_eq!(waiting.join().unwrap()[1..], [(b'a', Vec::new())]);
+    });
+    assert!(shared.scanning.take(Instant::now()).is_some());
 }

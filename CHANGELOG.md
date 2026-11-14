@@ -20,6 +20,16 @@ Notable changes for operators and users. The format follows
   the large logos, the byline logos and the sign-in page now reads "by" and
   relative23's own logo, the tile and the word, in its colours.
 
+### Fixed
+
+- **The macro filter answers in time whatever a message holds.** A crafted
+  attachment could keep the filter's one scan busy for seconds to minutes (a
+  megabyte of zip directory headers took eight seconds), and all other mail
+  waited behind it. The scan's work now grows with the size of the message
+  alone, whatever its archives' headers claim, and the filter answers within
+  20 seconds of a message's end, the wait for its turn included. A message
+  whose scan is not done by then is deferred, not taken as clean.
+
 ## [0.1.2] - 2026-11-13
 
 ### Added

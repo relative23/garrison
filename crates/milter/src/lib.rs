@@ -53,6 +53,7 @@ pub fn run(config: &Config) -> Result<(), Error> {
         Settings {
             tag: milter.action == MacroAction::Tag,
             max_bytes: usize::try_from(milter.max_message_bytes).unwrap_or(usize::MAX),
+            scan_time: server::SCAN_TIME,
         },
     );
     Ok(())
@@ -95,8 +96,8 @@ mod tests {
             server::serve(
                 &listener,
                 Settings {
-                    tag: false,
                     max_bytes: 1024,
+                    ..Default::default()
                 },
             );
         });

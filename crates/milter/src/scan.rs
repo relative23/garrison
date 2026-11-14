@@ -25,30 +25,22 @@
 //! documentation: encrypted archives, Excel 4.0 macro sheets in old `.xls`
 //! files and the macros of an old `.ppt` file among it.
 
-use std::io::Read;
+use std::time::Instant;
 
 use base64::Engine;
 use base64::engine::general_purpose::GeneralPurpose;
 use base64::engine::{DecodePaddingMode, GeneralPurposeConfig};
-use flate2::read::DeflateDecoder;
 
-/// A compound file's first bytes.
-const OLE: &[u8] = &[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
-/// `_VBA_PROJECT` as a compound file's directory writes it: UTF-16LE.
-const VBA_STORAGE: &[u8] = b"_\0V\0B\0A\0_\0P\0R\0O\0J\0E\0C\0T\0";
-const ZIP_ENTRY: &[u8] = b"PK\x03\x04";
-/// An entry of the directory at an archive's end, which is what Office reads.
-const ZIP_LISTED: &[u8] = b"PK\x01\x02";
-const ACTIVE_MIME: &[u8] = b"ActiveMime";
-/// The names inside a zip archive that are macros, in lower case.
-const ZIP_MACROS: [&[u8]; 2] = [b"vbaproject.bin", b"xl/macrosheets/"];
+mod marks;
+mod unpack;
+
+use marks::contains;
+use unpack::Work;
+
 /// A stretch of base64 shorter than this holds no document.
 const SHORTEST: usize = 64;
 /// Archives inside archives are opened this deep.
 pub const DEPTH: usize = 3;
-/// One file of an archive is unpacked up to this size, all of a message's
-/// together up to four times as much.
-const UNPACKED: usize = 16 * 1024 * 1024;
 
 /// base64 as mail programs read it: padding or none, and stray bits at the end.
 const LENIENT: GeneralPurpose = GeneralPurpose::new(
@@ -81,139 +73,36 @@ impl Found {
     }
 }
 
-fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty()
-        && haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
+/// Why a scan could not look at all of a message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gap {
+    /// Its archives hold more than the scan unpacks or reads.
+    Budget,
+    /// The scan's time ran out.
+    Deadline,
 }
 
-fn contains_lowercase(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack
-        .windows(needle.len())
-        .any(|window| window.eq_ignore_ascii_case(needle))
-}
-
-fn number(data: &[u8], at: usize, bytes: usize) -> Option<usize> {
-    let field = data.get(at..at + bytes)?;
-    Some(
-        field
-            .iter()
-            .rev()
-            .fold(0, |sum, byte| (sum << 8) | usize::from(*byte)),
-    )
-}
-
-/// Whether a zip header in `data` names a file that is macros: the header
-/// before a file or the directory's entry for it, wherever one stands. A
-/// name that is cut off counts as far as it goes.
-fn names_macros(data: &[u8]) -> bool {
-    let mut at = 0;
-    while let Some(offset) = data[at..].windows(2).position(|window| window == b"PK") {
-        let header = at + offset;
-        at = header + 2;
-        // Where the name's length stands, and where the name begins.
-        let (length, name) = match data.get(header..header + 4) {
-            Some(ZIP_ENTRY) => (26, 30),
-            Some(ZIP_LISTED) => (28, 46),
-            _ => continue,
-        };
-        let Some(length) = number(data, header + length, 2) else {
-            continue;
-        };
-        let start = (header + name).min(data.len());
-        let name = &data[start..(start + length).min(data.len())];
-        if ZIP_MACROS
-            .iter()
-            .any(|macros| contains_lowercase(name, macros))
-        {
-            return true;
+impl Gap {
+    /// The reason in words, for the log. It says nothing of the message.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Gap::Budget => "its archives hold more than the scan unpacks",
+            Gap::Deadline => "the scan's time ran out",
         }
     }
-    false
 }
 
-/// Whether a file begins with `ActiveMime` somewhere in `data`: at its start
-/// or a line's, and followed by the bytes of a file, not by a sentence.
-fn active_mime(data: &[u8]) -> bool {
-    let mut at = 0;
-    while let Some(offset) = data[at..]
-        .windows(ACTIVE_MIME.len())
-        .position(|window| window == ACTIVE_MIME)
-    {
-        let found = at + offset;
-        at = found + ACTIVE_MIME.len();
-        let begins = found == 0 || data[found - 1] == b'\n';
-        let binary = data[at..]
-            .iter()
-            .take(16)
-            .any(|byte| *byte < 0x20 && !matches!(byte, b'\t' | b'\r' | b'\n'));
-        if begins && binary {
-            return true;
-        }
-    }
-    false
-}
-
-/// What `data` shows without unpacking anything.
-fn plain(data: &[u8]) -> Option<Found> {
-    if contains(data, OLE) && contains(data, VBA_STORAGE) {
-        return Some(Found::Compound);
-    }
-    if names_macros(data) {
-        return Some(Found::Zipped);
-    }
-    active_mime(data).then_some(Found::ActiveMime)
-}
-
-/// The scan of one candidate: what it shows, and what the deflated files of
-/// an archive in it show. `budget` is what may still be unpacked.
-fn scanned(data: &[u8], depth: usize, budget: &mut usize) -> Option<Found> {
-    if let Some(found) = plain(data) {
-        return Some(found);
-    }
-    if depth == 0 {
-        return None;
-    }
-    // Every local file header, wherever the archive begins: a file that is
-    // stored was searched above, one that is deflated is unpacked.
-    let mut at = 0;
-    while let Some(offset) = data[at..].windows(4).position(|window| window == ZIP_ENTRY) {
-        let header = at + offset;
-        at = header + 4;
-        let (Some(method), Some(packed), Some(name), Some(extra)) = (
-            number(data, header + 8, 2),
-            number(data, header + 18, 4),
-            number(data, header + 26, 2),
-            number(data, header + 28, 2),
-        ) else {
-            break;
-        };
-        if method != 8 || *budget == 0 {
-            continue;
-        }
-        let start = header + 30 + name + extra;
-        let Some(rest) = data.get(start..) else {
-            continue;
-        };
-        // The header's size is zero where the archive was written as a
-        // stream; the deflated data ends itself either way.
-        let packed = if packed == 0 {
-            rest.len()
-        } else {
-            packed.min(rest.len())
-        };
-        let limit = (*budget).min(UNPACKED);
-        let mut unpacked = Vec::new();
-        let _ = DeflateDecoder::new(&rest[..packed])
-            .take(limit as u64)
-            .read_to_end(&mut unpacked);
-        *budget = budget.saturating_sub(unpacked.len());
-        if let Some(found) = scanned(&unpacked, depth - 1, budget) {
-            return Some(found);
-        }
-    }
-    None
+/// What a scan says of a message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// Everything was looked at, and no document with macros is in it.
+    Clean,
+    /// The first document with macros in it.
+    Macros(Found),
+    /// No document with macros was seen, but not everything could be looked
+    /// at: this is not a clean message.
+    Incomplete(Gap),
 }
 
 fn is_base64(byte: u8) -> bool {
@@ -278,15 +167,35 @@ fn unquoted(message: &[u8]) -> Vec<u8> {
     plain
 }
 
-/// The first document with macros in `message`, if it carries one.
+/// What `message` carries, with all the time the scan needs.
 #[must_use]
-pub fn macros(message: &[u8]) -> Option<Found> {
-    let mut budget = 4 * UNPACKED;
-    if let Some(found) = scanned(message, DEPTH, &mut budget) {
+pub fn macros(message: &[u8]) -> Outcome {
+    scan(message, None)
+}
+
+/// What `message` carries, so far as that is known at `until`: a scan that
+/// is not done by then ends as [`Gap::Deadline`].
+#[must_use]
+pub fn macros_until(message: &[u8], until: Instant) -> Outcome {
+    scan(message, Some(until))
+}
+
+fn scan(message: &[u8], until: Option<Instant>) -> Outcome {
+    let mut work = Work::new(until);
+    match (candidates(message, &mut work), work.gap) {
+        (Some(found), _) => Outcome::Macros(found),
+        (None, Some(gap)) => Outcome::Incomplete(gap),
+        (None, None) => Outcome::Clean,
+    }
+}
+
+/// The first document with macros in what `message` may be read as.
+fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
+    if let Some(found) = work.scanned(message, DEPTH) {
         return Some(found);
     }
     for stretch in stretches(message) {
-        if let Some(found) = scanned(&stretch, DEPTH, &mut budget) {
+        if let Some(found) = work.scanned(&stretch, DEPTH) {
             return Some(found);
         }
     }
@@ -296,10 +205,12 @@ pub fn macros(message: &[u8]) -> Option<Found> {
         || contains(message, b"=50=4B")
         || contains(message, b"=D0=CF")
     {
-        return scanned(&unquoted(message), DEPTH, &mut budget);
+        return work.scanned(&unquoted(message), DEPTH);
     }
     None
 }
 
+#[cfg(test)]
+mod bounds_tests;
 #[cfg(test)]
 pub(crate) mod tests;
