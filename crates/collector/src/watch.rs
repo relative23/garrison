@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use garrison_core::{sqlite, time};
-use rusqlite::OptionalExtension;
+use rusqlite::{Connection, OptionalExtension};
 use rustls::RootCertStore;
 
 use crate::context::{Deadline, Memory};
@@ -83,16 +83,35 @@ struct Recorded {
     channels: Channels,
 }
 
+/// When the newest snapshot was written: when the last run finished.
+fn finished(db: &Connection) -> rusqlite::Result<Option<i64>> {
+    db.query_row("SELECT MAX(collected_at) FROM snapshots", [], |row| {
+        row.get(0)
+    })
+}
+
+/// When the last collection run finished, as a Unix second; `None` before
+/// the first one, also where there is no database yet. `garrison doctor`
+/// asks this, so that both judge the collector the same way.
+pub fn last_run(database: &Path) -> Result<Option<i64>, String> {
+    let Some(reader) = sqlite::reading(database, BUDGET).map_err(|error| error.to_string())? else {
+        return Ok(None);
+    };
+    finished(&reader).map_err(|error| error.to_string())
+}
+
+/// Whether a collector whose last run finished at `last` has stopped by `now`.
+#[must_use]
+pub fn stopped(last: i64, now: time::Timestamp) -> bool {
+    now.as_second() - last > LIMIT
+}
+
 /// The collector's record; the default where there is no database yet.
 fn recorded(database: &Path) -> Result<Recorded, String> {
     let Some(reader) = sqlite::reading(database, BUDGET).map_err(|error| error.to_string())? else {
         return Ok(Recorded::default());
     };
-    let last: Option<i64> = reader
-        .query_row("SELECT MAX(collected_at) FROM snapshots", [], |row| {
-            row.get(0)
-        })
-        .map_err(|error| error.to_string())?;
+    let last = finished(&reader).map_err(|error| error.to_string())?;
     let channel: Option<String> = reader
         .query_row("SELECT value FROM memory WHERE key=?", [CHANNEL], |row| {
             row.get(0)
@@ -123,7 +142,7 @@ impl Watch<'_> {
             Ok(channels) => channels.clone(),
             Err(()) => recorded.channels.with(self.secrets.clone()),
         };
-        let stopped = self.now.as_second() - last > LIMIT;
+        let stopped = stopped(last, self.now);
         let told = fs::symlink_metadata(self.marker).is_ok();
         // A message counts once any channel took it.
         let send = |note: Note| match taken(&channels.send_with(

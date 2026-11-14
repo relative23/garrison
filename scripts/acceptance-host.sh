@@ -118,7 +118,7 @@ through_nginx installed
 step "garrison doctor"
 inside '/opt/garrison/current/bin/garrison doctor > /root/doctor.log 2>&1 || true'
 inside 'sed "s/^/      | /" /root/doctor.log'
-for expected in "ok    garrison-web.service is active" "ok    the last collection run succeeded" \
+for expected in "ok    garrison-web.service is active" "ok    the last collection run finished" \
     "ok    the access policy is private" "ok    webhook-signature-key is private" \
     "presents a trusted certificate" "ok    Garrison answers at https://admin.example.test" \
     "ok    nginx sends Strict-Transport-Security" "does not serve Stalwart's metrics" \

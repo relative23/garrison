@@ -155,6 +155,27 @@ fn a_run_within_the_limit_and_a_host_without_runs_are_left_alone() {
 }
 
 #[test]
+fn the_last_run_is_the_newest_snapshot_and_stops_after_the_limit() {
+    let host = Host::new(Some(LIMIT + 30), None);
+    let mut store = StatusStore::open(&host.database(), 90).unwrap();
+    run(&mut store, 90);
+    drop(store);
+    let last = last_run(&host.database()).unwrap().unwrap();
+    assert_eq!(last, now().as_second() - 90);
+    assert!(!stopped(last, now()));
+    assert!(!stopped(now().as_second() - LIMIT, now()));
+    assert!(stopped(now().as_second() - LIMIT - 1, now()));
+    // No run yet, and no database yet: nothing has finished.
+    assert_eq!(last_run(&Host::new(None, None).database()), Ok(None));
+    let directory = tempfile::tempdir().unwrap();
+    assert_eq!(last_run(&directory.path().join("status.sqlite")), Ok(None));
+    // A file that is no status database cannot say when a run finished.
+    let broken = directory.path().join("broken.sqlite");
+    fs::write(&broken, "not a database").unwrap();
+    assert!(last_run(&broken).is_err());
+}
+
+#[test]
 fn without_a_configuration_that_loads_the_channel_of_the_last_run_is_told() {
     let server = serve(vec![answer(200, "{}")]);
     let host = Host::new(Some(3600), Some(&channel(&server.url)));

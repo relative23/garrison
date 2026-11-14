@@ -53,6 +53,13 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **`garrison doctor` judges the collector by its last finished run.** It
+  called the last collection run successful whenever systemd said so of the
+  unit, and systemd says "success" also of a unit that has never run. Doctor
+  now reads when the collector last finished a run, as the watch does: within
+  ten minutes is in order, longer ago is a problem, no run yet a warning,
+  and a status database it cannot read is unknown. A last run that failed is
+  still named as a warning.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser
