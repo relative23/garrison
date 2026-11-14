@@ -54,6 +54,15 @@ Notable changes for operators and users. The format follows
   lasts, people signing in from a network that has not tried within the
   minute are likely to be turned away; people already signed in stay signed
   in, and a minute after the flood ends sign-in works again.
+- **Quick filter changes no longer end in "Too many concurrent history
+  queries".** The web service runs two history queries at a time and refused
+  a third at once, and a query kept its turn until it ended even when the
+  browser had given up its request for a newer filter: three quick steps
+  through the categories of the Event history while a search was set showed
+  that error instead of the list. A query whose request goes away now stops
+  and gives its turn to the next, and a further query waits up to two
+  seconds for a turn. It is refused only when eight are waiting already, or
+  when no turn came within those two seconds.
 - **The macro filter no longer passes what it could not scan as clean.** A
   message larger than `max_message_mib`, an archive that unpacks to more than
   the filter unpacks (16 MiB a file, 64 MiB together), and a zip archive

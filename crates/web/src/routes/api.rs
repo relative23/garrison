@@ -21,6 +21,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json as object};
 
 use super::auth::delete_cookie;
+use super::events::checked;
 use super::shown::shown;
 use crate::app::App;
 use crate::error::{ApiError, ApiResult, blocking};
@@ -318,9 +319,8 @@ async fn metrics(
     visitor: Visitor,
     uri: Uri,
 ) -> ApiResult<Json<MetricsResponse>> {
-    blocking(move || {
-        app.gate.require(&visitor, &[ModuleId::Dashboard])?;
-        // Parameters are checked after the caller, so strangers learn nothing.
+    // Parameters are checked after the caller, so strangers learn nothing.
+    let (start, end, buckets) = checked(&app, visitor, &[ModuleId::Dashboard], move || {
         let Ok(Query(query)) = Query::<MetricsQuery>::try_from_uri(&uri) else {
             return Err(ApiError::invalid());
         };
@@ -351,15 +351,18 @@ async fn metrics(
             let end = now - now.rem_euclid(60);
             (end - duration, end, *buckets)
         };
-        let Ok(_slot) = app.query_slots.try_acquire() else {
-            return Err(ApiError::new(429, "Too many concurrent history queries"));
-        };
-        let db = reading(&app.config.database(Database::Status), READ_BUDGET)?;
-        let db = db.ok_or_else(|| ApiError::new(503, "Metric history is not available yet"))?;
-        let history = history(&db, start, end, buckets)?;
-        Ok(Json(history.into()))
+        Ok((start, end, buckets))
     })
-    .await
+    .await?;
+    let path = app.config.database(Database::Status);
+    let missing = "Metric history is not available yet";
+    let history = app
+        .queries
+        .run(path, missing, move |db| {
+            Ok(history(db, start, end, buckets)?)
+        })
+        .await?;
+    Ok(Json(history.into()))
 }
 
 impl From<History> for MetricsResponse {

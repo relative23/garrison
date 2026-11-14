@@ -8,6 +8,7 @@ mod coding;
 pub mod error;
 pub mod models;
 pub mod openapi;
+pub mod queries;
 pub mod routes;
 pub mod security;
 pub mod store;

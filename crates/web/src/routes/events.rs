@@ -134,17 +134,32 @@ pub(super) fn parsed<T: serde::de::DeserializeOwned>(uri: &Uri) -> ApiResult<T> 
         .map_err(|_| ApiError::invalid())
 }
 
-/// One query on the event history, within the history's concurrency and time budget.
-pub(super) fn run<T>(
-    app: &App,
-    query: impl FnOnce(&Connection) -> Result<T, QueryError>,
+/// The caller's rights, then the request's parameters, checked off the async
+/// threads before a query waits for its turn: a stranger never takes a place.
+pub(super) async fn checked<T: Send + 'static>(
+    app: &Arc<App>,
+    visitor: Visitor,
+    modules: &'static [ModuleId],
+    prepare: impl FnOnce() -> ApiResult<T> + Send + 'static,
 ) -> ApiResult<T> {
-    let Ok(_slot) = app.query_slots.try_acquire() else {
-        return Err(ApiError::new(429, "Too many concurrent history queries"));
-    };
-    let db = reading(&app.config.database(Database::Events), READ_BUDGET)?;
-    let db = db.ok_or_else(|| ApiError::new(503, "The event history is not available yet"))?;
-    query(&db).map_err(failure)
+    let app = Arc::clone(app);
+    blocking(move || {
+        app.gate.require(&visitor, modules)?;
+        prepare()
+    })
+    .await
+}
+
+/// One query on the event history, in its turn (see `queries`).
+pub(super) async fn run<T: Send + 'static>(
+    app: &App,
+    query: impl FnOnce(&Connection) -> Result<T, QueryError> + Send + 'static,
+) -> ApiResult<T> {
+    let path = app.config.database(Database::Events);
+    let missing = "The event history is not available yet";
+    app.queries
+        .run(path, missing, move |db| query(db).map_err(failure))
+        .await
 }
 
 /// What a failed history query tells the user.
@@ -200,8 +215,7 @@ async fn events(
     visitor: Visitor,
     uri: Uri,
 ) -> ApiResult<Json<EventsPage>> {
-    blocking(move || {
-        app.gate.require(&visitor, &[ModuleId::Logs])?;
+    let filter = checked(&app, visitor, &[ModuleId::Logs], move || {
         let query: EventsQuery = parsed(&uri)?;
         let mut filter = filter(
             query.search,
@@ -217,10 +231,11 @@ async fn events(
         if unknown_category || unknown_type {
             return Err(ApiError::new(400, "Unknown event category or type"));
         }
-        let page = run(&app, |db| queries::list_events(db, &filter))?;
-        Ok(Json(page.into()))
+        Ok(filter)
     })
-    .await
+    .await?;
+    let page = run(&app, move |db| queries::list_events(db, &filter)).await?;
+    Ok(Json(page.into()))
 }
 
 fn grouped_filter(uri: &Uri) -> ApiResult<Filter> {
@@ -247,13 +262,12 @@ async fn deliveries(
     visitor: Visitor,
     uri: Uri,
 ) -> ApiResult<Json<DeliveriesPage>> {
-    blocking(move || {
-        app.gate.require(&visitor, &[ModuleId::Deliveries])?;
-        let filter = grouped_filter(&uri)?;
-        let page = run(&app, |db| queries::list_deliveries(db, &filter))?;
-        Ok(Json(page.into()))
+    let filter = checked(&app, visitor, &[ModuleId::Deliveries], move || {
+        grouped_filter(&uri)
     })
-    .await
+    .await?;
+    let page = run(&app, move |db| queries::list_deliveries(db, &filter)).await?;
+    Ok(Json(page.into()))
 }
 
 /// A queue or span ID: 1 to 20 ASCII digits.
@@ -278,14 +292,14 @@ async fn delivery(
     visitor: Visitor,
     Path(queue_id): Path<String>,
 ) -> ApiResult<Json<DeliveryDetail>> {
-    blocking(move || {
-        app.gate.require(&visitor, &[ModuleId::Deliveries])?;
-        identifier(&queue_id)?;
-        run(&app, |db| queries::delivery_detail(db, &queue_id))?
-            .map(|detail| Json(detail.into()))
-            .ok_or_else(|| ApiError::new(404, "No recorded events for this queue ID"))
+    let queue_id = checked(&app, visitor, &[ModuleId::Deliveries], move || {
+        identifier(&queue_id).map(|()| queue_id)
     })
-    .await
+    .await?;
+    run(&app, move |db| queries::delivery_detail(db, &queue_id))
+        .await?
+        .map(|detail| Json(detail.into()))
+        .ok_or_else(|| ApiError::new(404, "No recorded events for this queue ID"))
 }
 
 /// SMTP sessions reconstructed from recorded events, newest first.
@@ -301,13 +315,12 @@ async fn sessions(
     visitor: Visitor,
     uri: Uri,
 ) -> ApiResult<Json<SessionsPage>> {
-    blocking(move || {
-        app.gate.require(&visitor, &[ModuleId::Sessions])?;
-        let filter = grouped_filter(&uri)?;
-        let page = run(&app, |db| queries::list_sessions(db, &filter))?;
-        Ok(Json(page.into()))
+    let filter = checked(&app, visitor, &[ModuleId::Sessions], move || {
+        grouped_filter(&uri)
     })
-    .await
+    .await?;
+    let page = run(&app, move |db| queries::list_sessions(db, &filter)).await?;
+    Ok(Json(page.into()))
 }
 
 /// Every recorded event of one SMTP session.
@@ -323,14 +336,14 @@ async fn session(
     visitor: Visitor,
     Path(span_id): Path<String>,
 ) -> ApiResult<Json<SessionDetail>> {
-    blocking(move || {
-        app.gate.require(&visitor, &[ModuleId::Sessions])?;
-        identifier(&span_id)?;
-        run(&app, |db| queries::session_detail(db, &span_id))?
-            .map(|detail| Json(detail.into()))
-            .ok_or_else(|| ApiError::new(404, "No recorded events for this session"))
+    let span_id = checked(&app, visitor, &[ModuleId::Sessions], move || {
+        identifier(&span_id).map(|()| span_id)
     })
-    .await
+    .await?;
+    run(&app, move |db| queries::session_detail(db, &span_id))
+        .await?
+        .map(|detail| Json(detail.into()))
+        .ok_or_else(|| ApiError::new(404, "No recorded events for this session"))
 }
 
 #[cfg(test)]

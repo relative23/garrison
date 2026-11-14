@@ -10,9 +10,9 @@ use garrison_core::modules::ModuleId;
 use garrison_ingest::destinations as found;
 
 use super::attacks::PeriodQuery;
-use super::events::run;
+use super::events::{checked, run};
 use crate::app::App;
-use crate::error::{ApiResult, blocking};
+use crate::error::ApiResult;
 use crate::models::{DeliveryCause, Destination, DestinationTotals, Destinations, WaitingMessage};
 use crate::security::Visitor;
 
@@ -135,11 +135,10 @@ async fn destinations(
     visitor: Visitor,
     uri: Uri,
 ) -> ApiResult<Json<Destinations>> {
-    blocking(move || {
-        app.gate.require(&visitor, &[ModuleId::Deliveries])?;
-        let (since, until) = PeriodQuery::stretch(&uri)?;
-        let summary = run(&app, |db| found::destinations(db, since, until))?;
-        Ok(Json(summary.into()))
+    let (since, until) = checked(&app, visitor, &[ModuleId::Deliveries], move || {
+        PeriodQuery::stretch(&uri)
     })
-    .await
+    .await?;
+    let summary = run(&app, move |db| found::destinations(db, since, until)).await?;
+    Ok(Json(summary.into()))
 }

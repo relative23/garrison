@@ -9,6 +9,8 @@ use std::fs::{self, OpenOptions, Permissions};
 use std::ops::Deref;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use rusqlite::config::DbConfig;
@@ -145,6 +147,16 @@ impl Deref for Reader {
 /// The budget bounds expensive searches even when an authorized user sends a
 /// pathological filter.
 pub fn reading(path: &Path, budget: Duration) -> Result<Option<Reader>, SqliteError> {
+    reading_until(path, budget, Arc::new(AtomicBool::new(false)))
+}
+
+/// [`reading`], whose queries also stop as soon as `gone` is set: a query
+/// whose request has gone away need not run out its budget.
+pub fn reading_until(
+    path: &Path,
+    budget: Duration,
+    gone: Arc<AtomicBool>,
+) -> Result<Option<Reader>, SqliteError> {
     if fs::symlink_metadata(path).is_err() {
         return Ok(None);
     }
@@ -152,13 +164,17 @@ pub fn reading(path: &Path, budget: Duration) -> Result<Option<Reader>, SqliteEr
     let mut db = open_untrusted(path, flags)?;
     db.pragma_update(None, "query_only", "ON")?;
     let deadline = Instant::now() + budget;
-    db.progress_handler(10_000, Some(move || Instant::now() > deadline))?;
+    db.progress_handler(
+        10_000,
+        Some(move || Instant::now() > deadline || gone.load(Ordering::Relaxed)),
+    )?;
     db.execute_batch("BEGIN")?;
     Ok(Some(Reader { db }))
 }
 
-/// Whether a query failed because its reader's time budget ran out. That is
-/// the size of the request, not a fault of the database.
+/// Whether a query failed because its reader's time budget ran out, or its
+/// request went away. That is the size of the request, not a fault of the
+/// database.
 #[must_use]
 pub fn out_of_time(error: &rusqlite::Error) -> bool {
     error.sqlite_error_code() == Some(rusqlite::ErrorCode::OperationInterrupted)

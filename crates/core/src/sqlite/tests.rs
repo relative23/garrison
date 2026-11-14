@@ -161,6 +161,32 @@ fn reader_queries_stop_at_the_time_budget() {
 }
 
 #[test]
+fn reader_queries_stop_once_their_request_is_gone() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("items.sqlite");
+    drop(open_writer(&path, MIGRATIONS, Sharing::WithReaders, 0o600).unwrap());
+    let gone = Arc::new(AtomicBool::new(false));
+    // A budget the test never waits for: only the flag can stop the query.
+    let reader = reading_until(&path, Duration::from_secs(3600), Arc::clone(&gone))
+        .unwrap()
+        .unwrap();
+    let endless =
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n";
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let stopped = reader.query_row(endless, [], |row| row.get::<_, i64>(0));
+        sender.send(stopped.is_err_and(|error| out_of_time(&error)))
+    });
+    // The query runs until the flag is set, and then stops.
+    assert_eq!(
+        receiver.recv_timeout(Duration::from_millis(200)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    );
+    gone.store(true, Ordering::Relaxed);
+    assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(true));
+}
+
+#[test]
 fn schema_statements_are_read_as_sqlite_reads_them() {
     for (sql, kind) in [
         ("CREATE TABLE t(a)", Some("TABLE")),

@@ -12,9 +12,9 @@ use garrison_ingest::attacks as found;
 use serde::Deserialize;
 use utoipa::ToSchema;
 
-use super::events::{parsed, run};
+use super::events::{checked, parsed, run};
 use crate::app::App;
-use crate::error::{ApiError, ApiResult, blocking};
+use crate::error::{ApiError, ApiResult};
 use crate::models::{
     AttackNetwork, AttackSource, AttackTotals, AttackedAccount, Attacks, Ban, BanReason,
 };
@@ -216,11 +216,10 @@ async fn attacks(
     visitor: Visitor,
     uri: Uri,
 ) -> ApiResult<Json<Attacks>> {
-    blocking(move || {
-        app.gate.require(&visitor, &[ModuleId::Attacks])?;
-        let (since, until) = PeriodQuery::stretch(&uri)?;
-        let summary = run(&app, |db| found::attacks(db, since, until))?;
-        Ok(Json(stated(summary)?))
+    let (since, until) = checked(&app, visitor, &[ModuleId::Attacks], move || {
+        PeriodQuery::stretch(&uri)
     })
-    .await
+    .await?;
+    let summary = run(&app, move |db| found::attacks(db, since, until)).await?;
+    Ok(Json(stated(summary)?))
 }

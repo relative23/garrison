@@ -16,7 +16,6 @@ use axum::response::{IntoResponse, Response};
 use garrison_core::config::Config;
 use garrison_core::hex;
 use garrison_stalwart::oidc::{CodeExchange, Provider, Token};
-use tokio::sync::Semaphore;
 
 // Garrison's client ID and callback, which the checks also send to Stalwart's
 // sign-in page.
@@ -24,6 +23,7 @@ pub use garrison_stalwart::oidc::{client_id, redirect_uri};
 
 use crate::attempts::Attempts;
 use crate::error::{ApiError, Cause};
+use crate::queries::Queries;
 use crate::routes;
 use crate::security::Gate;
 use crate::store::WebStore;
@@ -49,8 +49,6 @@ fn policy(style: Option<&InlineStyle>) -> HeaderValue {
         })
         .unwrap_or(HeaderValue::from_static(CSP))
 }
-/// At most two concurrent history and event queries per process; more get 429.
-const QUERY_SLOTS: usize = 2;
 
 /// The identity provider's token endpoints; tests use their own.
 pub trait Identity: Send + Sync {
@@ -80,7 +78,8 @@ pub struct App {
     pub identity: Arc<dyn Identity>,
     /// The built interface: index.html, assets/, favicon.svg, the switch script.
     pub static_directory: PathBuf,
-    pub query_slots: Semaphore,
+    /// The turns of the history queries (see `queries`).
+    pub queries: Queries,
     /// Code exchanges per client network (see `attempts`).
     pub sign_ins: Attempts,
 }
@@ -119,7 +118,7 @@ impl App {
             gate,
             identity,
             static_directory,
-            query_slots: Semaphore::new(QUERY_SLOTS),
+            queries: Queries::default(),
             sign_ins: Attempts::default(),
         })
     }

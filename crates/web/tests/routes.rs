@@ -6,6 +6,9 @@
 
 mod support;
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use axum::http::{Method, StatusCode};
 use garrison_core::config::Database;
 use garrison_core::time;
@@ -305,11 +308,30 @@ async fn one_delivery_and_one_session_in_detail() {
 }
 
 #[tokio::test]
-async fn history_queries_beyond_their_slots_are_refused() {
+async fn history_queries_wait_for_a_turn_and_are_refused_beyond_their_room() {
     let mut setup = setup();
     setup.client.sign_in("code-admin").await;
-    let slots = u32::try_from(setup.app.query_slots.available_permits()).unwrap();
-    let held = setup.app.query_slots.try_acquire_many(slots).unwrap();
+    let queries = &setup.app.queries;
+    // With every turn taken a query waits, and takes the turn that frees.
+    let turns = u32::try_from(queries.running.available_permits()).unwrap();
+    let held = Arc::clone(&queries.running)
+        .try_acquire_many_owned(turns)
+        .unwrap();
+    let freed = async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        drop(held);
+    };
+    let events = api("events");
+    let (answer, ()) = tokio::join!(setup.client.get(&events), freed);
+    assert_eq!(
+        answer.json(),
+        json!({"detail": "The event history is not available yet"})
+    );
+    // With every place to run or to wait taken, the answer comes at once.
+    let room = u32::try_from(queries.admitted.available_permits()).unwrap();
+    let held = Arc::clone(&queries.admitted)
+        .try_acquire_many_owned(room)
+        .unwrap();
     for path in ["events", "deliveries", "metrics"] {
         let answer = setup.client.get(&api(path)).await;
         assert_eq!(
