@@ -53,6 +53,14 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **The lists and details of deliveries and sessions keep to a size.** A
+  session listed every recipient its commands named, up to 25 600 where a
+  delivery lists a hundred, and a delivery every recipient's outcome; a
+  page of such sessions or deliveries, and the events of one of them, went
+  out however large. A session lists its first hundred recipients, a
+  delivery the outcomes of the recipients it lists, and a page or a detail
+  ends at 768 kB like the list of events: the page continues on the next,
+  the detail says that it shows only the first events.
 - **An event's own time is believed only where it can be true.** The event
   history is kept by the time an event says it happened, so one dated years
   ahead outlived retention and both size limits, and enough of them left no

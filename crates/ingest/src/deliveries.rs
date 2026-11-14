@@ -24,13 +24,15 @@ pub type Event = (String, Map<String, Value>);
 pub struct Lifecycle {
     /// The first sender recorded; empty when no event names one.
     pub from: String,
+    /// The first hundred recipients the events name.
     pub to: Vec<String>,
     /// `queued`, `in-progress`, `deferred`, `failed` or `completed` by the
     /// last lifecycle event; with complete evidence the outcome all recipients
     /// share, else `partial`; `unknown` when events are missing.
     pub status: String,
-    /// The last outcome recorded for each recipient (`delivered`, `deferred`
-    /// or `failed`), in the order the recipients first had one.
+    /// The last outcome recorded for each recipient that `to` lists
+    /// (`delivered`, `deferred` or `failed`), in the order the recipients
+    /// first had one.
     pub recipient_outcomes: Map<String, Value>,
     pub recipient_evidence_complete: bool,
 }
@@ -179,6 +181,10 @@ pub fn summarize_queue(events: &[Event], total: usize) -> Lifecycle {
     } else if !outcomes.is_empty() && !matches!(current, "failed" | "deferred" | "completed") {
         "partial".clone_into(&mut final_status);
     }
+    // The message is judged by every outcome; the answer names those of the
+    // recipients it lists, so that it stays as small as its list.
+    let listed: BTreeSet<&str> = recipients.iter().map(String::as_str).collect();
+    outcomes.retain(|address, _| listed.contains(address.as_str()));
     Lifecycle {
         from: sender,
         to: recipients,
@@ -245,7 +251,7 @@ pub fn summarize_session(events: &[Event], total: usize) -> Milestones {
             Some(EventType::SmtpMailFrom) => from = text(fields, "from"),
             Some(EventType::SmtpRcptTo) => {
                 for address in addresses(fields) {
-                    if !to.contains(&address) {
+                    if !to.contains(&address) && to.len() < MAX_RECIPIENTS {
                         to.push(address);
                     }
                 }

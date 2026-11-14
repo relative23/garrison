@@ -36,7 +36,8 @@ pub struct Page<T> {
 }
 
 /// One delivery or session with its events, oldest first. `truncated` when
-/// more events were recorded than are shown and summarized.
+/// more events were recorded than are shown: beyond the 256 the summary
+/// reads, or beyond what the answer's size allows.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Detail<S> {
     pub summary: S,

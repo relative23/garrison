@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 
 use rusqlite::types::Value as Sql;
 use rusqlite::{Connection, OptionalExtension, Row, params_from_iter};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::answers::{DeliverySummary, Detail, EventItem, Page, SessionSummary};
@@ -104,16 +104,35 @@ fn event_item(row: &Row<'_>) -> Result<EventItem> {
     })
 }
 
+/// What an answer may still hold. Each item counts as the JSON it goes out
+/// as.
+struct Budget(usize);
+
+impl Budget {
+    fn new() -> Self {
+        Budget(MAX_RESPONSE_BYTES)
+    }
+
+    /// Whether `item` still fits; it is counted if it does.
+    fn takes<T: Serialize>(&mut self, item: &T) -> bool {
+        let size = serde_json::to_string(item).map_or(usize::MAX, |text| text.len());
+        match self.0.checked_sub(size) {
+            Some(left) => {
+                self.0 = left;
+                true
+            }
+            None => false,
+        }
+    }
+}
+
 /// At most `limit` items within the response budget, and whether more exist.
-/// The budget counts each item as the JSON it goes out as.
 fn bounded(items: Vec<EventItem>, limit: usize) -> (Vec<EventItem>, bool) {
     let more = items.len() > limit;
-    let mut used: usize = 0;
+    let mut budget = Budget::new();
     let mut kept = Vec::new();
     for item in items.into_iter().take(limit) {
-        let size = serde_json::to_string(&item).map_or(MAX_RESPONSE_BYTES, |text| text.len());
-        used = used.saturating_add(size);
-        if used > MAX_RESPONSE_BYTES {
+        if !budget.takes(&item) {
             return (kept, true);
         }
         kept.push(item);
@@ -333,12 +352,10 @@ fn summary<S>(
     let events = events_for(db, group, &row.id)?;
     let total = count(db, group, &row.id)?;
     let pairs: Vec<Event> = events.iter().map(|(pair, _)| pair.clone()).collect();
-    let truncated = events.len() > MAX_SUMMARY_EVENTS;
-    let items = events
-        .into_iter()
-        .take(MAX_SUMMARY_EVENTS)
-        .map(|(_, item)| item)
-        .collect();
+    // The summary reads every event up to its bound; the events that are
+    // shown end where the answer is full, and that is said.
+    let items = events.into_iter().map(|(_, item)| item).collect();
+    let (items, truncated) = bounded(items, MAX_SUMMARY_EVENTS);
     Ok(Detail {
         summary: summarize(row, &pairs, total),
         events: items,
@@ -346,20 +363,30 @@ fn summary<S>(
     })
 }
 
-fn page<S>(
+fn page<S: Serialize>(
     db: &Connection,
     group: Group,
     filter: &Filter,
     summarize: Summarize<S>,
 ) -> Result<Page<S>> {
     let rows = grouped(db, group, filter)?;
+    let mut more = rows.len() > filter.limit;
+    let mut budget = Budget::new();
     let mut items = Vec::new();
     for row in rows.iter().take(filter.limit) {
-        items.push(summary(db, group, row, summarize)?.summary);
+        let item = summary(db, group, row, summarize)?.summary;
+        // The page ends where the answer is full; the next begins there.
+        if !budget.takes(&item) {
+            more = true;
+            break;
+        }
+        items.push(item);
     }
-    let next = rows
-        .get(filter.limit.wrapping_sub(1))
-        .filter(|_| rows.len() > filter.limit)
+    let next = items
+        .len()
+        .checked_sub(1)
+        .and_then(|last| rows.get(last))
+        .filter(|_| more)
         .map(|last| format!("{}:{}", last.last_seen, last.id));
     Ok(Page { items, next })
 }
@@ -401,6 +428,8 @@ pub fn session_detail(db: &Connection, span_id: &str) -> Result<Option<Detail<Se
     detail(db, Group::Span, span_id, session)
 }
 
+#[cfg(test)]
+mod budget_tests;
 #[cfg(test)]
 mod refused_tests;
 #[cfg(test)]

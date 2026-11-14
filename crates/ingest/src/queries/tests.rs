@@ -343,7 +343,7 @@ fn queued(index: u64, data: &Value) -> Value {
     event(index, "queue.message-queued", &at, data)
 }
 
-fn limit(limit: usize) -> Filter {
+pub(super) fn limit(limit: usize) -> Filter {
     Filter {
         limit,
         ..Filter::default()

@@ -218,6 +218,44 @@ fn the_first_sender_counts_and_recipients_are_capped() {
 }
 
 #[test]
+fn a_session_lists_as_many_recipients_as_a_delivery() {
+    // A client may name a hundred recipients with each of many commands.
+    let events: Vec<Event> = (0..3)
+        .map(|command| {
+            let to: Vec<String> = (0..MAX_RECIPIENTS)
+                .map(|index| format!("r{command}-{index}@example.test"))
+                .collect();
+            event("smtp.rcpt-to", &json!({"to": to}))
+        })
+        .collect();
+    let summary = json!(summarize_session(&events, events.len()));
+    let to = summary["to"].as_array().unwrap();
+    assert_eq!(to.len(), MAX_RECIPIENTS);
+    // The first that were named.
+    assert_eq!(to[MAX_RECIPIENTS - 1], "r0-99@example.test");
+}
+
+#[test]
+fn outcomes_go_out_for_the_recipients_that_are_listed() {
+    let listed: Vec<String> = (0..MAX_RECIPIENTS)
+        .map(|index| format!("r{index}@example.test"))
+        .collect();
+    let others: Vec<String> = (0..MAX_RECIPIENTS)
+        .map(|index| format!("other{index}@example.test"))
+        .collect();
+    let events = [
+        event("queue.message-queued", &json!({"to": listed})),
+        event("delivery.delivered", &json!({"to": listed})),
+        event("delivery.delivered", &json!({"to": others})),
+    ];
+    let summary = json!(summarize_queue(&events, events.len()));
+    let outcomes = summary["recipientOutcomes"].as_object().unwrap();
+    assert_eq!(outcomes.len(), MAX_RECIPIENTS);
+    assert!(outcomes.keys().all(|address| address.starts_with('r')));
+    assert_eq!(summary["status"], "delivered");
+}
+
+#[test]
 fn a_truncated_queue_is_never_complete() {
     let events = [
         event("queue.message-queued", &json!({"to": ["a@example.test"]})),
