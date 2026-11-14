@@ -18,6 +18,8 @@ interface Reply {
   /** Sent as it is, for answers that are not JSON. */
   raw?: string;
   headers?: Record<string, string>;
+  /** The status line's text; HTTP/2 has none (""). */
+  statusText?: string;
 }
 
 /** A fixed reply, or a function of the request; a thrown error is a network failure. */
@@ -56,7 +58,8 @@ export class FakeServer {
     if (init.signal?.aborted) throw new DOMException("The request was aborted.", "AbortError");
     const status = reply.status ?? 200;
     const text = reply.raw ?? JSON.stringify(reply.body ?? null);
-    return new Response(text, { status, statusText: status === 200 ? "OK" : "Error", headers: reply.headers ?? {} });
+    const statusText = reply.statusText ?? (status === 200 ? "OK" : "Error");
+    return new Response(text, { status, statusText, headers: reply.headers ?? {} });
   }
 }
 

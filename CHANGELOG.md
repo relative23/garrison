@@ -47,6 +47,14 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **The Maintenance page keeps following a job, and keeps its dialog.** One
+  failed look at a started job ended the following for good, and the notice
+  stayed at "Queued"; it now looks again, later each time, and says
+  meanwhile that the status could not be read. A refresh of the page that
+  failed in the background replaced everything with the error, an open
+  confirmation dialog included; the page now keeps what it shows and says
+  so above it. An error for which the server gives no reason, as a proxy's
+  over HTTP/2, no longer shows an empty notice.
 - **A receiver that runs but stores nothing no longer looks healthy.** With
   a signature key that no longer matched, a database that was full or could
   not be written, or events that Stalwart had begun to write differently,

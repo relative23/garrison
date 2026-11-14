@@ -1,5 +1,6 @@
 // Typed access to Garrison API. Types come from schema.gen.ts, which is
 // generated from the server's OpenAPI document (`npm run api`).
+import { i18n } from "../i18n";
 import type { components } from "./schema.gen";
 
 type Schemas = components["schemas"];
@@ -81,6 +82,10 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
     } catch {
       // A non-JSON error body keeps the status text.
     }
+    // HTTP/2 has no status text, and a proxy's own error page no detail: the
+    // status is then all there is to say, and saying nothing would leave an
+    // empty notice.
+    if (!detail) detail = i18n.t("common.answeredStatus", { status: response.status });
     if (response.status === 401) onUnauthorized();
     throw new ApiError(response.status, detail, response.headers.get("x-request-id"));
   }

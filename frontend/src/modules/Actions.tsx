@@ -14,6 +14,10 @@ import { dateTime, duration } from "../lib/format";
 import { useResource } from "../lib/useResource";
 
 const TERMINAL = new Set(["succeeded", "failed", "uncertain"]);
+/** A started job is asked about this often, and after a failed look twice as
+ * late each time, up to the longest wait. */
+const POLL = 3000;
+const LONGEST_POLL = 30_000;
 const STATUS = ["queued", "running", "succeeded", "failed", "uncertain"] as const;
 
 function isStatus(status: string): status is (typeof STATUS)[number] {
@@ -47,7 +51,7 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job) =>
       onDone(result.job);
       dialog.current?.close();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : t("actions.notSent"));
+      setError(reason instanceof ApiError && reason.message ? reason.message : t("actions.notSent"));
     } finally {
       setBusy(false);
     }
@@ -103,21 +107,44 @@ export function Actions() {
   const catalog = useResource((signal) => api.actions(signal), [], 15);
   const reloadCatalog = catalog.reload;
   const [watched, setWatched] = useState<Job | null>(null);
+  // Why the job's status could not be read, and how often in a row.
+  const [lost, setLost] = useState<{ error: Error; times: number } | null>(null);
 
-  // Follow a started job until it reaches a final state.
+  // Follow a started job until it reaches a final state. A look that fails
+  // changes nothing of the job, so the failures count as well: each one
+  // sets the next look, later than the one before.
+  const failures = lost?.times ?? 0;
   useEffect(() => {
     if (!watched || TERMINAL.has(watched.status)) return undefined;
-    const timer = setTimeout(() => {
-      api.job(watched.id).then(setWatched, () => undefined);
-      reloadCatalog();
-    }, 3000);
+    const timer = setTimeout(
+      () => {
+        api.job(watched.id).then(
+          (job) => {
+            setLost(null);
+            setWatched(job);
+          },
+          (reason: unknown) => {
+            const error = reason instanceof Error ? reason : new Error(String(reason));
+            setLost((before) => ({ error, times: (before?.times ?? 0) + 1 }));
+          },
+        );
+        reloadCatalog();
+      },
+      Math.min(LONGEST_POLL, POLL * 2 ** failures),
+    );
     return () => clearTimeout(timer);
-  }, [watched, reloadCatalog]);
+  }, [watched, failures, reloadCatalog]);
+  const follow = (job: Job) => {
+    setLost(null);
+    setWatched(job);
+  };
 
   // The notice needs no data: it stands first while the catalog loads, and the
   // page the build draws carries it (src/prerender.tsx).
   const intro = <Notice>{t("actions.intro")}</Notice>;
-  if (catalog.error)
+  // Only without anything to show does an error take the page: a refresh
+  // that fails in the background must not close a dialog someone types in.
+  if (catalog.error && !catalog.data)
     return (
       <>
         {intro}
@@ -135,10 +162,14 @@ export function Actions() {
   return (
     <>
       {intro}
+      {catalog.error && <ErrorState tone="warning" lead={t("actions.refreshFailed")} error={catalog.error} retry={catalog.reload} />}
       {watched && (
         <Notice tone={watched.status === "failed" ? "error" : "info"}>
           {t("actions.job", { id: watched.id.slice(0, 8), status: label(watched.status), message: watched.message })}
         </Notice>
+      )}
+      {watched && lost && (
+        <ErrorState tone="warning" lead={t("actions.trackingFailed", { id: watched.id.slice(0, 8) })} error={lost.error} />
       )}
       {actions.length === 0 && <Notice>{t("actions.noActions")}</Notice>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -151,7 +182,7 @@ export function Actions() {
             <CardContent className="flex-1" />
             <CardFooter className="justify-between">
               <span className="text-xs text-muted-foreground">{t("actions.cooldown", { duration: duration(action.cooldownSeconds) })}</span>
-              <Confirm action={action} onDone={setWatched} />
+              <Confirm action={action} onDone={follow} />
             </CardFooter>
           </Card>
         ))}

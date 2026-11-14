@@ -19,6 +19,8 @@
     "job": "Job {{id}}: {{status}} — {{message}}",
     "noActions": "Your profile grants no maintenance actions.",
     "notSent": "The request could not be sent.",
+    "refreshFailed": "This page could not be refreshed; it shows what was read last.",
+    "trackingFailed": "The status of job {{id}} could not be read; it will be asked for again. The job itself runs on.",
     "recentJobs": "Recent jobs",
     "run": "Run…",
     "start": "Start",
@@ -89,6 +91,7 @@
     "totals": "In this period: {{totals}}"
   },
   "common": {
+    "answeredStatus": "The server answered with status {{status}} and gave no reason.",
     "labelValue": "{{label}}: {{value}}",
     "loading": "Loading…",
     "reference": "Reference {{reference}} in the journal of garrison-web",

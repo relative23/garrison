@@ -109,6 +109,68 @@ describe("maintenance actions", () => {
     expect(server.requests(`GET ${JOB}`)).toHaveLength(2);
   });
 
+  it("keep following a job whose status could not be read once, and say so meanwhile", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const server = serve({
+      "GET actions": { body: catalog() },
+      "POST actions": { status: 202, body: { job: job(), replayed: false } },
+      [`GET ${JOB}`]: { status: 503, body: { detail: "Authorization is temporarily unavailable" } },
+    });
+    renderView(<Actions />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    // The first look at the job fails: the page says so and looks again.
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(server.requests(`GET ${JOB}`)).toHaveLength(1);
+    const notice = screen.getByText(/The status of job 01234567 could not be read/).closest("[role]");
+    expect(notice?.textContent).toContain("Authorization is temporarily unavailable");
+    expect(screen.getByText("Job 01234567: Queued — Waiting to start")).toBeTruthy();
+    // A second failure, then the broker is back: each time later than before.
+    await act(() => vi.advanceTimersByTimeAsync(6000));
+    expect(server.requests(`GET ${JOB}`)).toHaveLength(2);
+    server.answer(`GET ${JOB}`, { body: job({ status: "succeeded", message: "Done." }) });
+    await act(() => vi.advanceTimersByTimeAsync(12_000));
+    expect(server.requests(`GET ${JOB}`)).toHaveLength(3);
+    expect(screen.getByText("Job 01234567: Succeeded — Done.")).toBeTruthy();
+    expect(screen.queryByText(/could not be read/)).toBeNull();
+  });
+
+  it("keep the dialog and the list when a refresh in the background fails", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const server = serve({ "GET actions": { body: catalog() } });
+    renderView(<Actions />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    confirmWith("RUN HEALTH");
+    expect(dialogOpen()).toBe(true);
+    // The list is read again every 15 seconds; this time the broker is away.
+    server.answer("GET actions", { status: 503, body: { detail: "Authorization is temporarily unavailable" } });
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    expect(dialogOpen()).toBe(true);
+    expect(screen.getByLabelText<HTMLInputElement>(/to confirm/).value).toBe("RUN HEALTH");
+    const notice = screen.getByText(/This page could not be refreshed/).closest("[role]");
+    expect(notice?.textContent).toContain("Authorization is temporarily unavailable");
+    // The next refresh works, and the notice goes.
+    server.answer("GET actions", { body: catalog() });
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    expect(screen.queryByText(/This page could not be refreshed/)).toBeNull();
+    expect(dialogOpen()).toBe(true);
+  });
+
+  it("say what the server answered where it gave no reason", async () => {
+    // Over HTTP/2 an answer has no status text, and a proxy's error no JSON.
+    serve({
+      "GET actions": { body: catalog() },
+      "POST actions": { status: 502, raw: "<html>Bad Gateway</html>", statusText: "" },
+    });
+    renderView(<Actions />);
+    await loaded();
+    fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
+    expect(await screen.findByText("The server answered with status 502 and gave no reason.")).toBeTruthy();
+    expect(dialogOpen()).toBe(true);
+  });
+
   it("list recent jobs with their action and result", async () => {
     const retired = job({
       id: "f".repeat(32),
