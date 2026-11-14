@@ -47,6 +47,14 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Notifications no longer lose a return to order or a lasting problem.**
+  A check that was reported as failed, warned for one run and was then in
+  order sent no "in order again"; one that failed and warned by turns was
+  never reported at all; and one whose observation was missing from a run,
+  as Stalwart's are while its API is away, lost its return. Failed and
+  Warning now count together as not in order, a return is reported whenever
+  something was reported, and a check that is missing from a run keeps its
+  place for up to a day.
 - **A slow check no longer costs the whole status.** A resolver that did not
   answer was asked again for every domain, three seconds each, and with
   notification channels that did not answer either a collection run passed

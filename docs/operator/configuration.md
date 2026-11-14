@@ -54,15 +54,23 @@ Optional. With it, the collector sends a message on every channel that is
 named here: an [ntfy](https://ntfy.sh) topic, a webhook, a mailbox, or
 several of them. A message goes out
 
-- when one of Garrison's checks is Failed or Warning in two runs in a row
-  (the collector runs every minute); one message, not one per run,
-- when that check is in order again,
+- when one of Garrison's checks is not in order in two runs in a row (the
+  collector runs every minute), Failed or Warning or one after the other;
+  one message, not one per run,
+- when a check that was reported as a warning then fails in two runs in a
+  row,
+- when a check that was reported is in order again, whatever it was last,
 - when a newer release exists (see the `releases` provider),
 - when the collector itself has not finished a run for ten minutes, and when
   it runs again.
 
 A message names each check with its title and its first finding. Only what
 Garrison itself observes is reported, and a check that turns Unknown is not.
+Neither is a check that a run does not report at all, because what it asks
+is away (the checks of Stalwart while its API does not answer): it keeps its
+place among the checks that are not in order, and its return is reported
+when it is back and in order. A check that stays away, such as one taken out
+of the configuration, is forgotten after a day.
 A message counts as sent once one channel took it; a channel that did not
 take it is not sent it again, and the Alerts page says which one that was.
 

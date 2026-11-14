@@ -2,11 +2,15 @@
 //! topic, a webhook, a mailbox, or several of them.
 //!
 //! After every run the collector holds its observations against what it told
-//! before. A check that fails or warns in two runs in a row is told once; so
-//! is its return to order. A check that turns unknown is neither: nothing is
-//! known of it, so nothing is said. Only what Garrison itself observes is
-//! told, with the title and first finding of the observation; the message
-//! goes out on every channel the operator configured.
+//! before. A check that is not in order in two runs in a row, failing or
+//! warning or one after the other, is told once; a warning that then fails
+//! in two runs in a row is told again as a failure. Its return to order is
+//! told whenever something was told of it, whatever it was last. A check
+//! that turns unknown, or is missing from a run because what it asks is
+//! away, is neither: nothing is known of it, so nothing is said and it
+//! keeps its place. Only what Garrison itself observes is told, with the
+//! title and first finding of the observation; the message goes out on
+//! every channel the operator configured.
 
 pub mod channels;
 pub mod mail;
@@ -28,19 +32,50 @@ use crate::fetch;
 const OPEN: &str = "notify.open";
 const SENT: &str = "notify.sent";
 const PROBLEM: &str = "notify.problem";
-/// The runs in a row a check must fail or warn in before it is told.
+/// The runs in a row a check must not be in order in before it is told, and
+/// fail in before a warning that was told is told again as a failure.
 const RUNS: u32 = 2;
+/// A check that no run reports any more is forgotten after so many runs: a
+/// day of them. Until then it may be away with what it asks, and come back.
+const FORGOTTEN: u32 = 1440;
 const MOST_LINES: usize = 20;
 
 /// A check that is not in order, as the status database keeps it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct Open {
-    /// `failed` or `warning`.
+    /// What the last run that reported it found: `failed` or `warning`, and
+    /// `ok` only until its return is told.
     state: String,
     title: String,
     detail: String,
+    /// The runs in a row it was not in order, failing or warning.
     runs: u32,
+    /// The runs in a row it failed.
+    #[serde(default)]
+    failed_runs: u32,
+    /// Whether anything was told of it.
     told: bool,
+    /// The most severe state that was told: `failed` or `warning`.
+    #[serde(default)]
+    told_as: Option<String>,
+    /// What this run has to tell of it, until the message is out.
+    #[serde(default)]
+    due: Option<String>,
+    /// The runs in a row that did not report it.
+    #[serde(default)]
+    missing: u32,
+}
+
+impl Open {
+    /// The most severe state that was told. An entry kept before `told_as`
+    /// existed was told as the state it has.
+    fn severity_told(&self) -> Option<&str> {
+        match (&self.told_as, self.told) {
+            (Some(told_as), _) => Some(told_as.as_str()),
+            (None, true) => Some(self.state.as_str()),
+            (None, false) => None,
+        }
+    }
 }
 
 type Opens = BTreeMap<String, Open>;
@@ -67,35 +102,59 @@ fn named(state: State) -> Option<&'static str> {
     }
 }
 
+/// A check that is not in order in this run, after what was kept of it.
+fn not_in_order(observation: &Observation, state: &str, before: Option<&Open>) -> Open {
+    // A return that could not be told yet begins anew, but stays told.
+    let lasting = before.filter(|before| before.state != "ok");
+    let failed = state == "failed";
+    let mut entry = Open {
+        state: state.to_owned(),
+        title: observation.title.clone(),
+        detail: observation.findings.first().cloned().unwrap_or_default(),
+        runs: lasting.map_or(1, |before| before.runs.saturating_add(1)),
+        failed_runs: match (failed, lasting) {
+            (false, _) => 0,
+            (true, None) => 1,
+            (true, Some(before)) => before.failed_runs.saturating_add(1),
+        },
+        told: before.is_some_and(|before| before.told),
+        told_as: before.and_then(|before| before.severity_told().map(str::to_owned)),
+        due: None,
+        missing: 0,
+    };
+    entry.due = match entry.told_as.as_deref() {
+        // Not in order twice in a row: told as what it is now.
+        None if entry.runs >= RUNS => Some(state.to_owned()),
+        // Told as a warning, and failing for as long as a failure must.
+        Some("warning") if entry.failed_runs >= RUNS => Some("failed".to_owned()),
+        _ => None,
+    };
+    entry
+}
+
 /// The checks that are open after this run, and what to tell of it. Nothing
 /// counts as told yet: [`told`] does that once the message is out.
 fn compare(open: &Opens, observations: &[Observation]) -> (Opens, News) {
     let mut next = Opens::new();
     let mut news = News::default();
+    let mut reported = std::collections::BTreeSet::new();
     for observation in observations {
         // The channel does not tell of itself.
         if observation.id.starts_with("notifications.") {
             continue;
         }
+        reported.insert(observation.id.as_str());
         let before = open.get(&observation.id);
         match (named(observation.state), before) {
             (Some(state), before) => {
-                let detail = observation.findings.first().cloned().unwrap_or_default();
-                let same = before.filter(|before| before.state == state);
-                let entry = Open {
-                    state: state.to_owned(),
-                    title: observation.title.clone(),
-                    detail,
-                    runs: same.map_or(1, |before| before.runs.saturating_add(1)),
-                    told: same.is_some_and(|before| before.told),
-                };
-                if !entry.told && entry.runs >= RUNS {
+                let entry = not_in_order(observation, state, before);
+                if let Some(due) = &entry.due {
                     let line = if entry.detail.is_empty() {
                         entry.title.clone()
                     } else {
                         format!("{}: {}", entry.title, entry.detail)
                     };
-                    if state == "failed" {
+                    if due == "failed" {
                         news.failed.push(line);
                     } else {
                         news.warnings.push(line);
@@ -104,6 +163,7 @@ fn compare(open: &Opens, observations: &[Observation]) -> (Opens, News) {
                 next.insert(observation.id.clone(), entry);
             }
             (None, Some(before)) if observation.state == State::Ok => {
+                // Whatever it was last: something was told, so is its return.
                 if before.told {
                     news.recovered.push(before.title.clone());
                     // Kept until the message is out, then dropped.
@@ -111,6 +171,8 @@ fn compare(open: &Opens, observations: &[Observation]) -> (Opens, News) {
                         observation.id.clone(),
                         Open {
                             state: "ok".to_owned(),
+                            due: None,
+                            missing: 0,
                             ..before.clone()
                         },
                     );
@@ -118,10 +180,37 @@ fn compare(open: &Opens, observations: &[Observation]) -> (Opens, News) {
             }
             // Unknown: what was open stays as it was.
             (None, Some(before)) => {
-                next.insert(observation.id.clone(), before.clone());
+                next.insert(
+                    observation.id.clone(),
+                    Open {
+                        due: None,
+                        missing: 0,
+                        ..before.clone()
+                    },
+                );
             }
             (None, None) => {}
         }
+    }
+    // A check no observation of this run stands for is away with what it
+    // asks, Stalwart's API for one: like an unknown one it keeps its place,
+    // and with it its return. One that stays away is forgotten in the end.
+    for (id, before) in open {
+        if reported.contains(id.as_str()) || before.missing >= FORGOTTEN {
+            continue;
+        }
+        if before.state == "ok" {
+            // Its return is still to be told.
+            news.recovered.push(before.title.clone());
+        }
+        next.insert(
+            id.clone(),
+            Open {
+                due: None,
+                missing: before.missing.saturating_add(1),
+                ..before.clone()
+            },
+        );
     }
     (next, news)
 }
@@ -137,13 +226,16 @@ fn carried_over(mut open: Opens, renamed: &[(&str, &str)]) -> Opens {
     open
 }
 
-/// The open checks once the news is out: what was told is marked, what is in
-/// order again is dropped.
+/// The open checks once the news is out: what was told is marked with what
+/// it was told as, what is in order again is dropped.
 fn told(open: Opens) -> Opens {
     open.into_iter()
         .filter(|(_, entry)| entry.state != "ok")
         .map(|(id, mut entry)| {
-            entry.told = entry.told || entry.runs >= RUNS;
+            if let Some(due) = entry.due.take() {
+                entry.told = true;
+                entry.told_as = Some(due);
+            }
             (id, entry)
         })
         .collect()
