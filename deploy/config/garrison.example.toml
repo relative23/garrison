@@ -5,6 +5,7 @@
 # into each service with LoadCredential=. Check with:
 #     garrison check-config
 schema = 1
+# The units load the credentials from here; they do not follow another value.
 credentials_directory = "/etc/garrison/credentials"
 # The modules this installation offers; without this line, all of them. The
 # dashboard and services are always on, and nobody is granted another module.

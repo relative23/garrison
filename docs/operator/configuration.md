@@ -14,7 +14,7 @@ with `LoadCredential=`.
 | Key | Default | Meaning |
 |---|---|---|
 | `schema` | none | Must be `1`. |
-| `credentials_directory` | `/etc/garrison/credentials` | Source of the `credential:` files. |
+| `credentials_directory` | `/etc/garrison/credentials` | Source of the `credential:` files. Keep the default: the units load every credential from there whatever this says, and `check-config` warns about another value. |
 | `modules` | all modules | The modules this installation offers, as [module IDs](#module-ids). The dashboard and services are always on. Nobody is granted another module, whatever the access policy says, and without `actions` the broker runs no action. A user whose profiles name none of these modules is refused, as one without a profile is. An unknown ID is an error. `garrison modules` sets it. |
 
 ## `[deployment]`
@@ -43,16 +43,21 @@ with `LoadCredential=`.
 | `collector.metrics_credential` | none | User name and password for Stalwart's Prometheus exporter; the example configuration names `credential:metrics-credential`, which `stalwart setup` writes. |
 | `broker.policy` | `/etc/garrison/access-policy.json` | Access policy, see [access.md](access.md). |
 | `broker.allowed_peers` | `["garrison"]` | System users allowed to use the broker socket. |
-| `broker.socket` | `/run/garrison/broker.sock` | The broker's Unix socket. |
+| `broker.socket` | `/run/garrison/broker.sock` | The broker's Unix socket. Keep the default: `garrison-broker.socket` listens there whatever this says. |
 
-State directories default to `/var/lib/garrison/<service>`
-(`state_directory` in each of the four sections).
+State directories are `/var/lib/garrison/<service>` (`state_directory` in
+each of the four sections). Keep the defaults: systemd makes these
+directories, and each service may write only in its own. To keep the data on
+another disk, mount it at `/var/lib/garrison`. `check-config` warns about a
+state directory, `credentials_directory` or `broker.socket` that the units do
+not follow, and says what to do.
 
 The installer writes `web.port` into nginx's include,
 `/etc/nginx/snippets/garrison.conf`, and into the SELinux module that lets
-nginx reach it. After changing the port, run the installer again. Without it,
-restart `garrison-web` and write the include anew; the SELinux module then
-moves with the next run of the installer:
+nginx reach it; `check-config` warns while the include names another port.
+After changing the port, run the installer again. Without it, restart
+`garrison-web` and write the include anew; the SELinux module then moves with
+the next run of the installer:
 
 ```sh
 sudo sh -c 'garrison nginx --snippet > /etc/nginx/snippets/garrison.conf'

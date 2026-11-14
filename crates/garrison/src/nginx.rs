@@ -36,6 +36,18 @@ pub(crate) fn snippet(port: u16) -> String {
     )
 }
 
+/// The port an include sends Garrison's requests to, where it names one.
+pub(crate) fn port_of(include: &str) -> Option<u16> {
+    let (before, after) = UPSTREAM;
+    include.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix(before)?
+            .strip_suffix(after)?
+            .parse()
+            .ok()
+    })
+}
+
 /// `nginx version: nginx/1.22.1` (nginx writes it to standard error).
 fn version(text: &str) -> Option<(u32, u32, u32)> {
     let number = text.split("nginx/").nth(1)?.split_whitespace().next()?;
@@ -199,6 +211,9 @@ mod tests {
         );
         // Nothing but the port differs.
         assert_eq!(moved.replace("9443", "8091"), SHIPPED);
+        assert_eq!(port_of(&moved), Some(9443));
+        assert_eq!(port_of(SHIPPED), Some(8091));
+        assert_eq!(port_of("location / { return 404; }"), None);
     }
 
     #[test]

@@ -67,6 +67,16 @@ Notable changes for operators and users. The format follows
   did the SELinux module, and reloads nginx when it changes;
   `garrison nginx --snippet` prints it. An installation on another port gets
   it with the next run of the installer.
+- **`check-config` names settings that the units do not follow.** A state
+  directory other than `/var/lib/garrison/<service>`, a
+  `credentials_directory` other than `/etc/garrison/credentials` and a
+  `broker.socket` other than `/run/garrison/broker.sock` were taken without
+  a word, although the systemd units keep to their own places: a service
+  could not write its data, the web service found no broker, or no service
+  read the credentials that setup wrote. `check-config` now warns of each,
+  with what does not follow it and what to do, and also when nginx's include
+  names another port than `web.port`. The settings stay, so that a file that
+  names them still loads.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser

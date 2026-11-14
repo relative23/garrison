@@ -106,6 +106,18 @@ fn check_config_reports_providers_actions_and_the_policy() {
         "{}",
         text(&valid.stderr)
     );
+    // Its directories are the test's, not those of the units.
+    let credentials = directory.path().join("credentials");
+    assert!(
+        text(&valid.stderr).contains(&format!(
+            "Warning: credentials_directory is {}, but the units load every credential from \
+             /etc/garrison/credentials",
+            credentials.display()
+        )),
+        "{}",
+        text(&valid.stderr)
+    );
+    assert!(text(&valid.stderr).contains("Warning: broker.socket is "));
     std::fs::remove_file(directory.path().join("policy.json")).unwrap();
     let unusable = run(directory.path(), &["check-config"]);
     assert_eq!(unusable.status.code(), Some(1));

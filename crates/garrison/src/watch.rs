@@ -14,10 +14,8 @@ use garrison_core::config::{self, Database};
 use garrison_core::credentials::{Credentials, SecretSource};
 use garrison_core::time;
 
-const DATABASE: &str = "/var/lib/garrison/collector/status.sqlite";
-const CREDENTIALS: &str = "/etc/garrison/credentials";
-/// systemd names the unit's own state directory; this is where it is.
-const STATE: &str = "/var/lib/garrison/watch";
+use crate::units;
+
 const MARKER: &str = "collector-stopped";
 
 pub(crate) fn run(path: &Path) -> u8 {
@@ -34,8 +32,10 @@ pub(crate) fn run(path: &Path) -> u8 {
             Credentials::from_environment(&config.credentials_directory),
         ),
         Err(_) => (
-            PathBuf::from(DATABASE),
-            Credentials::from_environment(Path::new(CREDENTIALS)),
+            Path::new(units::STATE)
+                .join(Database::Status.writer())
+                .join(Database::Status.file_name()),
+            Credentials::from_environment(Path::new(units::CREDENTIALS)),
         ),
     };
     // Without a configuration the secrets are those the units load by name.
@@ -55,8 +55,9 @@ pub(crate) fn run(path: &Path) -> u8 {
             mail: read("notify-mail-password"),
         },
     };
-    let state =
-        std::env::var_os("STATE_DIRECTORY").map_or_else(|| PathBuf::from(STATE), PathBuf::from);
+    // systemd names the unit's own state directory; without it, where it is.
+    let state = std::env::var_os("STATE_DIRECTORY")
+        .map_or_else(|| Path::new(units::STATE).join("watch"), PathBuf::from);
     let watch = Watch {
         database: &database,
         marker: &state.join(MARKER),

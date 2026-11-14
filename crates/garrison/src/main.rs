@@ -15,6 +15,7 @@ mod nginx;
 mod ops;
 mod selection;
 mod setup;
+mod unfollowed;
 mod units;
 mod upgrade;
 mod watch;
@@ -292,6 +293,10 @@ fn check_config(config: &Config) -> u8 {
                 "Warning: deployment.{setting} {origin} is a placeholder; set the real name."
             ));
         }
+    }
+    let include = unfollowed::installed_include();
+    for setting in unfollowed::settings(config, include.as_deref()) {
+        complain(&format!("Warning: {}. {}", setting.what, setting.fix));
     }
     match Authority::new(config, credentials(config)).policy() {
         Ok(_) => {
