@@ -53,6 +53,11 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Signature files that are no longer updated are a warning.** The
+  antivirus check called the signature databases in order as soon as one
+  file existed, and showed the age of the daily one without judging it. A
+  daily database older than 48 hours is now a warning, and files without a
+  daily database among them are Unknown.
 - **The Maintenance page keeps following a job, and keeps its dialog.** One
   failed look at a started job ended the following for good, and the notice
   stayed at "Queued"; it now looks again, later each time, and says

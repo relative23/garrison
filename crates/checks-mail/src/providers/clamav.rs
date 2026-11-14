@@ -75,6 +75,10 @@ pub struct Clamav {
     expect_on_fail: String,
 }
 
+/// The daily signature database is older than this only where updates no
+/// longer arrive: a new one is published every day.
+const STALE_AFTER_HOURS: f64 = 48.0;
+
 impl Clamav {
     pub fn new(raw: &toml::Table) -> Checked<Self> {
         let options = Options::new(
@@ -188,6 +192,9 @@ impl Clamav {
 
     fn signatures(&self, context: &Context<'_>) -> Result<Observation, ProviderError> {
         let mut rows = Vec::new();
+        // The newest daily database and its age in hours: the one file that
+        // changes every day, and so the one that shows whether updates arrive.
+        let mut daily: Option<(&str, f64)> = None;
         for name in &self.signatures {
             let Ok(info) = std::fs::metadata(self.database.join(name)) else {
                 continue;
@@ -195,7 +202,14 @@ impl Clamav {
             // The modification time with its fraction, in seconds.
             #[allow(clippy::cast_precision_loss)]
             let seconds = info.mtime() as f64 + info.mtime_nsec() as f64 * 1e-9;
-            let modified = time::from_unix(seconds).map(time::isoformat);
+            let modified = time::from_unix(seconds);
+            if let Some(modified) = modified.filter(|_| name.starts_with("daily.")) {
+                let hours = context.seconds_since(modified) / 3600.0;
+                if daily.is_none_or(|(_, newest)| hours < newest) {
+                    daily = Some((name.as_str(), hours));
+                }
+            }
+            let modified = modified.map(time::isoformat);
             rows.push(vec![
                 json!(name),
                 json!(info.len()),
@@ -207,21 +221,38 @@ impl Clamav {
             label: label.to_owned(),
             format,
         };
+        // Files that exist are not yet signatures that are current.
+        let (state, finding) = match daily {
+            _ if rows.is_empty() => (State::Unknown, None),
+            None => (
+                State::Unknown,
+                Some(
+                    "No daily signature database (daily.cld or daily.cvd) is among the files; \
+                     how current the signatures are is not known."
+                        .to_owned(),
+                ),
+            ),
+            Some((name, hours)) if hours > STALE_AFTER_HOURS => (
+                State::Warning,
+                Some(format!(
+                    "{name} was last updated {hours:.0} hours ago; ClamAV's signatures change \
+                     every day, so the updates do not arrive."
+                )),
+            ),
+            Some(_) => (State::Ok, None),
+        };
         Ok(Observation::new(
             "clamav.signatures",
             self.name(),
             "Signature databases",
             [ModuleId::Antivirus],
             Evidence::Inventory,
-            if rows.is_empty() {
-                State::Unknown
-            } else {
-                State::Ok
-            },
+            state,
             context.checked_at(),
             self.database.display().to_string(),
         )?
         .with_scope("File times do not prove a successful update check or a loaded database.")
+        .with_findings(finding.into_iter().collect())
         .with_table(Table {
             columns: vec![
                 column("File", Format::Text),

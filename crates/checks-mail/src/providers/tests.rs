@@ -55,3 +55,54 @@ fn clamav_policy_drift_is_a_finding() {
     );
     assert!(report.gauges.contains_key("signature_age_hours"));
 }
+
+#[test]
+fn signatures_that_were_not_updated_for_two_days_are_a_warning() {
+    use std::time::{Duration, SystemTime};
+    let directory = tempfile::tempdir().unwrap();
+    let daily = directory.path().join("daily.cld");
+    std::fs::write(&daily, "signatures").unwrap();
+    std::fs::write(directory.path().join("main.cvd"), "signatures").unwrap();
+    let provider = Clamav::new(&table(&format!(
+        "type = \"clamav\"\nmilter_config = \"{0}/milter.conf\"\nclamd_config = \"{0}/scan.conf\"\ndatabase_directory = \"{0}\"",
+        directory.path().display()
+    )))
+    .unwrap();
+    let config = config(directory.path());
+    let runner = Canned(String::new());
+    let context = context(&config, &runner);
+    let checked = SystemTime::UNIX_EPOCH
+        + Duration::from_secs(u64::try_from(context.now.as_second()).unwrap());
+    let aged = |hours: u64| {
+        // The main database is years old on every host; only the daily one
+        // says whether updates arrive.
+        for (path, age) in [(&daily, hours), (&directory.path().join("main.cvd"), 9000)] {
+            let file = std::fs::File::options().write(true).open(path).unwrap();
+            file.set_modified(checked - Duration::from_secs(age * 3600))
+                .unwrap();
+        }
+        provider.collect(&context).unwrap().observations.remove(1)
+    };
+    let fresh = aged(47);
+    assert_eq!((fresh.state, fresh.findings.len()), (State::Ok, 0));
+    let old = aged(49);
+    assert_eq!(old.state, State::Warning);
+    assert_eq!(
+        old.findings,
+        [
+            "daily.cld was last updated 49 hours ago; ClamAV's signatures change every day, so \
+          the updates do not arrive."
+        ]
+    );
+    // Without the daily database nothing says how current the scanner is.
+    std::fs::remove_file(&daily).unwrap();
+    let without = provider.collect(&context).unwrap().observations.remove(1);
+    assert_eq!(without.state, State::Unknown);
+    assert_eq!(
+        without.findings,
+        [
+            "No daily signature database (daily.cld or daily.cvd) is among the files; how \
+          current the signatures are is not known."
+        ]
+    );
+}
