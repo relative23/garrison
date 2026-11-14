@@ -43,6 +43,16 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **Rotating the API keys no longer interrupts the checks of users'
+  rights.** `garrison stalwart setup --rotate` removed the broker's old key
+  in Stalwart as soon as it had written the new one, while the running
+  broker held the old one until the command restarted it at its end: for
+  that time every check of a signed-in user's rights answered "Garrison is
+  not set up to check access rights", the broker's journal logged an error,
+  and nobody could sign in. The old keys now go only after the services
+  that hold them have restarted with the new ones. If the command stops
+  with an error after it made new keys, they are removed all the same, and
+  it says to restart the services.
 - **`check-config` and the installer say why on standard error.**
   `check-config` printed an access policy it could not use on standard
   output, and the installer printed there what a failed `check-config` had

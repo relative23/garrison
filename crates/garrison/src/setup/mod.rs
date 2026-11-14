@@ -302,56 +302,104 @@ fn ensure_metrics(admin: &Admin, directory: &Path, rotate: bool) -> Result<Strin
     ))
 }
 
-fn setup(
-    config: &Config,
-    source: &Source,
+/// What the operator asked of `stalwart setup` besides the administrator.
+struct Asked<'a> {
     skip_metrics: bool,
-    webhook_url: Option<&str>,
-    allowed: &[String],
+    webhook_url: Option<&'a str>,
+    allowed: &'a [String],
     rotate: bool,
-) -> Result<u8, String> {
+}
+
+fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<u8, String> {
     milter::prepare(config)?;
     let admin = Admin::new(config, source.authorization()?);
-    let directory = &config.credentials_directory;
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
-        .create(directory)
+        .create(&config.credentials_directory)
         .map_err(|error| error.to_string())?;
     // Keys work only from these networks: loopback, and for test setups such as
     // the contract lab's Docker bridge whatever --allow-network adds.
     let mut networks = Enabled::of(LOOPBACK);
-    for text in allowed {
+    for text in asked.allowed {
         networks.insert(keys::network(text)?);
     }
+    let mut replaced = Vec::new();
+    let configured = configure(&admin, config, asked, &networks, &mut replaced);
+    // The keys that new ones replaced go last: the services that held them
+    // have restarted with the new ones by now. After a failure they go all
+    // the same, since keys are replaced because someone may have seen them.
+    let removed = keys::remove(&admin, &replaced);
+    match (configured, removed) {
+        (Ok(()), Ok(())) => {}
+        (Ok(()), Err(also)) => {
+            return Err(format!(
+                "The API keys that new ones replaced could not be removed: {also}. Run this \
+                 again with --rotate."
+            ));
+        }
+        (Err(error), Ok(())) if replaced.is_empty() => return Err(error),
+        (Err(error), Ok(())) => {
+            return Err(format!(
+                "{error}. The API keys that new ones replaced were removed: restart \
+                 garrison-ingest and garrison-broker once this is mended."
+            ));
+        }
+        (Err(error), Err(also)) => {
+            return Err(format!(
+                "{error}. The API keys that new ones replaced could not be removed either: {also}"
+            ));
+        }
+    }
+    source.finish();
+    Ok(0)
+}
+
+/// Everything setup makes in Stalwart and here but the removal of the keys
+/// that new ones replace, whose ids go to `replaced`: the keys, the
+/// webhook, the sign-in client, the exporter and the macro filter's entry,
+/// then the new keys tried from this host and the services that hold
+/// secrets restarted.
+fn configure(
+    admin: &Admin,
+    config: &Config,
+    asked: &Asked<'_>,
+    networks: &Enabled,
+    replaced: &mut Vec<String>,
+) -> Result<(), String> {
+    let (directory, rotate) = (&config.credentials_directory, asked.rotate);
     // A running service holds the secrets it read when it started.
     let fresh = rotate || HELD.iter().any(|name| !directory.join(name).exists());
+    let broker = keys::ensure(
+        admin,
+        directory,
+        "broker-native-key",
+        "garrison broker",
+        &BROKER_PERMISSIONS,
+        networks,
+        rotate,
+    )?;
+    replaced.extend(broker.replaced);
+    let collector = keys::ensure(
+        admin,
+        directory,
+        "collector-native-key",
+        "garrison collector",
+        &COLLECTOR_PERMISSIONS,
+        networks,
+        rotate,
+    )?;
+    replaced.extend(collector.replaced);
     let mut steps = vec![
-        keys::ensure(
-            &admin,
-            directory,
-            "broker-native-key",
-            "garrison broker",
-            &BROKER_PERMISSIONS,
-            &networks,
-            rotate,
-        )?,
-        keys::ensure(
-            &admin,
-            directory,
-            "collector-native-key",
-            "garrison collector",
-            &COLLECTOR_PERMISSIONS,
-            &networks,
-            rotate,
-        )?,
-        ensure_webhook(&admin, config, directory, webhook_url, rotate)?,
-        ensure_oauth_client(&admin, config)?,
+        broker.step,
+        collector.step,
+        ensure_webhook(admin, config, directory, asked.webhook_url, rotate)?,
+        ensure_oauth_client(admin, config)?,
     ];
-    if !skip_metrics {
-        steps.push(ensure_metrics(&admin, directory, rotate)?);
+    if !asked.skip_metrics {
+        steps.push(ensure_metrics(admin, directory, rotate)?);
     }
-    steps.extend(milter::ensure(&admin, config, directory)?);
+    steps.extend(milter::ensure(admin, config, directory)?);
     admin.set("x:Action/set", &Set::create(Action::ReloadSettings))?;
     for step in &steps {
         say(&format!("- {step}"));
@@ -365,8 +413,7 @@ fn setup(
     } else {
         say("Settings reloaded.");
     }
-    source.finish();
-    Ok(0)
+    Ok(())
 }
 
 /// The services read their credentials when they start; the collector starts
@@ -414,15 +461,13 @@ pub(crate) fn run(config: &Config, command: &Command) -> u8 {
             return 2;
         }
     };
-    setup(
-        config,
-        &source,
-        *skip_metrics,
-        webhook_url.as_deref(),
-        allow_network,
-        *rotate,
-    )
-    .unwrap_or_else(|error| {
+    let asked = Asked {
+        skip_metrics: *skip_metrics,
+        webhook_url: webhook_url.as_deref(),
+        allowed: allow_network,
+        rotate: *rotate,
+    };
+    setup(config, &source, &asked).unwrap_or_else(|error| {
         crate::complain(&error);
         1
     })

@@ -12,8 +12,10 @@
 #![allow(clippy::unwrap_used)]
 
 use std::process::{Command, Output};
+use std::sync::{Arc, Mutex};
 
 use garrison_testing::lab::Lab;
+use garrison_testing::relay::relay;
 use garrison_testing::{config_text, write_private};
 use serde_json::json;
 
@@ -139,7 +141,7 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
         text(&check)
     );
     macro_filter(&mut lab, directory.path(), &credential, &gateway);
-    refused_without_the_gateway(directory.path(), &credential);
+    refused_without_the_gateway(&mut lab, directory.path(), &credential);
 }
 
 /// The macro filter's entry in Stalwart follows the configuration: none while
@@ -256,33 +258,68 @@ fn macro_filter(lab: &mut Lab, directory: &std::path::Path, credential: &str, ga
 
 /// Without the gateway the keys are allowed from loopback only, which this
 /// host is not for the lab's Stalwart, just as for a Stalwart in a bridge
-/// network: setup says so instead of leaving keys that never work.
-fn refused_without_the_gateway(directory: &std::path::Path, credential: &str) {
-    let narrowed = run(
-        directory,
-        &[
-            "stalwart",
-            "setup",
-            "--admin-credential",
-            credential,
+/// network: setup says so instead of leaving keys that never work. A
+/// rotation that stops there removes the old keys all the same.
+fn refused_without_the_gateway(lab: &mut Lab, directory: &std::path::Path, credential: &str) {
+    let setup = |more: &[&str]| {
+        let base = ["stalwart", "setup", "--admin-credential", credential];
+        let rest = [
             "--webhook-url",
             "http://127.0.0.1:9/webhook",
             "--skip-metrics",
-        ],
-    );
-    assert_eq!(narrowed.status.code(), Some(1), "{}", text(&narrowed));
+        ];
+        let output = run(directory, &[&base[..], &rest, more].concat());
+        (output.status.code(), text(&output))
+    };
+    let (code, output) = setup(&[]);
+    assert_eq!(code, Some(1), "{output}");
+    let refused = "Stalwart refuses the API key in broker-native-key from this host";
+    assert!(output.contains(refused), "{output}");
+    lab.created.retain(|(kind, _)| kind != "ApiKey");
+    let (code, output) = setup(&["--rotate"]);
+    remove_afterwards(lab);
+    assert_eq!(code, Some(1), "{output}");
+    assert!(output.contains(refused), "{output}");
     assert!(
-        text(&narrowed)
-            .contains("Stalwart refuses the API key in broker-native-key from this host"),
-        "{}",
-        text(&narrowed)
+        output.contains(
+            "The API keys that new ones replaced were removed: restart garrison-ingest and \
+             garrison-broker once this is mended."
+        ),
+        "{output}"
     );
+    let keys = lab.call("x:ApiKey/get", &json!({"ids": null}));
+    for description in ["garrison broker", "garrison collector"] {
+        let named = keys["list"].as_array().unwrap().iter();
+        assert_eq!(
+            named
+                .filter(|key| key["description"] == description)
+                .count(),
+            1
+        );
+    }
 }
 
-/// `--rotate` writes new secrets everywhere, and the old keys stop working.
+/// `--rotate` writes new secrets everywhere. The old keys still work while
+/// setup tries the new ones, the last thing it does before it restarts the
+/// services that hold the old ones, and stop working once it is done.
 fn rotate(lab: &mut Lab, directory: &std::path::Path, credential: &str, gateway: &str) {
     let credentials = directory.join("credentials");
     let before = secrets(&credentials);
+    // Setup reaches Stalwart through a relay that asks Stalwart about the
+    // old broker key each time setup tries a key.
+    let tried = Arc::new(Mutex::new(Vec::new()));
+    let relayed = {
+        let (url, old, tried) = (
+            lab.url.clone(),
+            before["broker-native-key"].clone(),
+            Arc::clone(&tried),
+        );
+        relay(&lab.url, "GET /jmap/session ", move || {
+            tried.lock().unwrap().push(key_status(&url, &old));
+        })
+    };
+    let settings = directory.join("garrison.toml");
+    std::fs::write(&settings, config_text(directory, &relayed)).unwrap();
     // The rotation removes the old keys itself; the new ones are recorded below.
     lab.created.retain(|(kind, _)| kind != "ApiKey");
     let rotated = run(
@@ -300,6 +337,7 @@ fn rotate(lab: &mut Lab, directory: &std::path::Path, credential: &str, gateway:
             "--rotate",
         ],
     );
+    std::fs::write(&settings, config_text(directory, &lab.url)).unwrap();
     remove_afterwards(lab);
     assert_eq!(rotated.status.code(), Some(0), "{}", text(&rotated));
     for key in ["garrison broker", "garrison collector"] {
@@ -313,8 +351,10 @@ fn rotate(lab: &mut Lab, directory: &std::path::Path, credential: &str, gateway:
     for (name, old) in &before {
         assert_ne!(&after[name], old, "{name} kept its secret");
     }
-    assert_eq!(key_status(lab, &before["broker-native-key"]), 401);
-    assert_eq!(key_status(lab, &after["broker-native-key"]), 200);
+    // A broker that still held the old key could check rights all along.
+    assert_eq!(*tried.lock().unwrap(), [200, 200], "{}", text(&rotated));
+    assert_eq!(key_status(&lab.url, &before["broker-native-key"]), 401);
+    assert_eq!(key_status(&lab.url, &after["broker-native-key"]), 200);
 }
 
 /// The secrets `stalwart setup` wrote, by file name.
@@ -334,9 +374,10 @@ fn secrets(credentials: &std::path::Path) -> std::collections::BTreeMap<String, 
     .collect()
 }
 
-/// The status of Stalwart's JMAP session for an API key: 200 or 401.
-fn key_status(lab: &Lab, key: &str) -> u16 {
-    let answer = ureq::get(format!("{}/jmap/session", lab.url))
+/// The status of the JMAP session of Stalwart at `url` for an API key: 200
+/// or 401.
+fn key_status(url: &str, key: &str) -> u16 {
+    let answer = ureq::get(format!("{url}/jmap/session"))
         .header("Authorization", &format!("Bearer {}", key.trim()))
         .call();
     match answer {

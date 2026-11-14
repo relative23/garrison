@@ -18,6 +18,14 @@ use super::{Admin, write_secret};
 /// The key files, as the broker and the collector read them.
 const KEYS: [&str; 2] = ["broker-native-key", "collector-native-key"];
 
+/// What `ensure` did, and the keys a new one replaces. `setup` removes those
+/// once the services that hold them have restarted with the new one, or
+/// when it fails on the way (`remove`).
+pub(super) struct Ensured {
+    pub(super) step: String,
+    pub(super) replaced: Vec<String>,
+}
+
 pub(super) fn ensure(
     admin: &Admin,
     directory: &Path,
@@ -26,7 +34,7 @@ pub(super) fn ensure(
     permissions: &[&str],
     networks: &Enabled,
     rotate: bool,
-) -> Result<String, String> {
+) -> Result<Ensured, String> {
     let target = directory.join(name);
     let existing: Vec<StoredKey> = admin
         .list::<StoredKey>("ApiKey")?
@@ -41,12 +49,14 @@ pub(super) fn ensure(
     };
     if let (Some(first), true, false) = (existing.first(), target.exists(), rotate) {
         admin.set("x:ApiKey/set", &Set::update(&first.id, rights()))?;
-        return Ok(format!(
-            "updated API key '{description}' (secret unchanged)"
-        ));
+        return Ok(Ensured {
+            step: format!("updated API key '{description}' (secret unchanged)"),
+            replaced: Vec::new(),
+        });
     }
-    // A new key first, its file next, the old keys last: a service keeps the
-    // old key until it restarts, and a key whose file is lost is useless.
+    // A new key first and its file next, since a key whose file is lost is
+    // useless. A running service keeps the old key until it restarts, so
+    // the old keys go after that (`remove`).
     let key = NewKey {
         description,
         rights: rights(),
@@ -58,18 +68,23 @@ pub(super) fn ensure(
     let new = created.created.get(NEW);
     let new = new.ok_or("Stalwart did not return the new API key secret")?;
     write_secret(&target, &new.secret)?;
-    for item in &existing {
-        admin.set("x:ApiKey/set", &Set::<()>::Destroy([item.id.as_str()]))?;
-    }
     let done = if rotate && !existing.is_empty() {
         "replaced"
     } else {
         "created"
     };
-    Ok(format!(
-        "{done} API key '{description}' -> {}",
-        target.display()
-    ))
+    Ok(Ensured {
+        step: format!("{done} API key '{description}' -> {}", target.display()),
+        replaced: existing.into_iter().map(|item| item.id).collect(),
+    })
+}
+
+/// Remove the keys that new ones replaced.
+pub(super) fn remove(admin: &Admin, replaced: &[String]) -> Result<(), String> {
+    for id in replaced {
+        admin.set("x:ApiKey/set", &Set::<()>::Destroy([id.as_str()]))?;
+    }
+    Ok(())
 }
 
 /// Each key opens a JMAP session from this host, as the services will use it.

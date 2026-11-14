@@ -200,10 +200,18 @@ sudo garrison stalwart setup --rotate
 
 This replaces the two API keys, the webhook signature key and the metrics
 credential with new secrets and restarts the services that hold them. A new
-key is created before the old one goes, so nothing stops working in between.
-Event batches that Stalwart sends while the signature key changes are refused
-once and delivered again. Rotate after anyone who should not have them may
-have seen the files in `/etc/garrison/credentials`, and from time to time.
+key is created and written first, and the old one goes only after the
+services that hold it have restarted with the new one, so sign-in and the
+checks of users' rights go on throughout. Event batches that Stalwart sends
+while the signature key changes are refused once and delivered again.
+Rotate after anyone who should not have them may have seen the files in
+`/etc/garrison/credentials`, and from time to time.
+
+Run it as root, so that it can restart the services itself. If it stops
+with an error after it made the new keys, or cannot restart the services,
+the old keys are removed all the same, since someone may have seen them:
+then restart `garrison-ingest` and `garrison-broker` once the cause is
+mended.
 
 ## Uninstall
 

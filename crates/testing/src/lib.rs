@@ -7,6 +7,7 @@
 pub mod http;
 pub mod lab;
 pub mod noise;
+pub mod relay;
 pub mod smtp;
 pub mod tls;
 
