@@ -2,7 +2,9 @@
 //!
 //! `systemctl show` works without privileges. Timers additionally report their
 //! loaded calendar and next run, which describes what systemd will actually do
-//! rather than what a unit file on disk says.
+//! rather than what a unit file on disk says. systemd answers an alias, such
+//! as `sshd.service` for `ssh.service`, under the unit it names, so each unit
+//! takes the answer that lists it among the unit's names.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -18,9 +20,9 @@ use serde_json::{Map, json};
 use crate::context::{Collected, Context, Provider, Report};
 use crate::options::{Checked, Options, fail, modules_of};
 
-const PROPERTIES: &str = "Id,LoadState,ActiveState,SubState,Result,TimersCalendar,TimersMonotonic,\
-                          NextElapseUSecRealtime,NextElapseUSecMonotonic,LastTriggerUSec,\
-                          LastTriggerUSecMonotonic,ExecMainStartTimestamp,\
+const PROPERTIES: &str = "Id,Names,LoadState,ActiveState,SubState,Result,TimersCalendar,\
+                          TimersMonotonic,NextElapseUSecRealtime,NextElapseUSecMonotonic,\
+                          LastTriggerUSec,LastTriggerUSecMonotonic,ExecMainStartTimestamp,\
                           ExecMainExitTimestamp,ExecMainStatus";
 
 #[derive(Debug)]
@@ -136,6 +138,15 @@ fn classify(values: &BTreeMap<String, String>, idle: bool) -> State {
     }
 }
 
+/// Whether `values` are systemd's answer for `unit`: its `Id` or one of its
+/// `Names`, where an alias is listed beside the unit it names.
+fn names(values: &BTreeMap<String, String>, unit: &str) -> bool {
+    values.get("Id").is_some_and(|id| id == unit)
+        || values
+            .get("Names")
+            .is_some_and(|names| names.split_whitespace().any(|name| name == unit))
+}
+
 /// What systemd remembers of a job's last run since the host started, and
 /// what its age means for the job's state.
 fn last_run(
@@ -240,17 +251,18 @@ impl Systemd {
         Ok(Systemd { units })
     }
 
-    /// Properties per unit ID, from one `systemctl show` for all units.
-    fn states(&self, context: &Context<'_>) -> BTreeMap<String, BTreeMap<String, String>> {
+    /// The properties systemd gives in one `systemctl show` for all units,
+    /// one block for each; `Err` says why there are none.
+    fn answers(&self, context: &Context<'_>) -> Result<Vec<BTreeMap<String, String>>, String> {
         let mut arguments = vec!["/usr/bin/env", "TZ=UTC", SYSTEMCTL, "show", "--no-pager"];
         let property = format!("--property={PROPERTIES}");
         arguments.push(&property);
         arguments.extend(self.units.iter().map(|unit| unit.name.as_str()));
-        let mut states = BTreeMap::new();
-        // An unavailable systemctl leaves every unit Unknown.
-        let Ok(output) = context.runner.run(&arguments) else {
-            return states;
-        };
+        let output = context
+            .runner
+            .run(&arguments)
+            .map_err(|error| format!("systemctl show could not be run: {error}."))?;
+        let mut answers = Vec::new();
         for block in output.stdout.split("\n\n") {
             // A property a unit has several of, such as a timer's rules,
             // comes as one line each: they are kept side by side.
@@ -264,28 +276,35 @@ impl Systemd {
                     })
                     .or_insert_with(|| value.to_owned());
             }
-            if let Some(id) = values.get("Id") {
-                states.insert(id.clone(), values);
+            if !values.is_empty() {
+                answers.push(values);
             }
         }
-        states
+        Ok(answers)
     }
 
     fn observation(
         &self,
         context: &Context<'_>,
         unit: &Unit,
-        values: Option<&BTreeMap<String, String>>,
+        answer: Result<&BTreeMap<String, String>, String>,
     ) -> Result<Observation, crate::context::ProviderError> {
         let empty = BTreeMap::new();
-        let values = values.unwrap_or(&empty);
+        let (values, why) = match answer {
+            Ok(values) => (values, None),
+            Err(why) => (&empty, Some(why)),
+        };
         let get = |key: &str| values.get(key).map(String::as_str);
         let (active, loaded) = (get("ActiveState"), get("LoadState"));
         // systemd unit names are case-sensitive; only `.timer` is a timer.
         #[allow(clippy::case_sensitive_file_extension_comparisons)]
         let timer = unit.name.ends_with(".timer");
         let mut state = classify(values, unit.idle);
-        let mut findings = Vec::new();
+        // Unknown always says why: no answer, or one without the load state.
+        let mut findings: Vec<String> = why.into_iter().collect();
+        if state == State::Unknown && findings.is_empty() {
+            findings.push("systemctl show gave no load state for this unit.".to_owned());
+        }
         let mut fields = vec![
             Field::text(
                 "Load state",
@@ -367,11 +386,20 @@ impl Provider for Systemd {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let states = self.states(context);
+        let answers = self.answers(context);
         let mut report = Report::default();
         let mut healthy = 0_u32;
         for unit in &self.units {
-            let observation = self.observation(context, unit, states.get(&unit.name))?;
+            // Only an answer that names the unit is its own; the order of the
+            // answers is not relied on.
+            let answer = match &answers {
+                Ok(answers) => answers
+                    .iter()
+                    .find(|values| names(values, &unit.name))
+                    .ok_or_else(|| "systemctl show gave no answer for this unit.".to_owned()),
+                Err(why) => Err(why.clone()),
+            };
+            let observation = self.observation(context, unit, answer)?;
             healthy += u32::from(observation.state == State::Ok);
             report.observations.push(observation);
         }

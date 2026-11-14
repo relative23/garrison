@@ -109,6 +109,13 @@ Notable changes for operators and users. The format follows
   clock comes back. Where a clock that ran ahead had carried the thinning
   past the present, it takes up again from the clock's time, so the minutes
   written since are thinned as well.
+- **A `systemd` entry may name an alias.** systemd answers for an alias,
+  such as `sshd.service` where the unit is `ssh.service`, under the name of
+  the unit it stands for, and the check looked for the answer under the
+  alias: such an entry stayed Unknown, without a reason. Each entry now
+  takes the answer that lists it among the unit's names. A unit that
+  systemd gives no answer for, and every unit while `systemctl` cannot be
+  run, is Unknown and says why.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser

@@ -1,12 +1,146 @@
 //! Timers and jobs as systemd reports them.
 
+use std::io;
+
 use garrison_core::observations::{Observation, State};
 use serde_json::{Value, json};
 
 use super::tests::value_of;
 use super::*;
+use crate::command::{Output, Runner};
 use crate::context::Provider;
 use crate::testing::{Canned, config, context, table};
+
+/// The observations for `units`, given as `{ unit = …, label = … }` entries,
+/// when systemctl answers with `runner`.
+fn observed(units: &str, runner: &dyn Runner) -> Vec<Observation> {
+    let provider = Systemd::new(&table(&format!("type = \"systemd\"\nunits = [{units}]"))).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let config = config(directory.path());
+    provider
+        .collect(&context(&config, runner))
+        .unwrap()
+        .observations
+}
+
+/// systemd 259's answer on Ubuntu 26.04 for `chronyd.service`, an alias of
+/// `chrony.service`, then for `chrony.service` itself and a unit that does
+/// not exist, in the order they were asked.
+const ALIASED: &str = "Id=chrony.service\nNames=chrony.service chronyd.service\n\
+    LoadState=loaded\nActiveState=active\nSubState=running\nResult=success\n\
+    ExecMainStartTimestamp=Mon 2026-11-09 22:26:51 UTC\nExecMainExitTimestamp=\nExecMainStatus=0\n\n\
+    Id=chrony.service\nNames=chrony.service chronyd.service\n\
+    LoadState=loaded\nActiveState=active\nSubState=running\nResult=success\n\
+    ExecMainStartTimestamp=Mon 2026-11-09 22:26:51 UTC\nExecMainExitTimestamp=\nExecMainStatus=0\n\n\
+    Id=garrison-nothing.service\nNames=garrison-nothing.service\n\
+    LoadState=not-found\nActiveState=inactive\nSubState=dead\nResult=success\n\
+    ExecMainStartTimestamp=\nExecMainExitTimestamp=\nExecMainStatus=0\n";
+
+/// systemd answers an alias, such as `sshd.service` for `ssh.service` on
+/// Debian and Ubuntu, under the unit it names; the alias is one of its names.
+#[test]
+fn an_alias_shows_the_state_of_the_unit_it_names() {
+    let observations = observed(
+        r#"{ unit = "chronyd.service", label = "Time (alias)", modules = ["services"] },
+           { unit = "chrony.service", label = "Time", modules = ["services"] },
+           { unit = "garrison-nothing.service", label = "Gone", modules = ["services"] }"#,
+        &Canned(ALIASED.to_owned()),
+    );
+    let states: Vec<(&str, State)> = observations
+        .iter()
+        .map(|observation| (observation.id.as_str(), observation.state))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            ("systemd.chronyd.service", State::Ok),
+            ("systemd.chrony.service", State::Ok),
+            ("systemd.garrison-nothing.service", State::Failed),
+        ]
+    );
+    assert_eq!(
+        value_of(&observations[0], "Active state"),
+        &json!("active (running)")
+    );
+    assert_eq!(observations[0].findings, Vec::<String>::new());
+}
+
+/// Fails as a systemctl that is not there does.
+struct Missing;
+
+impl Runner for Missing {
+    fn run(&self, _: &[&str]) -> io::Result<Output> {
+        Err(io::Error::from(io::ErrorKind::NotFound))
+    }
+}
+
+/// An answer is read only for a unit it names. One that names none, too
+/// few answers, one without the unit's load state and a systemctl that
+/// cannot be run leave the units Unknown, and each says why.
+#[test]
+fn a_unit_without_an_answer_of_its_own_is_unknown_and_says_why() {
+    let block = |id: &str| {
+        format!("Id={id}\nNames={id}\nLoadState=loaded\nActiveState=active\nSubState=running\n")
+    };
+    let units = r#"{ unit = "a.service", label = "A", modules = ["services"] },
+        { unit = "b.service", label = "B", modules = ["services"] },
+        { unit = "c.service", label = "C", modules = ["services"] }"#;
+    // An answer for a.service, one for a unit nobody asked about, none for c.
+    let answer = format!("{}\n{}", block("a.service"), block("other.service"));
+    let observations = observed(units, &Canned(answer));
+    let read: Vec<(State, &[String])> = observations
+        .iter()
+        .map(|observation| (observation.state, observation.findings.as_slice()))
+        .collect();
+    let none = ["systemctl show gave no answer for this unit.".to_owned()];
+    assert_eq!(
+        read,
+        [
+            (State::Ok, &[][..]),
+            (State::Unknown, &none[..]),
+            (State::Unknown, &none[..]),
+        ]
+    );
+    assert_eq!(
+        value_of(&observations[1], "Active state"),
+        &json!("unknown (unknown)")
+    );
+    // More answers than units asked: each unit still takes its own.
+    let answer = format!(
+        "{}\n{}\n{}\n{}",
+        block("other.service"),
+        block("c.service"),
+        block("b.service"),
+        block("a.service")
+    );
+    let states: Vec<State> = observed(units, &Canned(answer))
+        .iter()
+        .map(|observation| observation.state)
+        .collect();
+    assert_eq!(states, [State::Ok; 3]);
+    // An answer that does not say whether the unit is loaded.
+    let answer = "Id=a.service\nNames=a.service\nActiveState=active\nSubState=running\n";
+    let unloaded = observed(
+        r#"{ unit = "a.service", label = "A", modules = ["services"] }"#,
+        &Canned(answer.to_owned()),
+    );
+    assert_eq!(unloaded[0].state, State::Unknown);
+    assert_eq!(
+        unloaded[0].findings,
+        ["systemctl show gave no load state for this unit."]
+    );
+    // No systemctl at all.
+    let observations = observed(units, &Missing);
+    for observation in &observations {
+        assert_eq!(observation.state, State::Unknown);
+        assert_eq!(observation.findings.len(), 1);
+        assert!(
+            observation.findings[0].starts_with("systemctl show could not be run: "),
+            "{:?}",
+            observation.findings
+        );
+    }
+}
 
 /// A timer that runs again a while after its unit last ran has no calendar;
 /// systemd counts its next run from the start of the host.

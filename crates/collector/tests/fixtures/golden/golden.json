@@ -659,7 +659,9 @@
       }
      ],
      "table": null,
-     "findings": [],
+     "findings": [
+      "systemctl show gave no answer for this unit."
+     ],
      "value": {
       "unit": "missing.service",
       "activeState": null,
