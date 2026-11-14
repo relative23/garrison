@@ -56,6 +56,12 @@ pub(super) fn resolver_option(raw: &toml::Table, provider: &str) -> Checked<Opti
     }
 }
 
+/// What a check says that takes only the first `most` of Stalwart's
+/// `domains`.
+pub(super) fn left_out(domains: usize, most: usize) -> String {
+    format!("Stalwart has {domains} domains; only the first {most} are checked (`max_domains`).")
+}
+
 /// The hosts Stalwart names as the mail servers of its domains: the targets
 /// of the MX records in its zone files.
 pub(super) fn mail_hosts(context: &Context<'_>) -> Result<Vec<String>, String> {
@@ -333,6 +339,12 @@ impl Provider for Dns {
                 .observations
                 .push(self.domain(context, resolver, domain, &mut silent)?);
         }
+        // The records of the domains after them are not known.
+        if domains.len() > self.max_domains {
+            report
+                .observations
+                .push(self.unknown(context, &left_out(domains.len(), self.max_domains))?);
+        }
         if domains.is_empty() {
             report
                 .observations
@@ -342,6 +354,8 @@ impl Provider for Dns {
     }
 }
 
+#[cfg(test)]
+mod domains_tests;
 #[cfg(test)]
 pub(crate) mod tests;
 #[cfg(test)]

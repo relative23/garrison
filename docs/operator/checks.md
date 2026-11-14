@@ -211,7 +211,9 @@ check asks the resolver for them and compares:
   mail hosts, is a warning: senders that honour it stop delivering.
 
 The answers are those of this resolver at this moment; another resolver may
-still hold older ones.
+still hold older ones. The check takes the first `max_domains` of Stalwart's
+domains; where Stalwart has more, the card "DNS records" is Unknown and says
+how many it has.
 
 ## `reputation`
 

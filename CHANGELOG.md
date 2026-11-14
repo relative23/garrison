@@ -133,6 +133,10 @@ Notable changes for operators and users. The format follows
   carries a random number, and an answer counts only where it repeats the
   question as asked, its name, type and class; any other is dropped, and the
   wait for the real one goes on within the question's three seconds.
+- **The DNS check says when it leaves domains out.** It checks the first
+  `max_domains` (20) of Stalwart's domains and left the others out without
+  a word. Where Stalwart has more, the card "DNS records" is now Unknown
+  and says how many it has.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser
