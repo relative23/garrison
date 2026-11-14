@@ -1,8 +1,9 @@
 //! The receiver under load, over real connections: a sender that stalls,
-//! batches side by side, and a store that needs its clean-up.
+//! batches side by side, many at once, and a store that needs its clean-up.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::Barrier;
 use std::time::Instant;
 
 use tokio::runtime::Runtime;
@@ -113,6 +114,60 @@ fn a_batch_waits_while_two_others_are_read() {
     for holder in &mut holders {
         assert_eq!(answer(holder).map(|(status, _)| status), Some(408));
     }
+}
+
+#[test]
+fn batches_that_arrive_together_store_each_event_once() {
+    let directory = tempfile::tempdir().unwrap();
+    let events = Arc::new(store(directory.path(), 100_000));
+    let runtime = Runtime::new().unwrap();
+    let (app, _) = receiver(Arc::clone(&events), Duration::from_secs(5));
+    let address = serve(&runtime, app);
+    // Eight senders at once, each with fifty events, of which the last
+    // twenty-five come again first in the next batch: as Stalwart sends a
+    // batch again whose answer it did not hear.
+    let bodies: Vec<Vec<u8>> = (0..8_u64)
+        .map(|index| {
+            let first = index * 25;
+            let events: Vec<Value> = (first..first + 50)
+                .map(|seq| event(seq, "auth.failed", AT, &json!({})))
+                .collect();
+            batch(&events)
+        })
+        .collect();
+    let start = Barrier::new(bodies.len());
+    let answers: Vec<Option<(u16, Value)>> = std::thread::scope(|scope| {
+        let sending: Vec<_> = bodies
+            .iter()
+            .map(|body| {
+                let start = &start;
+                scope.spawn(move || {
+                    start.wait();
+                    let mut stream = begin(address, body, body.len());
+                    answer(&mut stream)
+                })
+            })
+            .collect();
+        sending
+            .into_iter()
+            .map(|sent| sent.join().unwrap())
+            .collect()
+    });
+    // Each is answered, and together they stored every event once.
+    let mut stored = 0;
+    for answer in &answers {
+        let (status, body) = answer.as_ref().expect("an answer to each batch");
+        assert_eq!(*status, 200, "{body}");
+        stored += body["stored"].as_u64().unwrap();
+        assert_eq!(
+            body["stored"].as_u64().unwrap() + body["skipped"].as_u64().unwrap(),
+            50
+        );
+    }
+    let distinct = 7 * 25 + 50;
+    assert_eq!(stored, distinct);
+    assert_eq!(count(directory.path()), i64::try_from(distinct).unwrap());
+    assert_eq!(events.health().duplicate, 8 * 50 - distinct);
 }
 
 fn count(directory: &std::path::Path) -> i64 {
