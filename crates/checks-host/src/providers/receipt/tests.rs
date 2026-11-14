@@ -199,6 +199,13 @@ fn a_receipt_is_old_only_after_its_maximum_age() {
         "",
     );
     assert_eq!(large.state, State::Ok);
+    // Without a limit a receipt never grows old, and says that of itself.
+    let unlimited = observe(&json!({"date": "2020-01-01T00:00:00Z"}), "");
+    assert_eq!(unlimited.state, State::Ok);
+    assert_eq!(
+        unlimited.findings,
+        ["No age limit is set (max_age_hours): this receipt stays in order however old it is."]
+    );
 }
 
 #[test]

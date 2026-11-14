@@ -327,6 +327,29 @@ impl Receipt {
     }
 }
 
+impl Receipt {
+    /// What the receipt's age says against it, where it says anything: no
+    /// date that reads, or one beyond the limit.
+    fn by_age(&self, age: Option<f64>) -> Option<(State, String)> {
+        match age {
+            None => Some((State::Unknown, "The receipt has no valid date.".to_owned())),
+            #[allow(clippy::cast_precision_loss)]
+            Some(seconds)
+                if self.max_age_hours > 0 && seconds > (self.max_age_hours * 3600) as f64 =>
+            {
+                Some((
+                    State::Warning,
+                    format!(
+                        "The last receipt is older than {} hours.",
+                        self.max_age_hours
+                    ),
+                ))
+            }
+            Some(_) => None,
+        }
+    }
+}
+
 impl Provider for Receipt {
     fn name(&self) -> &'static str {
         "receipt"
@@ -363,22 +386,9 @@ impl Provider for Receipt {
         let mut findings = Vec::new();
         let mut state = State::Ok;
         let age = reported.map(|written| context.seconds_since(written.instant));
-        match age {
-            None => {
-                state = State::Unknown;
-                findings.push("The receipt has no valid date.".to_owned());
-            }
-            #[allow(clippy::cast_precision_loss)]
-            Some(seconds)
-                if self.max_age_hours > 0 && seconds > (self.max_age_hours * 3600) as f64 =>
-            {
-                state = State::Warning;
-                findings.push(format!(
-                    "The last receipt is older than {} hours.",
-                    self.max_age_hours
-                ));
-            }
-            Some(_) => {}
+        if let Some((by_age, finding)) = self.by_age(age) {
+            state = by_age;
+            findings.push(finding);
         }
         if self
             .ok_when
@@ -395,6 +405,15 @@ impl Provider for Receipt {
         if rows_fail {
             state = State::Failed;
             findings.push("At least one recorded result is not a success.".to_owned());
+        }
+        // Without a limit the receipt of a job that stopped running months
+        // ago is as much in order as yesterday's: the card says so.
+        if self.max_age_hours == 0 {
+            findings.push(
+                "No age limit is set (max_age_hours): this receipt stays in order however old \
+                 it is."
+                    .to_owned(),
+            );
         }
         if !trusted {
             state = State::Unknown;

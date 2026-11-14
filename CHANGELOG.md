@@ -53,6 +53,10 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A receipt without an age limit says so.** Without `max_age_hours` the
+  receipt of a job that stopped running long ago stayed in order with
+  nothing to show it. Its card now carries a finding that no limit is set;
+  set one for every job that runs on a schedule.
 - **Signature files that are no longer updated are a warning.** The
   antivirus check called the signature databases in order as soon as one
   file existed, and showed the age of the daily one without judging it. A

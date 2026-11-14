@@ -292,6 +292,10 @@ fields = [{ key = "pauseSeconds", label = "Mail service pause", format = "durati
 ok_when = { key = "result", equals = ["passed"] }   # otherwise: Failed
 ```
 
+Set `max_age_hours` for every job that runs on a schedule. Without it a
+receipt has no age limit: the one of a job that stopped months ago stays in
+order, and the card says so in a finding.
+
 A receipt counts only if nobody else can have written it: it must belong to
 root (or to the collector's own user) and must not be writable by others, nor
 by its group unless that group is root. Otherwise the observation is Unknown.
