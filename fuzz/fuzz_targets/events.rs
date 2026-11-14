@@ -1,7 +1,8 @@
 //! A batch of events as the webhook delivers it, after its signature was
 //! checked: storing it never fails, and whatever was stored can be read
-//! through every view of the history. An event that could be stored but not
-//! read would hide the history until it expires.
+//! through every view of the history: the lists, a delivery and a session,
+//! the sign-in attacks, the destinations and the coverage. An event that
+//! could be stored but not read would hide the history until it expires.
 #![no_main]
 
 use std::sync::OnceLock;
@@ -9,14 +10,18 @@ use std::time::Duration;
 
 use garrison_core::json;
 use garrison_core::sqlite::reading;
-use garrison_ingest::coverage;
 use garrison_ingest::queries::{self, Filter};
 use garrison_ingest::store::{EventStore, Limits};
+use garrison_ingest::{attacks, coverage, destinations};
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 
 /// Seconds since the epoch at which every batch arrives.
 const NOW: i64 = 1_794_000_000;
+/// The window the attack and destination views read: the days kept, and a
+/// day beyond the arrival for an event dated ahead of it.
+const SINCE: i64 = NOW - 31 * 86_400;
+const UNTIL: i64 = NOW + 86_400;
 
 struct Setup {
     store: EventStore,
@@ -66,5 +71,7 @@ fuzz_target!(|data: &[u8]| {
     for session in sessions.items.iter().take(3) {
         queries::session_detail(&db, &session.span_id).expect("a session is shown");
     }
+    attacks::attacks(&db, SINCE, UNTIL).expect("the attacks are counted");
+    destinations::destinations(&db, SINCE, UNTIL).expect("the destinations are counted");
     coverage::read(Some(&db), NOW).expect("coverage is read");
 });
