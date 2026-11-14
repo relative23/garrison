@@ -442,6 +442,7 @@ One archive per architecture; building it publishes nothing:
 rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl
 cargo install --locked cargo-zigbuild@0.23.4   # cross-linking through Zig
 # Zig 0.17.0 on PATH: https://ziglang.org/download/ (check the sha256 there)
+# Node.js 24 on PATH, with the npm it brings (11) or a newer one
 cargo xtask release                            # dist/garrison-<version>-<arch>.tar.gz
 cargo xtask release aarch64                    # one architecture only
 ```
@@ -452,8 +453,10 @@ Each archive holds `bin/garrison`, the interface in `static/`, `deploy/`,
 notices of the Rust standard library and musl libc in `licenses/`, a CycloneDX
 SBOM in `sbom.cdx.json` (also written next to the archive) and `SHA256SUMS`.
 `cargo xtask sbom` prints the SBOM without a build. The same commit yields
-the same archive; `cargo xtask release` refuses other Zig or cargo-zigbuild
-versions, because they are part of the build like the compiler.
+the same archive; before it builds anything, `cargo xtask release` refuses
+other Zig or cargo-zigbuild versions and a Node.js of another release line
+than 24, because they are part of the build like the compiler, and an npm
+older than 11.
 
 ### Signing releases
 
