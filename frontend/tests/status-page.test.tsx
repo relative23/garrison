@@ -51,9 +51,32 @@ describe("status pages", () => {
     renderView(<StatusPage moduleId="antivirus" detail={null} />, { status: status([service, version]) });
     const row = within(screen.getByRole("row", { name: /Antivirus daemon/ }));
     expect(row.getByText("clamd@scan.service")).toBeTruthy();
-    // The first field is the state badge's; unknown values are left out.
-    expect(row.getByText("Memory: 1.0 MiB")).toBeTruthy();
+    // Every field, in its order, and a value that is missing as Unknown.
+    expect(row.getByText("State: active · Memory: 1.0 MiB · Restarts: Unknown")).toBeTruthy();
     expect(screen.getByText("ClamAV").nextElementSibling?.textContent).toContain("1.4.3");
+  });
+
+  it("show what is wrong with a process: its findings and the properties that tell", () => {
+    // As the systemd check reports a job whose unit file is missing.
+    const service = observation({
+      id: "systemd.backup.service",
+      kind: "service",
+      modules: ["services"],
+      title: "Backup job",
+      evidence: "process",
+      state: "unknown",
+      value: { unit: "backup.service" },
+      fields: [
+        { label: "Load state", value: "not-found", format: "text" },
+        { label: "Active state", value: "inactive (dead)", format: "text" },
+        { label: "Last run", value: null, format: "datetime" },
+      ],
+      findings: ["No run since the host started."],
+    });
+    renderView(<StatusPage moduleId="services" detail={null} />, { status: status([service]) });
+    const row = within(screen.getByRole("row", { name: /Backup job/ }));
+    expect(row.getByText("No run since the host started.")).toBeTruthy();
+    expect(row.getByText("Load state: not-found · Active state: inactive (dead) · Last run: Unknown")).toBeTruthy();
   });
 
   it("name failed providers on the services page only", () => {

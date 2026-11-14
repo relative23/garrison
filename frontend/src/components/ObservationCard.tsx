@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import type { Observation } from "../api/client";
 import { useTranslation } from "../i18n";
-import { dateTime, formatValue, relative, type Format } from "../lib/format";
+import { dateTime, formatValue, relative, text, type Format } from "../lib/format";
 import { EvidenceLabel, StateBadge, type StateName } from "./Status";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./ui/card";
@@ -147,12 +147,17 @@ export function ServiceTable({ services }: { services: Observation[] }) {
               <TableCell>
                 <StateBadge state={service.state as StateName} stale={service.stale} />
               </TableCell>
-              <TableCell className="text-muted-foreground">
-                {service.fields
-                  .slice(1)
-                  .filter((field) => field.value !== null)
-                  .map((field) => t("common.labelValue", { label: field.label, value: formatValue(field.value, field.format as Format) }))
-                  .join(" · ")}
+              {/* What is wrong first, then every property: a unit file that is
+                  missing shows in the load state, a job that never ran as Unknown. */}
+              <TableCell>
+                {service.findings.map((finding) => (
+                  <p key={finding}>{text(finding)}</p>
+                ))}
+                <p className="text-muted-foreground">
+                  {service.fields
+                    .map((field) => t("common.labelValue", { label: field.label, value: formatValue(field.value, field.format as Format) }))
+                    .join(" · ")}
+                </p>
               </TableCell>
             </TableRow>
           ))}

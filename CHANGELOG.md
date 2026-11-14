@@ -53,6 +53,12 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **The table of processes and schedules shows all that the check found.**
+  Its Details column left out a unit's findings, such as "No run since the
+  host started.", its first property, the load state, which is where a
+  missing unit file shows, and every property without a value. It now shows
+  the findings first, then every property, with Unknown for one without a
+  value.
 - **A tab follows a sign-in made in another one.** Every tab shares the
   browser's session cookie, but each read its session only once: after a
   sign-in in a second tab the first went on naming the account it had
