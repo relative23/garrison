@@ -1,7 +1,9 @@
 // HTTP/2 with TLS in front of the preview, as nginx serves Garrison in
 // production: the browser multiplexes every request over one connection
 // instead of opening at most six HTTP/1.1 connections. The certificate is made
-// for this run with openssl and removed afterwards.
+// for this run with openssl and removed afterwards. Like nginx, the proxy may
+// answer a request itself, with an error page of its own or one that passes
+// on a reason, as HTTP/2 carries it: with a status and no status text.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
@@ -11,8 +13,10 @@ import { join } from "node:path";
 
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "proxy-connection"]);
 
-/** Starts the proxy for `target` (an http://localhost origin) on `port`. */
-export async function startHttp2(target, port = 18443) {
+/** Starts the proxy for `target` (an http://localhost origin) on `port`.
+ * `answer` gets each request's path and may return `{ status, type, body }`
+ * to answer it in place of the preview. */
+export async function startHttp2(target, port = 18443, answer = () => null) {
   const upstream = new URL(target);
   const folder = mkdtempSync(join(tmpdir(), "garrison-e2e-"));
   const key = join(folder, "key.pem");
@@ -40,6 +44,12 @@ export async function startHttp2(target, port = 18443) {
   );
   const server = http2.createSecureServer({ key: readFileSync(key), cert: readFileSync(cert) });
   server.on("stream", (stream, headers) => {
+    const own = answer(headers[":path"]);
+    if (own) {
+      stream.respond({ ":status": own.status, "content-type": own.type });
+      stream.end(own.body);
+      return;
+    }
     const forward = {};
     for (const [name, value] of Object.entries(headers)) if (!name.startsWith(":")) forward[name] = value;
     // The preview checks the host it was configured for.

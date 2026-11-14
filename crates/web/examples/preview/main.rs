@@ -2,7 +2,8 @@
 //! web service and the built interface, with the collector's golden
 //! observations, a week of metric history and the ingest test batch. The
 //! sign-in approves at once and the broker grants every module and action, so
-//! nothing here needs Stalwart or touches a real host.
+//! nothing here needs Stalwart or touches a real host; a sign-in asked for with
+//! `profile=viewer` gets a viewer's rights, the dashboard alone (`fakes.rs`).
 //!
 //! ```sh
 //! (cd frontend && npm run build)
