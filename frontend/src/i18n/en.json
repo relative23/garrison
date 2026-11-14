@@ -229,7 +229,7 @@
     },
     "gapReason": {
       "batches-refused": "The event receiver ran but refused Stalwart's batches for longer than Stalwart buffers events: the signature key did not match, or the events could not be stored.",
-      "events-unreadable": "Events arrived in a form the event receiver could not read and were not recorded.",
+      "events-unreadable": "Events arrived that the event receiver could not read, or that were dated ahead of its clock or before what the history keeps, and were not recorded.",
       "receiver-offline": "The event receiver was offline for longer than Stalwart buffers events."
     }
   },

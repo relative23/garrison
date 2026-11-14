@@ -25,8 +25,11 @@ use serde_json::{Map, Value, json};
 use tower::ServiceExt;
 
 const KEY: &[u8] = b"golden-signature-key-0123456789";
-const START: i64 = 1_793_000_000;
-const RECEIVED: i64 = 1_793_000_100;
+/// The receiver starts half a minute before the batch's first event is
+/// written, and the batch arrives a quarter of a minute after its last: an
+/// event is taken only at a time at which it can have arrived.
+const START: i64 = 1_793_231_000;
+const RECEIVED: i64 = 1_793_231_300;
 const TABLES: [(&str, &str); 5] = [
     ("events", "seq"),
     ("queues", "queue_id"),

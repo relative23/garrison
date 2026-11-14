@@ -12,43 +12,40 @@ fn a_message_a_milter_refuses_is_part_of_its_session_and_no_delivery() {
     let events = store(directory.path(), 1000);
     let refused = QUEUE + 1;
     events
-        .ingest(
-            &[
-                event(
-                    1,
-                    "smtp.connection-start",
-                    AT,
-                    &json!({"spanId": SPAN, "remoteIp": "192.0.2.1"}),
-                ),
-                event(
-                    2,
-                    "mta-hook.action-accept",
-                    AT,
-                    &json!({"spanId": SPAN, "queueId": refused}),
-                ),
-                event(
-                    3,
-                    "milter.action-reply-code",
-                    AT,
-                    &json!({"spanId": SPAN, "queueId": refused}),
-                ),
-                event(4, "smtp.connection-end", AT, &json!({"spanId": SPAN})),
-                // Another message is queued and delivered.
-                event(
-                    5,
-                    "queue.message-queued",
-                    AT,
-                    &json!({"queueId": QUEUE, "from": "a@example.net", "to": ["b@example.test"]}),
-                ),
-                event(
-                    6,
-                    "delivery.delivered",
-                    AT,
-                    &json!({"queueId": QUEUE, "to": ["b@example.test"]}),
-                ),
-            ],
-            1,
-        )
+        .arriving(&[
+            event(
+                1,
+                "smtp.connection-start",
+                AT,
+                &json!({"spanId": SPAN, "remoteIp": "192.0.2.1"}),
+            ),
+            event(
+                2,
+                "mta-hook.action-accept",
+                AT,
+                &json!({"spanId": SPAN, "queueId": refused}),
+            ),
+            event(
+                3,
+                "milter.action-reply-code",
+                AT,
+                &json!({"spanId": SPAN, "queueId": refused}),
+            ),
+            event(4, "smtp.connection-end", AT, &json!({"spanId": SPAN})),
+            // Another message is queued and delivered.
+            event(
+                5,
+                "queue.message-queued",
+                AT,
+                &json!({"queueId": QUEUE, "from": "a@example.net", "to": ["b@example.test"]}),
+            ),
+            event(
+                6,
+                "delivery.delivered",
+                AT,
+                &json!({"queueId": QUEUE, "to": ["b@example.test"]}),
+            ),
+        ])
         .unwrap();
     let db = read(directory.path());
     let sessions = json!(list_sessions(&db, &Filter::default()).unwrap());
@@ -87,13 +84,10 @@ fn what_a_milter_or_a_hook_did_to_a_message_is_named() {
         let directory = tempfile::tempdir().unwrap();
         let events = store(directory.path(), 1000);
         events
-            .ingest(
-                &[
-                    event(1, "smtp.ehlo", AT, &json!({"spanId": SPAN})),
-                    event(2, kind, AT, &json!({"spanId": SPAN, "queueId": QUEUE})),
-                ],
-                1,
-            )
+            .arriving(&[
+                event(1, "smtp.ehlo", AT, &json!({"spanId": SPAN})),
+                event(2, kind, AT, &json!({"spanId": SPAN, "queueId": QUEUE})),
+            ])
             .unwrap();
         let sessions = json!(list_sessions(&read(directory.path()), &Filter::default()).unwrap());
         assert_eq!(sessions["items"][0]["rejections"], json!([named]), "{kind}");
@@ -102,14 +96,11 @@ fn what_a_milter_or_a_hook_did_to_a_message_is_named() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
     events
-        .ingest(
-            &[
-                event(1, "smtp.ehlo", AT, &json!({"spanId": SPAN})),
-                event(2, "milter.action-accept", AT, &json!({"spanId": SPAN})),
-                event(3, "mta-hook.action-accept", AT, &json!({"spanId": SPAN})),
-            ],
-            1,
-        )
+        .arriving(&[
+            event(1, "smtp.ehlo", AT, &json!({"spanId": SPAN})),
+            event(2, "milter.action-accept", AT, &json!({"spanId": SPAN})),
+            event(3, "mta-hook.action-accept", AT, &json!({"spanId": SPAN})),
+        ])
         .unwrap();
     let sessions = json!(list_sessions(&read(directory.path()), &Filter::default()).unwrap());
     assert_eq!(sessions["items"][0]["rejections"], json!([]));

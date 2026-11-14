@@ -9,6 +9,10 @@
 //! is no gap inside the history: the history begins later. The store keeps
 //! one window per limit and widens it, so a reader finds where the history
 //! begins and which limit moved it there.
+//!
+//! Retention and the limits go by the time an event says it happened, so
+//! that time is believed only where it can be true of an event that arrives
+//! now (`taking`).
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -18,11 +22,11 @@ use garrison_core::{recording, sqlite, time};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
 
-use crate::policy::{EventType, identifier, select_fields};
-
 mod failing;
+mod taking;
 
 use failing::Failing;
+use taking::{Arrival, Taken, insert};
 
 pub use failing::Health;
 pub use sqlite::SqliteError;
@@ -132,17 +136,6 @@ pub struct Outcome {
     pub unreadable: u64,
 }
 
-/// What became of one event of a batch.
-enum Taken {
-    Stored,
-    /// Stored already: Stalwart brought the batch again.
-    Duplicate,
-    /// No event, or of a type that is not recorded.
-    NotRecorded,
-    /// Of a type that is recorded, with a time or an id that does not read.
-    Unreadable,
-}
-
 impl EventStore {
     pub fn open(path: &Path, limits: Limits) -> Result<Self, SqliteError> {
         let db = sqlite::open_database(path, &MIGRATIONS, Database::Events)?;
@@ -242,11 +235,15 @@ impl EventStore {
         let state = &mut *guard;
         let was = state.failing;
         let mut outcome = Outcome::default();
+        let arrival = Arrival {
+            at: received,
+            kept_from: received - self.retention(),
+        };
         let transaction = state
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         for event in events {
-            match insert(&transaction, event, received)? {
+            match insert(&transaction, event, arrival)? {
                 Taken::Stored => outcome.stored += 1,
                 Taken::Duplicate => outcome.duplicate += 1,
                 Taken::Unreadable => outcome.unreadable += 1,
@@ -282,8 +279,9 @@ impl EventStore {
         transaction.commit()?;
         if outcome.unreadable > 0 && was.is_none() {
             log::error!(
-                "{} events of a recorded type could not be read and are lost; Stalwart may \
-                 write them differently now",
+                "{} events of a recorded type could not be read, or are dated as no event \
+                 that arrives now can be, and are lost; Stalwart may write them differently \
+                 now, or its clock is wrong",
                 outcome.unreadable
             );
         }
@@ -300,13 +298,18 @@ impl EventStore {
         Ok(outcome)
     }
 
+    /// The seconds for which an event is kept.
+    fn retention(&self) -> i64 {
+        i64::from(self.limits.retention_days) * 86400
+    }
+
     pub fn enforce_limits(&self, now: i64) -> Result<(), SqliteError> {
         self.enforce(&mut self.state(), now)
     }
 
     fn enforce(&self, state: &mut State, now: i64) -> Result<(), SqliteError> {
         state.inserted_since_cleanup = 0;
-        let cutoff = now - i64::from(self.limits.retention_days) * 86400;
+        let cutoff = now - self.retention();
         let transaction = state
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -362,74 +365,6 @@ fn set_meta(db: &Connection, key: &str, value: i64) -> Result<(), SqliteError> {
     Ok(())
 }
 
-/// Insert one event, and say what became of it.
-fn insert(db: &Connection, event: &Value, received: i64) -> Result<Taken, SqliteError> {
-    let Value::Object(event) = event else {
-        return Ok(Taken::NotRecorded);
-    };
-    let event_type = event
-        .get("type")
-        .and_then(Value::as_str)
-        .and_then(EventType::parse);
-    let created = event.get("createdAt").and_then(parse_time);
-    let event_id = match event.get("id") {
-        Some(Value::String(text)) => Some(text.clone()),
-        Some(Value::Number(number)) if !number.is_f64() => Some(number.to_string()),
-        _ => None,
-    }
-    .filter(|id| id.chars().count() <= MAX_EVENT_ID);
-    // A type that is not recorded is left out on purpose. One that is, with
-    // a time or an id that does not read, is an event that goes missing.
-    let Some(event_type) = event_type else {
-        return Ok(Taken::NotRecorded);
-    };
-    let (Some(created), Some(event_id)) = (created, event_id) else {
-        return Ok(Taken::Unreadable);
-    };
-    let data = event.get("data").unwrap_or(&Value::Null);
-    let fields = select_fields(event_type, data);
-    let span = data.get("spanId").and_then(identifier);
-    let queue = data.get("queueId").and_then(identifier);
-    let kind = event_type.category();
-    let inserted = db.execute(
-        "INSERT OR IGNORE INTO events(event_id,created_at,received_at,type,category,\
-         span_id,queue_id,fields) VALUES(?,?,?,?,?,?,?,?)",
-        params![
-            event_id,
-            created,
-            received,
-            event_type.as_str(),
-            kind,
-            span,
-            queue,
-            Value::Object(fields).to_string(),
-        ],
-    )?;
-    if inserted != 1 {
-        return Ok(Taken::Duplicate); // A retried batch: the event is already recorded.
-    }
-    if let Some(queue) = &queue {
-        db.execute(
-            "INSERT INTO queues VALUES(?,?,?,1) ON CONFLICT(queue_id) DO UPDATE SET \
-             first_seen=min(first_seen,excluded.first_seen),\
-             last_seen=max(last_seen,excluded.last_seen),event_count=event_count+1",
-            params![queue, created, created],
-        )?;
-    }
-    if let Some(span) = &span {
-        // A span that contains any SMTP event is an SMTP session, even if a
-        // queue event of the same span happened to arrive first.
-        db.execute(
-            "INSERT INTO spans VALUES(?,?,?,1,?) ON CONFLICT(span_id) DO UPDATE SET \
-             first_seen=min(first_seen,excluded.first_seen),\
-             last_seen=max(last_seen,excluded.last_seen),event_count=event_count+1,\
-             protocol=CASE WHEN excluded.protocol='smtp' THEN 'smtp' ELSE protocol END",
-            params![span, created, created, kind],
-        )?;
-    }
-    Ok(Taken::Stored)
-}
-
 /// Remove the `count` oldest events to keep the size limit `limit`.
 fn drop_oldest(db: &Connection, count: i64, limit: &str) -> Result<(), SqliteError> {
     let (first, last): (Option<i64>, Option<i64>) = db.query_row(
@@ -478,3 +413,5 @@ mod limit_tests;
 mod sequence_tests;
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+mod time_tests;

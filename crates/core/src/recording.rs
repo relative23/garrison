@@ -40,7 +40,8 @@ pub const OFFLINE: &str = "receiver-offline";
 /// The receiver ran and refused Stalwart's batches for longer than Stalwart
 /// keeps them: the signature key did not match, or storing failed.
 pub const REFUSED: &str = "batches-refused";
-/// Events of a recorded type arrived in a form the receiver could not read.
+/// Events of a recorded type arrived in a form the receiver could not read,
+/// or dated as no event that arrives then can be.
 pub const UNREADABLE: &str = "events-unreadable";
 /// The oldest events were removed to keep the event limit.
 pub const EVENT_LIMIT: &str = "capacity-events";

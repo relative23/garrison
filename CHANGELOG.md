@@ -53,6 +53,12 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **An event's own time is believed only where it can be true.** The event
+  history is kept by the time an event says it happened, so one dated years
+  ahead outlived retention and both size limits, and enough of them left no
+  room for real events. An event dated more than five minutes ahead of the
+  receiver's clock, or older than `ingest.retention_days`, is no longer
+  stored; it is counted and reported like an event that cannot be read.
 - **Searching the events finds what they say.** A search also matched the
   names of the stored fields, so a word such as "domain" found nearly every
   event; it never found a quote or a backslash; and capital letters beyond

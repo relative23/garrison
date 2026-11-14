@@ -33,7 +33,7 @@ fn other(seq: u64, kind: &str, time: &str, address: &str) -> Value {
 
 fn summary(events: &[Value], since: i64, until: i64) -> Attacks {
     let directory = tempfile::tempdir().unwrap();
-    store(directory.path(), 10_000).ingest(events, 1).unwrap();
+    store(directory.path(), 10_000).arriving(events).unwrap();
     attacks(&read(directory.path()), since, until).unwrap()
 }
 
@@ -41,7 +41,7 @@ fn summary(events: &[Value], since: i64, until: i64) -> Attacks {
 fn the_day_is_what_the_tests_take_it_for() {
     let directory = tempfile::tempdir().unwrap();
     store(directory.path(), 10)
-        .ingest(&[failed(1, "00:00:00", "192.0.2.1", None)], 1)
+        .arriving(&[failed(1, "00:00:00", "192.0.2.1", None)])
         .unwrap();
     let at: i64 = read(directory.path())
         .query_row("SELECT created_at FROM events", [], |row| row.get(0))
@@ -111,7 +111,7 @@ fn sign_ins_bans_and_handshakes_are_summed_by_address_network_and_account() {
 fn a_name_that_is_no_account_is_never_stored_or_shown() {
     let directory = tempfile::tempdir().unwrap();
     store(directory.path(), 10)
-        .ingest(&[failed(1, "10:00:00", "192.0.2.10", None)], 1)
+        .arriving(&[failed(1, "10:00:00", "192.0.2.10", None)])
         .unwrap();
     let stored: String = read(directory.path())
         .query_row("SELECT fields FROM events", [], |row| row.get(0))

@@ -19,7 +19,8 @@ pub(super) enum Kind {
     /// Batches were refused; Stalwart keeps them for a while and brings
     /// them again.
     Refused,
-    /// Events were answered as stored and could not be read: lost at once.
+    /// Events were answered as stored and could not be read, or carried a
+    /// time that cannot be their own: lost at once.
     Unreadable,
 }
 

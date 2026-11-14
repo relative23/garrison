@@ -10,6 +10,16 @@ const KEY: &[u8] = b"test-signature-key-0123456789";
 /// Request headers, and the status and message they lead to.
 type Case<'a> = (Vec<(&'a str, &'a str)>, StatusCode, &'a str);
 
+/// The second of `AT`, at which the tests' events are written.
+const WRITTEN: i64 = 1_793_231_030;
+
+/// The receiver as its events are written: an event is taken only at a
+/// time at which it can have arrived.
+fn receiver(directory: &std::path::Path) -> Router {
+    assert_eq!(crate::store::parse_time(&json!(AT)), Some(WRITTEN));
+    router_with_clock(Arc::new(store(directory, 1000)), KEY, || WRITTEN)
+}
+
 pub(super) fn batch(events: &[Value]) -> Vec<u8> {
     json!({"events": events}).to_string().into_bytes()
 }
@@ -43,7 +53,7 @@ pub(super) async fn call(app: &Router, request: Request<Body>) -> (StatusCode, V
 #[tokio::test]
 async fn signed_batches_are_stored_once_and_others_rejected() {
     let directory = tempfile::tempdir().unwrap();
-    let app = router(Arc::new(store(directory.path(), 1000)), KEY);
+    let app = receiver(directory.path());
     let body = batch(&[event(
         1,
         "smtp.ehlo",
@@ -79,7 +89,7 @@ async fn signed_batches_are_stored_once_and_others_rejected() {
 #[tokio::test]
 async fn requests_are_checked_before_the_signature() {
     let directory = tempfile::tempdir().unwrap();
-    let app = router(Arc::new(store(directory.path(), 1000)), KEY);
+    let app = receiver(directory.path());
     let body = batch(&[]);
     let signature = signature(KEY, &body);
     let cases: [Case<'_>; 3] = [
@@ -135,7 +145,7 @@ async fn requests_are_checked_before_the_signature() {
 #[tokio::test]
 async fn only_well_formed_batches_reach_the_store() {
     let directory = tempfile::tempdir().unwrap();
-    let app = router(Arc::new(store(directory.path(), 1000)), KEY);
+    let app = receiver(directory.path());
     let cases: [(&[u8], &str); 4] = [
         (b"{not json", "Invalid JSON"),
         (br#"{"events": 1, "events": 2}"#, "Invalid JSON"),
@@ -153,7 +163,7 @@ async fn only_well_formed_batches_reach_the_store() {
 #[tokio::test]
 async fn health_says_what_was_counted_and_unknown_paths_are_refused() {
     let directory = tempfile::tempdir().unwrap();
-    let app = router(Arc::new(store(directory.path(), 1000)), KEY);
+    let app = receiver(directory.path());
     let health = Request::get("/health").body(Body::empty()).unwrap();
     assert_eq!(
         call(&app, health).await,
@@ -195,7 +205,7 @@ fn signatures_are_base64_hmac_sha256() {
 #[tokio::test]
 async fn a_body_may_use_exactly_its_size_limit() {
     let directory = tempfile::tempdir().unwrap();
-    let app = router(Arc::new(store(directory.path(), 1000)), KEY);
+    let app = receiver(directory.path());
     let mut body = batch(&[]);
     // Stalwart batches up to 8 MiB.
     body.resize(8 * 1024 * 1024, b' ');
@@ -212,7 +222,7 @@ async fn a_body_may_use_exactly_its_size_limit() {
 #[tokio::test]
 async fn the_declared_length_must_be_plain_digits() {
     let directory = tempfile::tempdir().unwrap();
-    let app = router(Arc::new(store(directory.path(), 1000)), KEY);
+    let app = receiver(directory.path());
     let body = batch(&[]);
     for declared in ["", "+2", "0x10", "-1"] {
         let request = Request::post("/webhook")
@@ -232,7 +242,7 @@ async fn the_declared_length_must_be_plain_digits() {
 #[tokio::test]
 async fn a_batch_holds_at_most_fifty_thousand_events() {
     let directory = tempfile::tempdir().unwrap();
-    let app = router(Arc::new(store(directory.path(), 1000)), KEY);
+    let app = receiver(directory.path());
     let most: Vec<Value> = vec![json!(null); MAX_EVENTS_PER_BATCH];
     let (status, answer) = call(&app, signed(&batch(&most))).await;
     assert_eq!(
@@ -252,7 +262,8 @@ async fn events_are_received_at_the_current_time() {
     let directory = tempfile::tempdir().unwrap();
     let app = router(Arc::new(store(directory.path(), 1000)), KEY);
     let before = time::now().as_second();
-    let body = batch(&[event(1, "auth.failed", AT, &json!({}))]);
+    let written = time::isoformat(time::now());
+    let body = batch(&[event(1, "auth.failed", &written, &json!({}))]);
     assert_eq!(call(&app, signed(&body)).await.0, StatusCode::OK);
     let received: i64 = read(directory.path())
         .query_row("SELECT received_at FROM events", [], |row| row.get(0))
@@ -272,10 +283,12 @@ fn metadata(directory: &std::path::Path, key: &str) -> Option<String> {
 fn every_twentieth_beat_applies_retention() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
-    let now = 1_800_000_000;
+    // An event arrives as it is written; eleven weeks later it is older
+    // than the history keeps.
     events
-        .ingest(&[event(1, "auth.failed", AT, &json!({}))], now)
+        .arriving(&[event(1, "auth.failed", AT, &json!({}))])
         .unwrap();
+    let now = 1_800_000_000;
     let remaining = || -> i64 {
         read(directory.path())
             .query_row("SELECT count(*) FROM events", [], |row| row.get(0))
@@ -298,9 +311,11 @@ async fn the_receiver_beats_every_thirty_seconds() {
     let directory = tempfile::tempdir().unwrap();
     let events = Arc::new(store(directory.path(), 1000));
     // Expired, but retention runs only every twentieth beat.
-    let expired = event(1, "auth.failed", "2026-01-01T00:00:00Z", &json!({}));
-    events.ingest(&[expired], 1).unwrap();
-    let ingested = Some("1".to_owned());
+    let written = "2026-01-01T00:00:00Z";
+    events
+        .arriving(&[event(1, "auth.failed", written, &json!({}))])
+        .unwrap();
+    let ingested = crate::store::parse_time(&json!(written)).map(|second| second.to_string());
     let task = tokio::spawn(maintain(Arc::clone(&events)));
     tokio::time::sleep(HEARTBEAT / 2).await;
     assert_eq!(metadata(directory.path(), "heartbeatAt"), ingested);

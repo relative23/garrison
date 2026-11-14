@@ -24,7 +24,7 @@ fn outcome(seq: u64, kind: &str, time: &str, queue: u64, to: &str, details: &str
 
 fn summary(events: &[Value], since: i64, until: i64) -> Destinations {
     let directory = tempfile::tempdir().unwrap();
-    store(directory.path(), 10_000).ingest(events, 1).unwrap();
+    store(directory.path(), 10_000).arriving(events).unwrap();
     destinations(&read(directory.path()), since, until).unwrap()
 }
 
@@ -179,7 +179,7 @@ fn a_message_without_a_recorded_end_waits() {
     // A week later Stalwart has long given up on them: they wait no more.
     let later = MIDNIGHT + 8 * 86_400;
     let directory = tempfile::tempdir().unwrap();
-    store(directory.path(), 100).ingest(&events, 1).unwrap();
+    store(directory.path(), 100).arriving(&events).unwrap();
     let old = destinations(&read(directory.path()), later - 86_400, later).unwrap();
     assert_eq!((old.totals.waiting, old.waiting.len()), (0, 0));
 }

@@ -26,6 +26,18 @@ pub(crate) fn store(directory: &Path, max_events: u32) -> EventStore {
     .unwrap()
 }
 
+impl EventStore {
+    /// Store a batch that arrives as its newest event is written: the time
+    /// of an arrival these tests do not ask about.
+    pub(crate) fn arriving(&self, events: &[Value]) -> Result<Outcome, SqliteError> {
+        let newest = events
+            .iter()
+            .filter_map(|event| event.get("createdAt").and_then(parse_time))
+            .max();
+        self.ingest(events, newest.unwrap_or(0))
+    }
+}
+
 pub(crate) fn read(directory: &Path) -> Reader {
     reading(&directory.join("events.sqlite"), Duration::from_secs(2))
         .unwrap()
@@ -37,25 +49,22 @@ fn the_privacy_filter_keeps_identifiers_exact() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
     let outcome = events
-        .ingest(
-            &[
-                event(
-                    1,
-                    "queue.message-queued",
-                    AT,
-                    &json!({"queueId": QUEUE, "spanId": SPAN, "to": ["a@example.test"],
+        .arriving(&[
+            event(
+                1,
+                "queue.message-queued",
+                AT,
+                &json!({"queueId": QUEUE, "spanId": SPAN, "to": ["a@example.test"],
                             "blobId": "secret-blob", "details": "x".repeat(1000)}),
-                ),
-                event(2, "smtp.raw-input", AT, &json!({"contents": "DATA ..."})), // Never selected.
-                event(
-                    3,
-                    "smtp.mail-from",
-                    AT,
-                    &json!({"spanId": SPAN, "from": "s@example.net", "details": "client text"}),
-                ),
-            ],
-            1_793_000_000,
-        )
+            ),
+            event(2, "smtp.raw-input", AT, &json!({"contents": "DATA ..."})), // Never selected.
+            event(
+                3,
+                "smtp.mail-from",
+                AT,
+                &json!({"spanId": SPAN, "from": "s@example.net", "details": "client text"}),
+            ),
+        ])
         .unwrap();
     assert_eq!(
         outcome,
@@ -93,15 +102,16 @@ fn a_retried_batch_is_stored_once() {
         AT,
         &json!({"spanId": SPAN, "domain": "client.example.net"}),
     )];
+    let at = time::parse(AT).unwrap().as_second();
     assert_eq!(
-        events.ingest(&batch, 10).unwrap(),
+        events.ingest(&batch, at + 10).unwrap(),
         Outcome {
             stored: 1,
             ..Outcome::default()
         }
     );
     assert_eq!(
-        events.ingest(&batch, 20).unwrap(),
+        events.ingest(&batch, at + 20).unwrap(),
         Outcome {
             stored: 0,
             skipped: 1,
@@ -136,7 +146,7 @@ fn unrecordable_events_are_skipped() {
         json!({"id": 42, "createdAt": "2026-10-28T23:43:50.999+01:00", "type": "smtp.ehlo"}),
     ];
     assert_eq!(
-        events.ingest(&batch, 1).unwrap(),
+        events.arriving(&batch).unwrap(),
         // Two are no event of a recorded type; five are, and do not read.
         Outcome {
             stored: 1,
@@ -192,7 +202,7 @@ fn capacity_eviction_is_visible() {
             event(index, "auth.failed", &at, &json!({}))
         })
         .collect();
-    events.ingest(&batch, 1_793_000_000).unwrap();
+    events.arriving(&batch).unwrap();
     events.enforce_limits(1_793_000_000).unwrap();
     let db = read(directory.path());
     let coverage = json!(coverage::read(Some(&db), 0).unwrap());
@@ -220,7 +230,10 @@ fn retention_removes_old_events_and_groups() {
         &json!({"queueId": QUEUE}),
     );
     let new = event(2, "smtp.ehlo", AT, &json!({"spanId": SPAN}));
-    events.ingest(&[old, new], 0).unwrap();
+    // Each arrives as it is written; the old one is older than the 30 days
+    // by the time retention runs.
+    events.arriving(&[old]).unwrap();
+    events.arriving(&[new]).unwrap();
     events
         .enforce_limits(time::parse(AT).unwrap().as_second())
         .unwrap();

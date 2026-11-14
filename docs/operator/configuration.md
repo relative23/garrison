@@ -36,7 +36,7 @@ with `LoadCredential=`.
 | `web.bind_client_ip` | false | End the session when the client IP changes. Breaks mobile users. |
 | `ingest.port` | 8094 | Loopback port that Stalwart's webhook calls. |
 | `ingest.signature_key` | `credential:webhook-signature-key` | The key Stalwart signs its event batches with; `stalwart setup` writes it. |
-| `ingest.retention_days` | 30 | Event history retention. |
+| `ingest.retention_days` | 30 | Event history retention. An event that is older than this when it arrives is not stored. |
 | `ingest.max_events` / `max_database_mib` | 1000000 / 256 | Size limits. When one is reached, the oldest events go before their retention ends; the event views say from when on events are kept. An event takes about 400 bytes, and a server on the internet records some 15,000 a day from unsolicited connections alone. |
 | `collector.history_days` | 90 | Metric history retention: every minute of the last eight days, ten-minute values before them. With every check that is about 21 MiB for eight days and 48 MiB for 90. |
 | `collector.native_key`, `broker.native_key` | `credential:collector-native-key`, `credential:broker-native-key` | The two read-only API keys; `stalwart setup` writes them. |

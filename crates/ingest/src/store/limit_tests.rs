@@ -75,7 +75,7 @@ fn cleanup_runs_by_itself_after_a_thousand_events() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
     let now = START + 40 * 86400;
-    events.ingest(&batch(999, START), now).unwrap();
+    events.arriving(&batch(999, START)).unwrap();
     assert_eq!(count(directory.path()), 999, "not yet");
     events.ingest(&batch(1, now), now).unwrap();
     assert_eq!(
@@ -90,7 +90,7 @@ fn retention_keeps_exactly_the_configured_days() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
     let now = START + 30 * 86400;
-    events.ingest(&batch(3, START - 1), now).unwrap();
+    events.arriving(&batch(3, START - 1)).unwrap();
     events.enforce_limits(now).unwrap();
     assert_eq!(count(directory.path()), 2, "older than 30 days is gone");
 }
@@ -99,7 +99,8 @@ fn retention_keeps_exactly_the_configured_days() {
 fn a_full_store_records_no_gap_until_it_overflows() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
-    events.ingest(&batch(1000, START), START).unwrap();
+    events.arriving(&batch(1000, START)).unwrap();
+    assert_eq!(count(directory.path()), 1000);
     events.enforce_limits(START).unwrap();
     assert_eq!(gaps(directory.path()), []);
 }
@@ -108,7 +109,7 @@ fn a_full_store_records_no_gap_until_it_overflows() {
 fn a_limit_keeps_one_window_however_often_it_removes() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
-    events.ingest(&batch(1100, START), START).unwrap();
+    events.arriving(&batch(1100, START)).unwrap();
     events.enforce_limits(START).unwrap();
     assert_eq!(
         gaps(directory.path()),
@@ -124,7 +125,7 @@ fn a_limit_keeps_one_window_however_often_it_removes() {
                 event(id, "auth.failed", &at, &json!({}))
             })
             .collect();
-        events.ingest(&more, START).unwrap();
+        events.arriving(&more).unwrap();
         events.enforce_limits(START).unwrap();
         assert_eq!(
             gaps(directory.path()),
@@ -204,8 +205,8 @@ fn free_pages_do_not_count_against_the_byte_budget() {
         })
         .collect();
     let events = store(directory.path(), 100_000);
-    events.ingest(&expired, START).unwrap();
-    events.ingest(&batch(400, START), START).unwrap();
+    events.arriving(&expired).unwrap();
+    events.arriving(&batch(400, START)).unwrap();
     // Retention deletes the expired half; its pages stay in the file, free.
     events.enforce_limits(START).unwrap();
     drop(events);

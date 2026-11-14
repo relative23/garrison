@@ -127,11 +127,18 @@ impl Run {
             self.unreadable = true;
             return (event(number, "auth.failed", "yesterday", &json!({})), None);
         }
+        // An event older than the history keeps is not one of now: the
+        // store takes it as little as one whose time does not read.
+        let kept_from = self.clock - i64::from(self.limits.retention_days) * DAY;
         if choice < 16 && !self.taken.is_empty() {
             // Stalwart sends a batch again when it saw no answer.
             let index = self.noise.below(self.taken.len());
             let (id, (created, kind)) = self.taken.iter().nth(index).unwrap();
             let again = json!({"id": id, "createdAt": at(*created), "type": kind, "data": {}});
+            if *created < kept_from {
+                self.unreadable = true;
+                return (again, None);
+            }
             return (again, Some(id.clone()));
         }
         // Most events are of this minute; a few arrive up to three days late.
@@ -151,6 +158,10 @@ impl Run {
             _ => json!({}),
         };
         let sent = event(number, kind, &at(created), &data);
+        if created < kept_from {
+            self.unreadable = true;
+            return (sent, None);
+        }
         let id = sent["id"].as_str().unwrap().to_owned();
         self.taken.insert(id.clone(), (created, kind));
         (sent, Some(id))

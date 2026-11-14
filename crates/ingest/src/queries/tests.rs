@@ -9,38 +9,32 @@ fn a_delivery_summary_requires_every_enqueued_recipient() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
     events
-        .ingest(
-            &[
-                event(
-                    1,
-                    "queue.message-queued",
-                    AT,
-                    &json!({"queueId": QUEUE, "to": ["a@example.test", "b@example.org"]}),
-                ),
-                event(
-                    2,
-                    "delivery.dsn-success",
-                    AT,
-                    &json!({"queueId": QUEUE, "to": "a@example.test", "code": 250}),
-                ),
-            ],
-            1,
-        )
+        .arriving(&[
+            event(
+                1,
+                "queue.message-queued",
+                AT,
+                &json!({"queueId": QUEUE, "to": ["a@example.test", "b@example.org"]}),
+            ),
+            event(
+                2,
+                "delivery.dsn-success",
+                AT,
+                &json!({"queueId": QUEUE, "to": "a@example.test", "code": 250}),
+            ),
+        ])
         .unwrap();
     let partial = json!(list_deliveries(&read(directory.path()), &Filter::default()).unwrap());
     let partial = &partial["items"][0];
     assert_eq!(partial["recipientEvidenceComplete"], false);
     assert_eq!(partial["status"], "partial");
     events
-        .ingest(
-            &[event(
-                3,
-                "delivery.dsn-perm-fail",
-                AT,
-                &json!({"queueId": QUEUE, "to": "b@example.org"}),
-            )],
-            2,
-        )
+        .arriving(&[event(
+            3,
+            "delivery.dsn-perm-fail",
+            AT,
+            &json!({"queueId": QUEUE, "to": "b@example.org"}),
+        )])
         .unwrap();
     let detail = delivery_detail(&read(directory.path()), &QUEUE.to_string()).unwrap();
     let detail = json!(detail.unwrap());
@@ -61,31 +55,28 @@ fn a_session_summary_groups_by_span() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
     events
-        .ingest(
-            &[
-                event(
-                    1,
-                    "smtp.connection-start",
-                    AT,
-                    &json!({"spanId": SPAN, "listenerId": "smtp", "remoteIp": "192.0.2.1"}),
-                ),
-                event(
-                    2,
-                    "smtp.ehlo",
-                    AT,
-                    &json!({"spanId": SPAN, "domain": "client.example.net"}),
-                ),
-                event(3, "smtp.spf-from-fail", AT, &json!({"spanId": SPAN})),
-                event(
-                    4,
-                    "smtp.mailbox-does-not-exist",
-                    AT,
-                    &json!({"spanId": SPAN, "to": "nobody@example.test"}),
-                ),
-                event(5, "smtp.connection-end", AT, &json!({"spanId": SPAN})),
-            ],
-            1,
-        )
+        .arriving(&[
+            event(
+                1,
+                "smtp.connection-start",
+                AT,
+                &json!({"spanId": SPAN, "listenerId": "smtp", "remoteIp": "192.0.2.1"}),
+            ),
+            event(
+                2,
+                "smtp.ehlo",
+                AT,
+                &json!({"spanId": SPAN, "domain": "client.example.net"}),
+            ),
+            event(3, "smtp.spf-from-fail", AT, &json!({"spanId": SPAN})),
+            event(
+                4,
+                "smtp.mailbox-does-not-exist",
+                AT,
+                &json!({"spanId": SPAN, "to": "nobody@example.test"}),
+            ),
+            event(5, "smtp.connection-end", AT, &json!({"spanId": SPAN})),
+        ])
         .unwrap();
     let filter = Filter {
         search: "client.EXAMPLE".into(),
@@ -108,10 +99,7 @@ fn a_session_summary_groups_by_span() {
     );
     // A span without SMTP events is no SMTP session, not even by its ID.
     events
-        .ingest(
-            &[event(6, "auth.failed", AT, &json!({"spanId": "4242"}))],
-            1,
-        )
+        .arriving(&[event(6, "auth.failed", AT, &json!({"spanId": "4242"}))])
         .unwrap();
     assert_eq!(
         session_detail(&read(directory.path()), "4242").unwrap(),
@@ -139,7 +127,7 @@ fn pages_continue_with_their_cursor() {
             )
         })
         .collect();
-    events.ingest(&batch, 1).unwrap();
+    events.arriving(&batch).unwrap();
     let db = read(directory.path());
     let first = list_events(
         &db,
@@ -212,23 +200,20 @@ fn filters_narrow_the_event_list() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 1000);
     events
-        .ingest(
-            &[
-                event(
-                    1,
-                    "auth.failed",
-                    "2026-10-28T10:00:00Z",
-                    &json!({"remoteIp": "192.0.2.9"}),
-                ),
-                event(
-                    2,
-                    "smtp.ehlo",
-                    "2026-10-28T11:00:00Z",
-                    &json!({"domain": "100%_match"}),
-                ),
-            ],
-            1,
-        )
+        .arriving(&[
+            event(
+                1,
+                "auth.failed",
+                "2026-10-28T10:00:00Z",
+                &json!({"remoteIp": "192.0.2.9"}),
+            ),
+            event(
+                2,
+                "smtp.ehlo",
+                "2026-10-28T11:00:00Z",
+                &json!({"domain": "100%_match"}),
+            ),
+        ])
         .unwrap();
     let db = read(directory.path());
     let count = |filter: Filter| list_events(&db, &filter).unwrap().items.len();
@@ -290,15 +275,12 @@ fn a_search_reads_what_was_recorded_not_how_it_is_stored() {
     let directory = tempfile::tempdir().unwrap();
     let events = store(directory.path(), 100);
     events
-        .ingest(
-            &[event(
-                1,
-                "smtp.ehlo",
-                AT,
-                &json!({"spanId": SPAN, "domain": "client.example.net", "remoteIp": "192.0.2.7"}),
-            )],
+        .arriving(&[event(
             1,
-        )
+            "smtp.ehlo",
+            AT,
+            &json!({"spanId": SPAN, "domain": "client.example.net", "remoteIp": "192.0.2.7"}),
+        )])
         .unwrap();
     drop(events);
     // A value with a quote, a backslash and letters beyond ASCII, as a
@@ -375,7 +357,7 @@ fn an_exactly_full_page_has_no_next_page() {
     let batch: Vec<Value> = (1..=5)
         .map(|index| queued(index, &json!({"queueId": index, "to": ["a@example.test"]})))
         .collect();
-    events.ingest(&batch, 1).unwrap();
+    events.arriving(&batch).unwrap();
     let db = read(directory.path());
     assert_eq!(list_events(&db, &limit(5)).unwrap().next, None);
     assert_eq!(list_deliveries(&db, &limit(5)).unwrap().next, None);
@@ -392,7 +374,7 @@ fn a_page_stays_within_its_byte_budget() {
     let batch: Vec<Value> = (1..=40)
         .map(|index| queued(index, &json!({"to": to})))
         .collect();
-    events.ingest(&batch, 1).unwrap();
+    events.arriving(&batch).unwrap();
     let page = list_events(&read(directory.path()), &limit(100)).unwrap();
     let items = &page.items;
     assert!((1..40).contains(&items.len()), "{}", items.len());
@@ -410,19 +392,16 @@ fn a_detail_shows_its_first_256_events() {
     let batch: Vec<Value> = (1..=256)
         .map(|index| queued(index, &json!({"queueId": "77", "to": ["a@example.test"]})))
         .collect();
-    events.ingest(&batch, 1).unwrap();
+    events.arriving(&batch).unwrap();
     let detail = delivery_detail(&read(directory.path()), "77")
         .unwrap()
         .unwrap();
     assert_eq!((detail.truncated, detail.events.len()), (false, 256));
     events
-        .ingest(
-            &[queued(
-                257,
-                &json!({"queueId": "77", "to": ["a@example.test"]}),
-            )],
-            1,
-        )
+        .arriving(&[queued(
+            257,
+            &json!({"queueId": "77", "to": ["a@example.test"]}),
+        )])
         .unwrap();
     let detail = delivery_detail(&read(directory.path()), "77")
         .unwrap()

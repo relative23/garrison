@@ -10,10 +10,12 @@ use super::tests::{batch, call, signed};
 use super::*;
 use crate::answers::Receiver as State;
 use crate::coverage;
-use crate::store::tests::{AT, event, read, store};
+use crate::store::tests::{event, read, store};
 
 const KEY: &[u8] = b"test-signature-key-0123456789";
 const START: i64 = 1_793_000_000;
+/// The time of the events' own, which is `START`.
+const WRITTEN: &str = "2026-10-26T07:33:20Z";
 
 fn health() -> Request<Body> {
     Request::get("/health").body(Body::empty()).unwrap()
@@ -39,7 +41,7 @@ async fn a_signature_key_that_no_longer_matches_is_counted_and_leaves_a_gap() {
     let app = router_with_clock(Arc::clone(&events), KEY, || {
         KEY_CLOCK.load(Ordering::SeqCst)
     });
-    let body = batch(&[event(1, "auth.failed", AT, &json!({}))]);
+    let body = batch(&[event(1, "auth.failed", WRITTEN, &json!({}))]);
     assert_eq!(
         call(&app, health()).await,
         (
@@ -92,7 +94,7 @@ async fn a_database_that_takes_nothing_is_counted_and_leaves_a_gap() {
     let app = router_with_clock(Arc::clone(&events), KEY, || {
         FULL_CLOCK.load(Ordering::SeqCst)
     });
-    let body = batch(&[event(1, "auth.failed", AT, &json!({}))]);
+    let body = batch(&[event(1, "auth.failed", WRITTEN, &json!({}))]);
     // Another connection holds the database, as a full or read-only one
     // would refuse every write: the batch is not stored, and nothing of it.
     let holder = rusqlite::Connection::open(directory.path().join("events.sqlite")).unwrap();
