@@ -53,6 +53,12 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Back leaves a page the interface led away from.** An address that
+  names no page of the profile, such as an old bookmark or a page the
+  profile no longer grants, leads to the first page it does grant. That page
+  was added after the address, so Back returned to the address and was led
+  away again, and no number of Backs got past it. The address is now
+  replaced, and Back returns to the page before it.
 - **The closed menu on a narrow screen is out of the way.** Where the menu
   folds away, on a phone or in a narrow window, it was only moved out of
   sight while closed: Tab led through every one of its entries before the

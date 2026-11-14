@@ -9,7 +9,7 @@ import { ErrorState, Loading } from "./components/Status";
 import { ViewBoundary } from "./components/ViewBoundary";
 import { useTranslation } from "./i18n";
 import { AppContext, type AppState } from "./lib/context";
-import { navigate, useRoute } from "./lib/router";
+import { redirect, useRoute } from "./lib/router";
 import { useCurrentStatus } from "./lib/staleness";
 import { applyTheme } from "./lib/theme";
 import { useResource } from "./lib/useResource";
@@ -38,7 +38,7 @@ function SignedIn({ initial, onSignedOut }: { initial: SessionInfo; onSignedOut:
   const granted = session.modules.find((module) => module.id === route.view);
   useEffect(() => {
     // An unknown or ungranted view falls back to the first granted module.
-    if (!granted && !isPage(route.view) && session.modules[0]) navigate(session.modules[0].id);
+    if (!granted && !isPage(route.view) && session.modules[0]) redirect(session.modules[0].id);
   }, [granted, route.view, session.modules]);
 
   // The sign-in page appears only after the server ended the session: when

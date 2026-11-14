@@ -146,6 +146,19 @@ try {
   expect((await heading()) === "Services", "the open menu leads to its pages");
   await page.setViewportSize(DESKTOP);
 
+  step = "back";
+  await page.goto(`${origin}/admin/services`);
+  await heading();
+  // The interface leads away from a page it does not have; Back then skips that page.
+  await page.goto(`${origin}/admin/nowhere`);
+  await page.waitForURL(`${origin}/admin/dashboard`);
+  await page.goBack();
+  const back = await page.waitForURL(`${origin}/admin/services`, { timeout: 3000 }).then(
+    () => true,
+    () => false,
+  );
+  expect(back, `Back returns to the page before (it is at ${new URL(page.url()).pathname})`);
+
   step = "settings";
   await page.goto(`${origin}/admin/preferences`);
   await heading();

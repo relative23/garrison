@@ -94,6 +94,15 @@ describe("navigation", () => {
     expect(location.pathname).toBe("/admin/dashboard");
   });
 
+  it("leads away from a page it does not offer in that page's place, so Back skips it", async () => {
+    serve(signedIn());
+    const entries = history.length;
+    openApp("/admin/nowhere");
+    expect(await heading("Dashboard")).toBeTruthy();
+    expect(location.pathname).toBe("/admin/dashboard");
+    expect(history.length).toBe(entries);
+  });
+
   it("opens the first granted module for a page name that does not decode", async () => {
     serve(signedIn());
     // A "%" that starts no escape: the web service passes it as written.

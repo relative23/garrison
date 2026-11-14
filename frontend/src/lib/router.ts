@@ -36,6 +36,14 @@ export function navigate(view: string, detail?: string | null): void {
   dispatchEvent(new PopStateEvent("popstate"));
 }
 
+/** Go to `view` in place of the address that is open, for one the interface
+ * leads away from: Back then skips that address instead of returning to it
+ * and being led away again. */
+export function redirect(view: string): void {
+  history.replaceState(null, "", href(view));
+  dispatchEvent(new PopStateEvent("popstate"));
+}
+
 export function useRoute(): Route {
   const [route, setRoute] = useState(() => parse(location.pathname));
   useEffect(() => {
