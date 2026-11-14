@@ -53,7 +53,11 @@ Notable changes for operators and users. The format follows
   a sign-in it turns away is told so on the sign-in page. While a flood
   lasts, people signing in from a network that has not tried within the
   minute are likely to be turned away; people already signed in stay signed
-  in, and a minute after the flood ends sign-in works again.
+  in, and a minute after the flood ends sign-in works again. Stalwart's own
+  limit is lower: it takes 100 unauthenticated requests a minute from one
+  address and counts all of Garrison's as one, so 100 failed sign-ins in a
+  minute still stop every sign-in and every check of a signed-in user's
+  rights until that minute is over ([security model](docs/architecture/security.md#known-limits)).
 - **Quick filter changes no longer end in "Too many concurrent history
   queries".** The web service runs two history queries at a time and refused
   a third at once, and a query kept its turn until it ended even when the
