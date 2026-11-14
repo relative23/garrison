@@ -127,6 +127,12 @@ pub struct MilterConfig {
     pub defer_when_unreachable: bool,
 }
 
+impl MilterConfig {
+    /// The largest `max_message_mib`. The filter's unit allows the memory
+    /// that this takes, and no more.
+    pub const MOST_MESSAGE_MIB: i64 = 256;
+}
+
 /// Mail for notifications, submitted signed in over TLS.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MailSettings {

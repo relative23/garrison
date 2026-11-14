@@ -185,7 +185,7 @@ no message is kept or written anywhere.
 | `port` | 8096 | Loopback port the filter listens on. |
 | `on_macro` | `"reject"` | `"reject"`: the sending server gets `550 5.7.1 Message refused: an attached Office document contains macros.` and tells its sender. `"tag"`: the message is taken with the header `X-Garrison-Macro: yes`, for a Sieve rule or a mail program to act on. |
 | `on_incomplete` | `"tag"` | What a message gets that the filter could not scan completely (see below). `"tag"`: it is taken with the header `X-Garrison-Scan: unscanned`. `"defer"`: the sending server is told to bring it again later. `"refuse"`: the sending server gets `550 5.7.1 Message refused: its attachments could not be scanned completely.` |
-| `max_message_mib` | 64 | A larger message is not scanned and gets what `on_incomplete` says; at most 256. The filter holds 256 MiB of arriving mail in all and has the sending server bring a message again that finds no room. |
+| `max_message_mib` | 64 | A larger message is not scanned and gets what `on_incomplete` says; at most 256, which is what the unit's memory limit of 1 GiB allows. The filter holds 256 MiB of arriving mail in all and has the sending server bring a message again that finds no room. |
 | `when_unreachable` | `"defer"` | What Stalwart does while the filter does not answer: `"defer"` has the sending server try again later, `"accept"` takes the mail unscanned. |
 
 To switch it on, add the section (`[milter]` alone takes every default) and

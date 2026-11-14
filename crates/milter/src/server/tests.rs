@@ -1,5 +1,8 @@
 use std::io::Cursor;
 
+use std::sync::atomic::Ordering;
+
+use super::room::HELD;
 use super::*;
 use crate::protocol::tests::{frame, opening};
 use crate::sample::{archive, document};
@@ -63,7 +66,7 @@ pub(crate) fn sent(raw: &[u8], piece: usize) -> Vec<u8> {
 
 /// The frames the filter answers `frames` with, as their letter and data.
 fn answers(frames: Vec<u8>, settings: Settings) -> Vec<(u8, Vec<u8>)> {
-    answers_among(frames, settings, &Shared::new(settings))
+    answers_among(frames, settings, &Shared::of(settings.max_bytes))
 }
 
 /// The same on a connection that shares the filter's room with others.
@@ -203,8 +206,8 @@ fn a_message_that_finds_no_room_is_deferred_and_the_room_comes_back() {
         max_bytes: 2 * HELD,
         ..SETTINGS
     };
-    assert_eq!(Shared::new(roomy).room, 2 * HELD);
-    assert_eq!(Shared::new(SETTINGS).room, HELD);
+    assert_eq!(Shared::of(roomy.max_bytes).room, 2 * HELD);
+    assert_eq!(Shared::of(SETTINGS.max_bytes).room, HELD);
 }
 
 /// The header and the answer of a message that was taken unscanned.
@@ -319,7 +322,7 @@ fn a_message_whose_scan_has_no_time_left_gets_what_the_operator_chose() {
 
 #[test]
 fn a_message_waits_for_its_turn_no_longer_than_its_time() {
-    let shared = Shared::new(SETTINGS);
+    let shared = Shared::of(SETTINGS.max_bytes);
     let turn = shared.scanning.take(Instant::now()).unwrap();
     // Another connection is scanning: this message's time passes in the wait.
     let hurried = Settings {

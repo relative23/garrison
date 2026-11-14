@@ -53,6 +53,17 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **The macro filter counts the memory it holds.** The 256 MiB for arriving
+  messages counted what was written into their buffers, which held up to
+  twice that; the scan decoded every attachment of a message before it
+  looked at one, beside a copy of each; and the unit's limit of 1 GiB was
+  not set against a `max_message_mib` of 256. The filter counts what the
+  buffers hold, decodes and scans one attachment at a time, and takes
+  864 MiB at the most, which a test holds against the unit's limit. A
+  connection that ends in an error of the filter gives its place back, so
+  64 such ends no longer leave a filter that answers nobody, and the
+  journal says when the mail server opens more connections than the filter
+  takes.
 - **The event receiver bounds what it reads at a time.** Every connection
   to its port was read at once, up to 8 MiB each and several times that
   once parsed, in a service that is allowed 256 MiB; a sender that stalled

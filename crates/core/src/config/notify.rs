@@ -181,7 +181,7 @@ pub(super) fn milter(value: Option<&Value>) -> Result<Option<MilterConfig>, Conf
         Some(64),
         "milter.max_message_mib",
         1,
-        256,
+        MilterConfig::MOST_MESSAGE_MIB,
     )?;
     Ok(Some(MilterConfig {
         port: integer(table.get("port"), Some(8096), "milter.port", 1024, 65535)?,

@@ -33,28 +33,19 @@
 
 use std::time::Instant;
 
-use base64::Engine;
-use base64::engine::general_purpose::GeneralPurpose;
-use base64::engine::{DecodePaddingMode, GeneralPurposeConfig};
-
 mod marks;
+mod stretches;
 mod unpack;
 
 use marks::contains;
+use stretches::Stretches;
 use unpack::Work;
 
-/// A stretch of base64 shorter than this holds no document.
-const SHORTEST: usize = 64;
 /// Archives inside archives are opened this deep.
 pub const DEPTH: usize = 3;
-
-/// base64 as mail programs read it: padding or none, and stray bits at the end.
-const LENIENT: GeneralPurpose = GeneralPurpose::new(
-    &base64::alphabet::STANDARD,
-    GeneralPurposeConfig::new()
-        .with_decode_padding_mode(DecodePaddingMode::Indifferent)
-        .with_decode_allow_trailing_bits(true),
-);
+/// What a scan holds of unpacked files at the most: one at each depth, in
+/// a buffer that may hold twice what was unpacked into it.
+pub(crate) const MOST_UNPACKED: usize = DEPTH * 2 * unpack::UNPACKED;
 
 /// What kind of document with macros was found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,44 +111,6 @@ pub enum Outcome {
     Incomplete(Gap),
 }
 
-fn is_base64(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'=')
-}
-
-/// Each stretch of lines that are base64 and nothing else, decoded. Empty
-/// lines belong to a stretch: a mail program reads over them.
-fn stretches(message: &[u8]) -> Vec<Vec<u8>> {
-    let mut decoded = Vec::new();
-    let mut run: Vec<u8> = Vec::new();
-    let mut close = |run: &mut Vec<u8>| {
-        if run.len() >= SHORTEST {
-            // What does not decode as a whole decodes up to its last whole group.
-            let whole = run.len() - run.len() % 4;
-            if let Ok(data) = LENIENT
-                .decode(&*run)
-                .or_else(|_| LENIENT.decode(&run[..whole]))
-            {
-                decoded.push(data);
-            }
-        }
-        run.clear();
-    };
-    for line in message.split(|byte| *byte == b'\n') {
-        let line = line.trim_ascii();
-        if line.is_empty() {
-            continue;
-        }
-        if line.iter().all(|byte| is_base64(*byte)) {
-            // Padding ends a stretch's data; what follows it is not read.
-            run.extend(line.iter().copied().filter(|byte| *byte != b'='));
-        } else {
-            close(&mut run);
-        }
-    }
-    close(&mut run);
-    decoded
-}
-
 /// The message with its quoted-printable undone: `=XX` is a byte, `=` at a
 /// line's end joins the lines.
 fn unquoted(message: &[u8]) -> Vec<u8> {
@@ -209,8 +162,12 @@ fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
     if let Some(found) = work.scanned(message, DEPTH) {
         return Some(found);
     }
-    for stretch in stretches(message) {
-        if let Some(found) = work.scanned(&stretch, DEPTH) {
+    // One stretch is decoded, scanned and given up before the next.
+    for stretch in Stretches::of(message) {
+        if work.late() {
+            return None;
+        }
+        if let Some(found) = work.scanned(&stretch.decoded(), DEPTH) {
             return Some(found);
         }
     }

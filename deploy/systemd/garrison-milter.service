@@ -39,8 +39,11 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressDeny=any
 IPAddressAllow=localhost
 # Messages are held in memory while they arrive, 256 MiB for all of them
-# together, and one at a time is unpacked there to be scanned. A message that
-# finds no room is deferred; this limit is above what the filter takes.
+# together, and one at a time is scanned there. A message that finds no room
+# is deferred. With the largest max_message_mib (256) the filter takes 864 MiB
+# at the most: the arriving messages, as much again while their buffers grow,
+# the scan's copy of one message and 96 MiB of unpacked files. A test in
+# crates/milter fails when this limit no longer lies above that.
 MemoryMax=1G
 TasksMax=128
 

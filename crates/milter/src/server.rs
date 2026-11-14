@@ -14,6 +14,8 @@
 //! being received may hold so much and no more, and one message is scanned
 //! at a time. A message that finds no room is answered with a temporary
 //! failure, so the sending server brings it again; the filter itself stays up.
+//! [`most_memory`] adds up what that comes to, and the unit's limit lies
+//! above it.
 //!
 //! Time is bounded too: from a message's end the filter answers within
 //! [`SCAN_TIME`], the wait for its turn included. A message whose scan is
@@ -21,8 +23,7 @@
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use garrison_core::config::IncompleteAction;
@@ -31,6 +32,13 @@ use crate::protocol::{
     self, Command, NO_REPLY_BODY, NO_REPLY_END_OF_HEADERS, NO_REPLY_HEADER, Reply,
 };
 use crate::scan::{self, Gap, Outcome};
+
+mod places;
+mod room;
+
+use places::Places;
+use room::Message;
+pub use room::Shared;
 
 /// The header a tagged message gets.
 pub const HEADER: &str = "X-Garrison-Macro";
@@ -49,9 +57,6 @@ const PATIENCE: Duration = Duration::from_secs(60);
 /// Connections at one time; a mail server opens one for each message it is
 /// taking in.
 const MOST_SESSIONS: usize = 64;
-/// What the messages being received may hold together, unless one message
-/// alone may be larger.
-const HELD: usize = 256 * 1024 * 1024;
 /// A message's answer comes within this time of its end, the wait for the
 /// scan's turn included. A mail server waits for a milter's answer for half
 /// a minute or more.
@@ -89,154 +94,10 @@ impl Default for Settings {
     }
 }
 
-/// The turn to scan, which one connection has at a time: a scan holds
-/// copies of the message it unpacks.
-#[derive(Debug, Default)]
-struct Turn {
-    taken: Mutex<bool>,
-    free: Condvar,
-}
-
-/// The turn, until it is dropped.
-struct Taken<'a>(&'a Turn);
-
-impl Turn {
-    /// Wait for the turn, but not beyond `until`.
-    fn take(&self, until: Instant) -> Option<Taken<'_>> {
-        let mut taken = self.taken.lock().unwrap_or_else(PoisonError::into_inner);
-        while *taken {
-            let left = until.checked_duration_since(Instant::now())?;
-            if left.is_zero() {
-                return None;
-            }
-            taken = self
-                .free
-                .wait_timeout(taken, left)
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
-        }
-        *taken = true;
-        Some(Taken(self))
-    }
-}
-
-impl Drop for Taken<'_> {
-    fn drop(&mut self) {
-        *self.0.taken.lock().unwrap_or_else(PoisonError::into_inner) = false;
-        self.0.free.notify_one();
-    }
-}
-
-/// What all connections of one filter share: the room their messages take
-/// and the turn to scan.
-#[derive(Debug)]
-pub struct Shared {
-    /// The bytes all messages together may hold.
-    room: usize,
-    held: AtomicUsize,
-    scanning: Turn,
-}
-
-impl Shared {
-    /// Room for the messages of a filter set up as `settings` says: always
-    /// enough for one message of the largest size that is scanned.
-    #[must_use]
-    pub fn new(settings: Settings) -> Shared {
-        Shared::with_room(HELD.max(settings.max_bytes))
-    }
-
-    fn with_room(room: usize) -> Shared {
-        Shared {
-            room,
-            held: AtomicUsize::new(0),
-            scanning: Turn::default(),
-        }
-    }
-
-    /// Take `bytes` of the room, if they are there.
-    fn take(&self, bytes: usize) -> bool {
-        let mut held = self.held.load(Ordering::SeqCst);
-        loop {
-            let Some(sum) = held.checked_add(bytes).filter(|sum| *sum <= self.room) else {
-                return false;
-            };
-            match self
-                .held
-                .compare_exchange(held, sum, Ordering::SeqCst, Ordering::SeqCst)
-            {
-                Ok(_) => return true,
-                Err(now) => held = now,
-            }
-        }
-    }
-
-    fn give_back(&self, bytes: usize) {
-        self.held.fetch_sub(bytes, Ordering::SeqCst);
-    }
-}
-
-/// One message as it arrives.
-struct Message<'a> {
-    shared: &'a Shared,
-    data: Vec<u8>,
-    /// Whether the empty line between headers and body is written.
-    headed: bool,
-    /// More arrived than is scanned.
-    too_large: bool,
-    /// The filter had no room left for it.
-    crowded: bool,
-}
-
-impl Drop for Message<'_> {
-    fn drop(&mut self) {
-        self.shared.give_back(self.data.len());
-    }
-}
-
-impl<'a> Message<'a> {
-    fn new(shared: &'a Shared) -> Self {
-        Message {
-            shared,
-            data: Vec::new(),
-            headed: false,
-            too_large: false,
-            crowded: false,
-        }
-    }
-
-    /// Keep nothing of the message any more.
-    fn let_go(&mut self) {
-        self.shared.give_back(self.data.len());
-        self.data = Vec::new();
-    }
-
-    fn add(&mut self, bytes: &[u8], limit: usize) {
-        if self.too_large || self.crowded {
-            return;
-        }
-        if self.data.len() + bytes.len() > limit {
-            self.too_large = true;
-            self.let_go();
-        } else if self.shared.take(bytes.len()) {
-            self.data.extend_from_slice(bytes);
-        } else {
-            self.crowded = true;
-            self.let_go();
-        }
-    }
-
-    fn body(&mut self, limit: usize) {
-        if !self.headed {
-            self.headed = true;
-            self.add(b"\r\n", limit);
-        }
-    }
-}
-
 /// Speak with the mail server over `stream` until it ends the connection,
 /// as the only connection there is.
 pub fn session(stream: &mut (impl Read + Write), settings: Settings) -> io::Result<()> {
-    session_among(stream, settings, &Shared::new(settings))
+    session_among(stream, settings, &Shared::of(settings.max_bytes))
 }
 
 /// Speak with the mail server over `stream` until it ends the connection;
@@ -370,30 +231,63 @@ fn unscanned(gap: Gap, action: IncompleteAction) -> Vec<Reply> {
     }
 }
 
+/// The most memory a filter takes that scans messages of up to `max_bytes`.
+/// The unit's `MemoryMax` must lie above what this says of the largest
+/// `max_message_mib` the configuration takes; a test holds the two together.
+#[must_use]
+pub const fn most_memory(max_bytes: usize) -> usize {
+    // The messages that arrive, the one that is being scanned among them.
+    let room = if room::HELD > max_bytes {
+        room::HELD
+    } else {
+        max_bytes
+    };
+    // A buffer that grows may be copied to its new place: for that moment
+    // both exist, and every connection's may grow at the same moment.
+    let growing = room;
+    // The scan's own copy of the message: one stretch of base64 decoded,
+    // three quarters of it, or its quoted-printable undone.
+    let read = max_bytes;
+    room + growing + read + scan::MOST_UNPACKED
+}
+
 /// Take connections on `listener` for as long as the process lives.
 pub fn serve(listener: &TcpListener, settings: Settings) {
-    let open = Arc::new(AtomicUsize::new(0));
-    let shared = Arc::new(Shared::new(settings));
+    let places = Arc::new(Places::default());
+    let shared = Arc::new(Shared::of(settings.max_bytes));
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else {
             continue;
         };
         // More than the mail server would open at once: closed again, and
         // the server does with the message what its own setting says.
-        if open.fetch_add(1, Ordering::SeqCst) >= MOST_SESSIONS {
-            open.fetch_sub(1, Ordering::SeqCst);
+        let Some(place) = places.take(MOST_SESSIONS) else {
+            if let Some(count) = places.turned_away() {
+                log::warn!(
+                    "Closed a connection of the mail server unanswered: {MOST_SESSIONS} are \
+                     open, which is as many as the filter takes ({count} closed since it \
+                     started). The mail server does with such a message what it was told \
+                     for a filter that does not answer."
+                );
+            }
             continue;
-        }
-        let open = Arc::clone(&open);
+        };
         let shared = Arc::clone(&shared);
-        std::thread::spawn(move || {
+        let session = move || {
+            // The place is this connection's until the thread ends, also
+            // where it ends in a panic.
+            let _place = place;
             let spoken =
                 timed(&stream).and_then(|()| session_among(&mut stream, settings, &shared));
             if let Err(error) = spoken {
                 log::warn!("A connection of the mail server ended early: {error}");
             }
-            open.fetch_sub(1, Ordering::SeqCst);
-        });
+        };
+        // A thread the system does not give ends this connection, not the
+        // filter: the place and the connection go with what was not run.
+        if let Err(error) = std::thread::Builder::new().spawn(session) {
+            log::error!("No thread for a connection of the mail server: {error}");
+        }
     }
 }
 
@@ -402,5 +296,7 @@ fn timed(stream: &TcpStream) -> io::Result<()> {
     stream.set_write_timeout(Some(PATIENCE))
 }
 
+#[cfg(test)]
+mod room_tests;
 #[cfg(test)]
 pub(crate) mod tests;

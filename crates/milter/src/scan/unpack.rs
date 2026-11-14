@@ -14,7 +14,7 @@ use super::{Found, Gap};
 
 /// One file of an archive is unpacked up to this size, all of a message's
 /// together up to four times as much.
-const UNPACKED: usize = 16 * 1024 * 1024;
+pub(super) const UNPACKED: usize = 16 * 1024 * 1024;
 /// How a zip archive names a deflated file.
 const DEFLATED: usize = 8;
 /// So many packed files are opened in one message: what an archive lists
@@ -61,7 +61,7 @@ impl Work {
     }
 
     /// Whether the scan's time is up, which then is why it is incomplete.
-    fn late(&mut self) -> bool {
+    pub(super) fn late(&mut self) -> bool {
         let late = self.until.is_some_and(|until| Instant::now() >= until);
         if late {
             self.gap = Some(Gap::Deadline);
