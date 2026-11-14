@@ -1,8 +1,8 @@
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 import type { Observation } from "../src/api/client";
-import { ObservationCard } from "../src/components/ObservationCard";
+import { ObservationCard, ServiceTable } from "../src/components/ObservationCard";
 
 const base: Observation = {
   id: "clamav.configuration",
@@ -93,6 +93,23 @@ describe("ObservationCard", () => {
   it("names an evidence kind this build does not know as the server does", () => {
     show({ ...base, evidence: "survey" as Observation["evidence"] });
     expect(screen.getByText("survey")).toBeTruthy();
+  });
+
+  it("shows a state this build does not know as the server names it, in Unknown's colours", () => {
+    // As a page loaded before an upgrade would get it from the newer service.
+    const state = "degraded" as Observation["state"];
+    show({ ...base, state });
+    const badge = screen.getByText("degraded");
+    expect(badge.className).toContain("text-unknown");
+    expect(badge.getAttribute("title")).toBe("A state this page does not know; reload it");
+    expect(screen.queryByText("Warning")).toBeNull();
+    cleanup();
+    render(
+      <Tooltip.Provider>
+        <ServiceTable services={[{ ...base, kind: "service", state }]} />
+      </Tooltip.Provider>,
+    );
+    expect(within(screen.getByRole("table")).getByText("degraded").className).toContain("text-unknown");
   });
 
   it("shows the characters in a finding that hide or reorder text by their code point", () => {

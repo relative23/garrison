@@ -10,7 +10,9 @@ import { Badge, type BadgeTone } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Tooltip } from "./ui/tooltip";
 
-export type StateName = "ok" | "warning" | "failed" | "partial" | "unknown";
+const NAMES = ["ok", "warning", "failed", "partial", "unknown"] as const;
+
+export type StateName = (typeof NAMES)[number];
 
 const STATES: Record<StateName, { icon: typeof CircleCheck; tone: BadgeTone }> = {
   ok: { icon: CircleCheck, tone: "ok" },
@@ -20,12 +22,27 @@ const STATES: Record<StateName, { icon: typeof CircleCheck; tone: BadgeTone }> =
   unknown: { icon: CircleHelp, tone: "unknown" },
 };
 
-export function StateBadge({ state, stale = false }: { state: StateName; stale?: boolean }) {
+/** Whether this build knows `state`. A page loaded before an upgrade may
+ * get one that a newer service names. */
+export function isStateName(state: string): state is StateName {
+  return (NAMES as readonly string[]).includes(state);
+}
+
+export function StateBadge({ state, stale = false }: { state: string; stale?: boolean }) {
   const { t } = useTranslation();
   if (stale) {
     return (
       <Badge tone="unknown" title={t("state.staleHint")}>
         <Clock aria-hidden /> {t("state.stale")}
+      </Badge>
+    );
+  }
+  if (!isStateName(state)) {
+    // As the service named it, in Unknown's colours: never one that could
+    // pass for a state this page knows.
+    return (
+      <Badge tone="unknown" title={t("state.unrecognizedHint")}>
+        <CircleHelp aria-hidden /> {state}
       </Badge>
     );
   }

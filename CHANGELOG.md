@@ -43,6 +43,12 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A state that a page does not know no longer stops it or reads as OK.**
+  A page opened before an upgrade that brings a new state of a check failed
+  on such a state and showed its error instead of its checks, and the
+  dashboard counted a module with such a check as OK. The page now shows the
+  state as the service names it, in Unknown's colours with a hint to reload
+  the page, and the dashboard counts it as Unknown.
 - **The API answers every error with its detail, after the caller's
   rights.** A path segment that does not decode and a request body over
   2 MiB were answered by the web framework in plain text, before the

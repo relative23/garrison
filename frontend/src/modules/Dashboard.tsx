@@ -4,7 +4,7 @@ import { lazy, Suspense, useDeferredValue, useState } from "react";
 
 import { api, type MetricsResponse, type Observation } from "../api/client";
 import { ObservationCard } from "../components/ObservationCard";
-import { ErrorState, EvidenceLegend, Loading, Meta, Notice, StateBadge, type StateName } from "../components/Status";
+import { ErrorState, EvidenceLegend, Loading, Meta, Notice, StateBadge, isStateName, type StateName } from "../components/Status";
 import { StatusNotice } from "../components/StatusNotice";
 import { CARD } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
@@ -29,10 +29,12 @@ const PERIODS = [
 /** Rows shown on the dashboard; the full list belongs to the observation. */
 const MAILBOX_ROWS = 10;
 
-/** The most urgent state; a stale observation no longer shows its last state. */
+/** The most urgent state; a stale observation no longer shows its last
+ * state, and one this build does not know counts as unknown, never as ok. */
 function worst(items: Observation[]): StateName {
+  const shown = (item: Observation) => (item.stale || !isStateName(item.state) ? "unknown" : item.state);
   for (const state of ["failed", "warning", "partial", "unknown"] as const) {
-    if (items.some((item) => (item.stale ? "unknown" : item.state) === state)) return state;
+    if (items.some((item) => shown(item) === state)) return state;
   }
   return "ok";
 }

@@ -34,6 +34,15 @@ describe("dashboard", () => {
     await screen.findByText(/No samples were recorded in this period/);
   });
 
+  it("rates a module by a state this build does not know as Unknown, never as OK", async () => {
+    serve({ "GET metrics": { body: metrics() } });
+    const state = "degraded" as (typeof observations)[number]["state"];
+    renderView(<Dashboard />, { status: status([observation({ id: "b1", modules: ["backups"], state })]) });
+    expect(card("Backups").getByText("Unknown")).toBeTruthy();
+    expect(card("Backups").queryByText("OK")).toBeNull();
+    await screen.findByText(/No samples were recorded in this period/);
+  });
+
   it("says that a refresh failed above the status it still has", async () => {
     serve({ "GET metrics": { body: metrics() } });
     const collected = "2026-10-29T12:00:00+00:00";

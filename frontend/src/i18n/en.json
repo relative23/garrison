@@ -522,6 +522,7 @@
     "stale": "Stale",
     "staleHint": "The observation is older than expected",
     "unknown": "Unknown",
+    "unrecognizedHint": "A state this page does not know; reload it",
     "warning": "Warning"
   },
   "statusPage": {

@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { Observation } from "../api/client";
 import { useTranslation } from "../i18n";
 import { dateTime, formatValue, relative, text, type Format } from "../lib/format";
-import { EvidenceLabel, StateBadge, type StateName } from "./Status";
+import { EvidenceLabel, StateBadge } from "./Status";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableHeadRow, TableRow } from "./ui/table";
@@ -84,7 +84,7 @@ export function ObservationCard({ observation, limit, className }: { observation
         </CardTitle>
         <div className="flex shrink-0 items-center gap-2">
           <EvidenceLabel kind={evidence} />
-          <StateBadge state={state as StateName} stale={stale} />
+          <StateBadge state={state} stale={stale} />
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -145,7 +145,7 @@ export function ServiceTable({ services }: { services: Observation[] }) {
                 <code className="text-xs">{String(service.value.unit ?? service.source)}</code>
               </TableCell>
               <TableCell>
-                <StateBadge state={service.state as StateName} stale={service.stale} />
+                <StateBadge state={service.state} stale={service.stale} />
               </TableCell>
               {/* What is wrong first, then every property: a unit file that is
                   missing shows in the load state, a job that never ran as Unknown. */}
