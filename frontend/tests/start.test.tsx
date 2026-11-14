@@ -15,6 +15,12 @@ describe("a page with a drawn frame", () => {
     expect(server.requests("GET session")).toHaveLength(1);
   });
 
+  it("starts at an address that is no valid percent encoding", async () => {
+    serve({ "GET session": { body: { session: session() } } });
+    const state = await prepare("/admin/logs/%FF");
+    expect(state?.session?.email).toBe("admin@example.test");
+  });
+
   it("leaves the session to the app when the request fails", async () => {
     serve({ "GET session": { status: 500, body: { detail: "Internal error" } } });
     expect(await prepare("/admin/services")).toBeUndefined();

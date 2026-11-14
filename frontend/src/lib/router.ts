@@ -9,9 +9,20 @@ export interface Route {
   detail: string | null;
 }
 
+/** A path segment, decoded. One that is no valid percent encoding was not
+ * written by `href` and names nothing: it stays as written, so it reaches the
+ * views as any unknown name does, instead of stopping the start. */
+function decoded(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 export function parse(pathname: string): Route {
   const rest = pathname.startsWith(BASE) ? pathname.slice(BASE.length) : "";
-  const [view = "", detail = ""] = rest.split("/").filter(Boolean).map(decodeURIComponent);
+  const [view = "", detail = ""] = rest.split("/").filter(Boolean).map(decoded);
   return { view: view || "dashboard", detail: detail || null };
 }
 

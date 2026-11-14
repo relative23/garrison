@@ -53,6 +53,13 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **An address with a stray "%" no longer leaves the page blank.** A link
+  to Garrison whose path holds a "%" that starts no escape, such as
+  `/admin/logs/%zz` from a link cut short or typed by hand, stopped the
+  interface before it showed anything, signed in or not. Such a part of the
+  address is now taken as written and handled like any unknown name: an
+  unknown page leads to the first page the profile grants, and an unknown
+  detail of Deliveries or Sessions shows that page's error.
 - **A user whose profiles name no module the installation offers is
   refused.** The broker answered such a user with a grant of no module at
   all, which the web service had to take for a broken answer: the sign-in

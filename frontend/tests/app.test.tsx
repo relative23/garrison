@@ -94,6 +94,24 @@ describe("navigation", () => {
     expect(location.pathname).toBe("/admin/dashboard");
   });
 
+  it("opens the first granted module for a page name that does not decode", async () => {
+    serve(signedIn());
+    // A "%" that starts no escape: the web service passes it as written.
+    openApp("/admin/%zz");
+    expect(await heading("Dashboard")).toBeTruthy();
+    expect(location.pathname).toBe("/admin/dashboard");
+  });
+
+  it("opens the page of an address whose detail does not decode, and asks for that detail as written", async () => {
+    const server = serve(signedIn(["deliveries"]));
+    server.answer("GET coverage", { body: coverage() });
+    server.answer("GET deliveries/%25FF", { status: 404, body: { detail: "Not found" } });
+    openApp("/admin/deliveries/%FF");
+    expect(await heading("Deliveries")).toBeTruthy();
+    expect(await screen.findByText("Not found")).toBeTruthy();
+    expect(server.requests("GET deliveries/%25FF")).toHaveLength(1);
+  });
+
   it("never opens a module the profile does not grant", async () => {
     const server = serve(signedIn(["deliveries"]));
     server.answer("GET coverage", { body: { available: false } });
