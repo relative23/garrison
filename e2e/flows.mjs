@@ -66,9 +66,25 @@ async function heading() {
   return (await page.locator("h1").first().innerText()).trim();
 }
 
+/** The theme the signed-in user saved; "system" follows the system's. */
+let savedTheme = "system";
+
 async function accessible(name) {
   for (const theme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: theme });
+    // The page follows the system while it is open, so axe sees the theme it is
+    // checked in; a theme the user saved (by an earlier run) stays.
+    const wanted = savedTheme === "system" ? theme : savedTheme;
+    const shown = await page
+      .waitForFunction((scheme) => getComputedStyle(document.documentElement).colorScheme === scheme, wanted, { timeout: 2000 })
+      .then(
+        () => true,
+        () => false,
+      );
+    expect(shown, `${name} shows the ${wanted} theme while the system's is ${theme}`);
+    // Colours with a transition fade into the new theme; axe judges them once they have.
+    const faded = () => document.getAnimations().every((each) => !(each instanceof CSSTransition) || each.playState !== "running");
+    await page.waitForFunction(faded, null, { timeout: 2000 }).catch(() => undefined);
     const { violations } = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
     for (const violation of violations) fail(`axe on ${name} (${theme}): ${violation.id}, ${violation.help}`);
   }
@@ -104,6 +120,7 @@ try {
   expect((await heading()) === "Dashboard", "the dashboard follows the sign-in");
   const { session } = await (await page.request.get(`${origin}/api/session`)).json();
   expect(Boolean(session?.email), "the session names the user");
+  savedTheme = session?.preferences?.theme ?? "system";
 
   for (const name of PAGES) {
     step = `page ${name}`;
@@ -175,6 +192,24 @@ try {
   expect(found, "the page search leads to the page typed");
   if (!found) await page.keyboard.press("Escape");
   await page.setViewportSize(DESKTOP);
+
+  step = "first paint";
+  // A page as the build drew it, before any of its code runs: the system's theme.
+  for (const [name, path, signedIn] of [
+    ["sign-in", "/admin/", false],
+    ["services", "/admin/services", true],
+  ]) {
+    for (const theme of ["light", "dark"]) {
+      const drawn = await browser.newContext({ viewport: DESKTOP, colorScheme: theme });
+      if (signedIn) await drawn.addCookies(await context.cookies());
+      const first = await drawn.newPage();
+      await first.route("**/admin/assets/*.js", (route) => route.abort());
+      await first.goto(`${origin}${path}`);
+      const scheme = await first.evaluate(() => getComputedStyle(document.documentElement).colorScheme);
+      expect(scheme === theme, `the drawn ${name} page starts in the system's ${theme} theme, not ${scheme}`);
+      await drawn.close();
+    }
+  }
 
   step = "settings";
   await page.goto(`${origin}/admin/preferences`);

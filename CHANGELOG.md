@@ -53,6 +53,12 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Pages start in the system's theme, and follow it.** Every page started
+  light and turned dark only once its session had arrived, and with "Follow
+  the system" a change of the system's theme while a page was open was not
+  followed. Pages now start in the system's theme from the first paint and
+  follow its changes; a theme chosen in the settings takes over as soon as
+  the page has its session.
 - **Ctrl+K opens the page search on a narrow screen too.** Where the header
   has no room for the search button, on a phone or in a narrow window, the
   shortcut opened the search where it was not drawn: nothing could be seen,

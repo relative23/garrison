@@ -146,3 +146,64 @@ describe("theme button", () => {
     expect(dark()).toBe(false);
   });
 });
+
+/** The system's preference for dark colours, which the test changes. */
+function system(dark: boolean) {
+  const listeners = new Set<() => void>();
+  let matches = dark;
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    get matches() {
+      return query === "(prefers-color-scheme: dark)" && matches;
+    },
+    media: query,
+    onchange: null,
+    addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+    removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  }));
+  return {
+    turn(value: boolean) {
+      matches = value;
+      act(() => listeners.forEach((listener) => listener()));
+    },
+  };
+}
+
+describe("the system's theme", () => {
+  it("is followed while the page is open", async () => {
+    const preference = system(false);
+    serve(signedIn({ theme: "system", hiddenModules: [], showSwitch: true }));
+    openApp();
+    expect(await screen.findByRole("button", { name: "Use the dark theme" })).toBeTruthy();
+    expect(dark()).toBe(false);
+    preference.turn(true);
+    expect(dark()).toBe(true);
+    expect(screen.getByRole("button", { name: "Use the light theme" })).toBeTruthy();
+    preference.turn(false);
+    expect(dark()).toBe(false);
+  });
+
+  it("does not change a theme the user chose", async () => {
+    const preference = system(true);
+    serve(signedIn({ theme: "light", hiddenModules: [], showSwitch: true }));
+    openApp();
+    expect(await screen.findByRole("button", { name: "Use the dark theme" })).toBeTruthy();
+    preference.turn(false);
+    preference.turn(true);
+    expect(dark()).toBe(false);
+    // Said outright, so that the stylesheet's own following of the system,
+    // for the pages the build draws, does not apply.
+    expect(document.documentElement.classList.contains("light")).toBe(true);
+  });
+
+  it("is followed on the sign-in page", async () => {
+    const preference = system(false);
+    serve({ "GET session": { body: { session: null } } });
+    openApp("/admin/");
+    expect(await screen.findByRole("link", { name: "Sign in with Stalwart" })).toBeTruthy();
+    preference.turn(true);
+    expect(dark()).toBe(true);
+  });
+});

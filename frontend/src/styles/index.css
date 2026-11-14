@@ -8,8 +8,18 @@
    on a page. Every pair of text and surface used here has a contrast of 4.5:1
    or more and the focus ring 3:1 against every surface (WCAG AA); check a
    change with the numbers, not by eye. No Stalwart code is used. The theme
-   follows the `dark` class on <html>. */
-@custom-variant dark (&:where(.dark, .dark *));
+   follows the class the interface sets on <html>, `dark` or `light`; before
+   it runs, as on the pages the build draws, it follows the system. */
+@custom-variant dark {
+  &:where(.dark, .dark *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not(.light), :root:not(.light) *) {
+      @slot;
+    }
+  }
+}
 
 :root {
   --background: oklch(0.985 0.005 85);
@@ -55,46 +65,46 @@
   --unknown: oklch(0.48 0.012 65);
   --unknown-background: oklch(0.94 0.008 82);
   color-scheme: light;
-}
 
-.dark {
-  --background: oklch(0.195 0.004 70);
-  --foreground: oklch(0.955 0.004 85);
-  --card: oklch(0.225 0.005 70);
-  --card-foreground: oklch(0.955 0.004 85);
-  --popover: oklch(0.225 0.005 70);
-  --popover-foreground: oklch(0.955 0.004 85);
-  --content-background: oklch(0.165 0.004 70);
-  --primary: oklch(0.93 0.006 85);
-  --primary-foreground: oklch(0.19 0.004 70);
-  --secondary: oklch(0.285 0.006 70);
-  --secondary-foreground: oklch(0.955 0.004 85);
-  --muted: oklch(0.285 0.006 70);
-  --muted-foreground: oklch(0.75 0.008 80);
-  --accent: oklch(0.3 0.007 70);
-  --accent-foreground: oklch(0.96 0.004 85);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0.002 285.823);
-  --border: oklch(0.31 0.006 70);
-  --input: oklch(0.31 0.006 70);
-  --ring: oklch(0.68 0.008 80);
-  --tile-edge: oklch(1 0 0 / 0.05);
-  --tile-line: oklch(0 0 0 / 0.3);
-  --tile-drop: oklch(0 0 0 / 0.55);
-  --chart-1: hsl(220 70% 60%);
-  --chart-2: hsl(160 60% 55%);
-  --chart-3: hsl(30 80% 60%);
-  --chart-4: hsl(280 65% 65%);
-  --chart-5: hsl(340 75% 60%);
-  --ok: oklch(0.75 0.14 150);
-  --ok-background: oklch(0.3 0.06 150);
-  --warning: oklch(0.82 0.13 85);
-  --warning-background: oklch(0.32 0.06 70);
-  --failed: oklch(0.72 0.17 27);
-  --failed-background: oklch(0.3 0.08 27);
-  --unknown: oklch(0.76 0.008 80);
-  --unknown-background: oklch(0.285 0.006 70);
-  color-scheme: dark;
+  @variant dark {
+    --background: oklch(0.195 0.004 70);
+    --foreground: oklch(0.955 0.004 85);
+    --card: oklch(0.225 0.005 70);
+    --card-foreground: oklch(0.955 0.004 85);
+    --popover: oklch(0.225 0.005 70);
+    --popover-foreground: oklch(0.955 0.004 85);
+    --content-background: oklch(0.165 0.004 70);
+    --primary: oklch(0.93 0.006 85);
+    --primary-foreground: oklch(0.19 0.004 70);
+    --secondary: oklch(0.285 0.006 70);
+    --secondary-foreground: oklch(0.955 0.004 85);
+    --muted: oklch(0.285 0.006 70);
+    --muted-foreground: oklch(0.75 0.008 80);
+    --accent: oklch(0.3 0.007 70);
+    --accent-foreground: oklch(0.96 0.004 85);
+    --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: oklch(0.985 0.002 285.823);
+    --border: oklch(0.31 0.006 70);
+    --input: oklch(0.31 0.006 70);
+    --ring: oklch(0.68 0.008 80);
+    --tile-edge: oklch(1 0 0 / 0.05);
+    --tile-line: oklch(0 0 0 / 0.3);
+    --tile-drop: oklch(0 0 0 / 0.55);
+    --chart-1: hsl(220 70% 60%);
+    --chart-2: hsl(160 60% 55%);
+    --chart-3: hsl(30 80% 60%);
+    --chart-4: hsl(280 65% 65%);
+    --chart-5: hsl(340 75% 60%);
+    --ok: oklch(0.75 0.14 150);
+    --ok-background: oklch(0.3 0.06 150);
+    --warning: oklch(0.82 0.13 85);
+    --warning-background: oklch(0.32 0.06 70);
+    --failed: oklch(0.72 0.17 27);
+    --failed-background: oklch(0.3 0.08 27);
+    --unknown: oklch(0.76 0.008 80);
+    --unknown-background: oklch(0.285 0.006 70);
+    color-scheme: dark;
+  }
 }
 
 @theme inline {

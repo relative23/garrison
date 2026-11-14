@@ -11,7 +11,7 @@ import { useTranslation } from "./i18n";
 import { AppContext, type AppState } from "./lib/context";
 import { redirect, useRoute } from "./lib/router";
 import { useCurrentStatus } from "./lib/staleness";
-import { applyTheme } from "./lib/theme";
+import { applyTheme, useSystemDark } from "./lib/theme";
 import { useResource } from "./lib/useResource";
 import { ChunkView, isPage, moduleText, PAGE_VIEWS, PAGES, VIEWS } from "./modules/registry";
 
@@ -20,8 +20,10 @@ function SignedIn({ initial, onSignedOut }: { initial: SessionInfo; onSignedOut:
   const [session, setSession] = useState(initial);
   const route = useRoute();
   const status = useCurrentStatus(useResource((signal) => api.status(signal), [], 60));
+  const system = useSystemDark();
 
-  useEffect(() => applyTheme(session.preferences.theme), [session.preferences.theme]);
+  // Again when the system changes its own, which "system" follows.
+  useEffect(() => applyTheme(session.preferences.theme, system), [session.preferences.theme, system]);
   useEffect(() => {
     // The server ends the session at expiresAt; show the sign-in page then.
     const remaining = session.expiresAt * 1000 - Date.now();
@@ -107,9 +109,10 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
     return () => document.removeEventListener("visibilitychange", shown);
   }, [readAgain]);
 
+  const system = useSystemDark();
   useEffect(() => {
-    if (!signedIn) applyTheme("system");
-  }, [signedIn]);
+    if (!signedIn) applyTheme("system", system);
+  }, [signedIn, system]);
 
   let content;
   if (ended) content = <SignIn expired />;

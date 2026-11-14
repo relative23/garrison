@@ -8,7 +8,7 @@ import { useTranslation } from "../i18n";
 import { AppContext } from "../lib/context";
 import { safeUrl } from "../lib/format";
 import { follow, href } from "../lib/router";
-import { applyTheme, isDark, type Theme } from "../lib/theme";
+import { applyTheme, isDark, useSystemDark, type Theme } from "../lib/theme";
 import { Brand } from "./Brand";
 import { PageSearch } from "./PageSearch";
 import { Sidebar } from "./Sidebar";
@@ -41,7 +41,8 @@ export function Layout({
   // The theme being saved, shown at once; then the saved one, also when the
   // Settings page changed it.
   const [pending, setPending] = useState<Theme | null>(null);
-  const dark = isDark(pending ?? session?.preferences.theme ?? "system");
+  const system = useSystemDark();
+  const dark = isDark(pending ?? session?.preferences.theme ?? "system", system);
   const hidden = new Set(session?.preferences.hiddenModules);
   const visible = (session?.modules ?? []).filter((module) => !hidden.has(module.id) || module.id === current);
   const home = visible[0]?.id ?? "dashboard";
@@ -105,7 +106,10 @@ export function Layout({
             aria-disabled={app?.saving || undefined}
             onClick={toggleTheme}
           >
-            {dark ? <Sun aria-hidden /> : <Moon aria-hidden />}
+            {/* The icon follows the colours themselves, so it is right on a
+                page the build drew, before the session says what was chosen. */}
+            <Sun aria-hidden className="hidden dark:block" />
+            <Moon aria-hidden className="dark:hidden" />
           </Button>
           <Button asChild variant="ghost" size="icon">
             <a href={href("account")} aria-label={t("layout.account")} title={session?.email} onClick={(event) => follow(event, "account")}>
