@@ -491,8 +491,10 @@ as well, so that operators can check a first installation.
 
 `.github/workflows/release.yml` builds the archives of a `v*` tag twice,
 requires both builds to be identical, attests where they came from and keeps
-them as a workflow artifact; it publishes and signs nothing. To release, build
-the same tag locally, compare the two sets of checksums (`sha256sum` must
+them as a workflow artifact; it publishes and signs nothing. It runs when such
+a tag is pushed, or by hand from one; started by hand from a branch, it stops
+at its first step, and only a tag's archives are ever attested. To release,
+build the same tag locally, compare the two sets of checksums (`sha256sum` must
 match, since the build is reproducible; `gh attestation verify <archive>`
 shows the attested commit), sign your local archives and publish each archive
 with its `.minisig`, `.sha256` and `.cdx.json`. GitHub keeps attestations for
