@@ -47,6 +47,12 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A second collection run within a minute no longer erases what the
+  first one counted.** The charts keep one value a minute, and a run by
+  hand (`systemctl start garrison-collect.service`) right after the timer's
+  replaced that minute's deliveries, sign-ins and other counts with its
+  own, usually zero. The counts of one minute are now added; readings such
+  as load or queue length are still replaced by the newer one.
 - **A broken setup no longer signs everyone out.** A typo in the access
   policy, a broker key that was rotated or removed, or an answer of
   Stalwart's about rights that Garrison could not use was answered as "not

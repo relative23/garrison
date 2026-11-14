@@ -124,6 +124,46 @@ fn only_ten_snapshots_are_kept_and_bad_values_are_skipped() {
 }
 
 #[test]
+fn a_second_run_within_a_minute_adds_to_that_minutes_increase() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("status.sqlite");
+    let mut store = StatusStore::open(&path, 90).unwrap();
+    let snapshot = snapshot("");
+    let load = |value: f64| BTreeMap::from([("load_1m".to_owned(), value)]);
+    let total = || {
+        let db = reading(&path, Duration::from_secs(2)).unwrap().unwrap();
+        let result = json!(history(&db, 60_000, 60_120, 2).unwrap());
+        (
+            result["totals"]["delivery_completed"].clone(),
+            result["latest"]["load_1m"].clone(),
+        )
+    };
+    store
+        .write(60_000, &snapshot, &load(1.0), &counters(10.0))
+        .unwrap();
+    store
+        .write(60_060, &snapshot, &load(2.0), &counters(15.0))
+        .unwrap();
+    assert_eq!(total(), (json!(5.0), json!(2.0)));
+    // A run by hand half a minute later, in which nothing was delivered:
+    // the five of this minute stay, and the newer load replaces the older.
+    store
+        .write(60_090, &snapshot, &load(4.0), &counters(15.0))
+        .unwrap();
+    assert_eq!(total(), (json!(5.0), json!(4.0)));
+    // And one in the same second, after two more deliveries.
+    store
+        .write(60_090, &snapshot, &load(4.0), &counters(17.0))
+        .unwrap();
+    assert_eq!(total(), (json!(7.0), json!(4.0)));
+    // A counter that started over within the minute adds what it counts.
+    store
+        .write(60_100, &snapshot, &load(4.0), &counters(3.0))
+        .unwrap();
+    assert_eq!(total().0, json!(10.0));
+}
+
+#[test]
 fn samples_belong_to_their_minute_and_counters_start_at_zero() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("status.sqlite");

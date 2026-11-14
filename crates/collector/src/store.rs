@@ -142,7 +142,10 @@ impl Memory for StatusStore {
     }
 }
 
-/// A repeated collection within the same minute replaces that minute's value.
+/// One value for one minute. A repeated collection within the same minute
+/// replaces a gauge, which is a reading, and adds to an increase, which is
+/// what happened since the reading before: replaced, the events of the
+/// minute's first interval would be lost.
 fn sample(
     db: &Connection,
     name: &str,
@@ -152,7 +155,9 @@ fn sample(
 ) -> rusqlite::Result<()> {
     db.execute(
         "INSERT INTO samples(name, ts, value, kind) VALUES(?,?,?,?) \
-         ON CONFLICT(name, ts) DO UPDATE SET value=excluded.value",
+         ON CONFLICT(name, ts) DO UPDATE SET value = CASE \
+             WHEN excluded.kind = 'increase' AND samples.kind = 'increase' \
+             THEN samples.value + excluded.value ELSE excluded.value END",
         params![name, minute, value, kind],
     )?;
     Ok(())
@@ -177,7 +182,9 @@ fn counter(db: &Connection, name: &str, now: i64, minute: i64, value: f64) -> ru
     let Some((at, last)) = previous else {
         return Ok(());
     };
-    if !(1..=MAX_COUNTER_INTERVAL).contains(&(now - at)) {
+    // Also a second run within the same second: what the counter rose by
+    // since the reading before still happened.
+    if !(0..=MAX_COUNTER_INTERVAL).contains(&(now - at)) {
         return Ok(());
     }
     let increase = if value < last {
