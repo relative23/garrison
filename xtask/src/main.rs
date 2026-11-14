@@ -31,7 +31,9 @@ Tasks:
             newest prints Stalwart's newest release while it is not a supported one
   notices   print THIRD_PARTY_NOTICES.txt for one target (default x86_64 musl)
   sbom      print the CycloneDX SBOM of a release for one target (default x86_64 musl)
-  release   build dist/garrison-<version>-<arch>.tar.gz [ARCH ...]";
+  release   build dist/garrison-<version>-<arch>.tar.gz [ARCH ...] from a clean checkout
+            of the tag v<version>; --rehearsal builds any tree for tests, which is
+            never published and never signed with a key that releases trust";
 
 /// The repository root: the parent of this crate's directory.
 fn root() -> PathBuf {
@@ -118,8 +120,8 @@ fn main() -> ExitCode {
             }
         }
         Some("release") => {
-            let architectures: Vec<String> = std::env::args().skip(2).collect();
-            release::release(&root, &architectures)
+            let arguments: Vec<String> = std::env::args().skip(2).collect();
+            release::release(&root, &arguments)
                 .map_err(|error| eprintln!("release: {error}"))
                 .is_ok()
         }

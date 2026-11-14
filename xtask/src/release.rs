@@ -241,21 +241,50 @@ fn target_directory(root: &Path) -> Result<PathBuf, String> {
         .ok_or_else(|| "cargo metadata names no target directory".into())
 }
 
-/// Build the archives for `architectures` (all if empty).
-pub(crate) fn release(root: &Path, architectures: &[String]) -> Result<(), String> {
-    let chosen: Vec<&str> = if architectures.is_empty() {
-        ARCHITECTURES.to_vec()
-    } else {
-        architectures.iter().map(String::as_str).collect()
-    };
-    if let Some(unknown) = chosen.iter().find(|name| !ARCHITECTURES.contains(name)) {
-        return Err(format!(
-            "unknown architecture {unknown}; known: {}",
-            ARCHITECTURES.join(", ")
-        ));
+/// `[--rehearsal] [ARCH ...]`: whether a rehearsal is asked for, and the
+/// architectures to build, all of them where none is named.
+fn options(arguments: &[String]) -> Result<(bool, Vec<&str>), String> {
+    let mut rehearsal = false;
+    let mut chosen = Vec::new();
+    for argument in arguments {
+        match argument.as_str() {
+            "--rehearsal" => rehearsal = true,
+            option if option.starts_with('-') => {
+                return Err(format!("unknown option {option}; known: --rehearsal"));
+            }
+            name if ARCHITECTURES.contains(&name) => chosen.push(name),
+            name => {
+                return Err(format!(
+                    "unknown architecture {name}; known: {}",
+                    ARCHITECTURES.join(", ")
+                ));
+            }
+        }
     }
+    if chosen.is_empty() {
+        chosen = ARCHITECTURES.to_vec();
+    }
+    Ok((rehearsal, chosen))
+}
+
+/// minisign writes the signature of `file` beside it.
+fn signature(file: &Path) -> PathBuf {
+    let mut name = file.as_os_str().to_owned();
+    name.push(".minisig");
+    PathBuf::from(name)
+}
+
+/// Build the archives `arguments` ask for: from a clean checkout of the
+/// release's tag, or, with `--rehearsal`, from any tree for tests.
+pub(crate) fn release(root: &Path, arguments: &[String]) -> Result<(), String> {
+    let (rehearsal, chosen) = options(arguments)?;
+    let version = version(root)?;
+    let source = guards::source(root, &version, rehearsal)?;
     guards::tools()?;
-    let (epoch, version) = (source_date(root)?, version(root)?);
+    if let guards::Source::Rehearsal(what) = &source {
+        eprintln!("{what}: never publish these archives");
+    }
+    let epoch = source_date(root)?;
     let (toolchain, standard_library) = (toolchain(root)?, standard_library_notices(root)?);
     // The secret key stays with the maintainer; without it the archives are unsigned.
     let signing = std::env::var_os("GARRISON_SIGNING_KEY").map(PathBuf::from);
@@ -309,6 +338,12 @@ pub(crate) fn release(root: &Path, architectures: &[String]) -> Result<(), Strin
             Some(key) => {
                 sign(&archive, key, &comment)?;
                 sign(&listing, key, &format!("{comment} sbom"))?;
+                if rehearsal {
+                    guards::signed_by_no_release_key(
+                        root,
+                        &[signature(&archive), signature(&listing)],
+                    )?;
+                }
             }
             None => eprintln!("{name}: unsigned (GARRISON_SIGNING_KEY is not set)"),
         }
@@ -327,4 +362,39 @@ pub(crate) fn sbom(root: &Path, target: &str) -> Result<String, String> {
         &source_date(root)?,
         &toolchain(root)?,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arguments(list: &[&str]) -> Vec<String> {
+        list.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_rehearsal_is_asked_for_by_name_beside_the_architectures() {
+        let all = vec!["aarch64", "x86_64"];
+        assert_eq!(options(&arguments(&[])), Ok((false, all.clone())));
+        assert_eq!(options(&arguments(&["--rehearsal"])), Ok((true, all)));
+        for order in [["--rehearsal", "x86_64"], ["x86_64", "--rehearsal"]] {
+            assert_eq!(options(&arguments(&order)), Ok((true, vec!["x86_64"])));
+        }
+        assert_eq!(
+            options(&arguments(&["--allow-dirty"])),
+            Err("unknown option --allow-dirty; known: --rehearsal".to_owned())
+        );
+        assert_eq!(
+            options(&arguments(&["x86_64", "riscv64"])),
+            Err("unknown architecture riscv64; known: aarch64, x86_64".to_owned())
+        );
+    }
+
+    #[test]
+    fn signatures_lie_beside_what_they_sign() {
+        assert_eq!(
+            signature(Path::new("dist/garrison-1.2.3-x86_64.tar.gz")),
+            Path::new("dist/garrison-1.2.3-x86_64.tar.gz.minisig")
+        );
+    }
 }

@@ -7,7 +7,9 @@
 #
 # Writes OUT-DIR/garrison-<version>-<arch>.tar.gz and .minisig for both
 # versions, OUT-DIR/test.key and test.pub, and OUT-DIR/versions (two lines,
-# older first). Needs what `cargo xtask release` needs, plus minisign.
+# older first). Needs what `cargo xtask release` needs, plus minisign. They
+# are rehearsals (`--rehearsal`): the commit need not be tagged, and the
+# version and the trusted key are changed for the build.
 set -eu
 
 out=$(mkdir -p "$1" && cd "$1" && pwd)
@@ -36,7 +38,7 @@ for number in 1 2; do
     next=$version$suffix.$number
     sed -i "/^\[workspace.package\]/,/^\[/s/^version = \".*\"$/version = \"$next\"/" Cargo.toml
     cargo update --workspace --offline --quiet
-    GARRISON_SIGNING_KEY=$out/test.key cargo xtask release "$arch" > "$work/release-$number.log" 2>&1 ||
+    GARRISON_SIGNING_KEY=$out/test.key cargo xtask release --rehearsal "$arch" > "$work/release-$number.log" 2>&1 ||
         { tail -n 20 "$work/release-$number.log"; exit 1; }
     cp "dist/garrison-$next-$arch.tar.gz" "dist/garrison-$next-$arch.tar.gz.minisig" "$out/"
     echo "$next" >> "$out/versions"

@@ -26,12 +26,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Every tag, so that the release task finds the tag at HEAD.
+          fetch-depth: 0
       - name: Install the toolchain from rust-toolchain.toml and the musl targets
         run: |
           rustup toolchain install
           rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+      # Here and below, nothing is written into the checkout but ignored
+      # build output: the release task refuses files Git does not know of.
       - name: Install Zig 0.17.0, checked against ziglang.org's checksum
         run: |
+          cd "$RUNNER_TEMP"
           curl -fsSLO https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz
           echo "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026  zig-x86_64-linux-0.17.0.tar.xz" | sha256sum -c -
           tar xf zig-x86_64-linux-0.17.0.tar.xz
@@ -45,11 +50,12 @@ jobs:
         run: cargo xtask release
       - name: Build again; both builds must be identical
         run: |
-          mkdir first
-          mv dist/garrison-*.tar.gz first/
+          first="$RUNNER_TEMP/first"
+          mkdir "$first"
+          mv dist/garrison-*.tar.gz "$first/"
           rm -rf dist
           cargo xtask release
-          for archive in first/*.tar.gz; do cmp "$archive" "dist/${archive#first/}"; done
+          for archive in "$first"/*.tar.gz; do cmp "$archive" "dist/${archive##*/}"; done
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         if: ${{ !github.event.repository.private }}
         with:

@@ -445,7 +445,19 @@ cargo install --locked cargo-zigbuild@0.23.4   # cross-linking through Zig
 # Node.js 24 on PATH, with the npm it brings (11) or a newer one
 cargo xtask release                            # dist/garrison-<version>-<arch>.tar.gz
 cargo xtask release aarch64                    # one architecture only
+cargo xtask release --rehearsal                # any tree, for tests; never published
 ```
+
+A release is built from its tag alone. `cargo xtask release` refuses a
+working tree with changes that are not committed or files Git does not know
+of (ignored build output does not count), and a `HEAD` that is not the tag
+`v<version>` of the version in `Cargo.toml`, and says what to do: build it
+in a checkout of the tag, such as `git worktree add --detach
+../garrison-v0.1.3 v0.1.3`. `--rehearsal` builds any tree for tests, as
+`scripts/signed-releases.sh` does, and says so in its output. It still
+checks the tools, and it removes the signatures again and fails when a key
+that `deploy/signing/keys.txt` named in any commit made them, since
+installations trust those keys. Never publish a rehearsal.
 
 The binaries are static (musl), so they run on any Linux of their architecture.
 Each archive holds `bin/garrison`, the interface in `static/`, `deploy/`,
