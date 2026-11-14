@@ -113,17 +113,25 @@ fn upgrade(archive: &Path, signature: Option<&Path>) -> Result<u8, String> {
 fn running_version() -> Result<String, String> {
     let binary =
         std::env::current_exe().map_err(|error| format!("Cannot find this binary: {error}."))?;
-    let release = binary
-        .parent()
-        .and_then(Path::parent)
-        .filter(|release| release.parent() == Some(&Path::new(BASE).join("releases")))
-        .ok_or_else(|| {
-            format!("Run the installed release: {BASE}/current/bin/garrison upgrade <archive>.")
-        })?;
+    let release = installed_release(&binary, Path::new(BASE)).ok_or_else(|| {
+        format!("Run the installed release: {BASE}/current/bin/garrison upgrade <archive>.")
+    })?;
     let path = release.join("VERSION");
     let text =
         fs::read_to_string(&path).map_err(|error| format!("{}: {error}.", path.display()))?;
     Ok(text.trim().to_owned())
+}
+
+/// The release `binary` belongs to, if it is one installed under `base`:
+/// `<base>/releases/<version>/bin/garrison`. The system names a running
+/// binary by its resolved path, so `base` is resolved as well: /opt may be a
+/// link to another disk.
+fn installed_release<'a>(binary: &'a Path, base: &Path) -> Option<&'a Path> {
+    let releases = fs::canonicalize(base.join("releases")).ok()?;
+    binary
+        .parent()
+        .and_then(Path::parent)
+        .filter(|release| release.parent() == Some(releases.as_path()))
 }
 
 /// A fresh directory only root can enter, next to the releases rather than in
@@ -184,6 +192,31 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+
+    #[test]
+    fn the_installed_release_is_found_where_the_base_is_a_link() {
+        let directory = tempfile::tempdir().unwrap();
+        let disk = fs::canonicalize(directory.path()).unwrap().join("disk");
+        let release = disk.join("garrison/releases/0.5.0");
+        fs::create_dir_all(release.join("bin")).unwrap();
+        // /opt/garrison is a link to another disk; the running binary is
+        // named by where it really lies.
+        let base = directory.path().join("opt-garrison");
+        std::os::unix::fs::symlink(disk.join("garrison"), &base).unwrap();
+        let binary = release.join("bin/garrison");
+        assert_eq!(installed_release(&binary, &base), Some(release.as_path()));
+        assert_eq!(
+            installed_release(&binary, &disk.join("garrison")),
+            Some(release.as_path())
+        );
+        // A binary from an unpacked archive is no installed release.
+        let unpacked = disk.join("garrison-0.5.0-x86_64/bin/garrison");
+        assert_eq!(installed_release(&unpacked, &base), None);
+        assert_eq!(
+            installed_release(&binary, &directory.path().join("absent")),
+            None
+        );
+    }
 
     #[test]
     fn an_upgrade_unpacks_into_its_own_private_directory() {

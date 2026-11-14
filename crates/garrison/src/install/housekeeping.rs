@@ -54,13 +54,20 @@ fn installed_at(path: &Path) -> SystemTime {
 
 /// Releases beyond `current`, `previous` and the newest others up to RELEASES.
 fn old_releases(base: &Path) -> Vec<PathBuf> {
-    let kept: Vec<PathBuf> = ["current", "previous"]
+    // A release is its directory's name. The links are resolved and the
+    // releases listed under `base`: where /opt is itself a link, the two
+    // paths of one release differ, and comparing them would keep neither.
+    let kept: Vec<std::ffi::OsString> = ["current", "previous"]
         .iter()
         .filter_map(|link| fs::canonicalize(base.join(link)).ok())
+        .filter_map(|release| release.file_name().map(ToOwned::to_owned))
         .collect();
     let mut others: Vec<PathBuf> = directories(&base.join("releases"))
         .into_iter()
-        .filter(|path| !kept.contains(path))
+        .filter(|path| {
+            path.file_name()
+                .is_none_or(|name| !kept.iter().any(|kept| kept == name))
+        })
         .collect();
     others.sort_by_key(|path| std::cmp::Reverse(installed_at(path)));
     others
@@ -135,6 +142,25 @@ mod tests {
         // Without a previous release, two older ones stay.
         fs::remove_file(base.join("previous")).unwrap();
         assert_eq!(old_releases(base).len(), 2);
+    }
+
+    #[test]
+    fn the_release_to_roll_back_to_stays_where_the_base_is_a_link() {
+        // /opt, or /opt/garrison, on another disk and linked back: the links
+        // resolve to that disk, the releases are listed under the link.
+        let directory = tempfile::tempdir().unwrap();
+        let disk = directory.path().join("disk/garrison");
+        for (age, version) in [(40, "0.2"), (30, "0.3"), (20, "0.4"), (10, "0.5")] {
+            let path = disk.join("releases").join(version);
+            fs::create_dir_all(&path).unwrap();
+            set_age(&path, age);
+        }
+        let base = directory.path().join("opt-garrison");
+        symlink(&disk, &base).unwrap();
+        symlink(base.join("releases/0.5"), base.join("current")).unwrap();
+        symlink(base.join("releases/0.4"), base.join("previous")).unwrap();
+        // The running one, the one before it and one older stay.
+        assert_eq!(old_releases(&base), [base.join("releases/0.2")]);
     }
 
     #[test]

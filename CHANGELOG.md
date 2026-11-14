@@ -53,6 +53,11 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **An installation under a linked `/opt` keeps its rollback release.**
+  Where `/opt` or `/opt/garrison` is a link to another disk, every upgrade
+  removed all releases but the newest, the one to roll back to included; a
+  reinstall counted as an upgrade; and `garrison upgrade` refused to run.
+  All three now compare releases the same way whatever the path.
 - **Notification channels are in order only once a message went out.** The
   Alerts page called the channels in order as soon as they were named.
   Their check is now Unknown until the first notification has gone out;

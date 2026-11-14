@@ -339,6 +339,9 @@ fn install() -> Step {
     }
     room(&needs)?;
     let release = install_release(&here, &version)?;
+    // As `old` is: where /opt is a link, the path under BASE and the one the
+    // links resolve to differ, and a reinstall would pass for an upgrade.
+    let release = fs::canonicalize(&release).unwrap_or(release);
     let mut restore = false;
     let mut backup = None;
     if old.is_some() && configured {
