@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use super::*;
-use crate::providers::dns::tests::resolver as stand_in;
+use crate::providers::dns::tests::{guessable, resolver as stand_in};
 use crate::testing::{Canned, Remembered, config, now, table};
 
 type Zone = BTreeMap<(String, u16), Vec<Vec<u8>>>;
@@ -226,6 +226,15 @@ fn spamhaus_says_why_it_gives_no_verdict() {
         );
         assert_eq!(blocklists.state, State::Unknown, "127.255.255.{code}");
     }
+}
+
+#[test]
+fn the_lists_are_asked_with_numbers_at_random() {
+    let (resolver, handle) = stand_in(mail_host(), None, 11);
+    observed(&provider(resolver, ""), &Remembered::default(), 0);
+    let numbers = handle.join().unwrap();
+    assert_eq!(numbers.len(), 11);
+    assert!(!guessable(&numbers), "{numbers:?}");
 }
 
 #[test]

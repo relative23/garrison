@@ -125,6 +125,14 @@ Notable changes for operators and users. The format follows
   without a verdict, and such a resolver leaves the card Unknown. Spamhaus'
   errors also say which one it gave: a mistyped list name, a public
   resolver, or too many questions.
+- **A DNS answer counts only for the question it repeats.** The `dns` and
+  `reputation` checks numbered their questions in order, from the clock or
+  counting from one, and took any answer with that number: whoever could
+  send this host packets in the resolver's name had only the port to guess,
+  and an answer to another question was read as the answer. A question now
+  carries a random number, and an answer counts only where it repeats the
+  question as asked, its name, type and class; any other is dropped, and the
+  wait for the real one goes on within the question's three seconds.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser

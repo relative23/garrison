@@ -5,10 +5,15 @@
 //! TCP. Only the record types a mail domain publishes are read; everything
 //! else in an answer is skipped. What comes back is data from the network:
 //! every length is checked, and a name may point back only so often.
+//!
+//! A question leaves from a port of the system's choosing with a number at
+//! random, so an answer that does not come from the resolver must guess
+//! both. An answer counts only where it repeats the question as asked; any
+//! other is dropped as if it had not arrived, and the wait goes on.
 
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream, UdpSocket};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const TIMEOUT: Duration = Duration::from_secs(3);
 /// A name may follow this many pointers; more is a loop.
@@ -268,41 +273,75 @@ pub fn read(message: &[u8], id: u16, kind: Kind) -> Result<Option<Answer>, Strin
     Ok(Some(Answer::Records(records)))
 }
 
-fn over_udp(server: SocketAddr, question: &[u8]) -> std::io::Result<Vec<u8>> {
+/// Whether `answer` answers `question`: its number, marked as an answer,
+/// and the one question repeated as asked, its name in letters of either
+/// case, as DNS compares names (RFC 4343). Lengths, type and class are no
+/// letters, so they must be the same bytes.
+fn fits(answer: &[u8], question: &[u8]) -> bool {
+    answer.len() >= question.len()
+        && answer[..2] == question[..2]
+        && answer[2] & 0x80 != 0
+        && answer[4..6] == [0, 1]
+        && answer[12..question.len()].eq_ignore_ascii_case(&question[12..])
+}
+
+/// The time left until `until`; none left is a timeout.
+fn left(until: Instant) -> io::Result<Duration> {
+    let left = until.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Err(io::Error::from(io::ErrorKind::TimedOut));
+    }
+    Ok(left)
+}
+
+fn over_udp(server: SocketAddr, question: &[u8]) -> io::Result<Vec<u8>> {
     let local: SocketAddr = if server.is_ipv4() {
         ([0, 0, 0, 0], 0).into()
     } else {
         ([0u16; 8], 0).into()
     };
     let socket = UdpSocket::bind(local)?;
-    socket.set_read_timeout(Some(TIMEOUT))?;
     socket.connect(server)?;
     socket.send(question)?;
+    let until = Instant::now() + TIMEOUT;
     let mut answer = vec![0; 4096];
-    let length = socket.recv(&mut answer)?;
-    answer.truncate(length);
-    Ok(answer)
+    loop {
+        socket.set_read_timeout(Some(left(until)?))?;
+        let length = socket.recv(&mut answer)?;
+        if fits(&answer[..length], question) {
+            answer.truncate(length);
+            return Ok(answer);
+        }
+    }
 }
 
-fn over_tcp(server: SocketAddr, question: &[u8]) -> std::io::Result<Vec<u8>> {
+fn over_tcp(server: SocketAddr, question: &[u8]) -> io::Result<Vec<u8>> {
     let mut stream = TcpStream::connect_timeout(&server, TIMEOUT)?;
-    stream.set_read_timeout(Some(TIMEOUT))?;
     stream.set_write_timeout(Some(TIMEOUT))?;
     let length = u16::try_from(question.len()).unwrap_or(u16::MAX);
     stream.write_all(&length.to_be_bytes())?;
     stream.write_all(question)?;
-    let mut size = [0; 2];
-    stream.read_exact(&mut size)?;
-    let mut answer = vec![0; usize::from(u16::from_be_bytes(size))];
-    stream.read_exact(&mut answer)?;
-    Ok(answer)
+    let until = Instant::now() + TIMEOUT;
+    loop {
+        stream.set_read_timeout(Some(left(until)?))?;
+        let mut size = [0; 2];
+        stream.read_exact(&mut size)?;
+        let mut answer = vec![0; usize::from(u16::from_be_bytes(size))];
+        stream.read_exact(&mut answer)?;
+        if fits(&answer, question) {
+            return Ok(answer);
+        }
+    }
 }
 
 /// Ask `server` for the records of `kind` at `name`.
-pub fn ask(server: SocketAddr, name: &str, kind: Kind, id: u16) -> Result<Answer, String> {
+pub fn ask(server: SocketAddr, name: &str, kind: Kind) -> Result<Answer, String> {
+    let mut number = [0; 2];
+    getrandom::fill(&mut number)
+        .map_err(|_| "this host gave no random number for the question".to_owned())?;
+    let id = u16::from_be_bytes(number);
     let question = question(id, name, kind).ok_or_else(|| format!("{name} is no DNS name"))?;
-    let unreachable =
-        |error: std::io::Error| format!("the resolver {server} did not answer: {error}");
+    let unreachable = |error: io::Error| format!("the resolver {server} did not answer: {error}");
     let answer = over_udp(server, &question).map_err(unreachable)?;
     if let Some(answer) = read(&answer, id, kind)? {
         return Ok(answer);

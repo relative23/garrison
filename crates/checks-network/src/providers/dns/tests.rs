@@ -134,19 +134,22 @@ fn what_is_found_is_held_against_what_stalwart_names() {
 }
 
 /// A resolver on a free port that answers from `zone`: `(name, type)` to texts.
-/// Names it does not hold do not exist; `silent` is never answered.
+/// Names it does not hold do not exist; `silent` is never answered. The
+/// thread ends with the numbers of the questions it was asked.
 pub(crate) fn resolver(
     zone: BTreeMap<(String, u16), Vec<Vec<u8>>>,
     silent: Option<&'static str>,
     questions: usize,
-) -> (SocketAddr, thread::JoinHandle<()>) {
+) -> (SocketAddr, thread::JoinHandle<Vec<u16>>) {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     let address = socket.local_addr().unwrap();
     let handle = thread::spawn(move || {
+        let mut numbers = Vec::new();
         for _ in 0..questions {
             let mut buffer = [0; 512];
             let (length, client) = socket.recv_from(&mut buffer).unwrap();
             let question = &buffer[..length];
+            numbers.push(u16::from_be_bytes([question[0], question[1]]));
             // The name: labels from byte 12 to the zero.
             let mut name = Vec::new();
             let mut at = 12;
@@ -179,8 +182,32 @@ pub(crate) fn resolver(
             }
             socket.send_to(&message, client).unwrap();
         }
+        numbers
     });
     (address, handle)
+}
+
+/// Whether `numbers` are all one, or each one more than the one before:
+/// numbers an answer from elsewhere could guess.
+pub(crate) fn guessable(numbers: &[u16]) -> bool {
+    numbers.windows(2).all(|pair| pair[1] == pair[0])
+        || numbers
+            .windows(2)
+            .all(|pair| pair[1] == pair[0].wrapping_add(1))
+}
+
+/// An answer that does not come from the resolver must guess the number of
+/// the question as well as the port it left from.
+#[test]
+fn the_records_are_asked_with_numbers_at_random() {
+    let (address, handle) = resolver(BTreeMap::new(), None, 9);
+    collected(
+        &json!([{"id": "b", "name": "example.test", "dnsZoneFile": ZONE}]),
+        address,
+    );
+    let numbers = handle.join().unwrap();
+    assert_eq!(numbers.len(), 9);
+    assert!(!guessable(&numbers), "{numbers:?}");
 }
 
 fn text(value: &str) -> Vec<u8> {

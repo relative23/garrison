@@ -549,6 +549,7 @@ dependencies = [
  "flate2",
  "garrison-core",
  "garrison-testing",
+ "getrandom 0.4.3",
  "rustls",
  "rustls-native-certs",
  "serde_json",

@@ -192,11 +192,7 @@ impl Dns {
         let records = expected(domain.dns_zone_file.as_deref().unwrap_or_default());
         let mut rows = Vec::new();
         let (mut open, mut unanswered) = (Vec::new(), 0);
-        for (index, record) in records.iter().enumerate() {
-            // The question's number only tells the answer from a stray one.
-            let id =
-                u16::try_from((context.now.as_second().unsigned_abs() + index as u64) % 65_521)
-                    .unwrap_or(1);
+        for record in &records {
             // A resolver that is silent once is not asked again in this run,
             // for this domain or the next: each question would wait out its
             // time, and the run has only so long.
@@ -204,7 +200,7 @@ impl Dns {
             let asked = if *silent {
                 Err(String::new())
             } else {
-                dns::ask(resolver, &record.name, record.kind, id)
+                dns::ask(resolver, &record.name, record.kind)
             };
             let (verdict, found) = match asked {
                 Ok(Answer::Records(found)) => (verdict(record, &found), found),

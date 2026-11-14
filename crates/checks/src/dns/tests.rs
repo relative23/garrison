@@ -182,7 +182,7 @@ fn an_answer_cut_off_over_udp_is_asked_for_again_over_tcp() {
         stream.write_all(&full).unwrap();
     });
     assert_eq!(
-        ask(server, "example.test", Kind::Txt, 99),
+        ask(server, "example.test", Kind::Txt),
         Ok(Answer::Records(vec!["v=spf1 mx -all".to_owned()]))
     );
     handle.join().unwrap();
@@ -192,10 +192,98 @@ fn an_answer_cut_off_over_udp_is_asked_for_again_over_tcp() {
         .local_addr()
         .unwrap();
     assert!(
-        ask(silent, "example.test", Kind::Txt, 1)
+        ask(silent, "example.test", Kind::Txt)
             .unwrap_err()
             .contains("did not answer")
     );
+}
+
+/// First an answer with the question's number for another name, then the
+/// answer, its name in other letters: a name compares as DNS compares names.
+#[test]
+fn an_answer_to_another_question_is_dropped_as_if_it_had_not_arrived() {
+    let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let server = udp.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let mut buffer = [0; 512];
+        let (length, client) = udp.recv_from(&mut buffer).unwrap();
+        let asked = buffer[..length].to_vec();
+        let mut other = question(0, "forged.example", Kind::Txt).unwrap();
+        other[..2].copy_from_slice(&asked[..2]);
+        let forged = answer(&other, FINE, &[(16, txt(&["v=spf1 +all"]))]);
+        udp.send_to(&forged, client).unwrap();
+        let mut shouted = asked.clone();
+        shouted[12..].make_ascii_uppercase();
+        let real = answer(&shouted, FINE, &[(16, txt(&["v=spf1 mx -all"]))]);
+        udp.send_to(&real, client).unwrap();
+    });
+    assert_eq!(
+        ask(server, "example.test", Kind::Txt),
+        Ok(Answer::Records(vec!["v=spf1 mx -all".to_owned()]))
+    );
+    handle.join().unwrap();
+}
+
+#[test]
+fn an_answer_fits_only_the_question_it_repeats() {
+    let asked = question(0x1234, "Mail.Example.test", Kind::Mx).unwrap();
+    let reply = |question: &[u8]| answer(question, FINE, &[]);
+    assert!(fits(&reply(&asked), &asked));
+    let shouted = question(0x1234, "MAIL.example.TEST", Kind::Mx).unwrap();
+    assert!(fits(&reply(&shouted), &asked), "the same name");
+    for (why, other) in [
+        ("another number", (0x1235, "mail.example.test", Kind::Mx)),
+        ("another name", (0x1234, "mail.example.tesu", Kind::Mx)),
+        (
+            "a longer name",
+            (0x1234, "mail.example.test.example", Kind::Mx),
+        ),
+        ("another type", (0x1234, "mail.example.test", Kind::Txt)),
+    ] {
+        let other = question(other.0, other.1, other.2).unwrap();
+        assert!(!fits(&reply(&other), &asked), "{why}");
+    }
+    let mut chaos = reply(&asked);
+    chaos[asked.len() - 1] = 3;
+    assert!(!fits(&chaos, &asked), "another class");
+    let mut none = reply(&asked);
+    none[5] = 0;
+    assert!(!fits(&none, &asked), "no question");
+    assert!(!fits(&asked, &asked), "the question sent back");
+    assert!(
+        !fits(&reply(&asked)[..asked.len() - 1], &asked),
+        "cut short"
+    );
+}
+
+/// Answers to other questions, one after the other, do not keep the
+/// question waiting past its time.
+#[test]
+fn a_resolver_that_answers_only_other_questions_did_not_answer() {
+    let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let server = udp.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let mut buffer = [0; 512];
+        let (_, client) = udp.recv_from(&mut buffer).unwrap();
+        let mut other = question(0, "forged.example", Kind::Txt).unwrap();
+        other[..2].copy_from_slice(&buffer[..2]);
+        let forged = answer(&other, FINE, &[]);
+        // Past the question's three seconds.
+        let began = Instant::now();
+        while began.elapsed() < Duration::from_millis(3500) {
+            udp.send_to(&forged, client).unwrap();
+            thread::sleep(Duration::from_millis(50));
+        }
+    });
+    let began = Instant::now();
+    let error = ask(server, "example.test", Kind::Txt).unwrap_err();
+    assert!(error.contains("did not answer"), "{error}");
+    assert!(
+        began.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        began.elapsed()
+    );
+    handle.join().unwrap();
 }
 
 #[test]

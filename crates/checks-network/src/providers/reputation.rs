@@ -114,21 +114,15 @@ fn names(raw: &toml::Table, key: &str, default: &[&str]) -> Checked<Vec<String>>
 /// limit of its own, and a list that is down answers nothing for seconds.
 const PATIENCE: Duration = Duration::from_secs(30);
 
-/// Asks one resolver, numbering its questions.
+/// Asks one resolver.
 struct Asker {
     resolver: SocketAddr,
-    asked: u16,
     /// Lists that gave an error instead of an answer; they are not asked again.
     silent: BTreeSet<String>,
     until: Instant,
 }
 
 impl Asker {
-    fn ask(&mut self, name: &str, kind: Kind) -> Result<Answer, String> {
-        self.asked = self.asked.wrapping_add(1);
-        dns::ask(self.resolver, name, kind, self.asked)
-    }
-
     /// What `zone` says of `address`.
     fn list(&mut self, zone: &str, address: IpAddr) -> Said {
         if self.silent.contains(zone) {
@@ -137,7 +131,7 @@ impl Asker {
         if Instant::now() > self.until {
             return Said::Unanswered("not asked: the lists took too long".to_owned());
         }
-        let answer = self.ask(&dns::reversed(address, Some(zone)), Kind::A);
+        let answer = dns::ask(self.resolver, &dns::reversed(address, Some(zone)), Kind::A);
         if answer.is_err() {
             self.silent.insert(zone.to_owned());
         }
@@ -145,8 +139,8 @@ impl Asker {
     }
 
     /// The records of `kind` at `name`; none where the name has none.
-    fn records(&mut self, name: &str, kind: Kind) -> Result<Vec<String>, String> {
-        match self.ask(name, kind)? {
+    fn records(&self, name: &str, kind: Kind) -> Result<Vec<String>, String> {
+        match dns::ask(self.resolver, name, kind)? {
             Answer::Records(records) => Ok(records),
             Answer::NoSuchName => Ok(Vec::new()),
         }
@@ -185,7 +179,6 @@ impl Reputation {
         }
         let mut asker = Asker {
             resolver,
-            asked: 0,
             silent: BTreeSet::new(),
             until: Instant::now() + PATIENCE,
         };
