@@ -7,6 +7,7 @@
 
 use std::net::TcpListener;
 use std::os::unix::net::UnixDatagram;
+use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread::sleep;
@@ -109,10 +110,15 @@ fn ended(mut child: Child, waiting_for: &str) -> ExitStatus {
     }
 }
 
-fn stop(child: Child) -> Option<i32> {
+/// Send SIGTERM, as systemd stops a service, and wait for the end.
+fn terminated(child: Child) -> ExitStatus {
     let pid = rustix::process::Pid::from_child(&child);
     rustix::process::kill_process(pid, rustix::process::Signal::TERM).unwrap();
-    ended(child, "the service did not stop on SIGTERM").code()
+    ended(child, "the service did not stop on SIGTERM")
+}
+
+fn stop(child: Child) -> Option<i32> {
+    terminated(child).code()
 }
 
 fn agent() -> ureq::Agent {
@@ -192,7 +198,14 @@ fn the_broker_answers_its_peer_on_the_socket() {
     let mode =
         std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&socket).unwrap().permissions());
     assert_eq!(mode & 0o777, 0o660);
-    stop(child);
+    // The broker serves until it is ended and has no handler of its own:
+    // SIGTERM ends it, which systemd counts as a clean stop, as it counts
+    // exit status 0, and which a crash is not.
+    let status = terminated(child);
+    assert_eq!(
+        (status.code(), status.signal()),
+        (None, Some(rustix::process::Signal::TERM.as_raw()))
+    );
 }
 
 #[test]
