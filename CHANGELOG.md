@@ -47,6 +47,15 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Requests to Garrison are no longer written to nginx's access log.**
+  The security model said so, but nothing configured it: with the access
+  log that most distributions switch on for all of nginx, searched
+  addresses and the parameters of the sign-in's answer, which travel in a
+  request's address, were logged outside Garrison's retention. The snippet
+  `garrison.conf`, which every installation rewrites, and the server block
+  `garrison nginx` prints now say `access_log off;`. The installer reloads
+  nginx with the new snippet; a server block of your own may say it too.
+  Earlier lines stay in nginx's logs until they rotate.
 - **Two checks that report the same observation no longer cost every
   snapshot.** Two `http` or `receipt` entries with one `id`, a unit in two
   `systemd` entries, or a `version-command` for Stalwart beside the

@@ -71,6 +71,7 @@ server {{
     listen 80;
     listen [::]:80;
     server_name {own};
+    access_log off;
     # With certbot --webroot, serve its challenge here before the redirect:
     # location /.well-known/acme-challenge/ {{ root /var/lib/letsencrypt; }}
     location / {{ return 301 https://$host$request_uri; }}
@@ -82,6 +83,9 @@ server {{
     server_name {own};
     ssl_certificate     /etc/letsencrypt/live/{own}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{own}/privkey.pem;
+    # Searches and the sign-in's answer travel in the address of a request:
+    # none of them is written to a log.
+    access_log off;
     include /etc/nginx/snippets/garrison.conf;
 }}
 
@@ -135,6 +139,25 @@ mod tests {
         ));
         assert!(!older.contains("http2 on"));
         assert!(site(&config(), None).contains("http2 on;"));
+    }
+
+    #[test]
+    fn nothing_of_garrisons_requests_goes_into_an_access_log() {
+        // Searches travel in query strings, and so does the sign-in's
+        // callback: with the log most distributions switch on for all of
+        // nginx, addresses and codes would lie in a file that no retention
+        // and no privacy filter of Garrison's reaches.
+        let text = site(&config(), Some((1, 26, 3)));
+        let blocks: Vec<&str> = text.split("\nserver {").skip(1).collect();
+        assert_eq!(blocks.len(), 2);
+        for block in blocks {
+            assert!(block.contains("\n    access_log off;\n"), "{block}");
+        }
+        // The snippet every installation includes says so for itself, in
+        // case the server block around it is the operator's own.
+        let snippet = include_str!("../../../deploy/nginx/garrison.conf");
+        let location = snippet.split("location / {").nth(1).unwrap();
+        assert!(location.contains("\n    access_log off;\n"), "{location}");
     }
 
     #[test]
