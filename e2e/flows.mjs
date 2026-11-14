@@ -281,6 +281,15 @@ try {
   const start = page.getByRole("button", { name: "Start", exact: true });
   expect(await start.isDisabled(), "an action does not start before its phrase is typed");
   await page.getByLabel(`Type ${action.confirmation} to confirm.`).fill(action.confirmation);
+  // A start that fails keeps the dialog, and the focus on Start, where it was.
+  failing.add("503 /api/actions");
+  await page.route("**/api/actions", (route) => (route.request().method() === "POST" ? unavailable(route) : route.continue()));
+  await start.focus();
+  await page.keyboard.press("Enter");
+  await dialog.getByText("Authorization is temporarily unavailable").waitFor();
+  expect(await focused(start), "a start that failed leaves the focus on Start");
+  await page.unroute("**/api/actions");
+  failing.clear();
   const submitted = page.waitForResponse((response) => response.url().endsWith("/api/actions") && response.request().method() === "POST");
   await start.click();
   expect((await submitted).status() === 202, "a confirmed action is accepted");

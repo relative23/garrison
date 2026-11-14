@@ -44,6 +44,8 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job) =>
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    // One start at a time; Start stays focusable meanwhile.
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -90,7 +92,10 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job) =>
             <Button variant="outline" onClick={() => dialog.current?.close()}>
               {t("actions.cancel")}
             </Button>
-            <Button type="submit" disabled={busy || typed !== action.confirmation}>
+            {/* aria-disabled while it starts, not disabled: a disabled
+                button would drop the focus, and a start that fails would
+                leave the keyboard nowhere. */}
+            <Button type="submit" disabled={typed !== action.confirmation} aria-disabled={busy || undefined}>
               {busy ? t("actions.starting") : t("actions.start")}
             </Button>
           </div>

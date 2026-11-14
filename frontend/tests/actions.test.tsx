@@ -66,6 +66,27 @@ describe("maintenance actions", () => {
     expect(ids[2]).not.toBe(ids[0]);
   });
 
+  it("start once while a start is under way, and keep Start focusable meanwhile", async () => {
+    let answer: (reply: { status: number; body: unknown }) => void = () => undefined;
+    const server = serve({
+      "GET actions": { body: catalog() },
+      "POST actions": () => new Promise((resolve) => (answer = resolve)),
+    });
+    renderView(<Actions />);
+    await loaded();
+    const start = confirmWith("RUN HEALTH CHECKS");
+    fireEvent.click(start);
+    await screen.findByRole("button", { name: "Starting…" });
+    // A disabled button would drop the focus; this one says it is busy instead.
+    expect(start.disabled).toBe(false);
+    expect(start.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(start);
+    await act(async () => undefined);
+    expect(server.requests("POST actions")).toHaveLength(1);
+    await act(async () => answer({ status: 202, body: { job: job(), replayed: false } }));
+    expect(await screen.findByText(/^Job 01234567/)).toBeTruthy();
+  });
+
   it("show the server's refusal in the dialog", async () => {
     serve({
       "GET actions": { body: catalog() },

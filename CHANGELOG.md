@@ -80,6 +80,11 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **Start keeps the keyboard's place while a maintenance action starts.**
+  The button was disabled while the request was under way, which drops the
+  focus, so a start that failed left a keyboard user nowhere in the
+  dialog. It now only says that it is busy, and a second press while it
+  starts sends nothing.
 - **A channel's error no longer shows its whole address.** An answer that
   was no HTTP answer was reported with the address it came from, on the
   Alerts page, in the journal and by `garrison notify-test`; for a webhook
