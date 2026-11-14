@@ -5,7 +5,7 @@ use std::thread;
 use rustls::{ServerConfig, ServerConnection};
 
 use super::*;
-use crate::testing::{Certificates, certificates, certificates_until};
+use crate::testing::{Certificates, certificates, certificates_until, now};
 
 /// A port that is closed for every test: no test can bind it (it is below
 /// 1024) and nothing on a test host listens on it. A free port that a test
@@ -83,13 +83,13 @@ fn a_trusted_certificate_is_read() {
         "127.0.0.1",
         false,
         &trusted(&certificates),
+        now(),
     )
     .unwrap();
     assert_eq!(found.expires_at, "2036-10-26T00:00:00+00:00");
     assert_eq!(found.protocol, "TLSv1.3");
-    let expiry = time::parse("2036-10-26T00:00:00Z").unwrap().as_second();
-    let days = (expiry - time::now().as_second()) / 86400;
-    assert!((found.days - days).abs() <= 1, "{found:?}, expected {days}");
+    // From 2026-10-29T12:00:00Z, the tests' time: 3649 whole days and a half.
+    assert_eq!(found.days, 3649);
 }
 
 static TLS12_ONLY: [&rustls::SupportedProtocolVersion; 1] = [&rustls::version::TLS12];
@@ -104,6 +104,7 @@ fn tls_1_2_is_named_as_such() {
         "127.0.0.1",
         false,
         &trusted(&certificates),
+        now(),
     )
     .unwrap();
     assert_eq!(found.protocol, "TLSv1.2");
@@ -172,9 +173,28 @@ fn a_reply_ends_with_its_last_line_up_to_64_kib() {
     );
 }
 
-/// The observation of one endpoint whose certificate expires in `days` days.
+/// The certificate of one endpoint, judged at `now`.
+fn judged_at(certificates: &Certificates, now: Timestamp) -> Observation {
+    let port = listener(certificates, None);
+    let provider = Tls::new(&crate::testing::table(&format!(
+        "type = \"tls\"\nendpoints = [{{ host = \"localhost\", port = {port} }}]"
+    )))
+    .unwrap()
+    .with_roots(roots(certificates));
+    let directory = tempfile::tempdir().unwrap();
+    let config = crate::testing::config(directory.path());
+    let runner = crate::testing::Canned(String::new());
+    let context = Context {
+        now,
+        ..crate::testing::context(&config, &runner)
+    };
+    provider.collect(&context).unwrap().observations.remove(0)
+}
+
+/// The observation of one endpoint whose certificate expires `days` days
+/// after the tests' time, at midnight.
 fn expiring_in(days: i64) -> Observation {
-    let expiry = time::now()
+    let expiry = now()
         .checked_add(time::SignedDuration::from_hours(24 * days))
         .unwrap();
     let text = time::isoformat(expiry);
@@ -185,20 +205,25 @@ fn expiring_in(days: i64) -> Observation {
         u8::try_from(number(5..7)).unwrap(),
         u8::try_from(number(8..10)).unwrap(),
     );
-    let certificates = certificates_until(year, month, day);
-    let port = listener(&certificates, None);
-    let provider = Tls::new(&crate::testing::table(&format!(
-        "type = \"tls\"\nendpoints = [{{ host = \"localhost\", port = {port} }}]"
-    )))
-    .unwrap()
-    .with_roots(roots(&certificates));
-    let directory = tempfile::tempdir().unwrap();
-    let config = crate::testing::config(directory.path());
-    let runner = crate::testing::Canned(String::new());
-    let mut report = provider
-        .collect(&crate::testing::context(&config, &runner))
-        .unwrap();
-    report.observations.remove(0)
+    judged_at(&certificates_until(year, month, day), now())
+}
+
+/// A certificate is judged at the run's time, not at the clock's: one that
+/// ran out on 2026-11-13 is valid at the tests' 2026-10-29, and not after.
+#[test]
+fn a_certificate_is_judged_at_the_time_of_the_run() {
+    let certificates = certificates_until(2026, 11, 13);
+    let before = judged_at(&certificates, now());
+    assert_eq!(before.state, State::Ok, "{:?}", before.findings);
+    assert_eq!(before.fields[0].value, json!(14));
+    let after = judged_at(&certificates, time::parse("2026-11-13T00:00:01Z").unwrap());
+    assert_eq!(after.state, State::Failed);
+    assert_eq!(after.findings.len(), 1);
+    assert!(
+        after.findings[0].ends_with(" — TLS check failed (certificate not trusted)."),
+        "{:?}",
+        after.findings
+    );
 }
 
 #[test]
@@ -226,6 +251,7 @@ fn starttls_comes_before_the_handshake() {
         "127.0.0.1",
         true,
         &trusted(&certificates),
+        now(),
     )
     .unwrap();
     assert_eq!(found.protocol, "TLSv1.3");
@@ -236,7 +262,8 @@ fn starttls_comes_before_the_handshake() {
             refusing,
             "127.0.0.1",
             true,
-            &trusted(&certificates)
+            &trusted(&certificates),
+            now()
         ),
         Err(Failure("STARTTLS refused"))
     );
@@ -248,7 +275,7 @@ fn untrusted_or_misnamed_certificates_fail_verification() {
     let untrusted = listener(&certificates, None);
     let empty = Arc::new(RootCertStore::empty());
     assert_eq!(
-        probe("localhost", untrusted, "127.0.0.1", false, &empty),
+        probe("localhost", untrusted, "127.0.0.1", false, &empty, now()),
         Err(Failure("certificate not trusted"))
     );
     let misnamed = listener(&certificates, None);
@@ -258,7 +285,8 @@ fn untrusted_or_misnamed_certificates_fail_verification() {
             misnamed,
             "127.0.0.1",
             false,
-            &trusted(&certificates)
+            &trusted(&certificates),
+            now()
         ),
         Err(Failure("certificate not trusted"))
     );
@@ -272,7 +300,8 @@ fn closed_ports_are_refused_connections() {
             CLOSED,
             "127.0.0.1",
             false,
-            &trusted(&certificates())
+            &trusted(&certificates()),
+            now()
         ),
         Err(Failure("connection refused"))
     );

@@ -9,6 +9,7 @@ use garrison_collector::providers::signin;
 use garrison_collector::providers::tls::probe;
 use garrison_core::config::Config;
 use garrison_core::observations::State;
+use garrison_core::time;
 use garrison_stalwart::{oidc, sign_in_page};
 use rustls::RootCertStore;
 
@@ -27,7 +28,7 @@ fn host(origin: &str) -> &str {
 
 fn certificate(origin: &str, roots: &Arc<RootCertStore>) -> Finding {
     let name = host(origin);
-    match probe(name, 443, name, false, roots) {
+    match probe(name, 443, name, false, roots, time::now()) {
         Ok(probed) if probed.days < 0 => Finding::fail(
             format!("the certificate of {name} expired on {}", probed.expires_at),
             "Renew it (certbot renew) and reload nginx.",

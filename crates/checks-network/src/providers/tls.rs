@@ -14,8 +14,9 @@ use std::time::Duration;
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Column, Evidence, Field, Format, Observation, State, Table};
-use garrison_core::time;
-use rustls::pki_types::ServerName;
+use garrison_core::time::{self, Timestamp};
+use rustls::pki_types::{ServerName, UnixTime};
+use rustls::time_provider::TimeProvider;
 use rustls::{ClientConfig, ClientConnection, RootCertStore};
 use serde_json::{Value, json};
 
@@ -122,17 +123,33 @@ fn connect(address: &str, port: u16) -> Result<TcpStream, Failure> {
     Err(last)
 }
 
-/// One handshake: STARTTLS if asked, SNI `host`, chain and name validated.
+/// The time a handshake judges the certificate by: the run's, so that one
+/// run judges each certificate at one time, and a test can set it.
+#[derive(Debug)]
+struct At(UnixTime);
+
+impl TimeProvider for At {
+    fn current_time(&self) -> Option<UnixTime> {
+        Some(self.0)
+    }
+}
+
+/// One handshake: STARTTLS if asked, SNI `host`, chain and name validated
+/// at `now`.
 pub fn probe(
     host: &str,
     port: u16,
     address: &str,
     use_starttls: bool,
     roots: &Arc<RootCertStore>,
+    now: Timestamp,
 ) -> Result<Probed, Failure> {
     let name = ServerName::try_from(host.to_owned()).map_err(|_| Failure("invalid host name"))?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let config = ClientConfig::builder_with_provider(provider)
+    let at = UnixTime::since_unix_epoch(Duration::from_secs(
+        u64::try_from(now.as_second()).unwrap_or(0),
+    ));
+    let config = ClientConfig::builder_with_details(provider, Arc::new(At(at)))
         .with_safe_default_protocol_versions()
         .map_err(|_| Failure("TLS error"))?
         .with_root_certificates(roots.clone())
@@ -166,7 +183,7 @@ pub fn probe(
     connection.send_close_notify();
     let _ = connection.complete_io(&mut stream);
     #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-    let days = ((expiry.as_second() as f64 - time::unix(time::now())) / 86400.0).floor() as i64;
+    let days = ((expiry.as_second() as f64 - time::unix(now)) / 86400.0).floor() as i64;
     Ok(Probed {
         expires_at: time::isoformat(expiry),
         days,
@@ -319,6 +336,7 @@ impl Provider for Tls {
                 &endpoint.address,
                 endpoint.starttls,
                 &roots,
+                context.now,
             ) {
                 Err(Failure(kind)) => {
                     failures += 1;
