@@ -173,3 +173,32 @@ fn a_refusal_is_the_answer_for_all_and_ends_the_session_once() {
     assert_eq!(fixture.revoked.load(Ordering::SeqCst), 1);
     assert!(fixture.gate.session(&visitor).unwrap().is_none());
 }
+
+#[test]
+fn a_sign_out_while_the_broker_is_asked_stays_a_sign_out() {
+    let fixture = fixture(0);
+    let visitor = fixture.visitor();
+    let session = fixture.gate.session(&visitor).unwrap().unwrap();
+    // A request of the session asks the broker, and before the broker
+    // answers, the user signs out.
+    let (gate, asked) = (Arc::clone(&fixture.gate), visitor.clone());
+    let asking = thread::spawn(move || match gate.caller(&asked) {
+        Ok(_) => 200,
+        Err(error) => error.status.as_u16(),
+    });
+    fixture.broker.asked();
+    fixture.gate.end(&session, true).unwrap();
+    fixture.broker.answer_now();
+    // The request that came before the sign-out may have its answer. The
+    // grant that came after the sign-out serves nothing: the next request
+    // finds no session, and no answer brings one back.
+    assert!([200, 401].contains(&asking.join().unwrap()));
+    assert!(fixture.gate.session(&visitor).unwrap().is_none());
+    assert_eq!(
+        fixture.gate.caller(&visitor).unwrap_err().status.as_u16(),
+        401
+    );
+    assert_eq!(fixture.broker.calls.load(Ordering::SeqCst), 1);
+    // The sign-out revoked the token, and the late answer nothing more.
+    assert_eq!(fixture.revoked.load(Ordering::SeqCst), 1);
+}
