@@ -41,8 +41,9 @@ Nothing is granted unless it could be decided, and the answer says which of
 two things kept it from being granted.
 
 A refusal (403) is what the policy says of a user: the subject is on the deny
-list, has no binding, belongs to an account that is not allowed, or lacks the
-rights its profile requires. It ends that user's session, as an invalid token
+list, has no binding, belongs to an account that is not allowed, lacks the
+rights its profile requires, or has profiles that name none of the modules
+the installation offers. It ends that user's session, as an invalid token
 does (401).
 
 Everything else grants nothing and refuses nobody, and is answered 503: a

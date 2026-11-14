@@ -15,7 +15,7 @@ with `LoadCredential=`.
 |---|---|---|
 | `schema` | none | Must be `1`. |
 | `credentials_directory` | `/etc/garrison/credentials` | Source of the `credential:` files. |
-| `modules` | all modules | The modules this installation offers, as [module IDs](#module-ids). The dashboard and services are always on. Nobody is granted another module, whatever the access policy says, and without `actions` the broker runs no action. An unknown ID is an error. `garrison modules` sets it. |
+| `modules` | all modules | The modules this installation offers, as [module IDs](#module-ids). The dashboard and services are always on. Nobody is granted another module, whatever the access policy says, and without `actions` the broker runs no action. A user whose profiles name none of these modules is refused, as one without a profile is. An unknown ID is an error. `garrison modules` sets it. |
 
 ## `[deployment]`
 

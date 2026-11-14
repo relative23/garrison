@@ -13,6 +13,11 @@ Both are checked again on every request, so removing a role or permission in
 Stalwart takes effect within seconds. Hiding a module in Preferences only
 changes the menu; it grants and revokes nothing.
 
+Only the modules the installation offers (`modules` in the
+[configuration](configuration.md#top-level)) are granted, whatever a profile
+names. A user whose profiles name none of them is refused, as one without a
+profile is.
+
 ## Default profiles
 
 `garrison access init` creates:

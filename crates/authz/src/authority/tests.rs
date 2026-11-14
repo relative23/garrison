@@ -197,3 +197,25 @@ fn a_module_the_installation_does_not_offer_is_granted_to_nobody() {
     assert!(grant.actions.is_empty());
     server.requests();
 }
+
+#[test]
+fn a_profile_with_no_module_the_installation_offers_is_a_refusal() {
+    let directory = tempfile::tempdir().unwrap();
+    let server = serve(native("v", &["authenticate", "sysAccountGet"]));
+    let mut config = config(directory.path(), &server.url);
+    config.modules = BTreeSet::from([ModuleId::Dashboard, ModuleId::Services]);
+    let credentials = credentials(&config);
+    let mut document = policy_document();
+    document["profiles"]["viewer"]["modules"] = json!(["attacks", "logs"]);
+    write_policy(&config, &document);
+    // The viewer's profile applies, but names only modules this
+    // installation does not offer. A grant of nothing is no grant: the web
+    // service would refuse it as malformed and answer 502 on every request.
+    assert_eq!(
+        Authority::new(&config, credentials).authorize(TOKEN),
+        Err(Error::Denied(
+            "This identity's profiles grant no module this installation offers".into()
+        ))
+    );
+    server.requests();
+}

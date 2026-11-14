@@ -53,6 +53,14 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A user whose profiles name no module the installation offers is
+  refused.** The broker answered such a user with a grant of no module at
+  all, which the web service had to take for a broken answer: the sign-in
+  was turned away as HTTP 502, an open session got "The broker returned an
+  invalid authorization" on every request and stayed, and no journal named
+  the cause. Such a user is now refused like one without a profile: the
+  session ends with its token, and the broker's journal says that the
+  profiles grant no module this installation offers.
 - **A maintenance job no longer blocks the others for a fault of the
   broker's own.** A job the broker could find no thread for, one whose
   record could not be written, or one during which the broker itself

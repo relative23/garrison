@@ -106,6 +106,14 @@ impl Authority {
             .intersection(&self.modules)
             .copied()
             .collect();
+        // Profiles that name only modules this installation does not offer
+        // leave nothing to grant. That is what the policy says of this user,
+        // as a missing profile is, and no grant the web service must refuse.
+        if modules.is_empty() {
+            return Err(Error::Denied(
+                "This identity's profiles grant no module this installation offers".into(),
+            ));
+        }
         // Actions belong to the maintenance module.
         let actions = if modules.contains(&ModuleId::Actions) {
             result.actions
