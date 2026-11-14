@@ -19,6 +19,9 @@ LoadCredential=notify-mail-password:/etc/garrison/credentials/notify-mail-passwo
 StateDirectory=garrison/collector
 StateDirectoryMode=0750
 UMask=0027
+# A run that is ended here stores nothing. The collector keeps a shorter
+# time of its own: no check begins after 70 seconds, the notifications are
+# given up at 100, and the snapshot is written with what was found.
 TimeoutStartSec=120
 # Providers read host files (configuration, receipts) but never write them.
 ReadOnlyPaths=/var/lib/garrison/ingest

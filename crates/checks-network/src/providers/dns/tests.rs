@@ -201,7 +201,7 @@ fn host(prefix: &[u8], name: &str) -> Vec<u8> {
 
 /// The provider's observations for Stalwart answering `domains` and a
 /// resolver at `address`.
-fn collected(domains: &serde_json::Value, address: SocketAddr) -> Vec<Observation> {
+pub(super) fn collected(domains: &serde_json::Value, address: SocketAddr) -> Vec<Observation> {
     collected_with(domains, address, None)
 }
 

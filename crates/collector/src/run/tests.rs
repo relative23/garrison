@@ -210,3 +210,83 @@ fn duplicate_observation_ids_stop_the_run() {
         .unwrap();
     assert_eq!(stored, 0, "nothing is stored");
 }
+
+/// A provider that reports one observation after it took its time.
+struct Takes(&'static str, Duration);
+
+impl Provider for Takes {
+    fn name(&self) -> &'static str {
+        self.0
+    }
+
+    fn collect(&self, context: &Context<'_>) -> Collected {
+        std::thread::sleep(self.1);
+        Ok(Report::of(Observation::new(
+            format!("{}.done", self.0),
+            self.0,
+            "Done",
+            [ModuleId::Services],
+            Evidence::Process,
+            State::Ok,
+            context.checked_at(),
+            "test",
+        )?))
+    }
+}
+
+#[test]
+fn a_check_that_uses_up_the_runs_time_costs_only_the_checks_after_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = crate::testing::config(directory.path());
+    let credentials = Credentials::new(directory.path().join("credentials"));
+    let takes =
+        |name, millis| Box::new(Takes(name, Duration::from_millis(millis))) as Box<dyn Provider>;
+    let providers = vec![
+        takes("first", 0),
+        takes("slow", 300),
+        takes("late", 0),
+        takes("later", 0),
+    ];
+    let runner = Canned(String::new());
+    let time = Time {
+        checks: Duration::from_millis(100),
+        run: Duration::from_secs(30),
+    };
+    let snapshot = collect_within(&providers, &config, &credentials, &runner, now(), time).unwrap();
+    // What ran is there, the slow check too: it was done, only late. The
+    // checks behind it were not begun, and each says so in its place.
+    assert_eq!(
+        ids(&snapshot),
+        [
+            "first.done",
+            "slow.done",
+            "collector.late",
+            "collector.later"
+        ]
+    );
+    let late = &snapshot.observations[2];
+    assert_eq!(late.state, State::Unknown);
+    assert_eq!(
+        late.findings,
+        ["Not run: the checks before it used up the time of this collection run."]
+    );
+    assert_eq!(
+        snapshot.provider_errors,
+        ["late", "later"].map(|provider| ProviderError {
+            provider: provider.into(),
+            error: "not run".into()
+        })
+    );
+    // The snapshot is stored, with what was found.
+    let stored = rusqlite::Connection::open(config.database(Database::Status)).unwrap();
+    assert_eq!(
+        crate::store::latest_snapshot(&stored).unwrap(),
+        Some(snapshot)
+    );
+    // With the time a run has, every check runs.
+    let all = collect_from(&providers, &config, &credentials, &runner, now()).unwrap();
+    assert_eq!(
+        ids(&all),
+        ["first.done", "slow.done", "late.done", "later.done"]
+    );
+}

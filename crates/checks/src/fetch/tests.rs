@@ -1,0 +1,172 @@
+use std::net::TcpListener;
+
+use super::*;
+
+#[test]
+fn urls_split_into_scheme_host_port_and_path() {
+    assert_eq!(
+        split("https://mail.example.org/metrics/prometheus").unwrap(),
+        (
+            true,
+            "mail.example.org".into(),
+            443,
+            "/metrics/prometheus".into()
+        )
+    );
+    assert_eq!(
+        split("http://127.0.0.1:8080").unwrap(),
+        (false, "127.0.0.1".into(), 8080, "/".into())
+    );
+    assert_eq!(split("http://[::1]:8080/a").unwrap().1, "::1");
+    assert!(split("ftp://example.org").is_err());
+    assert!(split("https://:443/").is_err());
+}
+
+#[test]
+fn the_origin_of_a_url() {
+    assert_eq!(
+        origin("https://stalwart.example.org/admin/"),
+        "https://stalwart.example.org"
+    );
+    assert_eq!(
+        origin("https://mail.example.org"),
+        "https://mail.example.org"
+    );
+    assert_eq!(
+        origin("http://127.0.0.1:8080/login?a=b"),
+        "http://127.0.0.1:8080"
+    );
+}
+
+#[test]
+fn answers_are_parsed_with_chunked_bodies() {
+    let plain = parse(b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\n\r\nno").unwrap();
+    assert_eq!((plain.status, plain.body.as_str()), (404, "no"));
+    let chunked = parse(
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nStrict-Transport-Security: max-age=1\r\n\r\n\
+          4\r\n{\"a\"\r\n3\r\n:1}\r\n0\r\n\r\n",
+    )
+    .unwrap();
+    assert_eq!(chunked.body, "{\"a\":1}");
+    assert_eq!(
+        chunked.header("strict-transport-security"),
+        Some("max-age=1")
+    );
+    assert!(parse(b"not http").is_none());
+    // A chunk size near usize::MAX must neither overflow nor panic.
+    let huge = parse(
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\nab\r\n0\r\n\r\n",
+    );
+    assert_eq!(huge.unwrap().body, "");
+}
+
+#[test]
+fn a_compressed_body_is_unpacked_as_far_as_it_goes() {
+    use std::io::Write as _;
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(b"<html>sign in</html>").unwrap();
+    let packed = gzip.finish().unwrap();
+    let answer = |body: &[u8]| {
+        let mut data = b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n".to_vec();
+        data.extend_from_slice(body);
+        parse(&data).unwrap().body
+    };
+    assert_eq!(answer(&packed), "<html>sign in</html>");
+    // Cut off, or no gzip at all: what unpacks, never a panic.
+    assert!("<html>sign in</html>".starts_with(&answer(&packed[..packed.len() - 9])));
+    assert_eq!(answer(b"plain text"), "");
+}
+
+#[test]
+fn a_post_sends_its_headers_and_its_body() {
+    let server = garrison_testing::http::serve(vec![garrison_testing::http::answer(200, "{}")]);
+    let request = Request {
+        method: "POST",
+        url: &format!("{}/topic?x=1", server.url),
+        headers: &[
+            ("Title", "Two checks failed"),
+            ("Authorization", "Bearer token-1"),
+            // Nothing that would start another header or line goes out.
+            ("X-Bad\r\nInjected", "1"),
+            ("X-Also-Bad", "1\r\nInjected: 2"),
+        ],
+        body: b"Backup job: failed",
+    };
+    assert_eq!(send(&request, &roots()).unwrap().status, 200);
+    let sent = server.requests().remove(0);
+    assert!(sent.starts_with("POST /topic?x=1 HTTP/1.1\r\n"), "{sent}");
+    for line in [
+        "Title: Two checks failed\r\n",
+        "Authorization: Bearer token-1\r\n",
+        "Content-Length: 18\r\n",
+    ] {
+        assert!(sent.contains(line), "{sent}");
+    }
+    assert!(!sent.contains("Injected"), "{sent}");
+    assert!(sent.ends_with("\r\n\r\nBackup job: failed"), "{sent}");
+}
+
+#[test]
+fn random_answers_never_panic() {
+    let mut noise = garrison_testing::noise::Noise::new(0x9e37_79b9_7f4a_7c15);
+    let pieces: [&[u8]; 9] = [
+        b"HTTP/1.1 ",
+        b"200",
+        b" OK\r\n",
+        b"Transfer-Encoding: chunked\r\n",
+        b"\r\n",
+        b"ffffffff",
+        b"\r\n\r\n",
+        b"0\r\n",
+        b"\xff\xfe",
+    ];
+    for _ in 0..20_000 {
+        let mut data = Vec::new();
+        for _ in 0..(noise.next_u64() % 12) {
+            match pieces.get(noise.below(10)) {
+                Some(piece) => data.extend_from_slice(piece),
+                None => data.push(u8::try_from(noise.next_u64() % 256).unwrap()),
+            }
+        }
+        let _ = parse(&data);
+        let _ = split(&String::from_utf8_lossy(&data));
+    }
+}
+
+#[test]
+fn a_server_that_sends_a_byte_now_and_then_does_not_hold_a_request_beyond_its_time() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        // An answer that never ends: each byte comes within a step's time.
+        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\n");
+        for _ in 0..200 {
+            if stream.write_all(b"x").is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    });
+    let url = format!("http://127.0.0.1:{port}/");
+    let request = Request {
+        method: "GET",
+        url: &url,
+        headers: &[],
+        body: &[],
+    };
+    let began = Instant::now();
+    let error = send_until(&request, &roots(), began + Duration::from_millis(400)).unwrap_err();
+    assert!(
+        began.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        began.elapsed()
+    );
+    assert!(error.contains("not done in its time"), "{error}");
+    // A time that is over before the request begins asks nobody.
+    let late = send_until(&request, &roots(), Instant::now()).unwrap_err();
+    assert!(
+        late.contains("no answer within") || late.contains("not reached"),
+        "{late}"
+    );
+}

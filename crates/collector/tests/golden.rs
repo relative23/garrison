@@ -176,6 +176,7 @@ fn every_provider_reports_the_expected_observations() {
     }
     let config = config::parse(&text.parse().unwrap()).unwrap();
     let context = Context {
+        deadline: garrison_collector::context::Deadline::NONE,
         deployment: &config.deployment,
         now: time::parse(NOW).unwrap(),
         native_key: Some("native-key-0123456789".into()),

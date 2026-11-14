@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 pub use channels::{Address, Channels, Level, Note, Secrets, taken};
 
-use crate::context::Memory;
+use crate::context::{Deadline, Memory};
 use crate::fetch;
 
 const OPEN: &str = "notify.open";
@@ -217,8 +217,16 @@ pub fn after_run(
     observations: &[Observation],
     memory: &dyn Memory,
     now: time::Timestamp,
+    deadline: Deadline,
 ) -> Option<Observation> {
-    after_run_with(channels, observations, memory, now, &fetch::roots())
+    after_run_with(
+        channels,
+        observations,
+        memory,
+        now,
+        &fetch::roots(),
+        deadline,
+    )
 }
 
 fn after_run_with(
@@ -227,6 +235,7 @@ fn after_run_with(
     memory: &dyn Memory,
     now: time::Timestamp,
     roots: &Arc<RootCertStore>,
+    deadline: Deadline,
 ) -> Option<Observation> {
     if channels.is_empty() {
         return None;
@@ -241,7 +250,7 @@ fn after_run_with(
     let kept = if news.is_empty() {
         next
     } else {
-        let outcomes = channels.send_with(&note(&channels.host, &news), now, roots);
+        let outcomes = channels.send_with(&note(&channels.host, &news), now, roots, deadline);
         let (any, failures) = taken(&outcomes);
         if let Some(failures) = &failures {
             log::warn!("A notification did not go out: {failures}");

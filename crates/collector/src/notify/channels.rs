@@ -2,6 +2,7 @@
 //! mailbox. All that are configured get every message.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use garrison_core::config::{Config, Notifications};
 use garrison_core::credentials::Credentials;
@@ -11,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::mail::{self, Mail};
+use crate::context::Deadline;
 use crate::fetch::{self, Request};
 
 /// An address with the token that goes with it; an empty token sends none.
@@ -116,12 +118,13 @@ pub(crate) fn host_of(url: &str) -> &str {
     rest.split('/').next().unwrap_or(rest)
 }
 
-/// Send `body` as JSON to `url`; an empty token sends none.
+/// Send `body` as JSON to `url`, done by `until`; an empty token sends none.
 fn post(
     url: &str,
     token: &str,
     body: &serde_json::Value,
     roots: &Arc<RootCertStore>,
+    until: Instant,
 ) -> Result<u16, String> {
     let authorization = format!("Bearer {token}");
     let mut headers = vec![("Content-Type", "application/json")];
@@ -135,7 +138,7 @@ fn post(
         headers: &headers,
         body: body.as_bytes(),
     };
-    Ok(fetch::send(&request, roots)?.status)
+    Ok(fetch::send_until(&request, roots, until)?.status)
 }
 
 impl Channels {
@@ -208,18 +211,29 @@ impl Channels {
         note: &Note,
         now: time::Timestamp,
     ) -> Vec<(&'static str, Result<(), String>)> {
-        self.send_with(note, now, &fetch::roots())
+        self.send_with(note, now, &fetch::roots(), Deadline::NONE)
     }
 
+    /// The same within `deadline`: each channel has what a request has, or
+    /// what is left of the deadline if that is less, and a channel whose
+    /// turn comes after it is not tried.
     pub(crate) fn send_with(
         &self,
         note: &Note,
         now: time::Timestamp,
         roots: &Arc<RootCertStore>,
+        deadline: Deadline,
     ) -> Vec<(&'static str, Result<(), String>)> {
+        let in_time = || {
+            if deadline.expired() {
+                return Err("not tried: the collection run's time was used up".to_owned());
+            }
+            Ok(deadline.by(fetch::WITHIN))
+        };
         let mut outcomes = Vec::new();
         if let Some(ntfy) = &self.ntfy {
-            outcomes.push(("ntfy", to_ntfy(ntfy, note, roots)));
+            let sent = in_time().and_then(|until| to_ntfy(ntfy, note, roots, until));
+            outcomes.push(("ntfy", sent));
         }
         if let Some(webhook) = &self.webhook {
             let body = json!({
@@ -237,28 +251,35 @@ impl Channels {
                 "recovered": note.recovered,
                 "sentAt": time::isoformat(now),
             });
-            let sent = post(&webhook.url, &webhook.token, &body, roots).and_then(|status| {
-                if (200..300).contains(&status) {
-                    Ok(())
-                } else {
-                    Err(format!("it answered {status}"))
-                }
-            });
+            let sent = in_time()
+                .and_then(|until| post(&webhook.url, &webhook.token, &body, roots, until))
+                .and_then(|status| {
+                    if (200..300).contains(&status) {
+                        Ok(())
+                    } else {
+                        Err(format!("it answered {status}"))
+                    }
+                });
             outcomes.push(("webhook", sent));
         }
         if let Some(mail) = &self.mail {
             let text = format!("{}\n\nSent by Garrison on {}.\n", note.text, self.host);
-            outcomes.push((
-                "mail",
-                mail::submit(mail, &self.host, &note.title, &text, now, roots),
-            ));
+            let sent = in_time().and_then(|until| {
+                mail::submit_until(mail, &self.host, &note.title, &text, now, roots, until)
+            });
+            outcomes.push(("mail", sent));
         }
         outcomes
     }
 }
 
 /// ntfy's JSON publishing: the topic is the last part of the address.
-fn to_ntfy(ntfy: &Address, note: &Note, roots: &Arc<RootCertStore>) -> Result<(), String> {
+fn to_ntfy(
+    ntfy: &Address,
+    note: &Note,
+    roots: &Arc<RootCertStore>,
+    until: Instant,
+) -> Result<(), String> {
     let (base, topic) = ntfy
         .url
         .rsplit_once('/')
@@ -275,7 +296,7 @@ fn to_ntfy(ntfy: &Address, note: &Note, roots: &Arc<RootCertStore>) -> Result<()
         "priority": priority,
         "tags": [tag],
     });
-    match post(&format!("{base}/"), &ntfy.token, &body, roots)? {
+    match post(&format!("{base}/"), &ntfy.token, &body, roots, until)? {
         200 => Ok(()),
         status => Err(format!("it answered {status}")),
     }

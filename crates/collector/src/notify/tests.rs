@@ -25,7 +25,7 @@ fn observed(id: &str, state: State, finding: &str) -> Observation {
 
 /// The channel's observation after one run against a stand-in for ntfy.
 fn run(url: &str, memory: &Remembered, observations: &[Observation]) -> Observation {
-    after_run(&ntfy(url), observations, memory, now()).unwrap()
+    after_run(&ntfy(url), observations, memory, now(), Deadline::NONE).unwrap()
 }
 
 /// The channels of an installation that names only an ntfy topic.
@@ -274,8 +274,8 @@ fn every_channel_gets_the_message_and_one_that_fails_is_named() {
     let roots = mail::tests::trusted(&certificates);
     let memory = Remembered::default();
     let failing = [observed("backup", State::Failed, "The last run failed.")];
-    after_run_with(&channels, &failing, &memory, now(), &roots).unwrap();
-    let told = after_run_with(&channels, &failing, &memory, now(), &roots).unwrap();
+    after_run_with(&channels, &failing, &memory, now(), &roots, Deadline::NONE).unwrap();
+    let told = after_run_with(&channels, &failing, &memory, now(), &roots, Deadline::NONE).unwrap();
     assert_eq!(told.state, State::Ok);
     assert_eq!(told.id, "notifications.channels");
 
@@ -316,7 +316,7 @@ fn every_channel_gets_the_message_and_one_that_fails_is_named() {
         ..channels
     };
     let fine = [observed("backup", State::Ok, "")];
-    let partly = after_run_with(&channels, &fine, &memory, now(), &roots).unwrap();
+    let partly = after_run_with(&channels, &fine, &memory, now(), &roots, Deadline::NONE).unwrap();
     assert_eq!(partly.state, State::Failed);
     let finding = &partly.findings[0];
     assert!(
@@ -333,7 +333,7 @@ fn every_channel_gets_the_message_and_one_that_fails_is_named() {
         mail: None,
         ..ntfy(&format!("{}/mailserver", quiet.url))
     };
-    after_run_with(&silent, &fine, &memory, now(), &roots).unwrap();
+    after_run_with(&silent, &fine, &memory, now(), &roots, Deadline::NONE).unwrap();
     assert_eq!(quiet.requests().len(), 0);
 }
 
@@ -342,7 +342,13 @@ fn without_a_channel_nothing_is_kept_or_shown() {
     let memory = Remembered::default();
     let failing = [observed("backup", State::Failed, "The last run failed.")];
     assert_eq!(
-        after_run(&Channels::default(), &failing, &memory, now()),
+        after_run(
+            &Channels::default(),
+            &failing,
+            &memory,
+            now(),
+            Deadline::NONE
+        ),
         None
     );
     assert!(memory.0.borrow().is_empty());

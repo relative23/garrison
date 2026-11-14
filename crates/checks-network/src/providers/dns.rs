@@ -179,25 +179,29 @@ impl Dns {
         .with_max_age(180))
     }
 
+    /// `silent` is whether the resolver has stopped being asked in this run:
+    /// it did not answer once, or the run's time for its checks is over.
     fn domain(
         &self,
         context: &Context<'_>,
         resolver: SocketAddr,
         domain: &Domain,
+        silent: &mut bool,
     ) -> Result<Observation, crate::context::ProviderError> {
         let name = plain(&domain.name);
         let records = expected(domain.dns_zone_file.as_deref().unwrap_or_default());
         let mut rows = Vec::new();
         let (mut open, mut unanswered) = (Vec::new(), 0);
-        // A resolver that is silent once is not asked again in this run: each
-        // question would wait out its time, and the run has only so long.
-        let mut silent = false;
         for (index, record) in records.iter().enumerate() {
             // The question's number only tells the answer from a stray one.
             let id =
                 u16::try_from((context.now.as_second().unsigned_abs() + index as u64) % 65_521)
                     .unwrap_or(1);
-            let asked = if silent {
+            // A resolver that is silent once is not asked again in this run,
+            // for this domain or the next: each question would wait out its
+            // time, and the run has only so long.
+            *silent = *silent || context.deadline.expired();
+            let asked = if *silent {
                 Err(String::new())
             } else {
                 dns::ask(resolver, &record.name, record.kind, id)
@@ -207,7 +211,7 @@ impl Dns {
                 Ok(Answer::NoSuchName) => (Verdict::Missing, Vec::new()),
                 Err(error) => {
                     // An error for one name, such as SERVFAIL, is that name's.
-                    silent = silent || error.is_empty() || error.contains("did not answer");
+                    *silent = *silent || error.is_empty() || error.contains("did not answer");
                     (Verdict::Unanswered, Vec::new())
                 }
             };
@@ -323,10 +327,11 @@ impl Provider for Dns {
                 .push(self.unknown(context, "This host names no resolver in /etc/resolv.conf.")?);
             return Ok(report);
         };
+        let mut silent = false;
         for domain in domains.iter().take(self.max_domains) {
             report
                 .observations
-                .push(self.domain(context, resolver, domain)?);
+                .push(self.domain(context, resolver, domain, &mut silent)?);
         }
         if domains.is_empty() {
             report
@@ -339,3 +344,5 @@ impl Provider for Dns {
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+mod time_tests;

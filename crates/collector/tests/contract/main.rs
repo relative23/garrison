@@ -78,6 +78,7 @@ fn collect(
 ) -> Report {
     let directory = tempfile::tempdir().unwrap();
     let context = Context {
+        deadline: garrison_collector::context::Deadline::NONE,
         deployment,
         now: time::now(),
         native_key: key,

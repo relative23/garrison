@@ -19,7 +19,7 @@ use garrison_core::{sqlite, time};
 use rusqlite::OptionalExtension;
 use rustls::RootCertStore;
 
-use crate::context::Memory;
+use crate::context::{Deadline, Memory};
 use crate::notify::{Channels, Level, Note, Secrets, taken};
 
 /// Where a run leaves the channel, in the collector's memory.
@@ -126,7 +126,12 @@ impl Watch<'_> {
         let stopped = self.now.as_second() - last > LIMIT;
         let told = fs::symlink_metadata(self.marker).is_ok();
         // A message counts once any channel took it.
-        let send = |note: Note| match taken(&channels.send_with(&note, self.now, &self.roots)) {
+        let send = |note: Note| match taken(&channels.send_with(
+            &note,
+            self.now,
+            &self.roots,
+            Deadline::NONE,
+        )) {
             (true, _) => Ok(()),
             (false, problems) => Err(problems.unwrap_or_default()),
         };

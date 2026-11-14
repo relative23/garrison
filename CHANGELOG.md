@@ -47,6 +47,15 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A slow check no longer costs the whole status.** A resolver that did not
+  answer was asked again for every domain, three seconds each, and with
+  notification channels that did not answer either a collection run passed
+  the two minutes systemd gives it: the run was ended and nothing was
+  stored, the quick checks included. A run now keeps its own time. A silent
+  resolver is asked once in a run; no check begins after 70 seconds, and
+  one that did not begin shows as Unknown with "Not run"; every HTTPS
+  request, name lookup included, and every notification has a time for all
+  of it; the journal names a check that took ten seconds or more.
 - **A failed upgrade returns to a release that can read its data.** A new
   release that changed a database schema and then failed to start, or to
   stay up, left that database behind: the old release started again, the

@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use garrison_core::config::Deployment;
 use garrison_core::observations::{NoModule, Observation};
@@ -34,9 +35,43 @@ impl Memory for Forgetful {
     fn keep(&self, _: &str, _: &str) {}
 }
 
+/// When a collection run must be done with its checks, on the clock that
+/// only runs forward. systemd ends a run that takes too long, and with it
+/// everything the run had found: so a check that asks many times looks here
+/// in between, and what is not asked in time is said, not waited for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Deadline(Option<Instant>);
+
+impl Deadline {
+    /// No limit: for a check that is asked by hand, and for tests.
+    pub const NONE: Deadline = Deadline(None);
+
+    /// `time` from now.
+    #[must_use]
+    pub fn within(time: Duration) -> Self {
+        Deadline(Instant::now().checked_add(time))
+    }
+
+    #[must_use]
+    pub fn expired(self) -> bool {
+        self.0.is_some_and(|until| Instant::now() >= until)
+    }
+
+    /// By when something that may take `most` must be done: then, or at the
+    /// deadline if that comes first.
+    #[must_use]
+    pub fn by(self, most: Duration) -> Instant {
+        let now = Instant::now();
+        let then = now.checked_add(most).unwrap_or(now);
+        self.0.map_or(then, |until| until.min(then))
+    }
+}
+
 pub struct Context<'a> {
     pub deployment: &'a Deployment,
     pub now: Timestamp,
+    /// When the run's checks must be done.
+    pub deadline: Deadline,
     /// The collector's read-only management-API key, if it could be read.
     pub native_key: Option<String>,
     /// User name and secret for the metrics exporter.
@@ -119,6 +154,25 @@ pub trait Provider {
 #[cfg(test)]
 mod tests {
     use crate::testing::{Canned, config, context};
+
+    #[test]
+    fn a_deadline_bounds_what_may_take_long() {
+        use std::time::{Duration, Instant};
+
+        use super::Deadline;
+        let long = Duration::from_secs(3600);
+        assert!(!Deadline::NONE.expired());
+        assert!(Deadline::NONE.by(long) > Instant::now() + long / 2);
+        let soon = Deadline::within(Duration::from_secs(60));
+        assert!(!soon.expired());
+        // What may take an hour must be done within the minute that is left,
+        // and what takes a second within that second.
+        assert!(soon.by(long) <= Instant::now() + Duration::from_secs(60));
+        assert!(soon.by(Duration::from_secs(1)) <= Instant::now() + Duration::from_secs(1));
+        let over = Deadline::within(Duration::ZERO);
+        assert!(over.expired());
+        assert!(over.by(long) <= Instant::now());
+    }
 
     #[test]
     fn debug_output_hides_the_api_key() {

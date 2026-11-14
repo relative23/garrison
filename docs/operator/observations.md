@@ -16,7 +16,7 @@ changelog, and for one more release the observation carries its old id in
 | `bulwark.plugins` | `bulwark` | Webmail plugin versions and bundle integrity |
 | `clamav.configuration` | `clamav` | The scanner's policy |
 | `clamav.signatures` | `clamav` | The signature files |
-| `collector.<type>` | any | A check that failed as a whole; the collector's journal says why |
+| `collector.<type>` | any | A check that failed as a whole, or was not run because the checks before it used up the run's time; the collector's journal says why |
 | `dns.records` | `dns` | Stands in while the domains or the resolver are not known |
 | `dns.<domain>` | `dns` | The records of one domain |
 | `flow.spam` | `mail-flow` | Spam and ham of the last seven days |

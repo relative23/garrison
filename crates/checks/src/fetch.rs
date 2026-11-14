@@ -5,17 +5,27 @@
 //! asks the installation's public names with it, the collector the release
 //! list, the notification channel and Stalwart's sign-in page. No redirect is
 //! followed.
+//!
+//! A request has a time by which it must be done, all of it: the name
+//! lookup, the connection, TLS and the answer. A limit for each step alone
+//! would let a server that sends a byte now and then, or a resolver that
+//! does not answer, hold the caller for as long as it likes.
 
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use flate2::read::GzDecoder;
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 
+/// One step waits this long at most: the lookup, the connection, one read
+/// or write.
 const TIMEOUT: Duration = Duration::from_secs(8);
+/// A request without a time of its caller's has this long in all.
+pub const WITHIN: Duration = Duration::from_secs(20);
 const LIMIT: u64 = 256 * 1024;
 /// The most a compressed body may unpack to.
 const UNPACKED: u64 = 4 * 1024 * 1024;
@@ -96,22 +106,96 @@ fn split(url: &str) -> Result<(bool, String, u16, String), String> {
     Ok((secure, host.to_owned(), port, path.to_owned()))
 }
 
-fn connect(host: &str, port: u16) -> Result<TcpStream, String> {
-    let targets = (host, port)
-        .to_socket_addrs()
-        .map_err(|_| format!("{host} does not resolve"))?;
+/// A connection whose every read and write must be done by `until`.
+#[derive(Debug)]
+pub struct Timed {
+    stream: TcpStream,
+    until: Instant,
+}
+
+impl Timed {
+    /// How long the next step may wait; an error once the time is up.
+    fn patience(&self) -> std::io::Result<Duration> {
+        let left = self.until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "the request was not done in its time",
+            ));
+        }
+        Ok(left.min(TIMEOUT))
+    }
+
+    /// A step that waited out its time says so in words: the system's own
+    /// error for it reads "Resource temporarily unavailable".
+    fn waited<T>(&self, step: std::io::Result<T>) -> std::io::Result<T> {
+        use std::io::ErrorKind::{TimedOut, WouldBlock};
+        step.map_err(|error| match error.kind() {
+            WouldBlock | TimedOut => match self.patience() {
+                Ok(_) => std::io::Error::new(
+                    TimedOut,
+                    format!("the server was silent for {} s", TIMEOUT.as_secs()),
+                ),
+                Err(over) => over,
+            },
+            _ => error,
+        })
+    }
+}
+
+impl Read for Timed {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.stream.set_read_timeout(Some(self.patience()?))?;
+        let read = self.stream.read(buffer);
+        self.waited(read)
+    }
+}
+
+impl Write for Timed {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.stream.set_write_timeout(Some(self.patience()?))?;
+        let written = self.stream.write(data);
+        self.waited(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.stream.flush()
+    }
+}
+
+/// The addresses of `host`, asked of the system on a thread of its own: the
+/// system's lookup has no time limit, and a resolver that does not answer
+/// would hold the caller for as long as its own configuration says.
+fn resolve(host: &str, port: u16, until: Instant) -> Result<Vec<SocketAddr>, String> {
+    let (answer, asked) = mpsc::channel();
+    let name = host.to_owned();
+    std::thread::spawn(move || {
+        let found = (name.as_str(), port)
+            .to_socket_addrs()
+            .map(Iterator::collect::<Vec<_>>);
+        // Nobody waits any more once the time is up.
+        let _ = answer.send(found);
+    });
+    let patience = until.saturating_duration_since(Instant::now()).min(TIMEOUT);
+    match asked.recv_timeout(patience) {
+        Ok(Ok(addresses)) => Ok(addresses),
+        Ok(Err(_)) => Err(format!("{host} does not resolve")),
+        Err(_) => Err(format!(
+            "{host}: the name lookup gave no answer within {} s",
+            patience.as_secs()
+        )),
+    }
+}
+
+fn connect(host: &str, port: u16, until: Instant) -> Result<Timed, String> {
     let mut last = format!("{host} does not resolve");
-    for target in targets {
-        match TcpStream::connect_timeout(&target, TIMEOUT) {
-            Ok(stream) => {
-                stream
-                    .set_read_timeout(Some(TIMEOUT))
-                    .map_err(|error| error.to_string())?;
-                stream
-                    .set_write_timeout(Some(TIMEOUT))
-                    .map_err(|error| error.to_string())?;
-                return Ok(stream);
-            }
+    for target in resolve(host, port, until)? {
+        let patience = until.saturating_duration_since(Instant::now()).min(TIMEOUT);
+        if patience.is_zero() {
+            return Err(format!("{host}:{port}: not reached in the request's time"));
+        }
+        match TcpStream::connect_timeout(&target, patience) {
+            Ok(stream) => return Ok(Timed { stream, until }),
             Err(error) => last = format!("{host}:{port}: {error}"),
         }
     }
@@ -124,8 +208,18 @@ pub fn secure_stream(
     host: &str,
     port: u16,
     roots: &Arc<RootCertStore>,
-) -> Result<StreamOwned<ClientConnection, TcpStream>, String> {
-    let stream = connect(host, port)?;
+) -> Result<StreamOwned<ClientConnection, Timed>, String> {
+    secure_stream_until(host, port, roots, Instant::now() + WITHIN)
+}
+
+/// The same, with everything said over it done by `until`.
+pub fn secure_stream_until(
+    host: &str,
+    port: u16,
+    roots: &Arc<RootCertStore>,
+    until: Instant,
+) -> Result<StreamOwned<ClientConnection, Timed>, String> {
+    let stream = connect(host, port, until)?;
     let name =
         ServerName::try_from(host.to_owned()).map_err(|_| format!("{host} is no host name"))?;
     let config =
@@ -208,10 +302,19 @@ pub fn get(url: &str, roots: &Arc<RootCertStore>) -> Result<Answer, String> {
 }
 
 pub fn send(request: &Request<'_>, roots: &Arc<RootCertStore>) -> Result<Answer, String> {
+    send_until(request, roots, Instant::now() + WITHIN)
+}
+
+/// The same, with the whole request done by `until`.
+pub fn send_until(
+    request: &Request<'_>,
+    roots: &Arc<RootCertStore>,
+    until: Instant,
+) -> Result<Answer, String> {
     let url = request.url;
     let (secure, host, port, path) = split(url)?;
     let data = if secure {
-        let mut tls = secure_stream(&host, port, roots)?;
+        let mut tls = secure_stream_until(&host, port, roots, until)?;
         match exchange(&mut tls, &host, &path, request) {
             Ok(data) => data,
             // Servers often close without close_notify; what arrived counts.
@@ -219,7 +322,7 @@ pub fn send(request: &Request<'_>, roots: &Arc<RootCertStore>) -> Result<Answer,
             Err(error) => return Err(tls_error(&error)),
         }
     } else {
-        let mut stream = connect(&host, port)?;
+        let mut stream = connect(&host, port, until)?;
         exchange(&mut stream, &host, &path, request).map_err(|error| error.to_string())?
     };
     parse(&data).ok_or_else(|| format!("{url} gave no HTTP answer"))
@@ -287,135 +390,4 @@ fn dechunk(mut data: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn urls_split_into_scheme_host_port_and_path() {
-        assert_eq!(
-            split("https://mail.example.org/metrics/prometheus").unwrap(),
-            (
-                true,
-                "mail.example.org".into(),
-                443,
-                "/metrics/prometheus".into()
-            )
-        );
-        assert_eq!(
-            split("http://127.0.0.1:8080").unwrap(),
-            (false, "127.0.0.1".into(), 8080, "/".into())
-        );
-        assert_eq!(split("http://[::1]:8080/a").unwrap().1, "::1");
-        assert!(split("ftp://example.org").is_err());
-        assert!(split("https://:443/").is_err());
-    }
-
-    #[test]
-    fn the_origin_of_a_url() {
-        assert_eq!(
-            origin("https://stalwart.example.org/admin/"),
-            "https://stalwart.example.org"
-        );
-        assert_eq!(
-            origin("https://mail.example.org"),
-            "https://mail.example.org"
-        );
-        assert_eq!(
-            origin("http://127.0.0.1:8080/login?a=b"),
-            "http://127.0.0.1:8080"
-        );
-    }
-
-    #[test]
-    fn answers_are_parsed_with_chunked_bodies() {
-        let plain = parse(b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\n\r\nno").unwrap();
-        assert_eq!((plain.status, plain.body.as_str()), (404, "no"));
-        let chunked = parse(
-            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nStrict-Transport-Security: max-age=1\r\n\r\n\
-              4\r\n{\"a\"\r\n3\r\n:1}\r\n0\r\n\r\n",
-        )
-        .unwrap();
-        assert_eq!(chunked.body, "{\"a\":1}");
-        assert_eq!(
-            chunked.header("strict-transport-security"),
-            Some("max-age=1")
-        );
-        assert!(parse(b"not http").is_none());
-        // A chunk size near usize::MAX must neither overflow nor panic.
-        let huge = parse(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\nab\r\n0\r\n\r\n");
-        assert_eq!(huge.unwrap().body, "");
-    }
-
-    #[test]
-    fn a_compressed_body_is_unpacked_as_far_as_it_goes() {
-        use std::io::Write as _;
-        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        gzip.write_all(b"<html>sign in</html>").unwrap();
-        let packed = gzip.finish().unwrap();
-        let answer = |body: &[u8]| {
-            let mut data = b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n".to_vec();
-            data.extend_from_slice(body);
-            parse(&data).unwrap().body
-        };
-        assert_eq!(answer(&packed), "<html>sign in</html>");
-        // Cut off, or no gzip at all: what unpacks, never a panic.
-        assert!("<html>sign in</html>".starts_with(&answer(&packed[..packed.len() - 9])));
-        assert_eq!(answer(b"plain text"), "");
-    }
-
-    #[test]
-    fn a_post_sends_its_headers_and_its_body() {
-        let server = garrison_testing::http::serve(vec![garrison_testing::http::answer(200, "{}")]);
-        let request = Request {
-            method: "POST",
-            url: &format!("{}/topic?x=1", server.url),
-            headers: &[
-                ("Title", "Two checks failed"),
-                ("Authorization", "Bearer token-1"),
-                // Nothing that would start another header or line goes out.
-                ("X-Bad\r\nInjected", "1"),
-                ("X-Also-Bad", "1\r\nInjected: 2"),
-            ],
-            body: b"Backup job: failed",
-        };
-        assert_eq!(send(&request, &roots()).unwrap().status, 200);
-        let sent = server.requests().remove(0);
-        assert!(sent.starts_with("POST /topic?x=1 HTTP/1.1\r\n"), "{sent}");
-        for line in [
-            "Title: Two checks failed\r\n",
-            "Authorization: Bearer token-1\r\n",
-            "Content-Length: 18\r\n",
-        ] {
-            assert!(sent.contains(line), "{sent}");
-        }
-        assert!(!sent.contains("Injected"), "{sent}");
-        assert!(sent.ends_with("\r\n\r\nBackup job: failed"), "{sent}");
-    }
-
-    #[test]
-    fn random_answers_never_panic() {
-        let mut noise = garrison_testing::noise::Noise::new(0x9e37_79b9_7f4a_7c15);
-        let pieces: [&[u8]; 9] = [
-            b"HTTP/1.1 ",
-            b"200",
-            b" OK\r\n",
-            b"Transfer-Encoding: chunked\r\n",
-            b"\r\n",
-            b"ffffffff",
-            b"\r\n\r\n",
-            b"0\r\n",
-            b"\xff\xfe",
-        ];
-        for _ in 0..20_000 {
-            let mut data = Vec::new();
-            for _ in 0..(noise.next_u64() % 12) {
-                match pieces.get(noise.below(10)) {
-                    Some(piece) => data.extend_from_slice(piece),
-                    None => data.push(u8::try_from(noise.next_u64() % 256).unwrap()),
-                }
-            }
-            let _ = parse(&data);
-            let _ = split(&String::from_utf8_lossy(&data));
-        }
-    }
-}
+mod tests;

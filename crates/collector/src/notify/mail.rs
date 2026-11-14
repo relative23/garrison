@@ -7,6 +7,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::Arc;
+use std::time::Instant;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -14,7 +15,7 @@ use garrison_core::time;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 
-use crate::fetch::{secure_stream, tls_error};
+use crate::fetch::{WITHIN, secure_stream_until, tls_error};
 
 /// Where the mail goes and who submits it.
 #[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -119,7 +120,21 @@ pub fn submit(
     now: time::Timestamp,
     roots: &Arc<RootCertStore>,
 ) -> Result<(), String> {
-    let stream = secure_stream(&mail.host, mail.port, roots)?;
+    let until = Instant::now() + WITHIN;
+    submit_until(mail, name, subject, text, now, roots, until)
+}
+
+/// The same, with the whole session done by `until`.
+pub fn submit_until(
+    mail: &Mail,
+    name: &str,
+    subject: &str,
+    text: &str,
+    now: time::Timestamp,
+    roots: &Arc<RootCertStore>,
+    until: Instant,
+) -> Result<(), String> {
+    let stream = secure_stream_until(&mail.host, mail.port, roots, until)?;
     submit_over(stream, mail, name, &message(mail, name, subject, text, now))
 }
 
