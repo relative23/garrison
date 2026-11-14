@@ -1,4 +1,8 @@
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -20,14 +24,11 @@ fn report() -> Value {
     })
 }
 
-/// The observation for `report` written with `mode`, under `options`.
-fn observed(report: Option<&Value>, mode: u32, options: &str) -> Observation {
+/// The observation for what `make` puts at the report's path, under `options`.
+fn observed_at(make: impl FnOnce(&Path), options: &str) -> Observation {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("restic.json");
-    if let Some(report) = report {
-        fs::write(&path, report.to_string()).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
-    }
+    make(&path);
     let provider = BackupCheck::new(&table(&format!(
         "type = \"backup-check\"\npath = \"{}\"\n{options}",
         path.display()
@@ -38,6 +39,28 @@ fn observed(report: Option<&Value>, mode: u32, options: &str) -> Observation {
     let context = crate::testing::context(&config, &runner);
     provider.collect(&context).unwrap().observations.remove(0)
 }
+
+/// `text` written as the report with `mode`.
+fn written(path: &Path, text: &str, mode: u32) {
+    fs::write(path, text).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+/// The observation for `report` written with `mode`, under `options`.
+fn observed(report: Option<&Value>, mode: u32, options: &str) -> Observation {
+    observed_at(
+        |path| {
+            if let Some(report) = report {
+                written(path, &report.to_string(), mode);
+            }
+        },
+        options,
+    )
+}
+
+/// What the provider says of a report it cannot read.
+const UNREADABLE: &str = "The repository's state is not known: the report cannot be read: it must \
+                          be a file, not a link, of at most 256 KiB of valid JSON.";
 
 fn field<'a>(observation: &'a Observation, label: &str) -> &'a Value {
     &observation
@@ -176,6 +199,93 @@ fn a_missing_report_and_one_that_others_can_write_are_unknown() {
         ["The repository's state is not known: the report is one of restic."]
     );
     assert_eq!(borg.title, "borg repository");
+}
+
+#[test]
+fn a_report_behind_a_link_is_not_read() {
+    // Whoever may replace the path's file could point it at a report that
+    // says something else; the link itself proves nothing of who wrote it.
+    let linked = observed_at(
+        |path| {
+            let real = path.with_file_name("elsewhere.json");
+            written(&real, &report().to_string(), 0o644);
+            std::os::unix::fs::symlink(&real, path).unwrap();
+        },
+        "",
+    );
+    assert_eq!(linked.state, State::Unknown);
+    assert_eq!(linked.findings, [UNREADABLE]);
+}
+
+#[test]
+fn a_report_that_is_no_strict_json_object_is_not_read() {
+    // serde reads a struct from a list of its fields' values as well; no
+    // report of backup-check is ever written that way.
+    let listed = observed_at(
+        |path| {
+            let report = report();
+            let fields = [
+                "tool",
+                "repository",
+                "snapshots",
+                "problem",
+                "verify",
+                "restore",
+            ];
+            let list: Vec<Value> = fields.iter().map(|field| report[field].clone()).collect();
+            written(path, &Value::Array(list).to_string(), 0o644);
+        },
+        "",
+    );
+    assert_eq!(listed.state, State::Unknown);
+    assert_eq!(
+        listed.findings,
+        ["The repository's state is not known: the file is no report of backup-check."]
+    );
+    // Two values for one key, which two readers could read differently.
+    let twice = observed_at(
+        |path| {
+            let text = report().to_string();
+            let doubled = text.replacen("{\"", "{\"repository\":\"/srv/other\",\"", 1);
+            written(path, &doubled, 0o644);
+        },
+        "",
+    );
+    assert_eq!(twice.state, State::Unknown);
+    assert_eq!(twice.findings, [UNREADABLE]);
+}
+
+#[test]
+fn a_report_over_its_size_or_no_regular_file_is_not_read() {
+    let mut large = report();
+    large["repository"] = json!("r".repeat(256 * 1024));
+    let oversized = observed(Some(&large), 0o644, "");
+    assert_eq!(oversized.state, State::Unknown);
+    assert_eq!(oversized.findings, [UNREADABLE]);
+    // A pipe has no size to check and would keep the run waiting for a
+    // writer: it is no report, at once.
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let fifo = observed_at(
+            |path| {
+                rustix::fs::mknodat(
+                    rustix::fs::CWD,
+                    path,
+                    rustix::fs::FileType::Fifo,
+                    rustix::fs::Mode::from_raw_mode(0o644),
+                    0,
+                )
+                .unwrap();
+            },
+            "",
+        );
+        let _ = sender.send(fifo);
+    });
+    let fifo = receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the provider waited for a writer of the pipe");
+    assert_eq!(fifo.state, State::Unknown);
+    assert_eq!(fifo.findings, [UNREADABLE]);
 }
 
 #[test]

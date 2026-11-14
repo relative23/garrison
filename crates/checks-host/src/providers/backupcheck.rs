@@ -10,16 +10,16 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
-use garrison_core::files::changed_only_by_trusted;
+use garrison_core::files::{changed_only_by_trusted, read_json_with_metadata};
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, State};
-use garrison_core::time;
+use garrison_core::{json, time};
 
 use crate::backups::{Report as Backup, Run, Tool};
 use crate::context::{Collected, Context, Provider, Report};
 use crate::options::{Checked, Options, fail};
 
-const MAX_REPORT: u64 = 256 * 1024;
+const MAX_REPORT: usize = 256 * 1024;
 const HOUR: i64 = 3600;
 const DAY: i64 = 86_400;
 
@@ -64,26 +64,33 @@ impl BackupCheck {
         })
     }
 
-    /// The report, if it is there, small enough and root's own.
+    /// The report, if it is there, small enough and root's own. It is read
+    /// as `receipt` reads its file: no link followed, no file that is not a
+    /// regular one, at most `MAX_REPORT` bytes of strict JSON, and the owner
+    /// and mode of the very file that was read.
     fn read(&self) -> Result<Backup, String> {
-        let metadata = fs::metadata(&self.path).map_err(|_| {
-            format!(
+        // Only to say which of the two it is: the read below decides.
+        if fs::symlink_metadata(&self.path).is_err() {
+            return Err(format!(
                 "no report at {}; `garrison backup-check {}` writes it",
                 self.path.display(),
                 self.tool.name()
-            )
-        })?;
+            ));
+        }
+        let Some((value, metadata)) = read_json_with_metadata(&self.path, MAX_REPORT) else {
+            return Err(format!(
+                "the report cannot be read: it must be a file, not a link, of at most {} KiB of \
+                 valid JSON",
+                MAX_REPORT / 1024
+            ));
+        };
         if !changed_only_by_trusted(&metadata) {
             return Err(
                 "users other than root can change the report; it is not trusted".to_owned(),
             );
         }
-        if metadata.len() > MAX_REPORT {
-            return Err("the report is larger than a report is".to_owned());
-        }
-        let data = fs::read(&self.path).map_err(|error| error.to_string())?;
         let report: Backup =
-            serde_json::from_slice(&data).map_err(|_| "the file is no report of backup-check")?;
+            json::object(value).map_err(|_| "the file is no report of backup-check")?;
         if report.tool != self.tool {
             return Err(format!("the report is one of {}", report.tool.name()));
         }

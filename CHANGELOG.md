@@ -89,6 +89,14 @@ Notable changes for operators and users. The format follows
   journal does for a message that did not go out.
   A mail password may now be shorter than 16 characters and hold spaces; an
   empty one is an error, since mail is always submitted signed in.
+- **The backup check reads its report as a receipt is read.** The report of
+  `garrison backup-check` was read through a link, a list of values counted
+  as a report, its size was checked on another look at the file than the
+  one that was read, and a pipe at its path kept the collection run waiting.
+  The check now reads it as the `receipt` check reads its file: no link is
+  followed, only a plain file of at most 256 KiB of valid JSON that is one
+  object, judged by the owner and mode of the file that was read. Anything
+  else makes it Unknown, also a `path` that names a link.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser
