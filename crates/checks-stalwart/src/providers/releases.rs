@@ -314,6 +314,13 @@ impl Provider for Releases {
         "releases"
     }
 
+    fn ids(&self) -> Vec<String> {
+        self.products
+            .iter()
+            .map(|product| format!("release.{}", product.id()))
+            .collect()
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let mut report = Report::default();
         for product in &self.products {

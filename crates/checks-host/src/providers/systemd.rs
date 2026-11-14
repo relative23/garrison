@@ -359,6 +359,13 @@ impl Provider for Systemd {
         "systemd"
     }
 
+    fn ids(&self) -> Vec<String> {
+        self.units
+            .iter()
+            .map(|unit| format!("systemd.{}", unit.name))
+            .collect()
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let states = self.states(context);
         let mut report = Report::default();

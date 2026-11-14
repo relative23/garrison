@@ -47,6 +47,16 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **Two checks that report the same observation no longer cost every
+  snapshot.** Two `http` or `receipt` entries with one `id`, a unit in two
+  `systemd` entries, or a `version-command` for Stalwart beside the
+  `stalwart` check passed `garrison check-config`, and then every
+  collection run ended without storing anything. `check-config`, and with
+  it the installer before an upgrade, now refuses such a configuration and
+  names both entries by their place. A run that meets a repeated
+  observation all the same keeps the first, stores the snapshot and says so
+  in the new observation `collector.duplicates`. Two failing checks of one
+  type stand in as `collector.<type>` and `collector.<type>.2`.
 - **Signing out says when it did not work.** Where the session could not
   be deleted, because the database was busy or could not be written, the
   sign-out still answered "ok" and removed the cookie, while a copy of the

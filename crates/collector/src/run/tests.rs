@@ -191,24 +191,47 @@ fn a_failing_provider_does_not_hide_the_others() {
 }
 
 #[test]
-fn duplicate_observation_ids_stop_the_run() {
+fn an_observation_that_two_checks_report_is_kept_once_and_said() {
     let directory = tempfile::tempdir().unwrap();
     let config = crate::testing::config(directory.path());
     let credentials = Credentials::new(directory.path().join("credentials"));
-    let providers = vec![Box::new(Twice) as Box<dyn Provider>];
+    let mut providers = vec![Box::new(Twice) as Box<dyn Provider>];
+    providers.extend(crate::providers::build(&config.collector.providers).unwrap());
     let runner = Canned(String::new());
-    let error = collect_from(&providers, &config, &credentials, &runner, now()).unwrap_err();
+    let snapshot = collect_from(&providers, &config, &credentials, &runner, now()).unwrap();
+    // The first is kept, the others of the run are there, and the run says
+    // what happened instead of storing nothing.
     assert_eq!(
-        error.to_string(),
-        "Providers produced duplicate observation IDs: ['same.id']"
+        ids(&snapshot),
+        ["same.id", "host.resources", "collector.duplicates"]
     );
-    // The status database is opened before the providers run; no snapshot
-    // of such a run is stored in it.
-    let stored: i64 = rusqlite::Connection::open(config.database(Database::Status))
-        .unwrap()
-        .query_row("SELECT count(*) FROM snapshots", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(stored, 0, "nothing is stored");
+    let said = snapshot.observations.last().unwrap();
+    assert_eq!(said.state, State::Unknown);
+    assert!(said.findings[0].contains("kept as it came first: same.id."));
+    let stored = rusqlite::Connection::open(config.database(Database::Status)).unwrap();
+    assert_eq!(
+        crate::store::latest_snapshot(&stored).unwrap(),
+        Some(snapshot)
+    );
+}
+
+#[test]
+fn two_checks_of_one_type_that_both_fail_stand_in_under_ids_of_their_own() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = crate::testing::config(directory.path());
+    let credentials = Credentials::new(directory.path().join("credentials"));
+    let providers: Vec<Box<dyn Provider>> =
+        vec![Box::new(Broken), Box::new(Broken), Box::new(Broken)];
+    let runner = Canned(String::new());
+    let snapshot = collect_from(&providers, &config, &credentials, &runner, now()).unwrap();
+    assert_eq!(
+        ids(&snapshot),
+        [
+            "collector.broken",
+            "collector.broken.2",
+            "collector.broken.3"
+        ]
+    );
 }
 
 /// A provider that reports one observation after it took its time.

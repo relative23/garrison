@@ -406,6 +406,19 @@ impl Provider for Stalwart {
         "stalwart"
     }
 
+    fn ids(&self) -> Vec<String> {
+        [
+            "version.stalwart",
+            "stalwart.api",
+            "stalwart.spam",
+            "stalwart.milter",
+            "stalwart.mailboxes",
+            "stalwart.queue",
+        ]
+        .map(str::to_owned)
+        .to_vec()
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let mut report = Report::of(Self::version(context)?);
         let Some(key) = &context.native_key else {

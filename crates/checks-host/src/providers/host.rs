@@ -98,6 +98,10 @@ impl Provider for Host {
         "host"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec!["host.resources".to_owned()]
+    }
+
     #[allow(clippy::cast_precision_loss)]
     fn collect(&self, context: &Context<'_>) -> Collected {
         let base = |state, source: String| {

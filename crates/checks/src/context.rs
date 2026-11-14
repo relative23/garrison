@@ -148,6 +148,15 @@ pub trait Provider {
     /// The provider's `type`, also the `provider` of its observations.
     fn name(&self) -> &'static str;
 
+    /// The ids of the observations this provider reports, as far as its
+    /// configuration alone decides them. An id two providers report can be
+    /// stored for one of them only, so the configuration check refuses such
+    /// a pair before anything runs. A provider with ids that depend on what
+    /// it finds, a domain or a test, names those it always reports.
+    fn ids(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected;
 }
 

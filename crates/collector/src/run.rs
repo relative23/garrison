@@ -53,8 +53,6 @@ impl Time {
 pub enum Error {
     #[error("{0}")]
     Config(#[from] ConfigError),
-    #[error("Providers produced duplicate observation IDs: {0}")]
-    Duplicates(String),
     #[error("status database: {0}")]
     Store(#[from] SqliteError),
 }
@@ -100,10 +98,17 @@ fn metrics_credential(config: &Config, credentials: &Credentials) -> Option<(Str
 }
 
 /// The observation that stands in for a provider that failed or was not
-/// run; `said` is its finding.
-fn stand_in(context: &Context<'_>, name: &str, said: String) -> Option<Observation> {
+/// run; `said` is its finding. `place` is which of the providers of its type
+/// it is, from one: the second and later ones get an id of their own, so
+/// that two of a type that both fail do not report one id.
+fn stand_in(context: &Context<'_>, name: &str, place: usize, said: String) -> Option<Observation> {
+    let id = if place > 1 {
+        format!("collector.{name}.{place}")
+    } else {
+        format!("collector.{name}")
+    };
     Observation::new(
-        format!("collector.{name}"),
+        id,
         name,
         format!("Provider {name}"),
         [ModuleId::Services],
@@ -114,6 +119,46 @@ fn stand_in(context: &Context<'_>, name: &str, said: String) -> Option<Observati
     )
     .ok()
     .map(|observation| observation.with_findings(vec![said]))
+}
+
+/// Keep the first observation of each id and say which ids came more than
+/// once. The configuration check refuses the providers it can tell will do
+/// this; what it cannot tell must not cost the snapshot of every run.
+fn without_repeats(
+    context: &Context<'_>,
+    observations: &mut Vec<Observation>,
+) -> Option<Observation> {
+    let (mut seen, mut repeated) = (BTreeSet::new(), BTreeSet::new());
+    observations.retain(|observation| {
+        let first = seen.insert(observation.id.clone());
+        if !first {
+            repeated.insert(observation.id.clone());
+        }
+        first
+    });
+    if repeated.is_empty() {
+        return None;
+    }
+    let names: Vec<String> = repeated.into_iter().collect();
+    let names = names.join(", ");
+    log::error!("More than one provider reported: {names}; the first of each was kept");
+    Observation::new(
+        "collector.duplicates",
+        "collector",
+        "Checks that report the same observation",
+        [ModuleId::Services],
+        Evidence::Process,
+        State::Unknown,
+        context.checked_at(),
+        "collector",
+    )
+    .ok()
+    .map(|observation| {
+        observation.with_findings(vec![format!(
+            "Reported by more than one check, and kept as it came first: {names}. \
+             `garrison check-config` names providers that report the same observation."
+        )])
+    })
 }
 
 /// Run `providers` once and store the snapshot; the snapshot is returned.
@@ -155,8 +200,13 @@ pub fn collect_within(
     let mut gauges = BTreeMap::new();
     let mut counters = BTreeMap::new();
     let mut errors = Vec::new();
+    let mut places: BTreeMap<&str, usize> = BTreeMap::new();
     for provider in providers {
         let name = provider.name();
+        let place = *places
+            .entry(name)
+            .and_modify(|place| *place += 1)
+            .or_insert(1);
         // What is not begun in time is said, not waited for: the run ends
         // with a snapshot of what was found.
         if context.deadline.expired() {
@@ -166,7 +216,7 @@ pub fn collect_within(
                 error: "not run".to_owned(),
             });
             let said = "Not run: the checks before it used up the time of this collection run.";
-            observations.extend(stand_in(&context, name, said.to_owned()));
+            observations.extend(stand_in(&context, name, place, said.to_owned()));
             continue;
         }
         let began = Instant::now();
@@ -199,18 +249,10 @@ pub fn collect_within(
             error: kind.to_owned(),
         });
         let said = format!("The provider {kind}; see the collector journal.");
-        observations.extend(stand_in(&context, name, said));
+        observations.extend(stand_in(&context, name, place, said));
     }
-    let mut seen = BTreeSet::new();
-    let duplicates: BTreeSet<&str> = observations
-        .iter()
-        .map(|observation| observation.id.as_str())
-        .filter(|id| !seen.insert(*id))
-        .collect();
-    if !duplicates.is_empty() {
-        let names: Vec<String> = duplicates.iter().map(|id| format!("'{id}'")).collect();
-        return Err(Error::Duplicates(format!("[{}]", names.join(", "))));
-    }
+    let repeats = without_repeats(&context, &mut observations);
+    observations.extend(repeats);
     let channels = Channels::of(config, Secrets::read(credentials, &config.notifications));
     // The channels get what is left of the run's time: a channel that does
     // not answer must not cost the snapshot.

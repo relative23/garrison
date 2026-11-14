@@ -59,9 +59,23 @@ impl VersionCommand {
     }
 }
 
+impl VersionCommand {
+    /// The id of its observation: the component's name decides it.
+    fn id(&self) -> String {
+        format!(
+            "version.{}",
+            self.component.to_lowercase().replace(' ', "-")
+        )
+    }
+}
+
 impl Provider for VersionCommand {
     fn name(&self) -> &'static str {
         "version-command"
+    }
+
+    fn ids(&self) -> Vec<String> {
+        vec![self.id()]
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
@@ -70,10 +84,7 @@ impl Provider for VersionCommand {
         value.insert("component".into(), json!(self.component));
         value.insert("version".into(), json!(version));
         let observation = Observation::new(
-            format!(
-                "version.{}",
-                self.component.to_lowercase().replace(' ', "-")
-            ),
+            self.id(),
             self.name(),
             self.component.clone(),
             self.modules.iter().copied(),

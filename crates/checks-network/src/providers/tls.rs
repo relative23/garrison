@@ -284,6 +284,10 @@ impl Provider for Tls {
         "tls"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec!["tls.endpoints".to_owned()]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let roots = self.roots.clone().unwrap_or_else(system_roots);
         let (mut rows, mut findings) = (Vec::new(), Vec::new());

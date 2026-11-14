@@ -21,8 +21,10 @@ use serde_json::Value;
 const DOCUMENT: &str = include_str!("../../../docs/operator/observations.md");
 const NOW: &str = "2026-10-29T12:00:00Z";
 /// Listed ids this test cannot make a check report: the spam by domain needs
-/// Stalwart's accounts, which nothing here serves.
-const NEEDS_DATA: [&str; 1] = ["flow.spam-domains"];
+/// Stalwart's accounts, which nothing here serves, and an observation that
+/// two checks report needs providers the configuration check refuses (the
+/// collector's own tests make them).
+const NEEDS_DATA: [&str; 2] = ["collector.duplicates", "flow.spam-domains"];
 
 /// No program can be run.
 struct NoPrograms;

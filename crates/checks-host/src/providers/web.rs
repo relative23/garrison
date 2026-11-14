@@ -57,6 +57,10 @@ impl Provider for Http {
         "http"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec![format!("http.{}", self.id)]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let status = status_of(&self.url, Duration::from_secs(5)).ok();
         let findings = match status {
@@ -166,6 +170,10 @@ impl Bulwark {
 impl Provider for Bulwark {
     fn name(&self) -> &'static str {
         "bulwark"
+    }
+
+    fn ids(&self) -> Vec<String> {
+        vec!["bulwark.plugins".to_owned()]
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {

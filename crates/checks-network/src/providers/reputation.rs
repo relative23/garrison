@@ -451,6 +451,10 @@ impl Provider for Reputation {
         "reputation"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec!["reputation.blocklists".to_owned()]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let read = self.known(context);
         let at = time::Timestamp::from_second(read.at)

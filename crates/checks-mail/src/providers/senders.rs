@@ -313,6 +313,10 @@ impl Provider for Senders {
         "senders"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec!["senders.accounts".to_owned()]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let read = self.known(context);
         let unusual: Vec<&Sender> = read

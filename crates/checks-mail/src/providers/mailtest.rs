@@ -287,6 +287,10 @@ impl Provider for MailTest {
         "mail-test"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec!["mailtest.results".to_owned()]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let now = context.now.as_second();
         let kept: Option<Kept> = context

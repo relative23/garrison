@@ -176,6 +176,10 @@ impl Provider for BackupCheck {
         "backup-check"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec![format!("backup-check.{}", self.tool.name())]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let (noun, title) = match self.tool {
             Tool::Restic => ("snapshot", "restic repository"),

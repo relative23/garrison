@@ -113,6 +113,25 @@ fn check_config_reports_providers_actions_and_the_policy() {
 }
 
 #[test]
+fn check_config_refuses_two_providers_that_report_one_observation() {
+    let directory = prepared();
+    let path = directory.path().join("garrison.toml");
+    let mut config = std::fs::read_to_string(&path).unwrap();
+    // A second check of the host: every run would report host.resources twice.
+    config.push_str("\n[[providers]]\ntype = \"host\"\n");
+    std::fs::write(&path, config).unwrap();
+    let refused = run(directory.path(), &["check-config"]);
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(
+        text(&refused.stderr).contains(
+            "providers[1] (host) reports the observation host.resources as well as providers[0] (host)"
+        ),
+        "{}",
+        text(&refused.stderr)
+    );
+}
+
+#[test]
 fn the_switch_snippet_comes_from_the_interface_next_to_the_binary() {
     // A release layout: bin/garrison and static/ beside it.
     let release = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();

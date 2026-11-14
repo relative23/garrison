@@ -332,6 +332,10 @@ impl Provider for Receipt {
         "receipt"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec![format!("receipt.{}", self.id)]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let read = read_json_with_metadata(&self.path, MAX_DOCUMENT)
             .filter(|(value, _)| value.is_object() || value.is_array());

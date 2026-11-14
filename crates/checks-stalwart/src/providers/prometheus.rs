@@ -231,6 +231,10 @@ impl Provider for Prometheus {
         "prometheus"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec!["prometheus.exporter".to_owned()]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let scraped = self.scrape(context);
         let values = scraped.as_ref().ok();

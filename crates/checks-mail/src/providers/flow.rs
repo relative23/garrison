@@ -197,6 +197,13 @@ impl Provider for Flow {
         "mail-flow"
     }
 
+    fn ids(&self) -> Vec<String> {
+        self.checks
+            .iter()
+            .map(|check| format!("flow.{check}"))
+            .collect()
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let read = Self::known(context);
         let mut report = Report::default();

@@ -458,6 +458,16 @@ impl Provider for HostCare {
         "host-care"
     }
 
+    fn ids(&self) -> Vec<String> {
+        self.checks
+            .iter()
+            .map(|check| match check.as_str() {
+                "disk" => "host.disk-forecast".to_owned(),
+                check => format!("host.{check}"),
+            })
+            .collect()
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let mut report = Report::default();
         for check in &self.checks {

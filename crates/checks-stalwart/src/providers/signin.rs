@@ -316,6 +316,10 @@ impl Provider for SignIn {
         "sign-in"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec!["signin.page".to_owned()]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let page = page(context.deployment);
         let (at, examined) = Self::examined(context, &page);

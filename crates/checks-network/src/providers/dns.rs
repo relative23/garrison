@@ -303,6 +303,10 @@ impl Provider for Dns {
         "dns"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec!["dns.records".to_owned()]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let mut report = Report::default();
         let Some(key) = &context.native_key else {

@@ -270,6 +270,13 @@ impl Provider for Clamav {
         "clamav"
     }
 
+    fn ids(&self) -> Vec<String> {
+        vec![
+            "clamav.configuration".to_owned(),
+            "clamav.signatures".to_owned(),
+        ]
+    }
+
     fn collect(&self, context: &Context<'_>) -> Collected {
         let signatures = self.signatures(context)?;
         let daily = signatures

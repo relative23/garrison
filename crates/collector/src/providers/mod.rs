@@ -2,6 +2,8 @@
 //! The checks live in the `garrison-checks-*` crates; their types and the
 //! modules other crates use stay reachable here.
 
+use std::collections::BTreeMap;
+
 use garrison_core::config::ConfigError;
 
 use crate::context::Provider;
@@ -45,10 +47,13 @@ const TYPES: [(&str, Factory); 19] = [
     ("version-command", |raw| boxed(VersionCommand::new(raw))),
 ];
 
-/// Validate every provider table before anything is collected.
+/// Validate every provider table before anything is collected: each one's
+/// own settings, and that no two of them report the same observation.
 pub fn build(tables: &[toml::Table]) -> Checked<Vec<Box<dyn Provider>>> {
-    let mut providers = Vec::new();
-    for table in tables {
+    let mut providers: Vec<Box<dyn Provider>> = Vec::new();
+    // Which table reports an id, by its place in the configuration.
+    let mut claimed: BTreeMap<String, usize> = BTreeMap::new();
+    for (index, table) in tables.iter().enumerate() {
         let kind = table.get("type");
         let factory = kind
             .and_then(toml::Value::as_str)
@@ -61,7 +66,26 @@ pub fn build(tables: &[toml::Table]) -> Checked<Vec<Box<dyn Provider>>> {
             };
             return fail(format!("{problem}; known: {}", known.join(", ")));
         };
-        providers.push(factory(table)?);
+        let provider = factory(table)?;
+        for id in provider.ids() {
+            if let Some(first) = claimed.insert(id.clone(), index) {
+                // Both would report it, and a snapshot holds an id once.
+                let other = if first == index {
+                    "twice".to_owned()
+                } else {
+                    format!(
+                        "as well as providers[{first}] ({})",
+                        providers[first].name()
+                    )
+                };
+                return fail(format!(
+                    "providers[{index}] ({}) reports the observation {id} {other}; give each its \
+                     own id, unit or component, or take one of them out",
+                    provider.name()
+                ));
+            }
+        }
+        providers.push(provider);
     }
     Ok(providers)
 }
