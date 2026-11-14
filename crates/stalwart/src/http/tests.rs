@@ -123,6 +123,60 @@ fn a_silent_listener_times_out() {
     assert!(started.elapsed() < Duration::from_secs(3));
 }
 
+/// A listener that begins an answer and then sends a byte now and then: in
+/// the head when `in_head`, else in a body whose length it never reaches.
+fn dripping(in_head: bool) -> String {
+    use std::io::Write;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let begun: &[u8] = if in_head {
+            b"HTTP/1.1 200 OK\r\nX-Slow: "
+        } else {
+            b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n"
+        };
+        let _ = stream.write_all(begun);
+        // Each byte comes long before a wait for one byte would give up.
+        for _ in 0..200 {
+            if stream.write_all(b"x").is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    });
+    url
+}
+
+/// The time is for the whole request, as it is for the checks' own client
+/// (`garrison_checks::fetch`): a limit for each read alone would let a
+/// listener that sends a byte now and then hold the caller as long as it
+/// likes.
+#[test]
+fn a_listener_that_sends_a_byte_now_and_then_does_not_hold_a_request_beyond_its_time() {
+    for in_head in [true, false] {
+        let url = dripping(in_head);
+        let started = std::time::Instant::now();
+        let result = Request::get(&url)
+            .timeout(Duration::from_millis(400))
+            .send();
+        assert_eq!(
+            result,
+            Err(Error::Unavailable("Stalwart is unavailable".into())),
+            "in the head: {in_head}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "in the head: {in_head}, {:?}",
+            started.elapsed()
+        );
+    }
+    // The status alone is bound the same way.
+    let started = std::time::Instant::now();
+    assert!(status_of(&dripping(true), Duration::from_millis(400)).is_err());
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
 #[test]
 fn status_of_reports_any_status() {
     let server = serve(vec![answer(503, "")]);

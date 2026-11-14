@@ -2,6 +2,18 @@
 //!
 //! The target always comes from configuration. Proxies from the environment and
 //! redirects are disabled, bodies are size-bound and nothing is decompressed.
+//!
+//! A request has one time for all of it, from the connection to the last
+//! byte of the answer: a listener that sends a byte now and then holds the
+//! caller no longer than one that says nothing.
+//!
+//! Garrison has two HTTP clients, on purpose. This one speaks plain HTTP to
+//! an address of this host, mostly Stalwart's own listener: it is built
+//! without TLS and looks up no name. What is asked under a public name, the
+//! way a visitor's browser would ask (TLS against the system's trust store,
+//! the system's name lookup), goes through `garrison_checks::fetch`. Both
+//! bound a request in the same way: the whole of it in time, the answer in
+//! size, no redirect followed.
 
 use std::sync::LazyLock;
 use std::time::Duration;

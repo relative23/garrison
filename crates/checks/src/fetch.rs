@@ -10,6 +10,11 @@
 //! lookup, the connection, TLS and the answer. A limit for each step alone
 //! would let a server that sends a byte now and then, or a resolver that
 //! does not answer, hold the caller for as long as it likes.
+//!
+//! Requests to Stalwart's own listener on this host do not come through
+//! here: `garrison_stalwart::http` speaks plain HTTP to a loopback address,
+//! without TLS and without a name to look up, and bounds a request in the
+//! same way.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
