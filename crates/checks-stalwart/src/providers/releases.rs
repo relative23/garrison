@@ -27,6 +27,9 @@ const API: &str = "https://api.github.com";
 /// A known answer is asked for again after a day, a failed request after an hour.
 const DAY: i64 = 86400;
 const RETRY: i64 = 3600;
+/// Without an answer for this long, the release that was named last no
+/// longer says that the running one is the newest.
+const STALE_AFTER: i64 = 3 * DAY;
 /// The newest releases that are read where pre-releases count.
 const LISTED: usize = 10;
 
@@ -71,6 +74,9 @@ struct Asked {
     at: i64,
     /// The newest release GitHub named, when it last named one.
     latest: Option<String>,
+    /// When it last named one.
+    #[serde(default)]
+    answered_at: Option<i64>,
     /// Why the last request gave none.
     problem: Option<String>,
     /// Whether pre-releases counted in that request.
@@ -210,13 +216,16 @@ impl Releases {
             Ok(latest) => Asked {
                 at: now,
                 latest: Some(latest),
+                answered_at: Some(now),
                 problem: None,
                 every,
             },
-            // What was known before stays known; the next try comes sooner.
+            // What was known before stays known, with when it was learned;
+            // the next try comes sooner.
             Err(problem) => Asked {
                 at: now,
-                latest: kept.and_then(|kept| kept.latest),
+                latest: kept.as_ref().and_then(|kept| kept.latest.clone()),
+                answered_at: kept.and_then(|kept| kept.answered_at),
                 problem: Some(problem),
                 every,
             },
@@ -267,6 +276,31 @@ impl Releases {
                 )),
             ),
         };
+        // A release that was named once says nothing of the releases since:
+        // while no answer comes, that is said, and after a few days "the
+        // running release is the newest" is no longer known.
+        let silent = asked
+            .latest
+            .as_ref()
+            .and(asked.problem.as_deref())
+            .map(|problem| {
+                let since = asked
+                    .answered_at
+                    .and_then(|second| time::Timestamp::from_second(second).ok())
+                    .map_or_else(|| "an earlier run".to_owned(), time::isoformat);
+                format!(
+                    "GitHub has given no answer since {since}, so a newer release would not be \
+                     seen here: {problem}."
+                )
+            });
+        let outdated = asked
+            .answered_at
+            .is_none_or(|answered| context.now.as_second() - answered > STALE_AFTER);
+        let state = match (state, &silent) {
+            (State::Ok, Some(_)) if outdated => State::Unknown,
+            (state, _) => state,
+        };
+        let finding: Vec<String> = finding.into_iter().chain(silent).collect();
         let at = time::Timestamp::from_second(asked.at)
             .ok()
             .map(time::isoformat);
@@ -286,7 +320,7 @@ impl Releases {
             Field::text("Newest release", asked.latest),
             Field::new("Asked", at, Format::Datetime),
         ])
-        .with_findings(finding.into_iter().collect())
+        .with_findings(finding)
         .with_max_age(180))
     }
 }

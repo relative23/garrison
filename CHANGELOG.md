@@ -57,6 +57,11 @@ Notable changes for operators and users. The format follows
   Alerts page called the channels in order as soon as they were named.
   Their check is now Unknown until the first notification has gone out;
   `garrison notify-test` shows at once whether a message arrives.
+- **A release list that stops answering is said.** While GitHub gave no
+  answer, the release checks kept the last release it had named without a
+  word. They now say since when no answer came, and after three days "the
+  running release is the newest" turns Unknown; a newer release that was
+  seen stays a warning.
 - **A date from the future is no fresh date.** A receipt, a backup's newest
   snapshot or a backup report dated ahead of the host's clock counted as
   just written, however long that state lasted. More than five minutes

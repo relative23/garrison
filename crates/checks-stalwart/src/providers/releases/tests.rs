@@ -289,3 +289,32 @@ fn options_are_checked() {
         );
     }
 }
+
+#[test]
+fn a_release_list_that_stops_answering_is_said_and_then_no_longer_in_order() {
+    // One answer, then GitHub is not reached any more.
+    let server = serve(vec![answer(200, &release(&format!("v{RUNS}")))]);
+    let (provider, memory) = (provider(&server.url), Remembered::default());
+    let current = collected(&provider, &memory, 0);
+    assert_eq!((current.state, current.findings.len()), (State::Ok, 0));
+    server.requests();
+    // A day later the answer is due again and does not come: what was
+    // known stays, with since when it is all that is known.
+    let silent = collected(&provider, &memory, 86_400 + 60);
+    assert_eq!(silent.state, State::Ok);
+    assert_eq!(silent.findings.len(), 1);
+    assert!(
+        silent.findings[0].starts_with(
+            "GitHub has given no answer since 2026-10-29T12:00:00+00:00, so a newer release \
+             would not be seen here:"
+        ),
+        "{:?}",
+        silent.findings
+    );
+    // After three days without an answer, "the running release is the
+    // newest" is no longer known.
+    let stale = collected(&provider, &memory, 3 * 86_400 + 3700);
+    assert_eq!(stale.state, State::Unknown);
+    assert_eq!(field(&stale, "Newest release"), &json!(RUNS));
+    assert!(stale.findings[0].starts_with("GitHub has given no answer since"));
+}
