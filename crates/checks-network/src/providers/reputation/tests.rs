@@ -158,6 +158,76 @@ fn a_list_that_gives_this_resolver_no_verdict_is_no_listing() {
     assert_eq!(blocklists.findings, ["No list gave a verdict."]);
 }
 
+/// Lists answer within 127.0.0.0/8. A resolver that answers a name that does
+/// not exist with an address of its own, as some providers' resolvers do,
+/// leaves the list unread: no listing, and no clean result either.
+#[test]
+fn an_answer_outside_127_0_0_0_is_no_listing_and_no_verdict() {
+    let mut zone = mail_host();
+    listed(&mut zone, V4, "rewritten.example.org", [192, 0, 2, 80]);
+    let (resolver, _) = stand_in(zone, None, 64);
+    let alone = provider(
+        resolver,
+        "lists = [\"rewritten.example.org\"]\nlists_ipv6 = []",
+    );
+    let (blocklists, _) = observed(&alone, &Remembered::default(), 0);
+    assert_eq!(blocklists.state, State::Unknown);
+    assert_eq!(blocklists.findings, ["No list gave a verdict."]);
+    assert_eq!(
+        rows(&blocklists),
+        [
+            "203.0.113.5 | rewritten.example.org | no verdict: the resolver answered 192.0.2.80, \
+             which no list answers: it rewrites what it is told, so the list cannot be read \
+             through it"
+        ]
+    );
+    // Any code within 127.0.0.0/8 is a listing, not only 127.0.0.2.
+    let mut zone = mail_host();
+    listed(&mut zone, V4, "rewritten.example.org", [192, 0, 2, 80]);
+    listed(&mut zone, V4, "codes.example.org", [127, 0, 0, 10]);
+    let (resolver, _) = stand_in(zone, None, 64);
+    let both = provider(
+        resolver,
+        "lists = [\"rewritten.example.org\", \"codes.example.org\"]\nlists_ipv6 = []",
+    );
+    let (blocklists, _) = observed(&both, &Remembered::default(), 0);
+    assert_eq!(blocklists.state, State::Failed);
+    assert_eq!(
+        blocklists.findings,
+        ["203.0.113.5 is listed on codes.example.org (127.0.0.10)."]
+    );
+}
+
+/// Spamhaus' own errors, in 127.255.255.0/24, say why it gives no verdict.
+#[test]
+fn spamhaus_says_why_it_gives_no_verdict() {
+    for (code, reason) in [
+        (252, "the list says that its name is mistyped"),
+        (
+            254,
+            "the list gives this resolver no verdict; it refuses public resolvers",
+        ),
+        (
+            255,
+            "the list gives this resolver no verdict; it was asked too often",
+        ),
+    ] {
+        let mut zone = mail_host();
+        listed(&mut zone, V4, "zen.spamhaus.org", [127, 255, 255, code]);
+        let (resolver, _) = stand_in(zone, None, 64);
+        let spamhaus = provider(resolver, "lists = [\"zen.spamhaus.org\"]\nlists_ipv6 = []");
+        let (blocklists, _) = observed(&spamhaus, &Remembered::default(), 0);
+        assert_eq!(
+            rows(&blocklists),
+            [format!(
+                "203.0.113.5 | zen.spamhaus.org | no verdict: {reason}"
+            )],
+            "127.255.255.{code}"
+        );
+        assert_eq!(blocklists.state, State::Unknown, "127.255.255.{code}");
+    }
+}
+
 #[test]
 fn a_list_that_is_down_is_asked_once_and_not_for_every_address() {
     let mut zone = Zone::new();

@@ -116,6 +116,15 @@ Notable changes for operators and users. The format follows
   takes the answer that lists it among the unit's names. A unit that
   systemd gives no answer for, and every unit while `systemctl` cannot be
   run, is Unknown and says why.
+- **Only a blocklist's own answer is a listing.** Any address a resolver
+  gave for a list's question counted as a listing, so a resolver that
+  answers names that do not exist with an address of its own, as some
+  providers' resolvers do for a search page, put the mail server on every
+  list and the blocklists card at Failed. A listing is now an answer within
+  127.0.0.0/8, where lists give theirs; another address leaves that list
+  without a verdict, and such a resolver leaves the card Unknown. Spamhaus'
+  errors also say which one it gave: a mistyped list name, a public
+  resolver, or too many questions.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser

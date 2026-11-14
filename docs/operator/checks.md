@@ -224,9 +224,14 @@ names in the MX records of its domains.
   IPv4 addresses are asked of `lists` (default `zen.spamhaus.org`,
   `bl.spamcop.net`, `psbl.surriel.com`, `bl.mailspike.net`), IPv6 addresses
   of `lists_ipv6` (default `zen.spamhaus.org`): a listing of the IPv6 address
-  is the one that is overlooked. A list that gives no verdict is shown as
-  such and is no listing. Spamhaus gives none to public resolvers, such as
-  those of a hosting provider; a resolver of your own on the host gets one.
+  is the one that is overlooked. A listing is an answer within
+  127.0.0.0/8, where lists give theirs. A list that gives no verdict is shown
+  as such and is no listing. Spamhaus gives none to public resolvers, such as
+  those of a hosting provider, nor after too many questions; a resolver of
+  your own on the host gets one. An answer outside 127.0.0.0/8 comes from a
+  resolver that answers names that do not exist with an address of its own:
+  no list can be read through it, and the card stays Unknown until the
+  check asks another (`resolver`).
 - **Reverse names.** Each address should have a reverse name that leads back
   to it and is one of the mail hosts, the name the server greets with. One
   that is missing, leads elsewhere or is the hosting provider's default is a
