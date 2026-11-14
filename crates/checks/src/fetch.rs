@@ -272,8 +272,50 @@ fn exchange(
     stream.write_all(request.body)?;
     stream.flush()?;
     let mut data = Vec::new();
-    stream.take(LIMIT).read_to_end(&mut data)?;
-    Ok(data)
+    match stream.take(LIMIT).read_to_end(&mut data) {
+        Ok(_) => Ok(data),
+        // Many servers close the socket without the notice TLS ends with.
+        // What arrived before counts where its own length says that it is
+        // all of it: otherwise whoever can end the connection could cut the
+        // answer anywhere, and a message that did arrive would count as lost
+        // and be sent again.
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+            if whole(&data) {
+                Ok(data)
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "the connection ended before its answer was whole",
+                ))
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether `data` is an answer that its own length calls whole: the head,
+/// and a body as long as `Content-Length` says or with the last chunk of a
+/// chunked one. An answer that gives no length ends with its connection,
+/// and so is never known to be whole.
+fn whole(data: &[u8]) -> bool {
+    let Some(end) = data.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return false;
+    };
+    let head = String::from_utf8_lossy(&data[..end]);
+    let body = &data[end + 4..];
+    let header = |name: &str| {
+        head.split("\r\n")
+            .skip(1)
+            .filter_map(|line| line.split_once(':'))
+            .find(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.trim().to_owned())
+    };
+    if header("transfer-encoding").is_some_and(|value| value.eq_ignore_ascii_case("chunked")) {
+        return dechunk(body).1;
+    }
+    header("content-length")
+        .and_then(|length| length.parse::<usize>().ok())
+        .is_some_and(|length| body.len() >= length)
 }
 
 trait ReadWrite: Read + Write {}
@@ -315,12 +357,7 @@ pub fn send_until(
     let (secure, host, port, path) = split(url)?;
     let data = if secure {
         let mut tls = secure_stream_until(&host, port, roots, until)?;
-        match exchange(&mut tls, &host, &path, request) {
-            Ok(data) => data,
-            // Servers often close without close_notify; what arrived counts.
-            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => Vec::new(),
-            Err(error) => return Err(tls_error(&error)),
-        }
+        exchange(&mut tls, &host, &path, request).map_err(|error| tls_error(&error))?
     } else {
         let mut stream = connect(&host, port, until)?;
         exchange(&mut stream, &host, &path, request).map_err(|error| error.to_string())?
@@ -343,7 +380,7 @@ fn parse(data: &[u8]) -> Option<Answer> {
         key.eq_ignore_ascii_case("transfer-encoding") && value.eq_ignore_ascii_case("chunked")
     });
     if chunked {
-        body = dechunk(&body);
+        body = dechunk(&body).0;
     }
     // Stalwart sends its pages compressed whatever the request accepts.
     let packed = headers.iter().any(|(key, value)| {
@@ -367,7 +404,8 @@ fn unpack(data: &[u8]) -> Vec<u8> {
     body
 }
 
-fn dechunk(mut data: &[u8]) -> Vec<u8> {
+/// A chunked body joined, and whether its last, empty chunk was there.
+fn dechunk(mut data: &[u8]) -> (Vec<u8>, bool) {
     let mut body = Vec::new();
     while let Some(line) = data.windows(2).position(|window| window == b"\r\n") {
         let size = String::from_utf8_lossy(&data[..line]);
@@ -375,18 +413,18 @@ fn dechunk(mut data: &[u8]) -> Vec<u8> {
         else {
             break;
         };
+        if size == 0 {
+            return (body, true);
+        }
         let start = line + 2;
         // A size from the server: an absurd one must not overflow the bounds.
-        let Some(end) = start
-            .checked_add(size)
-            .filter(|end| size > 0 && *end <= data.len())
-        else {
+        let Some(end) = start.checked_add(size).filter(|end| *end <= data.len()) else {
             break;
         };
         body.extend_from_slice(&data[start..end]);
         data = data.get(end + 2..).unwrap_or_default();
     }
-    body
+    (body, false)
 }
 
 #[cfg(test)]

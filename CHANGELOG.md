@@ -47,6 +47,13 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **An answer that arrived counts, also where the server ends TLS without
+  its closing notice.** Many servers just close the connection. Garrison
+  then threw away what it had read: a notification that ntfy or a webhook
+  had taken counted as failed and was sent again every minute, and the
+  sign-in check, the MTA-STS policy and the release list could fail without
+  a reason. A complete answer is now taken; one that its own length does
+  not call complete still is not.
 - **Notifications no longer lose a return to order or a lasting problem.**
   A check that was reported as failed, warned for one run and was then in
   order sent no "in order again"; one that failed and warned by turns was

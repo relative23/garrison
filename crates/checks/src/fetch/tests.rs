@@ -170,3 +170,84 @@ fn a_server_that_sends_a_byte_now_and_then_does_not_hold_a_request_beyond_its_ti
         "{late}"
     );
 }
+
+/// A TLS server on `localhost` that reads one request, answers `answer` and
+/// closes the connection without the notice TLS ends with; its port, and the
+/// authority its certificate comes from.
+fn closes_without_notice(answer: &'static [u8]) -> (u16, Roots) {
+    use rustls::{RootCertStore, ServerConfig, ServerConnection, StreamOwned};
+    let certificates = garrison_testing::tls::certificates();
+    let mut roots = RootCertStore::empty();
+    roots.add(certificates.ca.clone()).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let config =
+        ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![certificates.server.clone()],
+                certificates.key.clone_key(),
+            )
+            .unwrap();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let connection = ServerConnection::new(Arc::new(config)).unwrap();
+        let mut tls = StreamOwned::new(connection, stream);
+        let mut request = [0u8; 2048];
+        let mut read = 0;
+        while !request[..read]
+            .windows(4)
+            .any(|window| window == b"\r\n\r\n")
+        {
+            match tls.read(&mut request[read..]) {
+                Ok(count) if count > 0 => read += count,
+                _ => return,
+            }
+        }
+        let _ = tls.write_all(answer);
+        let _ = tls.flush();
+        // Dropped as it is: the socket closes, and TLS was never ended.
+    });
+    (port, Arc::new(roots))
+}
+
+#[test]
+fn an_answer_that_is_whole_counts_though_the_server_ended_tls_without_notice() {
+    // Many servers close the socket and leave out TLS's closing notice.
+    let (port, roots) = closes_without_notice(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n{\"id\":\"m1\"}",
+    );
+    let answer = get(&format!("https://localhost:{port}/topic"), &roots).unwrap();
+    assert_eq!(
+        (answer.status, answer.body.as_str()),
+        (200, "{\"id\":\"m1\"}")
+    );
+    // A chunked answer is whole with its last, empty chunk.
+    let (port, roots) = closes_without_notice(
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nok\r\n0\r\n\r\n",
+    );
+    let answer = get(&format!("https://localhost:{port}/"), &roots).unwrap();
+    assert_eq!((answer.status, answer.body.as_str()), (200, "ok"));
+}
+
+#[test]
+fn an_answer_cut_short_without_notice_is_no_answer() {
+    // Whoever can end the connection could cut an answer anywhere: without
+    // the notice, only what its own length calls whole is taken.
+    for cut in [
+        b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{\"id\"".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nok\r\n",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\n",
+        // No length at all: the end of the connection would be the end.
+        b"HTTP/1.1 200 OK\r\n\r\nall there is",
+    ] {
+        let (port, roots) = closes_without_notice(cut);
+        let error = get(&format!("https://localhost:{port}/"), &roots).unwrap_err();
+        assert!(
+            error.contains("ended before its answer was whole"),
+            "{error}"
+        );
+    }
+}
