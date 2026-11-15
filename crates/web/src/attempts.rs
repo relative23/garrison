@@ -85,6 +85,11 @@ struct Table {
     networks: HashMap<Option<IpAddr>, Window>,
     /// What the networks beyond a full table used together.
     others: Option<Window>,
+    /// No network's window ends before this, so a sweep of the full table
+    /// sooner would find nothing to remove; `None` before the first sweep.
+    /// Every callback beyond the table takes its lock, and a sweep of 4096
+    /// entries a callback would hold it a hundred times as long.
+    unchanged_until: Option<Instant>,
 }
 
 #[derive(Debug, Default)]
@@ -96,9 +101,20 @@ impl Attempts {
     /// Whether `network` may start one more code exchange at `now`.
     pub fn allow(&self, network: Option<IpAddr>, now: Instant) -> Result<(), Refusal> {
         let mut table = self.table.lock().unwrap_or_else(PoisonError::into_inner);
-        let Table { networks, others } = &mut *table;
+        let Table {
+            networks,
+            others,
+            unchanged_until,
+        } = &mut *table;
         if networks.len() >= MAX_NETWORKS && !networks.contains_key(&network) {
-            networks.retain(|_, window| window.recent(now));
+            if unchanged_until.is_none_or(|until| now >= until) {
+                networks.retain(|_, window| window.recent(now));
+                // A window renewed since only ends later than this.
+                *unchanged_until = networks
+                    .values()
+                    .filter_map(|window| window.start.checked_add(WINDOW))
+                    .min();
+            }
             if networks.len() >= MAX_NETWORKS {
                 let count = others.get_or_insert_with(|| Window::new(now)).take(now);
                 if count == BUDGET + 1 {
@@ -235,6 +251,39 @@ mod tests {
             assert_eq!(attempts.allow(newcomer(0), later), Ok(()));
         }
         assert_eq!(attempts.allow(newcomer(0), later), Err(Refusal::Network));
+    }
+
+    /// A flood beyond a full table: each callback takes the table's lock,
+    /// and must not hold it for a sweep of all the networks when none of
+    /// their windows can have ended.
+    #[test]
+    fn a_callback_beyond_a_full_table_costs_no_more_than_a_counted_one() {
+        let attempts = Attempts::default();
+        let start = Instant::now();
+        full_table(&attempts, start);
+        let calls = 20_000;
+        // The quickest of five rounds, so that a pause of the machine's own
+        // does not count.
+        let timed = |network: &dyn Fn(usize) -> Option<IpAddr>| {
+            (0..5)
+                .map(|_| {
+                    let began = Instant::now();
+                    for index in 0..calls {
+                        let _ = attempts.allow(network(index), start + Duration::from_secs(1));
+                    }
+                    began.elapsed()
+                })
+                .min()
+                .unwrap()
+        };
+        let counted = timed(&|_| prefix(0));
+        let beyond = timed(&|index| newcomer(index % 250));
+        // A sweep of 4096 entries took a hundred times as long as a
+        // counted network's callback; without one, the two are alike.
+        assert!(
+            beyond < counted * 10,
+            "{calls} callbacks: {beyond:?} beyond the table, {counted:?} of a counted network"
+        );
     }
 
     #[test]
