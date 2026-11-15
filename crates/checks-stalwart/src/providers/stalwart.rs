@@ -427,6 +427,15 @@ impl Provider for Stalwart {
                 .push(Self::unknown(context, "No API key is configured.".into())?);
             return Ok(report);
         };
+        // The check's one request, which has its own time; it is not made
+        // once the run's time is up, after the history was read.
+        if context.deadline.expired() {
+            report.observations.push(Self::unknown(
+                context,
+                "Not asked: the collection run's time was used up.".into(),
+            )?);
+            return Ok(report);
+        }
         let client = JmapClient::new(&context.deployment.stalwart_url, key)
             .with_timeout(Duration::from_secs(8));
         let answers = match client.call_many(&calls(), MAX_RESPONSE) {
@@ -483,3 +492,5 @@ impl Provider for Stalwart {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod time_tests;
