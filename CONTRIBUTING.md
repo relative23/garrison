@@ -267,7 +267,7 @@ measured in:
 (cd frontend && npm run build)
 cargo run -p garrison-web --example preview        # http://localhost:18091/
 (cd e2e && npm ci && npm run flows)                # in a second terminal
-# Stop the preview (Ctrl+C) and start it again before each measurement.
+# Stop the preview (Ctrl+C, or SIGTERM to its PID) and start it again before each measurement.
 (cd e2e && npm run measure -- --runs 3)
 ```
 

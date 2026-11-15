@@ -17,8 +17,8 @@
 //! large numbers (`busy.rs`). The browser checks and measurements use the
 //! preview without it.
 //!
-//! It serves `http://127.0.0.1:18091/` until Ctrl+C; its state lives in a
-//! temporary directory that goes with it.
+//! It serves `http://127.0.0.1:18091/` until Ctrl+C or SIGTERM; its state
+//! lives in a temporary directory that goes with it.
 
 // A command-line tool reports on the terminal.
 #![allow(clippy::print_stdout)]
@@ -29,6 +29,7 @@ mod fakes;
 
 use std::collections::BTreeSet;
 use std::error::Error;
+use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
@@ -40,6 +41,7 @@ use garrison_core::time;
 use garrison_web::security::Gate;
 use garrison_web::store::WebStore;
 use garrison_web::{App, router};
+use tokio::signal::unix::{SignalKind, signal};
 
 const PORT: u16 = 18091;
 
@@ -99,7 +101,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .build()?;
     runtime.block_on(async move {
         let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
-        println!("Preview on {origin}/ (Ctrl+C ends it)");
+        println!("Preview on {origin}/ (Ctrl+C or SIGTERM ends it)");
         let routes = router(app)
             .merge(fakes::sign_in(&origin))
             .merge(fakes::controls(broker));
@@ -107,10 +109,25 @@ fn main() -> Result<(), Box<dyn Error>> {
             listener,
             routes.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(ended()?)
         .await?;
         Ok(())
     })
 }
+
+/// What ends the preview: Ctrl+C at its terminal, or SIGTERM from whoever
+/// stops it by its process ID. Either way `main` returns and the temporary
+/// state directory goes with it; killed by a signal it would stay in /tmp.
+/// SIGTERM is caught from the call on, not only once the future is awaited.
+fn ended() -> std::io::Result<impl Future<Output = ()>> {
+    let mut terminated = signal(SignalKind::terminate())?;
+    Ok(async move {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = terminated.recv() => {}
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests;

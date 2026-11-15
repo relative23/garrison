@@ -35,5 +35,10 @@ tempfile.workspace = true
 tokio.workspace = true
 tower = { version = "0.5.3", default-features = false, features = ["util"] }
 
+[[example]]
+name = "preview"
+# `cargo test` runs its test: that SIGTERM ends it as Ctrl+C does.
+test = true
+
 [lints]
 workspace = true
