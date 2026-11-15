@@ -56,7 +56,8 @@ Notable changes for operators and users. The format follows
   "Client IP source" setting, its listeners kept out of reach, and an end
   for a block. Garrison names the user's address when it exchanges a
   sign-in code, but not one of loopback, which Stalwart answers with 400.
-  See [installation](docs/operator/installation.md#client-addresses-for-stalwarts-limits).
+  `garrison nginx` prints the same `map` and line, as optional ones. See
+  [installation](docs/operator/installation.md#client-addresses-for-stalwarts-limits).
 - **`garrison restore --from DIR` puts back a backup.** What `garrison
   backup` wrote had no way back but by hand. The command checks the backup
   before anything stops, keeps the state as it is in

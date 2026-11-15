@@ -185,7 +185,8 @@ administration. `check-config` refuses a shared origin.
 Create the DNS record and a certificate for that name, then give it a server
 block that serves nothing else. `garrison nginx` prints one for your names,
 written for the nginx installed on this host, with the lines that belong in
-Stalwart's server blocks:
+Stalwart's server blocks and, as optional ones, those of
+[client addresses for Stalwart's limits](#client-addresses-for-stalwarts-limits):
 
 ```sh
 sudo garrison nginx

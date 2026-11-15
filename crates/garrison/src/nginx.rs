@@ -1,7 +1,8 @@
 //! `garrison nginx`: the server block for Garrison's own host name, written
-//! for the nginx installed here, and the lines that belong in Stalwart's
-//! server blocks. It prints and changes nothing: the nginx configuration
-//! stays the operator's.
+//! for the nginx installed here, the lines that belong in Stalwart's server
+//! blocks and, as optional ones, the forwarding of the client's address to
+//! Stalwart. It prints and changes nothing: the nginx configuration stays
+//! the operator's.
 //!
 //! `garrison nginx --snippet` prints the include that block names, for the
 //! configured web port; the installer writes it to [`SNIPPET`].
@@ -25,6 +26,25 @@ const SHIPPED: &str = include_str!("../../../deploy/nginx/garrison.conf");
 const SHIPPED_PORT: u16 = 8091;
 /// The line of it that names the web service's port.
 const UPSTREAM: (&str, &str) = ("proxy_pass http://127.0.0.1:", ";");
+/// The optional forwarding of the client's address to Stalwart, as
+/// installation.md shows it ("Client addresses for Stalwart's limits"): the
+/// map in nginx's `http` block and the header in each location that
+/// proxies to Stalwart. Stalwart refuses (400) a header that names a
+/// loopback address, so the map names no client on this host.
+const FORWARDED_MAP: &str = r#"map $remote_addr $stalwart_forwarded_for {
+    ~^(127\.|::1$|::ffff:127\.)  "";
+    default                     $proxy_add_x_forwarded_for;
+}"#;
+const FORWARDED_HEADER: &str = "proxy_set_header X-Forwarded-For $stalwart_forwarded_for;";
+
+/// `text` as comment lines, each indented under the comment before it.
+fn commented(text: &str) -> String {
+    text.lines().fold(String::new(), |mut lines, line| {
+        lines.push_str("\n#     ");
+        lines.push_str(line);
+        lines
+    })
+}
 
 /// The include for a web service on `port`: the shipped one with that port.
 pub(crate) fn snippet(port: u16) -> String {
@@ -129,8 +149,17 @@ server {{
 # Optional, inside the location that serves the Stalwart WebUI, for its
 # \"Switch to Garrison WebUI\" row:
 #     include /etc/nginx/snippets/garrison-stalwart-switch*.conf;
+# Optional, so that Stalwart counts and blocks each client under its own
+# address (the installation guide's \"Client addresses for Stalwart's limits\"
+# has every step): in nginx's http block, for example as
+# /etc/nginx/conf.d/stalwart-forwarded-for.conf:{map}
+# and in every location that proxies to Stalwart:{header}
+# then set Stalwart's \"Client IP source\" to \"X-Forwarded-For header\", and
+# let nothing but nginx and Garrison reach Stalwart's HTTP listeners.
 ",
-        hosts = stalwart.join(", ")
+        hosts = stalwart.join(", "),
+        map = commented(FORWARDED_MAP),
+        header = commented(FORWARDED_HEADER),
     )
 }
 
@@ -228,6 +257,70 @@ mod tests {
             .filter(|line| line.starts_with("proxy_set_header Host "))
             .collect();
         assert_eq!(hosts, ["proxy_set_header Host $http_host;"]);
+    }
+
+    /// The `nginx` blocks of installation.md's section on Stalwart's client
+    /// addresses, each without its comments and the list's indentation.
+    fn documented_forwarding() -> Vec<String> {
+        let guide = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/operator/installation.md"
+        ))
+        .unwrap();
+        let section = guide
+            .split("### Client addresses for Stalwart's limits\n")
+            .nth(1)
+            .unwrap();
+        let section = section.split("\n## ").next().unwrap();
+        section
+            .split("```nginx\n")
+            .skip(1)
+            .map(|block| {
+                let block = block.split("```").next().unwrap();
+                let lines: Vec<&str> = block.lines().map(str::trim_end).collect();
+                let indent = lines
+                    .iter()
+                    .filter(|line| !line.trim().is_empty())
+                    .map(|line| line.len() - line.trim_start().len())
+                    .min()
+                    .unwrap();
+                lines
+                    .iter()
+                    .filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
+                    .map(|line| format!("#     {}", &line[indent..]))
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            })
+            .collect()
+    }
+
+    /// An operator who forwards the client's address finds the same lines
+    /// in what `garrison nginx` prints as in the installation guide, marked
+    /// as optional, with the section that has every step.
+    #[test]
+    fn the_optional_forwarding_is_the_one_the_guide_documents() {
+        let documented = documented_forwarding();
+        assert_eq!(documented.len(), 2, "{documented:?}");
+        assert!(documented[0].starts_with("#     map $remote_addr "));
+        assert_eq!(
+            documented[1],
+            "#     proxy_set_header X-Forwarded-For $stalwart_forwarded_for;"
+        );
+        for found in [None, Some((1, 22, 1)), Some((1, 26, 3))] {
+            let text = site(&config(), found);
+            let at: Vec<usize> = documented
+                .iter()
+                .map(|block| text.find(&format!("\n{block}\n")).unwrap_or(usize::MAX))
+                .collect();
+            assert!(at[0] < at[1] && at[1] < usize::MAX, "{at:?}\n{text}");
+            let before = &text[..at[0]];
+            let lead = before[before.rfind("\n# Optional").unwrap_or(0)..].replace("\n# ", " ");
+            assert!(
+                lead.contains("\"Client addresses for Stalwart's limits\"")
+                    && !lead.contains("\nserver"),
+                "{lead}"
+            );
+        }
     }
 
     #[test]
