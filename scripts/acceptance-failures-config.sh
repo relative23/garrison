@@ -2,10 +2,10 @@
 # Sourced by scripts/acceptance-failures.sh: the scenarios of the
 # configuration the installer checks. The installer passes on what
 # check-config warns of, names a file it could not write, refuses a secret
-# its unit would not hand over, and a policy that the broker's unit
-# hides, and follows a policy kept elsewhere, but leaves a folder named as
-# the policy as it is. They use that script's helpers and its `old` and
-# `new`.
+# its unit would not hand over, and a policy or a check's path that a
+# unit hides, and follows a policy kept elsewhere, but leaves a folder
+# named as the policy as it is. They use that script's helpers and its
+# `old` and `new`.
 # shellcheck disable=SC2154
 
 scenario_warnings() {
@@ -119,3 +119,41 @@ scenario_hidden_policy() {
     running "after the policy under /home" "$current"
 }
 
+# A check's path that the collector's unit hides from it, a receipt under
+# /home: the installer refuses it before an upgrade and changes nothing,
+# doctor names it, and the place shown to the collector as checks.md says,
+# the folder bound read-only at another one, is taken and read.
+scenario_hidden_check() {
+    step "A check's path where the collector's unit hides it stops the upgrade, and a place shown to it is read"
+    current=$(inside 'basename "$(readlink -f /opt/garrison/current)"')
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.hidden && mkdir -p /home/jobs &&
+        printf "{\"date\": \"%s\", \"result\": \"passed\"}\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > /home/jobs/nightly.json && chmod 644 /home/jobs/nightly.json &&
+        printf "\n[[providers]]\ntype = \"receipt\"\nid = \"nightly\"\ntitle = \"Nightly job\"\npath = \"/home/jobs/nightly.json\"\nmodules = [\"services\"]\nmax_age_hours = 24\n" \
+            >> /etc/garrison/garrison.toml &&
+        cp -p /etc/garrison/garrison.toml /root/garrison.toml.named'
+    backups=$(inside 'ls /var/backups/garrison | wc -l')
+    refused "the installer refuses a check's path the collector's unit hides" '/root/release/bin/garrison install' \
+        "providers[receipt].path is /home/jobs/nightly.json, under /home, which garrison-collect.service hides from the collector (ProtectHome=true): the check cannot read it there"
+    check "and changes nothing: the release that ran is current, garrison.toml as it was, nothing backed up" \
+        "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$current' &&
+            cmp -s /etc/garrison/garrison.toml /root/garrison.toml.named &&
+            test \$(ls /var/backups/garrison | wc -l) -eq $backups"
+    says "doctor names the check's path the collector cannot see" '/opt/garrison/current/bin/garrison doctor || true' \
+        "FAIL  providers[receipt].path is /home/jobs/nightly.json, under /home, which garrison-collect.service hides"
+    inside 'mkdir -p /srv/garrison/jobs /etc/systemd/system/garrison-collect.service.d &&
+        printf "[Service]\nBindReadOnlyPaths=/home/jobs:/srv/garrison/jobs\n" \
+            > /etc/systemd/system/garrison-collect.service.d/jobs.conf && systemctl daemon-reload &&
+        sed -i "s|^path = \"/home/jobs/nightly.json\"\$|path = \"/srv/garrison/jobs/nightly.json\"|" \
+            /etc/garrison/garrison.toml && grep -q "^path = \"/srv/garrison/jobs/nightly.json\"\$" /etc/garrison/garrison.toml'
+    says "the installer takes the place shown to the collector" '/root/release/bin/garrison install' "is running"
+    check "the collector reads the receipt there, and root sees an empty folder" \
+        'systemctl start garrison-collect.service && test -z "$(ls -A /srv/garrison/jobs)" &&
+            sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT document FROM snapshots ORDER BY id DESC LIMIT 1" |
+                grep -o "\"id\":\"receipt.nightly\"[^}]*\"state\":\"[a-z]*\"" | grep -q "\"state\":\"ok\""'
+    inside 'rm /etc/systemd/system/garrison-collect.service.d/jobs.conf &&
+        { rmdir /etc/systemd/system/garrison-collect.service.d 2>/dev/null || true; } && systemctl daemon-reload &&
+        cat /root/garrison.toml.hidden > /etc/garrison/garrison.toml && rm -r /home/jobs /srv/garrison &&
+        systemctl start garrison-collect.service'
+    running "after the check's path under /home" "$new"
+}

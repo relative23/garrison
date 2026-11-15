@@ -6,8 +6,8 @@
 # backs up, waits for the services to settle or switches back, leaves
 # nothing a later run cannot finish. The installer passes on what
 # check-config warns of, names a file it could not write, refuses a secret
-# its unit would not hand over, and a policy that the broker's unit hides,
-# which doctor names, and follows a policy kept elsewhere, but
+# its unit would not hand over, and a policy or a check's path that a unit
+# hides, which doctor names, and follows a policy kept elsewhere, but
 # leaves a folder named as the policy as it is. Beside
 # the installer: a collector that stops is reported, a collection run beside
 # one under way collects nothing, and setup after a rotation that failed
@@ -401,7 +401,7 @@ install_previous
 old=$(inside 'cat /root/previous/VERSION')
 new=$(inside 'cat /root/release/VERSION')
 running "installed" "$old"
-for scenario in ${SCENARIOS:-refusals hidden_policy failed_start crash_loop migrated_then_failed concurrent \
+for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check failed_start crash_loop migrated_then_failed concurrent \
     interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere unwritten \
     rotation collect_beside}; do
     "scenario_$scenario"
