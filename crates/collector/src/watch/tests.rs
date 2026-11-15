@@ -170,9 +170,9 @@ fn the_last_run_is_the_newest_snapshot_and_stops_after_the_limit() {
     drop(store);
     let last = last_run(&host.database()).unwrap().unwrap();
     assert_eq!(last, now().as_second() - 90);
-    assert!(!stopped(last, now()));
-    assert!(!stopped(now().as_second() - LIMIT, now()));
-    assert!(stopped(now().as_second() - LIMIT - 1, now()));
+    assert_eq!(stopped(last, now()), Some(false));
+    assert_eq!(stopped(now().as_second() - LIMIT, now()), Some(false));
+    assert_eq!(stopped(now().as_second() - LIMIT - 1, now()), Some(true));
     // No run yet, and no database yet: nothing has finished.
     assert_eq!(last_run(&Host::new(None, None).database()), Ok(None));
     let directory = tempfile::tempdir().unwrap();
@@ -282,4 +282,29 @@ fn a_kept_address_is_read_again_from_its_file_without_a_configuration() {
         "{error}"
     );
     assert!(!host.marker().exists());
+}
+
+/// A damaged or hand-edited status database may date its newest snapshot
+/// at a time that is none, such as the least or the greatest integer:
+/// whether the collector runs is not known then, and nobody is told either.
+#[test]
+fn a_snapshot_dated_at_no_time_leaves_the_stop_unknown() {
+    // Nothing listens there: a message the watch sent would be an error.
+    let channel = channel("http://127.0.0.1:9");
+    for when in [i64::MIN, i64::MAX] {
+        let host = Host::new(None, Some(&channel));
+        let db = Connection::open(host.database()).unwrap();
+        db.execute(
+            "INSERT INTO snapshots(collected_at, document) VALUES(?, '{}')",
+            [when],
+        )
+        .unwrap();
+        drop(db);
+        assert_eq!(
+            host.look(Ok(Some(channel.clone()))),
+            Ok(Outcome::NotKnown),
+            "{when}"
+        );
+        assert!(!host.marker().exists());
+    }
 }

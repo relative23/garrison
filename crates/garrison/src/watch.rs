@@ -59,12 +59,20 @@ pub(crate) fn run(path: &Path) -> u8 {
         roots: garrison_collector::fetch::roots(),
     };
     match watch.look() {
+        Ok(Outcome::NotKnown) => {
+            log::warn!(
+                "Whether the collector runs is not known: the newest snapshot in {} is dated at \
+                 a time that is none",
+                database.display()
+            );
+            0
+        }
         Ok(outcome) => {
             log::info!(
                 "{}",
                 match outcome {
                     Outcome::NeverRan => "No collection run has finished yet",
-                    Outcome::Running => "The collector runs",
+                    Outcome::Running | Outcome::NotKnown => "The collector runs",
                     Outcome::Stopped => "The collector has stopped",
                     Outcome::ToldStopped => "The collector has stopped; the channels were told",
                     Outcome::ToldRunning => "The collector runs again; the channels were told",

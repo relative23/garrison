@@ -90,7 +90,12 @@ fn finished(last: Result<Option<i64>, String>, now: time::Timestamp) -> Finding 
             "no collection run has finished yet",
             format!("The collector runs every minute; if this stays, {why}"),
         ),
-        Ok(Some(last)) if watch::stopped(last, now) => Finding::fail(
+        // A damaged or hand-edited database: no age, and no stop either.
+        Ok(Some(last)) if watch::stopped(last, now).is_none() => Finding::unknown(format!(
+            "when the collector last finished a run: the newest status snapshot is dated \
+             {last}, which is no time"
+        )),
+        Ok(Some(last)) if watch::stopped(last, now) == Some(true) => Finding::fail(
             format!(
                 "no collection run has finished since {}, {}",
                 time::Timestamp::from_second(last)
@@ -344,6 +349,25 @@ mod tests {
             judged(Ok(Some(NOW + 120))).what,
             "the last collection run finished 0 minutes ago"
         );
+    }
+
+    /// A damaged or hand-edited status database may date its newest snapshot
+    /// at a time that is none: it gives no age, and no stop either.
+    #[test]
+    fn a_snapshot_dated_at_no_time_gives_no_age() {
+        for when in [i64::MIN, i64::MAX] {
+            let found = judged(Ok(Some(when)));
+            assert_eq!(
+                (found.level, found.what),
+                (
+                    Level::Unknown,
+                    format!(
+                        "when the collector last finished a run: the newest status snapshot \
+                         is dated {when}, which is no time"
+                    )
+                )
+            );
+        }
     }
 
     #[test]

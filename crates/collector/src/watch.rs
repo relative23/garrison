@@ -51,6 +51,10 @@ pub fn remember(memory: &dyn Memory, channels: &Channels) {
 pub enum Outcome {
     /// No run has ever finished: nothing to compare with.
     NeverRan,
+    /// The newest snapshot is dated at a time that is none, as in a damaged
+    /// or hand-edited status database: whether the collector runs is not
+    /// known, and nobody is told either way.
+    NotKnown,
     Running,
     /// Stopped; the channels know, or there is none to tell.
     Stopped,
@@ -105,10 +109,13 @@ pub fn last_run(database: &Path) -> Result<Option<i64>, String> {
     finished(&reader).map_err(|error| error.to_string())
 }
 
-/// Whether a collector whose last run finished at `last` has stopped by `now`.
+/// Whether a collector whose last run finished at `last` has stopped by
+/// `now`; `None` where `last` is no time, which a status database that was
+/// damaged or edited by hand may hold.
 #[must_use]
-pub fn stopped(last: i64, now: time::Timestamp) -> bool {
-    now.as_second() - last > LIMIT
+pub fn stopped(last: i64, now: time::Timestamp) -> Option<bool> {
+    let last = time::Timestamp::from_second(last).ok()?;
+    Some(now.as_second() - last.as_second() > LIMIT)
 }
 
 /// The collector's record; the default where there is no database yet.
@@ -150,7 +157,9 @@ impl Watch<'_> {
                 .with(self.secrets.clone())
                 .located(&self.credentials),
         };
-        let stopped = stopped(last, self.now);
+        let Some(stopped) = stopped(last, self.now) else {
+            return Ok(Outcome::NotKnown);
+        };
         let told = fs::symlink_metadata(self.marker).is_ok();
         // A message counts once any channel took it.
         let send = |note: Note| match taken(&channels.send_with(

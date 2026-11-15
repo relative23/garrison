@@ -311,6 +311,9 @@ Notable changes for operators and users. The format follows
   collection run.** A counter's reading or a sample at a time no clock
   gives, in a database that was edited by hand or damaged, made each run
   fail before it stored anything. Such a time now counts as no interval.
+  A newest snapshot dated so made the watch over the collector and
+  `garrison doctor` stop with an error, or call the collector running; they
+  now say that whether it runs is not known, and the watch tells nobody.
 - **A `systemd` entry may name an alias.** systemd answers for an alias,
   such as `sshd.service` where the unit is `ssh.service`, under the name of
   the unit it stands for, and the check looked for the answer under the
