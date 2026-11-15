@@ -273,6 +273,41 @@ fn the_disk_forecast_needs_a_day_and_warns_of_a_disk_that_fills_up() {
     assert_eq!(checked(&provider, &nothing, &memory, 0).state, State::Ok);
 }
 
+/// A damaged or hand-edited status database may keep a reading at a time no
+/// clock gives. It is no reading of the last two weeks: the forecast goes on
+/// from the others, and the readings are kept again without it.
+#[test]
+fn a_disk_reading_at_no_time_is_left_out_of_the_forecast() {
+    let root = tempfile::tempdir().unwrap();
+    let provider = HostCare::new(&table(&format!(
+        "type = \"host-care\"\ndisk_path = \"{}\"\nchecks = [\"disk\"]",
+        root.path().display()
+    )))
+    .unwrap();
+    let nothing = Programs::new(Vec::new());
+    let free = field(
+        &checked(&provider, &nothing, &Remembered::default(), 0),
+        "Free now",
+    )
+    .as_u64()
+    .unwrap();
+    let start = now().as_second() - 2 * 86_400;
+    for when in [i64::MIN, i64::MAX] {
+        let mut kept = vec![Sample { at: when, free: 1 }];
+        kept.extend((0..48).map(|hour: i64| Sample {
+            at: start + hour * 3600,
+            free,
+        }));
+        let memory = Remembered::default();
+        memory.keep(DISK, &serde_json::to_string(&kept).unwrap());
+        let found = checked(&provider, &nothing, &memory, 0);
+        assert_eq!(found.state, State::Ok, "{when}: {:?}", found.findings);
+        let left: Vec<Sample> = serde_json::from_str(&memory.recall(DISK).unwrap()).unwrap();
+        assert_eq!(left.len(), 49, "{when}");
+        assert!(left.iter().all(|sample| sample.at != when), "{when}");
+    }
+}
+
 #[test]
 fn options_are_checked_and_every_check_runs_by_default() {
     let root = tempfile::tempdir().unwrap();

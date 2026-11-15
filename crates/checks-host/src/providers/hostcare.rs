@@ -342,15 +342,16 @@ impl HostCare {
             .recall(DISK)
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
-        let count = kept.len();
         let samples = reading::recorded(
-            kept,
+            kept.clone(),
             Sample {
                 at: context.now.as_second(),
                 free,
             },
         );
-        if samples.len() != count
+        // Also where one reading goes as another comes, so that their number
+        // stays the same: the one that came is kept, and the other is gone.
+        if samples != kept
             && let Ok(text) = serde_json::to_string(&samples)
         {
             context.memory.keep(DISK, &text);

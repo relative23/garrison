@@ -436,6 +436,9 @@ Notable changes for operators and users. The format follows
   collection run.** A counter's reading or a sample at a time no clock
   gives, in a database that was edited by hand or damaged, made each run
   fail before it stored anything. Such a time now counts as no interval.
+  A reading of the free disk space kept so made the disk forecast crash in
+  every run, or stayed kept while the run's own reading was not; it is now
+  left out, and the readings are kept again without it.
   A newest snapshot dated so made the watch over the collector and
   `garrison doctor` stop with an error, or call the collector running; they
   now say that whether it runs is not known, and the watch tells nobody.

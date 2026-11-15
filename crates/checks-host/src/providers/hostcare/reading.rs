@@ -100,9 +100,15 @@ pub(super) const KEPT: i64 = 14 * 86_400;
 pub(super) const SPAN: i64 = 86_400;
 
 /// The readings with `now` added where an hour has passed, without those
-/// older than two weeks.
+/// older than two weeks. A reading at a second no clock gives, as a damaged
+/// or hand-edited status database may keep, lies outside those weeks or has
+/// no age at all: either way it is none of them.
 pub(super) fn recorded(mut samples: Vec<Sample>, now: Sample) -> Vec<Sample> {
-    samples.retain(|sample| (0..=KEPT).contains(&(now.at - sample.at)));
+    samples.retain(|sample| {
+        now.at
+            .checked_sub(sample.at)
+            .is_some_and(|age| (0..=KEPT).contains(&age))
+    });
     if samples.last().is_none_or(|last| now.at - last.at >= EVERY) {
         samples.push(now);
     }
