@@ -263,15 +263,16 @@ if a Stalwart release changes its menu layout, the row is not shown.
 
 ### Client addresses for Stalwart's limits
 
-Stalwart limits sign-ins and, after 100 failed passwords in a day, blocks
-an address, both by the address a request comes from. Behind nginx that is
-nginx's: where nginx and Stalwart share this host, 127.0.0.1, which
-Stalwart neither limits nor blocks, so password guesses at its sign-in page
-go unlimited; where Stalwart sees nginx under another address, as with
-nginx on another host or Stalwart in a container behind a published port,
-one address that every client shares, so one client's guesses lock out
-everyone. A failed sign-in at Stalwart's page shows in Garrison's event
-history with the address Stalwart counted it under.
+Stalwart answers no more than 100 unauthenticated requests a minute from
+one address, failed sign-ins among them, and blocks an address after 100
+failed passwords in a day, both by the address a request comes from.
+Behind nginx that is nginx's: where nginx and Stalwart share this host,
+127.0.0.1, which Stalwart neither limits nor blocks, so password guesses
+at its sign-in page go unlimited; where Stalwart sees nginx under another
+address, as with nginx on another host or Stalwart in a container behind
+a published port, one address that every client shares, so one client's
+guesses lock out everyone. A failed sign-in at Stalwart's page shows in
+Garrison's event history with the address Stalwart counted it under.
 
 To have Stalwart count and block each client under its own address:
 
@@ -305,9 +306,30 @@ To have Stalwart count and block each client under its own address:
    them on 127.0.0.1, or behind a firewall): a client that reaches one
    directly names any address it likes and so meets no limit at all.
 4. Give a block an end: Settings → Security → Settings, "Authentication
-   failure ban", "Duration". Without one, a blocked address stays blocked
-   until it is removed under Settings → Security → Blocked IPs, followed by
-   Management → Actions → Blocked IPs list.
+   failure ban", "Duration", and save. As with the client IP source,
+   Stalwart takes it once you run Management → Actions → Server settings;
+   until then, and for a block made before, a block has no end. Without
+   one, a blocked address stays blocked until it is removed under
+   Settings → Security → Blocked IPs, followed by Management → Actions →
+   Blocked IPs list.
+
+Stalwart then counts and blocks each client under its own address, an
+IPv6 client too, and that address alone: the other addresses of its
+network, also those of its IPv6 /64, are neither limited nor blocked with
+it. A blocked client gets 403 for everything of Stalwart's that nginx
+forwards, its sign-in page and the WebUI included, which a browser shows
+as `{"detail":"Forbidden",...}`, and Stalwart closes the connections that
+address opens to its mail listeners too, so a mail program there is
+turned away as well. Garrison's own pages, and a Garrison session begun
+before the block, go on working. Once the duration is over, Stalwart
+answers the address again by itself; its list of blocked IPs goes on
+showing the block, with its end.
+
+Garrison's event history then names each client's own address, for every
+failed sign-in at Stalwart's page and for every block Stalwart makes, in
+the Event history and on Attacks & bans. It records no successful
+sign-in; Stalwart's own log names one under the address of the
+connection, nginx's, also with forwarding.
 
 Garrison names the user's address when it exchanges a sign-in code. Its
 other requests carry a token or its key and count under its own address,

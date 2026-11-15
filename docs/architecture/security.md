@@ -103,7 +103,9 @@ brokers never repeat a job; pending jobs become "uncertain".
   (`authBanRate`, `authBanPeriod`), after which Stalwart answers neither
   nginx nor Garrison until an administrator removes it. Told to take the
   client's address from X-Forwarded-For, Stalwart counts and blocks each
-  client under its own address in either case
+  client under its own address in either case, and that address alone: an
+  IPv6 client by its whole address and not by its /64, so a client with
+  many addresses of one network meets each limit once for every address
   ([installation](../operator/installation.md#client-addresses-for-stalwarts-limits));
   a request without the header, such as Garrison's own, counts under the
   connection's address, and one whose header names a loopback address is
