@@ -328,6 +328,15 @@ Notable changes for operators and users. The format follows
   `check-config`, and with it the installer, now refuse both and give the
   name to use; `garrison doctor` reports them, and `notify-test` sends
   nothing on a channel whose secret the collector would not have.
+- **Setup restarts the services that still hold replaced secrets.** After
+  a rotation that stopped with an error once it had made the new keys, the
+  old keys are gone, but a plain `garrison stalwart setup` restarted
+  neither the receiver nor the broker, which went on with the old
+  signature key and API key: no event batch was taken and no rights could
+  be checked until someone restarted them. The same happened where setup
+  made a key anew because Stalwart no longer had it. Setup now compares
+  what each running service was handed with its file and restarts the
+  service where they differ.
 - **The installer says which file it could not write from the
   configuration.** Where `garrison.toml` was there but did not load, the
   installer left the polkit rule and the switch row's include as they were

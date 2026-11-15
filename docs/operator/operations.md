@@ -212,8 +212,11 @@ Rotate after anyone who should not have them may have seen the files in
 Run it as root, so that it can restart the services itself. If it stops
 with an error after it made the new keys, or cannot restart the services,
 the old keys are removed all the same, since someone may have seen them:
-then restart `garrison-ingest` and `garrison-broker` once the cause is
-mended.
+once the cause is mended, run `sudo garrison stalwart setup` again, which
+restarts `garrison-ingest` and `garrison-broker` wherever they still hold
+other secrets than the files, or restart them yourself. Setup does that
+after every run, also where it made a key anew because Stalwart no longer
+had it.
 
 ## Uninstall
 

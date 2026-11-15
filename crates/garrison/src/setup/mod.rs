@@ -57,8 +57,6 @@ const BROKER_PERMISSIONS: [&str; 4] = [
 /// `WebHook` objects have no description; this header marks Garrison's own webhook.
 const MARKER: (&str, &str) = ("X-Garrison", "events");
 const LOOPBACK: [&str; 2] = ["127.0.0.1/32", "::1/128"];
-/// The secrets a running service holds: the ingest's and the broker's.
-const HELD: [&str; 2] = ["webhook-signature-key", "broker-native-key"];
 const MAX_ANSWER: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Subcommand)]
@@ -370,7 +368,10 @@ fn configure(
 ) -> Result<(), String> {
     let (directory, rotate) = (&config.credentials_directory, asked.rotate);
     // A running service holds the secrets it read when it started.
-    let fresh = rotate || HELD.iter().any(|name| !directory.join(name).exists());
+    let fresh = rotate
+        || restart::HELD
+            .iter()
+            .any(|(_, name)| !directory.join(name).exists());
     let broker = keys::ensure(
         admin,
         directory,
@@ -409,7 +410,9 @@ fn configure(
         say(&format!("- {step}"));
     }
     say(&format!("- {}", keys::verify(config, directory)?));
-    if fresh {
+    // Also a service that still holds what a rotation that failed, or a new
+    // key for one Stalwart no longer had, replaced in its file.
+    if fresh || restart::stale(directory) {
         restart();
     } else {
         say("Settings reloaded.");
