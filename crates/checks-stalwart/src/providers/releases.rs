@@ -272,24 +272,24 @@ impl Releases {
         };
         // A release that was named once says nothing of the releases since:
         // while no answer comes, that is said, and after a few days "the
-        // running release is the newest" is no longer known.
+        // running release is the newest" is no longer known. A time that is
+        // none, in a damaged status database, is no time it was named at.
+        let answered = asked
+            .answered_at
+            .and_then(|second| time::Timestamp::from_second(second).ok());
         let silent = asked
             .latest
             .as_ref()
             .and(asked.problem.as_deref())
             .map(|problem| {
-                let since = asked
-                    .answered_at
-                    .and_then(|second| time::Timestamp::from_second(second).ok())
-                    .map_or_else(|| "an earlier run".to_owned(), time::isoformat);
+                let since = answered.map_or_else(|| "an earlier run".to_owned(), time::isoformat);
                 format!(
                     "GitHub has given no answer since {since}, so a newer release would not be \
                      seen here: {problem}."
                 )
             });
-        let outdated = asked
-            .answered_at
-            .is_none_or(|answered| context.now.as_second() - answered > STALE_AFTER);
+        let outdated = answered
+            .is_none_or(|answered| context.now.as_second() - answered.as_second() > STALE_AFTER);
         let state = match (state, &silent) {
             (State::Ok, Some(_)) if outdated => State::Unknown,
             (state, _) => state,

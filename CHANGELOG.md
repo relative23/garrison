@@ -379,6 +379,10 @@ Notable changes for operators and users. The format follows
   A newest snapshot dated so made the watch over the collector and
   `garrison doctor` stop with an error, or call the collector running; they
   now say that whether it runs is not known, and the watch tells nobody.
+  A release GitHub named, kept dated so, made the releases check crash
+  until GitHub answered again, or call the running release the newest for
+  as long as GitHub gave no answer; while none comes, the card now says
+  that GitHub has not answered since an earlier run and is not in order.
 - **A time that is none in the event history no longer stops a check or a
   page.** The event receiver's heartbeat at a time no clock gives, in a
   history that was edited by hand or damaged, made the checks that read the

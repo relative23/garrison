@@ -319,3 +319,32 @@ fn a_release_list_that_stops_answering_is_said_and_then_no_longer_in_order() {
     assert_eq!(field(&stale, "Newest release"), &json!(RUNS));
     assert!(stale.findings[0].starts_with("GitHub has given no answer since"));
 }
+
+/// A kept answer dated at a time no clock gives, in a damaged or hand-edited
+/// status database: when GitHub last named a release is not known, so the
+/// release it named then says nothing of today's.
+#[test]
+fn a_release_named_at_no_time_says_nothing_of_today() {
+    for answered in [i64::MIN, i64::MAX] {
+        let memory = Remembered::default();
+        let kept = json!({
+            "at": now().as_second() - 60, "latest": RUNS, "answeredAt": answered,
+            "problem": "GitHub answered 502", "every": false,
+        });
+        memory
+            .0
+            .borrow_mut()
+            .insert("release.garrison".to_owned(), kept.to_string());
+        // Asked a minute ago: the kept answer is used, nothing is asked.
+        let card = collected(&provider("http://127.0.0.1:9"), &memory, 0);
+        assert_eq!(card.state, State::Unknown, "{answered}");
+        assert_eq!(
+            card.findings,
+            [
+                "GitHub has given no answer since an earlier run, so a newer release would not be \
+                 seen here: GitHub answered 502."
+            ],
+            "{answered}"
+        );
+    }
+}
