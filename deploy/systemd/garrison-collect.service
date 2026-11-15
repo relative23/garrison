@@ -46,7 +46,10 @@ PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
 ProtectKernelTunables=true
-ProtectKernelModules=true
+# Not ProtectKernelModules=: it hides /lib/modules, where host care's restart
+# check reads which kernels are installed. Loading a module stays out of
+# reach all the same: the unit holds no capability (CapabilityBoundingSet=),
+# and its system calls (SystemCallFilter=) leave out @module.
 ProtectKernelLogs=true
 ProtectControlGroups=true
 ProtectClock=true

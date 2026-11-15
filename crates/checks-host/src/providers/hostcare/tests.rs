@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use garrison_core::time;
@@ -150,6 +151,60 @@ fn a_marker_or_a_newer_kernel_says_that_a_restart_is_due() {
     let container = look(&[("proc/sys/kernel/osrelease", "6.12.57\n")]);
     assert_eq!(container.state, State::Ok);
     assert_eq!(look(&[]).state, State::Unknown);
+}
+
+/// Where the installed kernels cannot be read, as where the collector's
+/// sandbox hides them, an update of the kernel would not show: the card says
+/// so and is Unknown, never in order. The distribution's marker still counts.
+#[test]
+fn kernels_that_cannot_be_read_leave_the_restart_unknown() {
+    let nothing = Programs::new(Vec::new());
+    let observe = |root: &Path| {
+        checked(
+            &provider(root, "\"restart\""),
+            &nothing,
+            &Remembered::default(),
+            0,
+        )
+    };
+    // A file where the folder of the kernels should be.
+    let root = tempfile::tempdir().unwrap();
+    host(
+        root.path(),
+        &[
+            ("proc/sys/kernel/osrelease", "6.12.0-55.9.1.el10_0.x86_64\n"),
+            ("lib/modules", ""),
+        ],
+    );
+    let unread = observe(root.path());
+    assert_eq!(unread.state, State::Unknown);
+    let said = format!(
+        "The installed kernels in {} could not be read: ",
+        root.path().join("lib/modules").display()
+    );
+    assert!(
+        unread.findings[0].starts_with(&said),
+        "{:?}",
+        unread.findings
+    );
+    host(root.path(), &[("run/reboot-required", "")]);
+    assert_eq!(observe(root.path()).state, State::Warning);
+    // A folder this user may not read, where its mode keeps the user out.
+    let root = tempfile::tempdir().unwrap();
+    host(
+        root.path(),
+        &[
+            ("proc/sys/kernel/osrelease", "6.12.57\n"),
+            ("lib/modules/6.12.60/modules.dep", ""),
+        ],
+    );
+    let folder = root.path().join("lib/modules");
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read_dir(&folder).is_err() {
+        assert_eq!(observe(root.path()).state, State::Unknown);
+    }
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(observe(root.path()).state, State::Warning);
 }
 
 #[test]

@@ -57,9 +57,17 @@ changes nothing; one that cannot be made is Unknown.
   collector's user reads dnf's cache in `/var/cache/dnf`: where only root may
   read a cache folder, as a dnf run under umask 077 leaves it, the finding
   names the repository.
-- `restart`: the marker Debian and Ubuntu write when installed updates need a
-  restart, and on every distribution an installed kernel newer than the one
-  that runs.
+- `restart`: whether installed updates need a restart of the host. On every
+  distribution a kernel installed in `/lib/modules` that is newer than the
+  one that runs is a warning. The check also reads `/run/reboot-required`,
+  the marker that packages of Debian and Ubuntu write where their update
+  needs a restart, as Debian's dbus does, so that such an update shows too.
+  The RHEL family, Fedora, Amazon Linux and openSUSE do not write it: there
+  a new kernel is what shows. In a container, which runs its host's kernel,
+  no kernel is installed and only the marker counts. Where the installed
+  kernels cannot be read, as under a drop-in that sets
+  `ProtectKernelModules=true` for the collector, the card is Unknown and
+  says why.
 - `clock`: whether the system clock follows a time server, as `timedatectl`
   says.
 - `disk`: the free space of `disk_path` (default `/`), read hourly and carried
@@ -387,9 +395,10 @@ The collector runs in the sandbox of `garrison-collect.service`, which hides
 some places of the host from it: `/home`, `/root` and `/run/user`
 (`ProtectHome=true`), `/tmp` and `/var/tmp`, which are its own and empty
 (`PrivateTmp=true`), `/dev`, which is its own but for `/dev/shm` and
-`/dev/mqueue` (`PrivateDevices=true`), and the kernel's own files:
-`/lib/modules` and `/usr/lib/modules`, `/proc/kallsyms`, `/proc/kcore` and
-`/proc/kmsg`. `check-config`, and with it the installer before an upgrade,
+`/dev/mqueue` (`PrivateDevices=true`), and the kernel's own files
+`/proc/kallsyms`, `/proc/kcore` and `/proc/kmsg`. It sees `/lib/modules`,
+where the `restart` check reads the installed kernels; the broker's unit
+hides that too. `check-config`, and with it the installer before an upgrade,
 refuses a path of a check that lies there, also through a link, and
 `garrison doctor` names it: `disk_path`, `proc` and `root` of `host` and
 `host-care`, the `path` of `receipt` and `backup-check`, the files and the

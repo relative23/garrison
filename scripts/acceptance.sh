@@ -170,6 +170,39 @@ check "the key is nowhere but in the question" "
 inside "systemctl stop acceptance-dns && : > $credentials/spamhaus-dqs-key &&
     cp -p /root/garrison.toml.before-dqs /etc/garrison/garrison.toml"
 
+step "The kernels that the restart card compares"
+# A kernel newer than the one that runs, as an update installs one: on the
+# RHEL family, which writes no /run/reboot-required, only that shows that a
+# restart is due. Its folder in /lib/modules with its modules.dep is all the
+# check reads of a kernel; the step removes it again. The card is read from
+# the newest snapshot.
+inside_input 'cat > /root/restart-card.sh' <<'SQL'
+sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT value FROM snapshots,
+    json_each(document, '\$.observations') WHERE snapshots.id = (SELECT max(id) FROM snapshots)
+    AND json_extract(value, '\$.id') = 'host.restart'" > /root/restart.json
+cat /root/restart.json
+SQL
+newer=99.0.0-garrison-acceptance
+inside "mkdir -p /lib/modules/$newer && : > /lib/modules/$newer/modules.dep"
+check "with a newer kernel installed a collection run starts" "$collect"
+check "the restart card names the newer kernel and says that a restart is due" "
+    sh /root/restart-card.sh && grep -q '$newer' /root/restart.json &&
+        grep -q '\"state\":\"warning\"' /root/restart.json"
+# A unit that hides the kernels, as an operator's own drop-in may, leaves
+# the card Unknown with the reason, never in order.
+dropin=/etc/systemd/system/garrison-collect.service.d
+inside "mkdir -p $dropin && printf '[Service]\nProtectKernelModules=true\n' > $dropin/kernels.conf &&
+    systemctl daemon-reload"
+check "with the kernels hidden a collection run starts" "$collect"
+check "with the kernels hidden the restart card says that it cannot read them" "
+    sh /root/restart-card.sh &&
+        grep -q 'The installed kernels in /lib/modules could not be read' /root/restart.json &&
+        grep -q '\"state\":\"unknown\"' /root/restart.json"
+inside "rm $dropin/kernels.conf && rm -r /lib/modules/$newer && systemctl daemon-reload"
+check "without the newer kernel a collection run starts" "$collect"
+check "the restart card no longer names the newer kernel" \
+    "sh /root/restart-card.sh && ! grep -q '$newer' /root/restart.json"
+
 step "Making room in a full audit, as operations.md says"
 # The audit as it stands an hour later, filled up: the jobs so far have
 # settled, and records of a finished check make up the 1000.

@@ -431,9 +431,9 @@ Notable changes for operators and users. The format follows
   sign in; `check-config`, and with it the installer, now refuses it with
   the setting that hides it, and `garrison doctor` names it.
 - **`check-config` refuses a check's path that the collector cannot see.**
-  The collector's unit hides the same places from the collector as the
-  broker's from the broker, and the kernel's own files as well, while
-  `check-config` reads as root: a `receipt` or a `backup-check` report under
+  The collector's unit hides `/home`, `/root`, `/run/user`, `/tmp`,
+  `/var/tmp`, `/dev` and the kernel's own files from the collector, as the
+  broker's does from the broker, while `check-config` reads as root: a `receipt` or a `backup-check` report under
   `/home` or in `/tmp`, a ClamAV or Bulwark folder there, a
   `version-command` program there, passed, and the check read nothing, or a
   `disk_path` of `/home` reported the free space of the empty place the
@@ -444,6 +444,15 @@ Notable changes for operators and users. The format follows
   doctor` names it. `disk_path = "/tmp"` stays in order: the collector's
   own `/tmp` lies on the same file system. See
   [checks](docs/operator/checks.md#paths-the-collector-cannot-see).
+- **The restart card sees a kernel update on the RHEL family.** The
+  collector's unit hid `/lib/modules` from the collector
+  (`ProtectKernelModules=true`), so host care's restart check found no
+  kernel installed: on AlmaLinux, Rocky Linux, CentOS Stream, Fedora,
+  Amazon Linux and openSUSE, which write no `/run/reboot-required`, the card
+  stayed in order after a kernel update. The unit now lets the collector
+  read the installed kernels; loading a module stays out of its reach, as
+  it holds no capability and may not make such a call. Where the kernels
+  cannot be read, the card says so and is Unknown, never in order.
 - **`garrison doctor` names what makes each file.** For a missing access
   policy it said to run `garrison stalwart setup` or the installer, neither
   of which makes one; it now names `garrison access init`, and `garrison

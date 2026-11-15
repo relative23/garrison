@@ -6,7 +6,7 @@ use super::*;
 /// The places hidden from the broker and from the collector are those of
 /// the settings in their units that hide or replace a path, as
 /// systemd.exec(5) gives them and a container showed them (systemd 257): a
-/// unit that hides more, or less, fails here until the list follows.
+/// unit that hides more, or less, fails here until its list follows.
 #[test]
 fn the_places_hidden_are_those_the_broker_and_collector_units_hide() {
     const HIDING: [&str; 18] = [
@@ -29,11 +29,13 @@ fn the_places_hidden_are_those_the_broker_and_collector_units_hide() {
         "ProtectProc=",
         "ProcSubset=",
     ];
-    let listed: BTreeSet<String> = HIDDEN
-        .iter()
-        .map(|(_, setting, _)| (*setting).to_owned())
-        .collect();
-    for unit in [BROKER, COLLECT] {
+    let listed: BTreeSet<&str> = HIDDEN.iter().map(|(_, setting, _)| *setting).collect();
+    for (unit, sets) in [(BROKER, &BROKER_SETS[..]), (COLLECT, &COLLECT_SETS[..])] {
+        assert!(
+            sets.iter().all(|setting| listed.contains(setting)),
+            "{unit}"
+        );
+        let listed: BTreeSet<String> = sets.iter().map(ToString::to_string).collect();
         let set: BTreeSet<String> = HIDING
             .iter()
             .flat_map(|key| {
@@ -45,6 +47,9 @@ fn the_places_hidden_are_those_the_broker_and_collector_units_hide() {
             .collect();
         assert_eq!(set, listed, "{unit}");
     }
+    // No place is listed that neither unit hides.
+    let set: BTreeSet<&str> = BROKER_SETS.iter().chain(&COLLECT_SETS).copied().collect();
+    assert_eq!(set, listed);
     let places = |wanted: &str| -> Vec<&str> {
         HIDDEN
             .iter()
@@ -166,11 +171,6 @@ fn a_checks_path_where_the_collector_cannot_see_it_is_named_with_the_setting() {
         ),
         ("/root/clamd.conf", Use::Reads, "(ProtectHome=true)"),
         ("/run/user/0/x", Use::Reads, "(ProtectHome=true)"),
-        (
-            "/usr/lib/modules/x",
-            Use::Reads,
-            "(ProtectKernelModules=true)",
-        ),
         ("/proc/kcore", Use::Reads, "(ProtectKernelTunables=true)"),
         ("/proc/kmsg", Use::Reads, "(ProtectKernelLogs=true)"),
         (
@@ -212,6 +212,9 @@ fn a_checks_path_where_the_collector_cannot_see_it_is_named_with_the_setting() {
         ("/var/lib/garrison/backup-check/restic.json", Use::Reads),
         ("/usr/bin/clamdscan", Use::Runs),
         ("/homes/x", Use::Reads),
+        // The installed kernels, which host care's restart check reads.
+        ("/lib/modules", Use::Reads),
+        ("/usr/lib/modules/6.12.0/modules.dep", Use::Reads),
     ] {
         assert_eq!(said(path, used, Some(path)), None, "{path}");
     }

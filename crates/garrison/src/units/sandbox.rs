@@ -17,7 +17,8 @@ use super::{BROKER, COLLECT};
 /// (`PrivateTmp=true`, and `PrivateDevices=true` for `/dev`, into which
 /// systemd still binds the host's `/dev/shm` and `/dev/mqueue`). The third
 /// value says that the service's own place lies on the file system of the
-/// host's, so that statvfs there measures that one. Both units set the same.
+/// host's, so that statvfs there measures that one. Which of these each
+/// unit sets: [`BROKER_SETS`], [`COLLECT_SETS`].
 const HIDDEN: [(&str, &str, bool); 11] = [
     ("/home", "ProtectHome=true", false),
     ("/root", "ProtectHome=true", false),
@@ -32,16 +33,35 @@ const HIDDEN: [(&str, &str, bool); 11] = [
     ("/proc/kmsg", "ProtectKernelLogs=true", false),
 ];
 const DEV_SHARED: [&str; 2] = ["/dev/shm", "/dev/mqueue"];
+/// The settings of [`HIDDEN`] that `garrison-broker.service` sets.
+const BROKER_SETS: [&str; 6] = [
+    "ProtectHome=true",
+    "PrivateTmp=true",
+    "PrivateDevices=true",
+    "ProtectKernelModules=true",
+    "ProtectKernelTunables=true",
+    "ProtectKernelLogs=true",
+];
+/// Those that `garrison-collect.service` sets: not `ProtectKernelModules=`,
+/// which hid the installed kernels from host care's restart check.
+const COLLECT_SETS: [&str; 5] = [
+    "ProtectHome=true",
+    "PrivateTmp=true",
+    "PrivateDevices=true",
+    "ProtectKernelTunables=true",
+    "ProtectKernelLogs=true",
+];
 
-/// The hidden place that holds `path`, the setting that hides it and
-/// whether statvfs there measures the host's file system.
-fn hidden_place(path: &Path) -> Option<(&'static str, &'static str, bool)> {
+/// The place that a unit with the settings `sets` hides and that holds
+/// `path`, the setting that hides it and whether statvfs there measures the
+/// host's file system.
+fn hidden_place(path: &Path, sets: &[&str]) -> Option<(&'static str, &'static str, bool)> {
     if DEV_SHARED.iter().any(|shared| path.starts_with(shared)) {
         return None;
     }
     HIDDEN
         .into_iter()
-        .find(|(place, _, _)| path.starts_with(place))
+        .find(|(place, setting, _)| sets.contains(setting) && path.starts_with(place))
 }
 
 /// Why the broker's unit keeps it from reading the policy at `policy`, and
@@ -49,9 +69,9 @@ fn hidden_place(path: &Path) -> Option<(&'static str, &'static str, bool)> {
 /// with the links of its folders followed, as the broker's open follows
 /// them: either path in a hidden place hides the file.
 fn hidden_at(policy: &Path, resolved: Option<&Path>) -> Option<(String, String)> {
-    let (hidden, (place, setting, _)) = hidden_place(policy)
+    let (hidden, (place, setting, _)) = hidden_place(policy, &BROKER_SETS)
         .map(|found| (policy, found))
-        .or_else(|| resolved.and_then(|path| Some((path, hidden_place(path)?))))?;
+        .or_else(|| resolved.and_then(|path| Some((path, hidden_place(path, &BROKER_SETS)?))))?;
     let through = if hidden == policy {
         String::new()
     } else {
@@ -108,7 +128,7 @@ fn hidden_check(
 ) -> Option<(String, String)> {
     let path = host.path;
     let found = |at: &Path| {
-        hidden_place(at).filter(|(place, _, same)| {
+        hidden_place(at, &COLLECT_SETS).filter(|(place, _, same)| {
             !(host.used == Use::Measures && *same && at == Path::new(place))
         })
     };
