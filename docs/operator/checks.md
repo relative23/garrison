@@ -267,6 +267,10 @@ Partial where they would be OK.
   written, but names it without its key, `….zen.dq.spamhaus.net`, on the
   card, in its findings and in what the status database keeps. The key still
   stands in `garrison.toml`, which every user of the host may read.
+  `garrison check-config` refuses a name DNS can never ask, and says which:
+  one with a label of more than 63 octets, or one longer than 253 octets as
+  it is asked, which is with the reversed address before a list's zone, so
+  237 octets at the most in `lists` and 189 in `lists_ipv6`.
 - **Reverse names.** Each address should have a reverse name that leads back
   to it and is one of the mail hosts, the name the server greets with. One
   that is missing, leads elsewhere or is the hosting provider's default is a

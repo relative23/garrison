@@ -67,14 +67,19 @@ fn the_key_of_a_dqs_zone_is_asked_but_neither_shown_nor_kept() {
 }
 
 /// An error may repeat the name a question asked: the key leaves it too.
-/// A label longer than DNS allows makes no question at all.
+/// A label longer than DNS allows makes no question at all. The options
+/// refuse such a zone (`names_tests.rs`); a reading names it without its key
+/// all the same.
 #[test]
 fn an_error_that_repeats_the_question_names_the_zone_without_its_key() {
     let long = "k".repeat(64);
     let (resolver, _) = stand_in(mail_host(), None, 64);
-    let lists = format!("lists = [\"{long}.zen.dq.spamhaus.net\"]\nlists_ipv6 = []");
+    let provider = Reputation {
+        lists: vec![format!("{long}.zen.dq.spamhaus.net")],
+        ..provider(resolver, "lists_ipv6 = []")
+    };
     let memory = Remembered::default();
-    let card = blocklists(&provider(resolver, &lists), &memory, 0);
+    let card = blocklists(&provider, &memory, 0);
     assert_eq!(
         rows(&card),
         ["203.0.113.5 | ….zen.dq.spamhaus.net | no verdict: \

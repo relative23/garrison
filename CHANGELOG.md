@@ -414,6 +414,13 @@ Notable changes for operators and users. The format follows
   its first label, which showed on the card and stood in the status
   database: it is now named without it, `….zen.dq.spamhaus.net`, and a
   reading kept with the key is asked again in the first run.
+- **check-config refuses a blocklist that DNS can never ask.** A zone in
+  `lists` or `lists_ipv6`, or a name in `hosts`, with a label longer than
+  63 octets, or longer than 253 octets as the `reputation` check asks it,
+  with the reversed address before a list's zone, was taken, and every
+  reading said of it "no verdict: … is no DNS name". `garrison check-config`,
+  and with it the installer before an upgrade, now refuses it and names the
+  entry and why.
 - **A DNS answer counts only for the question it repeats.** The `dns` and
   `reputation` checks numbered their questions in order, from the clock or
   counting from one, and took any answer with that number: whoever could

@@ -119,8 +119,61 @@ pub struct Reputation {
     patience: std::time::Duration,
 }
 
-/// A list of DNS names from an option; `default` where it is absent.
-fn names(raw: &toml::Table, key: &str, default: &[&str]) -> Checked<Vec<String>> {
+/// What a question puts before a name of an option: a mail host's name is
+/// asked as it is, a list's zone with the reversed address before it.
+#[derive(Clone, Copy)]
+enum Before {
+    Nothing,
+    Ipv4,
+    Ipv6,
+}
+
+impl Before {
+    /// The octets of the longest such address with its dot: `255.255.255.255.`,
+    /// or the 32 digits of an IPv6 address, each with a dot.
+    fn octets(self) -> usize {
+        match self {
+            Before::Nothing => 0,
+            Before::Ipv4 => 16,
+            Before::Ipv6 => 64,
+        }
+    }
+
+    fn says(self) -> &'static str {
+        match self {
+            Before::Nothing => "it has",
+            Before::Ipv4 => {
+                "with an IPv4 address before it, as the list is asked, a question has up to"
+            }
+            Before::Ipv6 => "with an IPv6 address before it, as the list is asked, a question has",
+        }
+    }
+}
+
+/// Why DNS can never ask `name` as the check asks it: no label may be longer
+/// than 63 octets, nor the name than 253. The refusal names the entry of
+/// `key`, without the key a zone may hold.
+fn askable(key: &str, name: &str, before: Before) -> Checked<()> {
+    let cannot = |why: String, most: usize| {
+        fail(format!(
+            "providers[reputation].{key} names {}, which DNS cannot ask: {why}, and DNS takes \
+             {most} at the most",
+            shown(name)
+        ))
+    };
+    if let Some(label) = name.split('.').map(str::len).find(|octets| *octets > 63) {
+        return cannot(format!("it has a label of {label} octets"), 63);
+    }
+    let asked = name.len() + before.octets();
+    if asked > 253 {
+        return cannot(format!("{} {asked} octets", before.says()), 253);
+    }
+    Ok(())
+}
+
+/// A list of DNS names from an option; `default` where it is absent. Each is
+/// asked with `before` before it.
+fn names(raw: &toml::Table, key: &str, default: &[&str], before: Before) -> Checked<Vec<String>> {
     let wrong = || {
         fail(format!(
             "providers[reputation].{key} must be a list of DNS names"
@@ -142,13 +195,10 @@ fn names(raw: &toml::Table, key: &str, default: &[&str]) -> Checked<Vec<String>>
                             .chars()
                             .all(|character| character.is_ascii_alphanumeric() || character == '-')
                 };
-                if name.len() > 253
-                    || !name.contains('.')
-                    || !name.split('.').all(plain)
-                    || names.contains(&name)
-                {
+                if !name.contains('.') || !name.split('.').all(plain) || names.contains(&name) {
                     return wrong();
                 }
+                askable(key, &name, before)?;
                 names.push(name);
             }
             Ok(names)
@@ -172,10 +222,10 @@ impl Reputation {
         )?;
         Ok(Reputation {
             resolver: resolver_option(raw, "reputation")?,
-            hosts: names(raw, "hosts", &[])?,
+            hosts: names(raw, "hosts", &[], Before::Nothing)?,
             max_domains: max_domains(&options)?,
-            lists: names(raw, "lists", &LISTS)?,
-            lists_ipv6: names(raw, "lists_ipv6", &LISTS_IPV6)?,
+            lists: names(raw, "lists", &LISTS, Before::Ipv4)?,
+            lists_ipv6: names(raw, "lists_ipv6", &LISTS_IPV6, Before::Ipv6)?,
             modules: options.modules(&["dns_tls"])?,
             patience: PATIENCE,
         })
@@ -360,6 +410,8 @@ impl Provider for Reputation {
 mod dqs_tests;
 #[cfg(test)]
 mod limits_tests;
+#[cfg(test)]
+mod names_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
