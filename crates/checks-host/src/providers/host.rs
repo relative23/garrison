@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 
-use crate::context::{Collected, Context, Provider, Report};
+use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options};
 
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
@@ -100,6 +100,21 @@ impl Provider for Host {
 
     fn ids(&self) -> Vec<String> {
         vec!["host.resources".to_owned()]
+    }
+
+    fn paths(&self) -> Vec<HostPath<'_>> {
+        vec![
+            HostPath {
+                option: "disk_path",
+                path: &self.disk_path,
+                used: Use::Measures,
+            },
+            HostPath {
+                option: "proc",
+                path: &self.proc,
+                used: Use::Reads,
+            },
+        ]
     }
 
     #[allow(clippy::cast_precision_loss)]

@@ -16,7 +16,7 @@ use garrison_core::observations::{Evidence, Field, Format, Observation, Required
 use garrison_core::{json, time};
 
 use crate::backups::{MAX_REPORT, Report as Backup, Run, Tool};
-use crate::context::{Collected, Context, Provider, Report};
+use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
 const HOUR: i64 = 3600;
@@ -245,6 +245,14 @@ impl Provider for BackupCheck {
 
     fn ids(&self) -> Vec<String> {
         vec![format!("backup-check.{}", self.tool.name())]
+    }
+
+    fn paths(&self) -> Vec<HostPath<'_>> {
+        vec![HostPath {
+            option: "path",
+            path: &self.path,
+            used: Use::Reads,
+        }]
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {

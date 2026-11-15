@@ -3,7 +3,7 @@
 
 mod sandbox;
 
-pub(crate) use sandbox::{hidden_policy, policy_place};
+pub(crate) use sandbox::{collector_places, hidden_paths, hidden_policy, policy_place};
 
 pub(crate) const WEB: &str = "garrison-web.service";
 pub(crate) const INGEST: &str = "garrison-ingest.service";

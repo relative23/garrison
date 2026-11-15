@@ -248,18 +248,26 @@ pub(crate) fn placeholder(origin: &str) -> bool {
 }
 
 fn check_config(config: &Config, path: &Path) -> u8 {
-    if let Err(error) = garrison_collector::build(&config.collector.providers) {
-        complain(&format!("Configuration not usable: {error}"));
-        return 2;
-    }
+    let providers = match garrison_collector::build(&config.collector.providers) {
+        Ok(providers) => providers,
+        Err(error) => {
+            complain(&format!("Configuration not usable: {error}"));
+            return 2;
+        }
+    };
     let unloaded = loaded::unloaded(config);
     let unaskable = dqs::refused(config);
-    if !unloaded.is_empty() || !unaskable.is_empty() {
+    // Root reads the checks' paths here; the collector, in its unit's sandbox, may not.
+    let places = units::collector_places(&providers, path);
+    if !unloaded.is_empty() || !unaskable.is_empty() || places.is_err() {
         for secret in &unloaded {
             complain(&format!("Configuration not usable: {}", secret.line()));
         }
         for (what, fix) in &unaskable {
             complain(&format!("Configuration not usable: {what}. {fix}"));
+        }
+        for refusal in places.err().unwrap_or_default() {
+            complain(&format!("Configuration not usable: {refusal}"));
         }
         return 2;
     }
@@ -285,6 +293,9 @@ fn check_config(config: &Config, path: &Path) -> u8 {
     }
     for (what, fix) in dqs::warned(config) {
         complain(&format!("Warning: {what}. {fix}"));
+    }
+    for warning in places.unwrap_or_default() {
+        complain(&format!("Warning: {warning}"));
     }
     // Root reads the policy here; the broker, in its unit's sandbox, may not.
     match units::policy_place(&config.broker.policy, path) {

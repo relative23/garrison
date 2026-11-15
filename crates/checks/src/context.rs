@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use garrison_core::config::Deployment;
@@ -169,6 +169,26 @@ impl From<NoModule> for ProviderError {
 
 pub type Collected = Result<Report, ProviderError>;
 
+/// What a check does with a path of the host that one of its options names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Use {
+    /// It reads the file or the folder there.
+    Reads,
+    /// It runs the program there.
+    Runs,
+    /// It measures the file system the path lies on, as `statvfs` does.
+    Measures,
+}
+
+/// A path of the host that an option of a check names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostPath<'a> {
+    /// The option, as `garrison.toml` writes it.
+    pub option: &'static str,
+    pub path: &'a Path,
+    pub used: Use,
+}
+
 /// One kind of source, configured by one `[[providers]]` table.
 pub trait Provider {
     /// The provider's `type`, also the `provider` of its observations.
@@ -180,6 +200,13 @@ pub trait Provider {
     /// a pair before anything runs. A provider with ids that depend on what
     /// it finds, a domain or a test, names those it always reports.
     fn ids(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// The paths of the host its options name. The collector's unit hides
+    /// some places from the collector, while the configuration check runs as
+    /// root, which sees them: it holds each of these against those places.
+    fn paths(&self) -> Vec<HostPath<'_>> {
         Vec::new()
     }
 

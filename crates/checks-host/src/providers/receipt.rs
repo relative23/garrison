@@ -29,7 +29,7 @@ use garrison_core::observations::{
 use garrison_core::time::{self, Written};
 use serde_json::{Value, json};
 
-use crate::context::{Collected, Context, Provider, Report};
+use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 use crate::values::{from_toml, loosely_equal};
 
@@ -372,6 +372,14 @@ impl Provider for Receipt {
 
     fn ids(&self) -> Vec<String> {
         vec![format!("receipt.{}", self.id)]
+    }
+
+    fn paths(&self) -> Vec<HostPath<'_>> {
+        vec![HostPath {
+            option: "path",
+            path: &self.path,
+            used: Use::Reads,
+        }]
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {

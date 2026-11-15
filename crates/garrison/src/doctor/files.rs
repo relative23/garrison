@@ -176,6 +176,12 @@ pub(super) fn files(config: &Config) -> Vec<Finding> {
     if let Some((what, fix)) = units::hidden_policy(&config.broker.policy) {
         findings.push(Finding::fail(what, format!("{fix}.")));
     }
+    // And the checks' paths, which the collector reads in its own.
+    if let Ok(providers) = garrison_collector::build(&config.collector.providers) {
+        for (what, fix) in units::hidden_paths(&providers) {
+            findings.push(Finding::fail(what, format!("{fix}.")));
+        }
+    }
     // Setup writes these root's with mode 600, and nothing changes them after.
     for name in KEYS {
         let path = config.credentials_directory.join(name);
@@ -228,6 +234,28 @@ mod tests {
             .find(|finding| finding.what.contains("(ProtectHome=true)"))
             .unwrap();
         assert_eq!(named.level, Level::Fail, "{}", named.line());
+        // And a check's path that the collector's unit hides from it.
+        let mut check = config.clone();
+        check.collector.providers.push(
+            "type = \"bulwark\"\nadmin_directory = \"/root/bulwark\""
+                .parse()
+                .unwrap(),
+        );
+        let found = files(&check);
+        let named = found
+            .iter()
+            .find(|finding| {
+                finding
+                    .what
+                    .starts_with("providers[bulwark].admin_directory")
+            })
+            .unwrap();
+        assert_eq!(named.level, Level::Fail, "{}", named.line());
+        assert!(
+            named.line().contains("Paths the collector cannot see"),
+            "{}",
+            named.line()
+        );
     }
 
     /// Each fix names what makes the file, or what gives it owner and mode.

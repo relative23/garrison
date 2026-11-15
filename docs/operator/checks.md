@@ -371,3 +371,44 @@ Let the job write it as root with mode `0644`.
 
 Keys can be nested: `key = ["components", "stalwartlabs/stalwart", "installed"]`.
 Formats: `text`, `number`, `bytes`, `datetime`, `duration` (seconds), `boolean`, `url`.
+
+## Paths the collector cannot see
+
+The collector runs in the sandbox of `garrison-collect.service`, which hides
+some places of the host from it: `/home`, `/root` and `/run/user`
+(`ProtectHome=true`), `/tmp` and `/var/tmp`, which are its own and empty
+(`PrivateTmp=true`), `/dev`, which is its own but for `/dev/shm` and
+`/dev/mqueue` (`PrivateDevices=true`), and the kernel's own files:
+`/lib/modules` and `/usr/lib/modules`, `/proc/kallsyms`, `/proc/kcore` and
+`/proc/kmsg`. `check-config`, and with it the installer before an upgrade,
+refuses a path of a check that lies there, also through a link, and
+`garrison doctor` names it: `disk_path`, `proc` and `root` of `host` and
+`host-care`, the `path` of `receipt` and `backup-check`, the files and the
+database folder of `clamav`, `admin_directory` of `bulwark` and the program
+a `version-command` runs. Root sees them there, the collector does not, so
+the check would read nothing there, or the free space of the collector's
+own `/home`. `disk_path = "/tmp"` and `"/var/tmp"` are in order: the
+collector's own lie on the same file systems.
+
+Keep such a file where the collector sees it, as under `/var/lib` or
+`/srv`. Where a check must look at one place under `/home`, show the
+collector that place read-only at another one, and name that one in the
+option. For a folder, such as Bulwark's under `/home/webmail/bulwark`:
+
+```sh
+sudo mkdir -p /srv/garrison/bulwark
+sudo systemctl edit garrison-collect.service
+```
+
+```ini
+[Service]
+BindReadOnlyPaths=/home/webmail/bulwark:/srv/garrison/bulwark
+```
+
+and `admin_directory = "/srv/garrison/bulwark"`. The collector then reads
+that folder there and nothing else of `/home`; root sees an empty folder at
+`/srv/garrison/bulwark`. For the free space of a file system mounted at
+`/home`, show it an empty folder of that file system:
+`sudo mkdir -p /home/.garrison-disk /srv/garrison/home-disk`, the line
+`BindReadOnlyPaths=/home/.garrison-disk:/srv/garrison/home-disk` and
+`disk_path = "/srv/garrison/home-disk"`.

@@ -1,13 +1,14 @@
 //! Installed versions from local commands, e.g. `clamdscan --version`.
 
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Kind, Observation, Required, State};
 use regex_lite::Regex;
 use serde_json::{Map, json};
 
-use crate::context::{Collected, Context, Provider, Report};
+use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
 const MAX_OUTPUT: usize = 4096;
@@ -76,6 +77,19 @@ impl Provider for VersionCommand {
 
     fn ids(&self) -> Vec<String> {
         vec![self.id()]
+    }
+
+    /// The program it runs, which its options always name.
+    fn paths(&self) -> Vec<HostPath<'_>> {
+        self.command
+            .first()
+            .map(|program| HostPath {
+                option: "command",
+                path: Path::new(program),
+                used: Use::Runs,
+            })
+            .into_iter()
+            .collect()
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {

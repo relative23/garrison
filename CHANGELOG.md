@@ -22,6 +22,12 @@ Notable changes for operators and users. The format follows
   the upgrade, before anything stops. Move the file to
   `/etc/garrison/credentials/<name>` (root, mode 0600) and write
   `credential:<name>`; check-config names the setting and the name.
+- A check's path that the collector's unit hides from it, such as a
+  `receipt` or a `disk_path` under `/home`, or a file in `/tmp`, is refused
+  by `garrison check-config` now, and with it the upgrade, before anything
+  stops. Keep it where the collector sees it, or show it the place
+  read-only with a drop-in, as
+  [checks](docs/operator/checks.md#paths-the-collector-cannot-see) shows.
 
 ### Added
 
@@ -413,6 +419,20 @@ Notable changes for operators and users. The format follows
   reads it as root, while the broker could not read it and nobody could
   sign in; `check-config`, and with it the installer, now refuses it with
   the setting that hides it, and `garrison doctor` names it.
+- **`check-config` refuses a check's path that the collector cannot see.**
+  The collector's unit hides the same places from the collector as the
+  broker's from the broker, and the kernel's own files as well, while
+  `check-config` reads as root: a `receipt` or a `backup-check` report under
+  `/home` or in `/tmp`, a ClamAV or Bulwark folder there, a
+  `version-command` program there, passed, and the check read nothing, or a
+  `disk_path` of `/home` reported the free space of the empty place the
+  unit puts there. `check-config`, and with it the installer before an
+  upgrade, now refuses such a path, also where a link leads there, with the
+  setting that hides it and what to do; another configuration file than
+  the one the units read gets the same words as a warning, and `garrison
+  doctor` names it. `disk_path = "/tmp"` stays in order: the collector's
+  own `/tmp` lies on the same file system. See
+  [checks](docs/operator/checks.md#paths-the-collector-cannot-see).
 - **`garrison doctor` names what makes each file.** For a missing access
   policy it said to run `garrison stalwart setup` or the installer, neither
   of which makes one; it now names `garrison access init`, and `garrison

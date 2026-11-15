@@ -19,7 +19,7 @@ use garrison_core::time;
 use serde_json::json;
 
 use super::directives::directives;
-use crate::context::{Collected, Context, Provider, ProviderError, Report};
+use crate::context::{Collected, Context, HostPath, Provider, ProviderError, Report, Use};
 use crate::options::{Checked, Options, fail};
 
 const ACTIONS: [&str; 5] = ["Accept", "Reject", "Defer", "Blackhole", "Quarantine"];
@@ -308,6 +308,33 @@ impl Provider for Clamav {
             "clamav.configuration".to_owned(),
             "clamav.signatures".to_owned(),
         ]
+    }
+
+    fn paths(&self) -> Vec<HostPath<'_>> {
+        [
+            HostPath {
+                option: "milter_config",
+                path: &self.milter_config,
+                used: Use::Reads,
+            },
+            HostPath {
+                option: "clamd_config",
+                path: &self.clamd_config,
+                used: Use::Reads,
+            },
+            HostPath {
+                option: "database_directory",
+                path: &self.database,
+                used: Use::Reads,
+            },
+        ]
+        .into_iter()
+        .chain(self.fangfrisch.as_deref().map(|path| HostPath {
+            option: "fangfrisch_database",
+            path,
+            used: Use::Reads,
+        }))
+        .collect()
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {

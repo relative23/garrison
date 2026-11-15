@@ -272,6 +272,34 @@ fn check_config_names_a_policy_where_the_broker_cannot_read_it() {
     assert!(text(&checked.stderr).contains("Access policy not usable: "));
 }
 
+/// The collector's unit hides the same places from the collector, so a
+/// check's path there is named as the policy is: a refusal for the file the
+/// units read (units/sandbox.rs holds that), a warning for any other.
+#[test]
+fn check_config_names_a_checks_path_where_the_collector_cannot_see_it() {
+    let directory = prepared();
+    let path = directory.path().join("garrison.toml");
+    let mut config = std::fs::read_to_string(&path).unwrap();
+    config.push_str(
+        "\n[[providers]]\ntype = \"receipt\"\nid = \"nightly\"\ntitle = \"Nightly job\"\n\
+         path = \"/home/garrison-cli-test/nightly.json\"\nmodules = [\"services\"]\n",
+    );
+    std::fs::write(&path, config).unwrap();
+    let checked = run(directory.path(), &["check-config"]);
+    assert!(
+        text(&checked.stderr).contains(
+            "Warning: providers[receipt].path is /home/garrison-cli-test/nightly.json, under \
+             /home, which garrison-collect.service hides from the collector (ProtectHome=true): \
+             the check cannot read it there. Keep it where the collector sees it and name that \
+             in providers[receipt].path, or show the collector that place read-only at another \
+             one (docs/operator/checks.md, \"Paths the collector cannot see\").\n"
+        ),
+        "{}",
+        text(&checked.stderr)
+    );
+    assert_eq!(checked.status.code(), Some(0), "{}", text(&checked.stderr));
+}
+
 #[test]
 fn the_switch_snippet_comes_from_the_interface_next_to_the_binary() {
     // A release layout: bin/garrison and static/ beside it.

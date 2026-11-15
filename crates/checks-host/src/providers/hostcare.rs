@@ -21,7 +21,7 @@ mod reading;
 
 use reading::{Pending, Sample};
 
-use crate::context::{Collected, Context, Provider, ProviderError, Report};
+use crate::context::{Collected, Context, HostPath, Provider, ProviderError, Report, Use};
 use crate::kept::{Kept, cached};
 use crate::options::{Checked, Options, fail};
 
@@ -461,6 +461,21 @@ impl Provider for HostCare {
                 check => format!("host.{check}"),
             })
             .collect()
+    }
+
+    fn paths(&self) -> Vec<HostPath<'_>> {
+        vec![
+            HostPath {
+                option: "root",
+                path: &self.root,
+                used: Use::Reads,
+            },
+            HostPath {
+                option: "disk_path",
+                path: &self.disk_path,
+                used: Use::Measures,
+            },
+        ]
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {

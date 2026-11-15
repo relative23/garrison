@@ -12,7 +12,7 @@ use garrison_stalwart::http::status_of;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::context::{Collected, Context, Provider, Report};
+use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
 const MAX_REGISTRY: usize = 1024 * 1024;
@@ -174,6 +174,14 @@ impl Provider for Bulwark {
 
     fn ids(&self) -> Vec<String> {
         vec!["bulwark.plugins".to_owned()]
+    }
+
+    fn paths(&self) -> Vec<HostPath<'_>> {
+        vec![HostPath {
+            option: "admin_directory",
+            path: &self.base,
+            used: Use::Reads,
+        }]
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {

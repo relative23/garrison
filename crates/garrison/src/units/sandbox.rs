@@ -1,38 +1,47 @@
 //! What the sandboxes of Garrison's units hide from their services:
 //! root reads a file there, and the service never does.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use garrison_collector::Provider;
+use garrison_collector::context::{HostPath, Use};
 use garrison_core::config;
 
-use super::BROKER;
+use super::{BROKER, COLLECT};
 
-/// The places `garrison-broker.service` hides from the broker, each with the
-/// setting that does: they are inaccessible to it (`ProtectHome=true`), or
-/// its own and empty (`PrivateTmp=true`, and `PrivateDevices=true` for
-/// `/dev`, into which systemd still binds the host's `/dev/shm` and
-/// `/dev/mqueue`). Root sees a file there; the broker never reads it.
-const BROKER_HIDDEN: [(&str, &str); 6] = [
-    ("/home", "ProtectHome=true"),
-    ("/root", "ProtectHome=true"),
-    ("/run/user", "ProtectHome=true"),
-    ("/tmp", "PrivateTmp=true"),
-    ("/var/tmp", "PrivateTmp=true"),
-    ("/dev", "PrivateDevices=true"),
+/// The places `garrison-broker.service` and `garrison-collect.service` hide
+/// from their services, each with the setting that does, as a container
+/// showed them (systemd 257): inaccessible (`ProtectHome=true`, and for the
+/// kernel's own files `ProtectKernelModules=true`, `ProtectKernelTunables=true`
+/// and `ProtectKernelLogs=true`), or the service's own and empty
+/// (`PrivateTmp=true`, and `PrivateDevices=true` for `/dev`, into which
+/// systemd still binds the host's `/dev/shm` and `/dev/mqueue`). The third
+/// value says that the service's own place lies on the file system of the
+/// host's, so that statvfs there measures that one. Both units set the same.
+const HIDDEN: [(&str, &str, bool); 11] = [
+    ("/home", "ProtectHome=true", false),
+    ("/root", "ProtectHome=true", false),
+    ("/run/user", "ProtectHome=true", false),
+    ("/tmp", "PrivateTmp=true", true),
+    ("/var/tmp", "PrivateTmp=true", true),
+    ("/dev", "PrivateDevices=true", false),
+    ("/lib/modules", "ProtectKernelModules=true", false),
+    ("/usr/lib/modules", "ProtectKernelModules=true", false),
+    ("/proc/kallsyms", "ProtectKernelTunables=true", false),
+    ("/proc/kcore", "ProtectKernelTunables=true", false),
+    ("/proc/kmsg", "ProtectKernelLogs=true", false),
 ];
-const BROKER_DEV_SHARED: [&str; 2] = ["/dev/shm", "/dev/mqueue"];
+const DEV_SHARED: [&str; 2] = ["/dev/shm", "/dev/mqueue"];
 
-/// The hidden place that holds `path`, and the setting that hides it.
-fn hidden_place(path: &Path) -> Option<(&'static str, &'static str)> {
-    if BROKER_DEV_SHARED
-        .iter()
-        .any(|shared| path.starts_with(shared))
-    {
+/// The hidden place that holds `path`, the setting that hides it and
+/// whether statvfs there measures the host's file system.
+fn hidden_place(path: &Path) -> Option<(&'static str, &'static str, bool)> {
+    if DEV_SHARED.iter().any(|shared| path.starts_with(shared)) {
         return None;
     }
-    BROKER_HIDDEN
+    HIDDEN
         .into_iter()
-        .find(|(place, _)| path.starts_with(place))
+        .find(|(place, _, _)| path.starts_with(place))
 }
 
 /// Why the broker's unit keeps it from reading the policy at `policy`, and
@@ -40,7 +49,7 @@ fn hidden_place(path: &Path) -> Option<(&'static str, &'static str)> {
 /// with the links of its folders followed, as the broker's open follows
 /// them: either path in a hidden place hides the file.
 fn hidden_at(policy: &Path, resolved: Option<&Path>) -> Option<(String, String)> {
-    let (hidden, (place, setting)) = hidden_place(policy)
+    let (hidden, (place, setting, _)) = hidden_place(policy)
         .map(|found| (policy, found))
         .or_else(|| resolved.and_then(|path| Some((path, hidden_place(path)?))))?;
     let through = if hidden == policy {
@@ -86,113 +95,98 @@ pub(crate) fn policy_place(policy: &Path, configuration: &Path) -> Result<Option
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
+/// Why the collector's unit keeps the check of type `kind` from the path one
+/// of its options names, and what to do; `None` where the collector sees it.
+/// `resolved` is the same path with its links followed, as the check's
+/// open, exec or statvfs follows them: either path in a hidden place hides
+/// it. The service's own `/tmp` and `/var/tmp` lie on the host's file
+/// systems, so statvfs of exactly those measures the right one.
+fn hidden_check(
+    kind: &str,
+    host: &HostPath<'_>,
+    resolved: Option<&Path>,
+) -> Option<(String, String)> {
+    let path = host.path;
+    let found = |at: &Path| {
+        hidden_place(at).filter(|(place, _, same)| {
+            !(host.used == Use::Measures && *same && at == Path::new(place))
+        })
+    };
+    let (hidden, (place, setting, _)) = found(path)
+        .map(|place| (path, place))
+        .or_else(|| resolved.and_then(|at| Some((at, found(at)?))))?;
+    let through = if hidden == path {
+        String::new()
+    } else {
+        format!(", which leads to {}", hidden.display())
+    };
+    let cannot = match host.used {
+        Use::Reads => "the check cannot read it there",
+        Use::Runs => "the check cannot run it there",
+        Use::Measures if hidden == Path::new(place) => {
+            "the check would measure the unit's own file system there instead"
+        }
+        Use::Measures => "the check cannot measure it there",
+    };
+    let option = host.option;
+    Some((
+        format!(
+            "providers[{kind}].{option} is {}{through}, under {place}, which {COLLECT} hides \
+             from the collector ({setting}): {cannot}",
+            path.display()
+        ),
+        format!(
+            "Keep it where the collector sees it and name that in providers[{kind}].{option}, \
+             or show the collector that place read-only at another one \
+             (docs/operator/checks.md, \"Paths the collector cannot see\")"
+        ),
+    ))
+}
 
-    use super::super::tests::values;
-    use super::*;
+/// `path` with its links followed, as far as it is there; else the same for
+/// its folder, with its own name after it.
+fn resolved(path: &Path) -> Option<PathBuf> {
+    std::fs::canonicalize(path).ok().or_else(|| {
+        path.parent()
+            .and_then(|folder| std::fs::canonicalize(folder).ok())
+            .zip(path.file_name())
+            .map(|(folder, name)| folder.join(name))
+    })
+}
 
-    /// The places hidden from the broker are those of the settings in its
-    /// unit that hide or replace a path, as systemd.exec(5) gives them and a
-    /// container showed them (systemd 257): a unit that hides more, or less,
-    /// fails here until the list follows.
-    #[test]
-    fn the_places_hidden_from_the_broker_are_those_its_unit_hides() {
-        const HIDING: [&str; 14] = [
-            "ProtectHome=",
-            "PrivateTmp=",
-            "PrivateDevices=",
-            "InaccessiblePaths=",
-            "TemporaryFileSystem=",
-            "BindPaths=",
-            "BindReadOnlyPaths=",
-            "RootDirectory=",
-            "RootImage=",
-            "MountImages=",
-            "ExtensionImages=",
-            "ExtensionDirectories=",
-            "PrivateUsers=",
-            "ProtectProc=",
-        ];
-        let set: BTreeSet<String> = HIDING
-            .iter()
-            .flat_map(|key| {
-                values(key)
-                    .into_iter()
-                    .filter(|(unit, _)| *unit == BROKER)
-                    .map(move |(_, value)| format!("{key}{value}"))
-            })
-            .collect();
-        let listed: BTreeSet<String> = BROKER_HIDDEN
-            .iter()
-            .map(|(_, setting)| (*setting).to_owned())
-            .collect();
-        assert_eq!(set, listed);
-        let places = |wanted: &str| -> Vec<&str> {
-            BROKER_HIDDEN
+/// [`hidden_check`] for every path the checks name, in their order.
+pub(crate) fn hidden_paths(providers: &[Box<dyn Provider>]) -> Vec<(String, String)> {
+    providers
+        .iter()
+        .flat_map(|provider| {
+            provider
+                .paths()
                 .iter()
-                .filter(|(_, setting)| *setting == wanted)
-                .map(|(place, _)| *place)
-                .collect()
-        };
-        assert_eq!(places("ProtectHome=true"), ["/home", "/root", "/run/user"]);
-        assert_eq!(places("PrivateTmp=true"), ["/tmp", "/var/tmp"]);
-        assert_eq!(places("PrivateDevices=true"), ["/dev"]);
-    }
+                .filter_map(|host| {
+                    hidden_check(provider.name(), host, resolved(host.path).as_deref())
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
 
-    #[test]
-    fn a_policy_where_the_broker_cannot_read_it_is_named_with_the_setting() {
-        let said = |policy: &str, resolved: Option<&str>| {
-            hidden_at(Path::new(policy), resolved.map(Path::new)).map(|(what, _)| what)
-        };
-        assert_eq!(
-            said("/home/admin/policy.json", None).as_deref(),
-            Some(
-                "broker.policy is /home/admin/policy.json, under /home, which \
-                 garrison-broker.service hides from the broker (ProtectHome=true): the broker \
-                 cannot read it there, and nobody can sign in"
-            )
-        );
-        for (policy, setting) in [
-            ("/root/policy.json", "(ProtectHome=true)"),
-            ("/run/user/0/policy.json", "(ProtectHome=true)"),
-            ("/tmp/policy.json", "(PrivateTmp=true)"),
-            ("/var/tmp/garrison/policy.json", "(PrivateTmp=true)"),
-            ("/dev/policy.json", "(PrivateDevices=true)"),
-        ] {
-            assert!(said(policy, None).unwrap().contains(setting), "{policy}");
-        }
-        // The broker sees these, and a name that only begins like a place.
-        for policy in [
-            "/etc/garrison/access-policy.json",
-            "/srv/garrison/policy.json",
-            "/dev/shm/policy.json",
-            "/homes/policy.json",
-            "/var/lib/garrison/policy.json",
-        ] {
-            assert_eq!(said(policy, Some(policy)), None, "{policy}");
-        }
-        // A folder that is a link into a hidden place hides the file too.
-        assert_eq!(
-            said("/srv/policy/access.json", Some("/home/admin/access.json")).as_deref(),
-            Some(
-                "broker.policy is /srv/policy/access.json, which leads to /home/admin/access.json, \
-                 under /home, which garrison-broker.service hides from the broker \
-                 (ProtectHome=true): the broker cannot read it there, and nobody can sign in"
-            )
-        );
-        let hidden = Path::new("/home/admin/policy.json");
-        assert!(policy_place(hidden, Path::new(config::DEFAULT_PATH)).is_err());
-        let draft = policy_place(hidden, Path::new("/root/draft.toml")).unwrap();
-        assert!(draft.unwrap().ends_with(
-            "Keep the policy where the broker sees it, such as \
-                 /etc/garrison/access-policy.json, and name that in broker.policy."
-        ));
-        let seen = Path::new("/etc/garrison/access-policy.json");
-        assert_eq!(
-            policy_place(seen, Path::new(config::DEFAULT_PATH)),
-            Ok(None)
-        );
+/// What check-config says of the checks' paths the collector's unit hides:
+/// refusals (`Err`) for the configuration the units read, and warnings for
+/// any other, as for the access policy.
+pub(crate) fn collector_places(
+    providers: &[Box<dyn Provider>],
+    configuration: &Path,
+) -> Result<Vec<String>, Vec<String>> {
+    let said: Vec<String> = hidden_paths(providers)
+        .into_iter()
+        .map(|(what, fix)| format!("{what}. {fix}."))
+        .collect();
+    if configuration == Path::new(config::DEFAULT_PATH) && !said.is_empty() {
+        Err(said)
+    } else {
+        Ok(said)
     }
 }
+
+#[cfg(test)]
+mod tests;
