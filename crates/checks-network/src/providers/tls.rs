@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{
@@ -26,9 +26,15 @@ use super::certificate::not_after;
 use super::dns::max_domains;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::options::{Checked, Options, fail};
+use crate::timed::Timed;
 
 const WARN_DAYS: i64 = 14;
+/// One step of a probe waits this long at most: the connection, one read or
+/// write.
 const TIMEOUT: Duration = Duration::from_secs(5);
+/// A probe has this long in all, so that a listener that sends a byte now
+/// and then cannot hold the run.
+const PROBE: Duration = Duration::from_secs(10);
 const MAX_REPLY: usize = 65536;
 
 mod listeners;
@@ -96,7 +102,7 @@ fn reply(stream: &mut impl Read) -> io::Result<String> {
     }
 }
 
-fn starttls(stream: &mut TcpStream, host: &str) -> io::Result<()> {
+fn starttls(stream: &mut (impl Read + Write), host: &str) -> io::Result<()> {
     if !reply(stream)?.starts_with("220") {
         return Err(protocol_error("Unexpected SMTP greeting"));
     }
@@ -111,14 +117,20 @@ fn starttls(stream: &mut TcpStream, host: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn connect(address: &str, port: u16) -> Result<TcpStream, Failure> {
+/// A connection to the listener, with everything said over it done by
+/// `until`.
+fn connect(address: &str, port: u16, until: Instant) -> Result<Timed, Failure> {
     let targets = (address, port)
         .to_socket_addrs()
         .map_err(|_| Failure("name lookup failed"))?;
     let mut last = Failure("name lookup failed");
     for target in targets {
-        match TcpStream::connect_timeout(&target, TIMEOUT) {
-            Ok(stream) => return Ok(stream),
+        let patience = until.saturating_duration_since(Instant::now()).min(TIMEOUT);
+        if patience.is_zero() {
+            return Err(Failure("timed out"));
+        }
+        match TcpStream::connect_timeout(&target, patience) {
+            Ok(stream) => return Ok(Timed::new(stream, until, TIMEOUT)),
             Err(error) => last = failure(&error),
         }
     }
@@ -137,7 +149,7 @@ impl TimeProvider for At {
 }
 
 /// One handshake: STARTTLS if asked, SNI `host`, chain and name validated
-/// at `now`.
+/// at `now`; all of it within `PROBE`.
 pub fn probe(
     host: &str,
     port: u16,
@@ -158,10 +170,8 @@ pub fn probe(
         .with_no_client_auth();
     let mut connection =
         ClientConnection::new(Arc::new(config), name).map_err(|_| Failure("TLS error"))?;
-    let mut stream = connect(address, port)?;
+    let mut stream = connect(address, port, Instant::now() + PROBE)?;
     let io = |error| failure(&error);
-    stream.set_read_timeout(Some(TIMEOUT)).map_err(io)?;
-    stream.set_write_timeout(Some(TIMEOUT)).map_err(io)?;
     if use_starttls {
         // A server that answers but refuses STARTTLS is not a network failure.
         starttls(&mut stream, host).map_err(|error| match error.kind() {
@@ -202,6 +212,89 @@ fn system_roots() -> Arc<RootCertStore> {
     }
     roots.add_parsable_certificates(loaded.certs);
     Arc::new(roots)
+}
+
+/// What the probes of one run found, and the state that gives.
+struct Probes {
+    state: State,
+    rows: Vec<Vec<Value>>,
+    findings: Vec<String>,
+    lowest: Option<i64>,
+}
+
+/// A row for an endpoint without a certificate to show.
+fn bare(label: &str, result: &str) -> Vec<Value> {
+    vec![
+        json!(label),
+        json!(result),
+        Value::Null,
+        Value::Null,
+        Value::Null,
+    ]
+}
+
+/// Each endpoint probed while the run has time; the ones after that are
+/// named, not probed, and keep the state from being in order.
+fn probe_each(endpoints: &[Endpoint], roots: &Arc<RootCertStore>, context: &Context<'_>) -> Probes {
+    let (mut rows, mut findings, mut unchecked) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut lowest, mut failures): (Option<i64>, usize) = (None, 0);
+    for endpoint in endpoints {
+        let label = format!("{}:{}", endpoint.host, endpoint.port);
+        if context.deadline.expired() {
+            rows.push(bare(&label, "not checked"));
+            unchecked.push(label);
+            continue;
+        }
+        match probe(
+            &endpoint.host,
+            endpoint.port,
+            &endpoint.address,
+            endpoint.starttls,
+            roots,
+            context.now,
+        ) {
+            Err(Failure(kind)) => {
+                failures += 1;
+                findings.push(format!("{label} — TLS check failed ({kind})."));
+                rows.push(bare(&label, "failed"));
+            }
+            Ok(found) => {
+                lowest = Some(lowest.map_or(found.days, |known| known.min(found.days)));
+                if found.days < WARN_DAYS {
+                    findings.push(format!(
+                        "{label} — certificate expires in {} days.",
+                        found.days
+                    ));
+                }
+                rows.push(vec![
+                    json!(label),
+                    json!("valid"),
+                    json!(found.expires_at),
+                    json!(found.days),
+                    json!(found.protocol),
+                ]);
+            }
+        }
+    }
+    let state = match (failures, findings.is_empty(), unchecked.len()) {
+        (0, true, 0) => State::Ok,
+        (0, true, left) if left == endpoints.len() => State::Unknown,
+        (0, true, _) => State::Partial,
+        (0, false, _) => State::Warning,
+        _ => State::Failed,
+    };
+    if !unchecked.is_empty() {
+        findings.push(format!(
+            "Not checked in this run, as its time was used up: {}.",
+            unchecked.join(", ")
+        ));
+    }
+    Probes {
+        state,
+        rows,
+        findings,
+        lowest,
+    }
 }
 
 #[derive(Debug)]
@@ -314,8 +407,6 @@ impl Provider for Tls {
 
     fn collect(&self, context: &Context<'_>) -> Collected {
         let roots = self.roots.clone().unwrap_or_else(system_roots);
-        let (mut rows, mut findings) = (Vec::new(), Vec::new());
-        let (mut lowest, mut failures): (Option<i64>, usize) = (None, 0);
         let found;
         let mut rest = None;
         let endpoints = if self.endpoints.is_empty() {
@@ -330,50 +421,12 @@ impl Provider for Tls {
         } else {
             &self.endpoints
         };
-        for endpoint in endpoints {
-            let label = format!("{}:{}", endpoint.host, endpoint.port);
-            match probe(
-                &endpoint.host,
-                endpoint.port,
-                &endpoint.address,
-                endpoint.starttls,
-                &roots,
-                context.now,
-            ) {
-                Err(Failure(kind)) => {
-                    failures += 1;
-                    findings.push(format!("{label} — TLS check failed ({kind})."));
-                    rows.push(vec![
-                        json!(label),
-                        json!("failed"),
-                        Value::Null,
-                        Value::Null,
-                        Value::Null,
-                    ]);
-                }
-                Ok(found) => {
-                    lowest = Some(lowest.map_or(found.days, |known| known.min(found.days)));
-                    if found.days < WARN_DAYS {
-                        findings.push(format!(
-                            "{label} — certificate expires in {} days.",
-                            found.days
-                        ));
-                    }
-                    rows.push(vec![
-                        json!(label),
-                        json!("valid"),
-                        json!(found.expires_at),
-                        json!(found.days),
-                        json!(found.protocol),
-                    ]);
-                }
-            }
-        }
-        let state = match (failures, findings.is_empty()) {
-            (0, true) => State::Ok,
-            (0, false) => State::Warning,
-            _ => State::Failed,
-        };
+        let Probes {
+            state,
+            rows,
+            mut findings,
+            lowest,
+        } = probe_each(endpoints, &roots, context);
         // The hosts of the domains left out are not probed; the state is that
         // of the endpoints that are.
         findings.extend(rest);
@@ -420,3 +473,5 @@ impl Provider for Tls {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod time_tests;

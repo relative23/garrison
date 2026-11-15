@@ -86,6 +86,13 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A check that asks many times stops when the run's time is up.** The
+  TLS check went on probing after the run's 70 seconds, five seconds for
+  each listener that did not answer, and a listener that sent a byte now
+  and then held one probe for as long as it liked: systemd then ended the
+  run, and nothing of it was stored. It now probes only while the run has
+  time, names the endpoints it left for later as "not checked", and is not
+  in order for them; a probe has ten seconds in all.
 - **A tab follows what changes beside it.** The page that says the session
   has ended stayed so after a sign-in in another tab, a sign-out reached the
   other tabs only with their next request, and a change of a user's rights

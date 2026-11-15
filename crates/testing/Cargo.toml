@@ -1,6 +1,6 @@
 [package]
 name = "garrison-testing"
-description = "Test fixtures shared by the crates' tests: configuration, policy, a loopback HTTP server, a relay that looks at a server before passing a request on, test certificates, the Stalwart lab client. Never shipped."
+description = "Test fixtures shared by the crates' tests: configuration, policy, a loopback HTTP server, a listener that never answers, a relay that looks at a server before passing a request on, test certificates, the Stalwart lab client. Never shipped."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
