@@ -248,15 +248,25 @@ impl JobStore {
         )
     }
 
-    /// When the newest job (of one action, or of any) was created.
+    /// When the newest job (of one action, or of any) was created. A job at
+    /// a second no clock gives, as a damaged or hand-edited audit may hold,
+    /// was created at no time, so it is not the newest: it holds no action
+    /// back, and the job before it still does.
     pub fn latest_created(&self, action_id: Option<&str>) -> rusqlite::Result<Option<i64>> {
+        let (first, last) = (
+            time::Timestamp::MIN.as_second(),
+            time::Timestamp::MAX.as_second(),
+        );
         match action_id {
-            None => self
-                .db
-                .query_row("SELECT max(created_at) FROM jobs", [], |row| row.get(0)),
+            None => self.db.query_row(
+                "SELECT max(created_at) FROM jobs WHERE created_at BETWEEN ?1 AND ?2",
+                [first, last],
+                |row| row.get(0),
+            ),
             Some(action) => self.db.query_row(
-                "SELECT max(created_at) FROM jobs WHERE action_id=?",
-                [action],
+                "SELECT max(created_at) FROM jobs WHERE action_id=?1 \
+                 AND created_at BETWEEN ?2 AND ?3",
+                params![action, first, last],
                 |row| row.get(0),
             ),
         }

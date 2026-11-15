@@ -451,6 +451,12 @@ Notable changes for operators and users. The format follows
   itself cannot be read. On the pages of the history such a heartbeat
   called the receiver running or failed the request with a panic; they now
   say that what the history covers is not known.
+- **A maintenance job recorded at a time that is none no longer holds back
+  every action.** A job in the broker's audit at a time no clock gives, in
+  a database that was edited by hand or damaged, made every action wait for
+  it to settle for as long as its record stayed, or failed the request with
+  an internal error. Such a job now holds no action back, the newest job at
+  a time still does, and the Maintenance page shows its time as Unknown.
 - **A `systemd` entry may name an alias.** systemd answers for an alias,
   such as `sshd.service` where the unit is `ssh.service`, under the name of
   the unit it stands for, and the check looked for the answer under the

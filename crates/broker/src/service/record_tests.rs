@@ -175,6 +175,53 @@ fn the_cooldown_and_the_settle_time_end_on_time() {
     }
 }
 
+/// A damaged or hand-edited audit may hold a job of `run_monitor` at a time
+/// no clock gives, here `when`, beside the jobs of `others` (`run_backup`,
+/// six minutes ago). That is no job the settle time or the action's cooldown
+/// waits for, also while its record stays, and a job at a time still is.
+fn no_action_is_held_back_by_a_job_at(when: i64, others: usize) {
+    let setup = make(false);
+    // One that may still run is kept by the clean-up until it is settled.
+    let nowhen = Job {
+        created_at: when,
+        may_still_run: true,
+        ..old_job("1", "run_monitor", 0)
+    };
+    setup.broker.store().insert(&nowhen).unwrap();
+    for index in 0..others {
+        let earlier = old_job(&format!("2{index}"), "run_backup", 6 * MINUTE);
+        setup.broker.store().insert(&earlier).unwrap();
+    }
+    let answer = submit_monitor(&setup, REQUEST);
+    assert!(answer.is_ok(), "{when}: {answer:?}");
+    let other = REQUEST.replace("0b3f", "1b3f");
+    let again = setup
+        .broker
+        .submit("admin-token", "run_backup", &other, "RUN BACKUP")
+        .unwrap_err();
+    assert_eq!(
+        again.message, "Allow the previous operation to settle first",
+        "{when}"
+    );
+}
+
+/// The newest of all jobs, which the settle time waits for.
+#[test]
+fn a_job_recorded_at_the_least_integer_holds_no_action_back() {
+    no_action_is_held_back_by_a_job_at(i64::MIN, 0);
+}
+
+/// The newest job of the action, which its cooldown waits for.
+#[test]
+fn a_job_recorded_at_the_least_integer_holds_no_cooldown_back() {
+    no_action_is_held_back_by_a_job_at(i64::MIN, 1);
+}
+
+#[test]
+fn a_job_recorded_at_the_greatest_integer_holds_no_action_back() {
+    no_action_is_held_back_by_a_job_at(i64::MAX, 1);
+}
+
 #[test]
 fn a_job_that_may_still_run_is_settled_once_its_unit_is_idle() {
     let setup = make(false);
