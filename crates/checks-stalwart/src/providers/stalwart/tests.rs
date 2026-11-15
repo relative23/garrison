@@ -300,4 +300,20 @@ fn a_recorded_start_is_the_running_version_only_while_the_history_is_current() {
         "{:?}",
         quiet.findings
     );
+    // A heartbeat at a time no clock gives, in a damaged or hand-edited
+    // database, says nothing either way.
+    for beat in [i64::MIN, i64::MAX] {
+        recording::set(&db, HEARTBEAT_AT, beat).unwrap();
+        let damaged = observed();
+        assert_eq!(damaged.state, State::Unknown, "{beat}");
+        assert_eq!(
+            damaged.findings,
+            [
+                "A later start of Stalwart may not be recorded: what the event receiver recorded \
+                 about itself cannot be read (a value the event receiver keeps about itself \
+                 cannot be read)."
+            ],
+            "{beat}"
+        );
+    }
 }

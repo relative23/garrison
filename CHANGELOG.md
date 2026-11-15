@@ -379,6 +379,12 @@ Notable changes for operators and users. The format follows
   A newest snapshot dated so made the watch over the collector and
   `garrison doctor` stop with an error, or call the collector running; they
   now say that whether it runs is not known, and the watch tells nobody.
+- **A time that is none in the event history no longer stops a check.** The
+  event receiver's heartbeat at a time no clock gives, in a history that was
+  edited by hand or damaged, made the checks that read the history crash
+  in every run, each of their cards saying so, or take the history for
+  current. They now say that what the receiver recorded about itself
+  cannot be read.
 - **A `systemd` entry may name an alias.** systemd answers for an alias,
   such as `sshd.service` where the unit is `ssh.service`, under the name of
   the unit it stands for, and the check looked for the answer under the

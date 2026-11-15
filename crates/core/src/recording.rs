@@ -74,6 +74,16 @@ pub fn number(db: &Connection, key: &str) -> Result<Option<i64>, Error> {
     }
 }
 
+/// A time the receiver keeps about itself, in seconds, or `None` before it
+/// wrote one. It writes its clock's seconds, so a number that is no time, as
+/// a damaged or hand-edited database may hold, is not what it writes.
+pub fn time_of(db: &Connection, key: &str) -> Result<Option<i64>, Error> {
+    match number(db, key)? {
+        Some(second) if time::Timestamp::from_second(second).is_err() => Err(Error::Invalid),
+        known => Ok(known),
+    }
+}
+
 /// Keep a number about the recording. Only the receiver calls this, inside
 /// the transaction that it belongs to.
 pub fn set(db: &Connection, key: &str, value: i64) -> rusqlite::Result<()> {
@@ -177,14 +187,15 @@ impl fmt::Display for Uncovered {
 /// receiver reported within `patience` seconds, and no window of lost events
 /// reaches into that time. `None` says it does. A history that only begins
 /// after `since`, because recording began then or a size limit removed what
-/// was before, is not judged here: it is complete from where it begins.
+/// was before, is not judged here: it is complete from where it begins. A
+/// heartbeat at no time is an error: neither a report nor a silence.
 pub fn uncovered(
     db: &Connection,
     since: i64,
     now: i64,
     patience: i64,
 ) -> Result<Option<Uncovered>, Error> {
-    let heartbeat = number(db, HEARTBEAT_AT)?;
+    let heartbeat = time_of(db, HEARTBEAT_AT)?;
     if heartbeat.is_none_or(|beat| now - beat > patience) {
         return Ok(Some(Uncovered::Quiet { since: heartbeat }));
     }
@@ -319,6 +330,26 @@ mod tests {
             "events between 2026-11-13T12:00:00+00:00 and 2026-11-13T13:00:00+00:00 were lost \
              while the event receiver was away"
         );
+    }
+
+    /// A damaged or hand-edited database may hold a heartbeat at a time no
+    /// clock gives: whether the history is current is then not known.
+    #[test]
+    fn a_heartbeat_at_no_time_leaves_the_history_not_known() {
+        for beat in [i64::MIN, -377_705_023_202, 253_402_207_201, i64::MAX] {
+            let db = database();
+            set(&db, HEARTBEAT_AT, beat).unwrap();
+            let judged = uncovered(&db, NOW - 7 * DAY, NOW, QUIET_AFTER);
+            assert!(matches!(judged, Err(Error::Invalid)), "{beat}: {judged:?}");
+            assert!(matches!(time_of(&db, HEARTBEAT_AT), Err(Error::Invalid)));
+        }
+        // The first and the last second a clock gives are times.
+        for beat in [-377_705_023_201, 253_402_207_200] {
+            let db = database();
+            set(&db, HEARTBEAT_AT, beat).unwrap();
+            assert_eq!(time_of(&db, HEARTBEAT_AT).unwrap(), Some(beat));
+        }
+        assert_eq!(time_of(&database(), HEARTBEAT_AT).unwrap(), None);
     }
 
     #[test]
