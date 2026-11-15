@@ -95,7 +95,6 @@ check "systemd starts no collection run whose credential file is missing" "
     ! systemctl start garrison-collect.service 2>/dev/null &&
         systemctl status garrison-collect.service --no-pager 2>&1 |
             grep -E -q -i '243/CREDENTIALS|set up credentials'"
-since=$(inside 'date +%s')
 again=$(mktemp)
 if ! installer '/root/release/bin/garrison install' >"$again" 2>&1; then
     cat "$again"
@@ -103,6 +102,9 @@ if ! installer '/root/release/bin/garrison install' >"$again" 2>&1; then
     exit 1
 fi
 rm -f "$again"
+# From here on every run reads the files the installer kept; a run of the
+# timer's from before may still end within the second before.
+since=$(inside 'sleep 1 && date +%s')
 check "after the installer, a collection run starts" 'systemctl start garrison-collect.service'
 check "the installer keeps both files, empty and root's alone" "
     for name in metrics-credential spamhaus-dqs-key; do
@@ -137,8 +139,8 @@ case $distro in
 esac
 inside "$resolver && systemd-run --quiet --unit=acceptance-dns dnsmasq --keep-in-foreground --user=root \
     --no-resolv --no-hosts --listen-address=127.0.0.1 --port=5353 --bind-interfaces \
-    --log-queries --log-facility=- --address=/mail.example.test/192.0.2.25 \
-    --ptr-record=25.2.0.192.in-addr.arpa,mail.example.test --local=/dq.spamhaus.net/"
+    --log-queries --log-facility=- --host-record=mail.example.test,192.0.2.25 \
+    --local=/example.test/ --local=/dq.spamhaus.net/"
 key=garrisonacceptancenotakey
 inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.before-dqs &&
     printf "\n[[providers]]\ntype = \"reputation\"\nresolver = \"127.0.0.1:5353\"\nhosts = [\"mail.example.test\"]\nlists = [\"zen.dq.spamhaus.net\"]\nlists_ipv6 = []\n" \
@@ -147,16 +149,21 @@ check "check-config refuses a list written without its key while collector.dqs_k
     '! garrison check-config >/root/check.log 2>&1 && grep -q "written without its key" /root/check.log'
 inside 'printf "\n[collector]\ndqs_key = \"credential:spamhaus-dqs-key\"\n" >> /etc/garrison/garrison.toml'
 check "check-config takes it with collector.dqs_key" 'garrison check-config >/dev/null'
-latest='sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT document FROM snapshots ORDER BY id DESC LIMIT 1"'
+# One collection run each; a check repeats only its look at what the run left.
+collect='systemctl reset-failed garrison-collect.service; systemctl start garrison-collect.service'
+# The card's words where a check fails, and the resolver's questions.
+card='sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT document FROM snapshots ORDER BY id DESC LIMIT 1" |
+    tee /root/latest.json | tr "[]" "\n\n" | grep -E "Data Query|could be asked|dq\.spamhaus" | head -n 4'
+asked="journalctl -u acceptance-dns --no-pager | grep 'query\[' | tail -n 6"
+check "with an empty key file a collection run starts" "$collect"
 check "with an empty key file the list is not asked, and the card says why" "
-    systemctl start garrison-collect.service &&
-        $latest | grep -q 'spamhaus-dqs-key is empty' &&
-        ! journalctl -u acceptance-dns --no-pager | grep -q 'dq.spamhaus.net'"
+    $card; $asked; grep -q 'spamhaus-dqs-key is empty' /root/latest.json &&
+        ! journalctl -u acceptance-dns --no-pager | grep -q 'query\[.*dq\.spamhaus\.net'"
 inside "printf '%s\n' $key > $credentials/spamhaus-dqs-key"
+check "with a key in the file a collection run starts" "$collect"
 check "with a key in the file the list is asked with it" "
-    systemctl start garrison-collect.service &&
-        journalctl -u acceptance-dns --no-pager | grep -q '\.$key\.zen\.dq\.spamhaus\.net' &&
-        ! $latest | grep -q 'spamhaus-dqs-key is empty'"
+    $card; $asked; journalctl -u acceptance-dns --no-pager | grep -q 'query\[A\] .*\.$key\.zen\.dq\.spamhaus\.net' &&
+        ! grep -q 'spamhaus-dqs-key is empty' /root/latest.json"
 check "the key is nowhere but in the question" "
     ! grep -a -q $key /var/lib/garrison/collector/status.sqlite* &&
         ! journalctl -u garrison-collect.service --no-pager | grep -q $key"
