@@ -43,7 +43,7 @@ impl Reputation {
         }
         // A list left unasked for its time concerns this card alone, as
         // does one of the Data Query Service that this run had no key for.
-        let lists_unasked = read.lists_unasked();
+        let lists_unasked = read.lists_unasked;
         let keyless = read.keyless.as_ref().map(|why| {
             format!(
                 "The lists of Spamhaus' Data Query Service written without their key were not \

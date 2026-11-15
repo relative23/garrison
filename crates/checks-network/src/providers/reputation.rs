@@ -28,7 +28,7 @@ mod cards;
 mod dqs;
 mod verdict;
 
-use asker::{Asker, PATIENCE, RUN_OVER, SLOW};
+use asker::{Asker, PATIENCE, RUN_OVER};
 use verdict::Said;
 
 const EVERY: i64 = 6 * 3600;
@@ -86,18 +86,14 @@ struct Read {
     /// an answer the check cannot use counts for that host alone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hosts_unread: Vec<String>,
+    /// Whether a list went unasked about an address because the lists had
+    /// had their time: the blocklists card cannot be in order then. The
+    /// row's words only say so.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    lists_unasked: bool,
 }
 
 impl Read {
-    /// Whether a list went unasked about an address because the lists had
-    /// had their time: the blocklists card cannot be in order then.
-    fn lists_unasked(&self) -> bool {
-        let unasked = Said::Unanswered(format!("not asked: {SLOW}"));
-        self.addresses
-            .iter()
-            .any(|asked| asked.lists.iter().any(|(_, said)| *said == unasked))
-    }
-
     /// Whether an address's reverse name could not be read: the reverse
     /// names card cannot be in order then.
     fn reverse_unread(&self) -> bool {
@@ -386,6 +382,7 @@ impl Reputation {
             left_out,
             keyless,
             hosts_unread,
+            lists_unasked: asker.slow,
         })
     }
 
@@ -401,7 +398,7 @@ impl Reputation {
                 0
             } else if read.problem.is_some()
                 || read.cut.is_some()
-                || read.lists_unasked()
+                || read.lists_unasked
                 || read.reverse_unread()
                 || !read.hosts_unread.is_empty()
             {

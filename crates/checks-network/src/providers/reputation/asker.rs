@@ -30,6 +30,8 @@ pub(super) struct Asker {
     deadline: Deadline,
     /// Whether a list was left unasked because that time was up.
     pub(super) cut: bool,
+    /// Whether a list was left unasked because the lists had their time.
+    pub(super) slow: bool,
 }
 
 impl Asker {
@@ -42,6 +44,7 @@ impl Asker {
             until: Instant::now() + patience,
             deadline,
             cut: false,
+            slow: false,
         }
     }
 
@@ -60,6 +63,7 @@ impl Asker {
             return Said::Unanswered(format!("not asked: {RUN_OVER}"));
         }
         if Instant::now() > self.until {
+            self.slow = true;
             return Said::Unanswered(format!("not asked: {SLOW}"));
         }
         // An error may repeat the question, and with it a zone's key.

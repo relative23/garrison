@@ -5,11 +5,13 @@
 use std::time::Duration;
 
 use garrison_core::observations::{Observation, State};
+use serde_json::json;
 
+use super::asker::SLOW;
 use super::tests::{Zone, address, pointer, rows};
 use super::*;
 use crate::providers::dns::stand_in::resolver as stand_in;
-use crate::testing::{Canned, Remembered, config, table};
+use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 
 /// The two cards of `provider`.
 fn observed(provider: &Reputation) -> (Observation, Observation) {
@@ -141,4 +143,51 @@ fn lists_left_unasked_for_their_time_keep_the_blocklists_card_from_being_in_orde
     assert_eq!(blocklists.state, State::Unknown);
     assert_eq!(blocklists.findings, [unasked]);
     assert_eq!(reverse.state, State::Ok);
+}
+
+/// The kept reading says that a list went unasked for the lists' time; the
+/// words of its row are only shown. Kept with other words, as another
+/// release may write them, it keeps the card from being in order all the
+/// same, and is asked again after an hour.
+#[test]
+fn a_list_left_unasked_is_known_by_the_reading_not_by_the_words_of_its_row() {
+    let reading = |row: &str, marked: bool| {
+        let mut kept = json!({
+            "at": now().as_second(),
+            "hosts": ["mail.example.test"],
+            "addresses": [{"host": "mail.example.test", "address": "203.0.113.5",
+                           "pointer": "mail.example.test", "confirmed": true,
+                           "lists": [["up.example.org", "Clear"],
+                                     ["down.example.org", {"Unanswered": row}]]}],
+            "problem": null,
+        });
+        if marked {
+            kept["lists_unasked"] = json!(true);
+        }
+        let memory = Remembered::default();
+        memory
+            .0
+            .borrow_mut()
+            .insert(MEMORY.to_owned(), kept.to_string());
+        // Not asked: the kept reading is used.
+        let provider = provider(SocketAddr::from(([127, 0, 0, 1], 9)), &[]);
+        tests::observed(&provider, &memory, 0).0
+    };
+    let other = "not asked: the lists had had their time";
+    let blocklists = reading(other, true);
+    assert_eq!(
+        rows(&blocklists)[1],
+        format!("203.0.113.5 | down.example.org | no verdict: {other}")
+    );
+    assert_eq!(blocklists.state, State::Partial);
+    assert_eq!(
+        blocklists.findings,
+        ["Not every list was asked: the lists took too long."]
+    );
+    assert_dated(&blocklists, 0, AGAIN);
+    // The words alone decide nothing: a reading without the mark, as 0.1.2
+    // kept it, counts as it counted there until it is asked again.
+    let earlier = reading(&format!("not asked: {SLOW}"), false);
+    assert_eq!((earlier.state, earlier.findings.len()), (State::Ok, 0));
+    assert_dated(&earlier, 0, EVERY);
 }
