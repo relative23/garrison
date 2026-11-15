@@ -390,3 +390,17 @@ fn replies_queue_ids_and_options() {
     // The test file is not in this program as one piece.
     assert_eq!(Test::Eicar.body().len(), 68);
 }
+
+#[test]
+fn a_reply_line_without_an_end_is_read_only_so_far() {
+    use std::io::Read as _;
+    // A greeting of 64 MiB without an end of line: the session gives up
+    // after the longest line a reply may have, and reads no further.
+    let mut source = BufReader::new(std::io::repeat(b'2').take(64 << 20));
+    assert_eq!(
+        reply(&mut source),
+        Err("the server's reply is too long".to_owned())
+    );
+    let read = (64 << 20) - source.get_ref().limit();
+    assert!(read < 64 << 10, "{read} bytes read");
+}

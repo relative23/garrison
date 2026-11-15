@@ -47,20 +47,29 @@ impl std::fmt::Debug for Mail {
     }
 }
 
-/// One reply of the server: its code and its last line.
+/// The longest line of a reply that is read.
+const LONGEST: usize = 2048;
+
+/// One reply of the server: its code and its last line. A line is read up to
+/// `LONGEST`, so that a server that sends no end of line cannot fill memory.
 fn reply(reader: &mut impl BufRead) -> Result<(u16, String), String> {
     loop {
-        let mut line = String::new();
+        let mut data = Vec::new();
         let read = reader
-            .read_line(&mut line)
+            .take(LONGEST as u64 + 1)
+            .read_until(b'\n', &mut data)
             .map_err(|error| match error.kind() {
                 std::io::ErrorKind::InvalidData | std::io::ErrorKind::Other => tls_error(&error),
                 _ => error.to_string(),
             })?;
-        if read == 0 || line.len() > 2048 {
+        if read == 0 {
             return Err("the server closed the session".to_owned());
         }
-        let line = line.trim_end();
+        if read > LONGEST {
+            return Err("the server's reply is too long".to_owned());
+        }
+        let text = String::from_utf8_lossy(&data);
+        let line = text.trim_end();
         let code: u16 = line
             .get(..3)
             .and_then(|code| code.parse().ok())

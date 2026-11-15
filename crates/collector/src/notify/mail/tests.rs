@@ -220,3 +220,17 @@ fn headers_stay_one_line_and_other_scripts_are_encoded() {
     assert_eq!(header("Prüfung"), "=?utf-8?B?UHLDvGZ1bmc=?=");
     assert!(!format!("{:?}", mail(465)).contains("app-password"));
 }
+
+#[test]
+fn a_reply_line_without_an_end_is_read_only_so_far() {
+    use std::io::Read as _;
+    // A greeting of 64 MiB without an end of line: the session gives up
+    // after the longest line a reply may have, and reads no further.
+    let mut source = BufReader::new(std::io::repeat(b'2').take(64 << 20));
+    assert_eq!(
+        reply(&mut source),
+        Err("the server's reply is too long".to_owned())
+    );
+    let read = (64 << 20) - source.get_ref().limit();
+    assert!(read < 64 << 10, "{read} bytes read");
+}

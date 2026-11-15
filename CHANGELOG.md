@@ -99,6 +99,12 @@ Notable changes for operators and users. The format follows
   A TLS probe has ten seconds in all and a test message's session twenty; a
   reputation reading cut short is asked again after an hour, and a test
   message the run had no time for is sent in the next run.
+- **A mail server that sends a line without end no longer stops the
+  collector.** The test messages and the mail notifications read each line
+  of a reply whole before they looked at its length, so a listener that
+  sent data without an end of line filled the collector's memory until
+  systemd ended it, and the run with it. A line is now read up to 2 KiB,
+  and such a reply is "the server's reply is too long".
 - **A tab follows what changes beside it.** The page that says the session
   has ended stayed so after a sign-in in another tab, a sign-out reached the
   other tabs only with their next request, and a change of a user's rights
