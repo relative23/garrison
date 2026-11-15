@@ -21,6 +21,7 @@
 //! the day again.
 
 use garrison_core::time;
+use log::Level;
 use rusqlite::{OptionalExtension, Transaction, params};
 
 use crate::watch::LIMIT;
@@ -82,6 +83,20 @@ fn step(previous: Option<i64>, now: i64) -> (i64, Option<i64>) {
     }
 }
 
+/// The time a run cleans up the history by, and what the collector's
+/// journal says of it where a stretch at a time ahead begins or ends.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Cleaned {
+    pub(super) by: i64,
+    pub(super) said: Option<(Level, String)>,
+}
+
+impl Cleaned {
+    fn by(by: i64) -> Self {
+        Cleaned { by, said: None }
+    }
+}
+
 /// The time the run at `now` cleans up by: its own where the store believes
 /// it, else the collector's run time. `previous` is when the run before it
 /// collected, the newest snapshot's time.
@@ -89,25 +104,28 @@ pub(super) fn cleaned_by(
     transaction: &Transaction<'_>,
     now: i64,
     previous: Option<i64>,
-) -> rusqlite::Result<i64> {
+) -> rusqlite::Result<Cleaned> {
     let previous = previous.and_then(when);
     // A database of a release before this one has its newest snapshot to go
     // by; the very first run has nothing to hold its clock against.
     let Some(believed) = recall(transaction, BELIEVED)?.and_then(when).or(previous) else {
         keep(transaction, BELIEVED, now)?;
-        return Ok(now);
+        return Ok(Cleaned::by(now));
     };
     let ahead = recall(transaction, AHEAD_FOR)?.filter(|ahead| (0..HOLD).contains(ahead));
     if now <= believed.saturating_add(LIMIT) {
+        let mut cleaned = Cleaned::by(now);
         if ahead.is_some() {
             forget(transaction, AHEAD_FOR)?;
-            log::info!(
+            cleaned.said = Some((
+                Level::Info,
                 "The clock is back within ten minutes of the collector's run time; the metric \
                  history is cleaned up by it again"
-            );
+                    .to_owned(),
+            ));
         }
         keep(transaction, BELIEVED, now)?;
-        return Ok(now);
+        return Ok(cleaned);
     }
     let (counted, towards) = step(previous, now);
     let run_time = believed.saturating_add(counted);
@@ -116,28 +134,37 @@ pub(super) fn cleaned_by(
         .zip(towards)
         .map(|(ahead, step)| ahead.saturating_add(step))
     else {
-        log::warn!(
-            "This collection run is dated {}, more than ten minutes after the collector's own \
-             run time, {}: the clock went ahead, or the collector paused. The metric history \
-             is cleaned up by the run time until the collector has run at this time for a \
-             day, or the clock comes back.",
-            at(now),
-            at(believed)
-        );
         keep(transaction, AHEAD_FOR, 0)?;
-        return Ok(run_time);
+        return Ok(Cleaned {
+            by: run_time,
+            said: Some((
+                Level::Warn,
+                format!(
+                    "This collection run is dated {}, more than ten minutes after the \
+                     collector's own run time, {}: the clock went ahead, or the collector \
+                     paused. The metric history is cleaned up by the run time until the \
+                     collector has run at this time for a day, or the clock comes back.",
+                    at(now),
+                    at(believed)
+                ),
+            )),
+        });
     };
     if ahead < HOLD {
         keep(transaction, AHEAD_FOR, ahead)?;
-        return Ok(run_time);
+        return Ok(Cleaned::by(run_time));
     }
     forget(transaction, AHEAD_FOR)?;
     keep(transaction, BELIEVED, now)?;
-    log::info!(
-        "The collector has run for a day at its clock's new time; the metric history is \
-         cleaned up by the clock again"
-    );
-    Ok(now)
+    Ok(Cleaned {
+        by: now,
+        said: Some((
+            Level::Info,
+            "The collector has run for a day at its clock's new time; the metric history is \
+             cleaned up by the clock again"
+                .to_owned(),
+        )),
+    })
 }
 
 #[cfg(test)]

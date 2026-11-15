@@ -6,10 +6,10 @@ const T0: i64 = 1_793_181_600;
 const DAY: i64 = 86400;
 const YEAR: i64 = 365 * DAY;
 
-/// What each run at `times` cleans up by, each run after the one before,
-/// in a store whose memory holds `memory` first. `previous` is when the run
-/// before the first one collected.
-fn cleaned_with(memory: &[(&str, &str)], previous: Option<i64>, times: &[i64]) -> Vec<i64> {
+/// What each run at `times` cleans up by and says, each run after the one
+/// before, in a store whose memory holds `memory` first. `previous` is when
+/// the run before the first one collected.
+fn runs_with(memory: &[(&str, &str)], previous: Option<i64>, times: &[i64]) -> Vec<Cleaned> {
     let directory = tempfile::tempdir().unwrap();
     let mut store = StatusStore::open(&directory.path().join("status.sqlite"), 90).unwrap();
     for (key, value) in memory {
@@ -23,11 +23,29 @@ fn cleaned_with(memory: &[(&str, &str)], previous: Option<i64>, times: &[i64]) -
         .iter()
         .map(|&now| {
             let transaction = store.db.transaction().unwrap();
-            let by = cleaned_by(&transaction, now, previous).unwrap();
+            let cleaned = cleaned_by(&transaction, now, previous).unwrap();
             transaction.commit().unwrap();
             previous = Some(now);
-            by
+            cleaned
         })
+        .collect()
+}
+
+/// What each run at `times` cleans up by.
+fn cleaned_with(memory: &[(&str, &str)], previous: Option<i64>, times: &[i64]) -> Vec<i64> {
+    runs_with(memory, previous, times)
+        .into_iter()
+        .map(|cleaned| cleaned.by)
+        .collect()
+}
+
+/// The journal lines of the runs at `times` in a new store, each with the
+/// run's place among them.
+fn journal(times: &[i64]) -> Vec<(usize, Level, String)> {
+    runs_with(&[], None, times)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(run, cleaned)| cleaned.said.map(|(level, line)| (run, level, line)))
         .collect()
 }
 
@@ -179,6 +197,46 @@ fn a_collector_that_runs_only_every_quarter_hour_finds_its_way_back() {
     let cleaned = cleaned(&times);
     assert!(cleaned[1..1441].iter().all(|by| *by == T0));
     assert_eq!(cleaned[1441], times[1441]);
+}
+
+/// The journal says once where a stretch at a time ahead begins, and once
+/// where it ends, the clock put right or a day of runs at the new time;
+/// nothing between, and nothing of an ordinary run.
+#[test]
+fn the_journal_says_where_a_time_ahead_begins_and_where_it_ends() {
+    let back = "The clock is back within ten minutes of the collector's run time; the metric history \
+         is cleaned up by it again";
+    assert_eq!(
+        journal(&[T0, T0 + 60, T0 + YEAR, T0 + YEAR + 60, T0 + 180]),
+        [
+            (
+                2,
+                Level::Warn,
+                "This collection run is dated 2027-10-28T10:00:00+00:00, more than ten minutes \
+                 after the collector's own run time, 2026-10-28T10:01:00+00:00: the clock went \
+                 ahead, or the collector paused. The metric history is cleaned up by the run \
+                 time until the collector has run at this time for a day, or the clock comes \
+                 back."
+                    .to_owned()
+            ),
+            (4, Level::Info, back.to_owned()),
+        ]
+    );
+    let mut times = vec![T0];
+    times.extend(runs(T0 + 30 * DAY, 600, DAY));
+    let said = journal(&times);
+    assert_eq!(
+        said.iter()
+            .map(|(run, level, _)| (*run, *level))
+            .collect::<Vec<_>>(),
+        [(1, Level::Warn), (145, Level::Info)]
+    );
+    assert_eq!(
+        said[1].2,
+        "The collector has run for a day at its clock's new time; the metric history is \
+         cleaned up by the clock again"
+    );
+    assert_eq!(journal(&runs(T0, 60, 3600)), []);
 }
 
 #[test]

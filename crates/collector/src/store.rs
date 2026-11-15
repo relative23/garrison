@@ -118,7 +118,11 @@ impl StatusStore {
         }
         // The snapshot and the samples keep the run's own time; what is old
         // goes by the collector's run time.
-        let by = clock::cleaned_by(&transaction, collected_at, previous)?;
+        let cleaned = clock::cleaned_by(&transaction, collected_at, previous)?;
+        if let Some((level, line)) = &cleaned.said {
+            log::log!(*level, "{line}");
+        }
+        let by = cleaned.by;
         let cutoff = by.saturating_sub(i64::from(self.history_days) * 86400);
         transaction.execute("DELETE FROM samples WHERE ts < ?", [cutoff])?;
         transaction.execute("DELETE FROM resets WHERE ts < ?", [cutoff])?;
