@@ -13,8 +13,10 @@
 // of a page's requests back for another round trip.
 //
 // Measure a preview that was just started. The flows (flows.mjs) save the dark
-// theme in the preview's session; a page measured after them is drawn light
-// and turns dark when the session arrives, which the speed index counts.
+// theme for the preview's user, and every page of that user would then be
+// measured dark, also where the light theme is asked for: measure refuses a
+// preview whose user has saved settings, and a run in which a page showed
+// another theme than the one asked for ends with an error.
 //
 //   npm run measure -- [--url http://localhost:18091] [--runs 1] [--http1]
 //                      [--pages deliveries,logs]
@@ -67,9 +69,9 @@ const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const output = join(import.meta.dirname, "results", stamp);
-mkdirSync(join(output, "lighthouse"), { recursive: true });
 
-/** The preview's session cookie, from its sign-in that approves at once. */
+/** The preview's session cookie, from its sign-in that approves at once, and
+ * the settings its user has saved. */
 async function signIn() {
   const browser = await chromium.launch({ channel: "chrome" });
   const context = await browser.newContext();
@@ -78,9 +80,10 @@ async function signIn() {
   await page.goto(`${preview}/auth/login`);
   await page.waitForURL(`${preview}/admin/`);
   const cookie = (await context.cookies()).find((each) => each.name === "__Host-garrison_session");
+  const { session } = await (await page.request.get(`${preview}/api/session`)).json();
   await browser.close();
-  if (!cookie) throw new Error(`no session from ${preview}; is the preview running?`);
-  return cookie;
+  if (!cookie || !session) throw new Error(`no session from ${preview}; is the preview running?`);
+  return { cookie, preferences: session.preferences };
 }
 
 const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
@@ -187,7 +190,19 @@ async function measureAxe(cookie) {
   return results;
 }
 
-const cookie = await signIn();
+const { cookie, preferences } = await signIn();
+// Measured with them, the light runs would show the dark theme, or a menu
+// without the modules hidden.
+const unsaved = preferences.theme === "system" && preferences.hiddenModules.length === 0 && !preferences.showSwitch;
+if (!unsaved) {
+  console.error(
+    `The preview's user has saved settings (${JSON.stringify(preferences)}), as the flows do. ` +
+      "Measure a preview that was just started: stop it and start it again, then run measure.",
+  );
+  proxy?.close();
+  process.exit(1);
+}
+mkdirSync(join(output, "lighthouse"), { recursive: true });
 console.log(`Lighthouse, ${runs} run(s) each, median:`);
 const scores = await measureLighthouse(cookie);
 console.log("axe:");
@@ -202,3 +217,9 @@ proxy?.close();
 const protocol = proxy ? "HTTP/2" : "HTTP/1.1";
 writeFileSync(join(output, "summary.json"), JSON.stringify({ origin, protocol, runs, scores, accessibility }, null, 2));
 console.log(`Results: ${output}`);
+// axe judged such a page in the other theme: it did not measure the one asked for.
+const unapplied = accessibility.filter((entry) => !entry.themeApplied);
+if (unapplied.length > 0) {
+  console.error(`Not measured as asked: ${unapplied.length} page(s) showed another theme than the one asked for.`);
+  process.exitCode = 1;
+}

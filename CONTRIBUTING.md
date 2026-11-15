@@ -249,12 +249,17 @@ page with Lighthouse (Performance, Accessibility and Best Practices,
 desktop and mobile) and axe on both screen sizes, by hand. It measures over
 HTTP/2 with TLS, as nginx serves Garrison, through a proxy with a
 certificate it makes with `openssl` for the run; `--http1` measures the
-preview directly:
+preview directly. It needs a preview that was just started: the flows save
+settings for the preview's user, a dark theme among them, with which every
+light run would measure the dark theme. `npm run measure` refuses such a
+preview, and it fails when a page showed another theme than the one it was
+measured in:
 
 ```sh
 (cd frontend && npm run build)
 cargo run -p garrison-web --example preview        # http://localhost:18091/
 (cd e2e && npm ci && npm run flows)                # in a second terminal
+# Stop the preview (Ctrl+C) and start it again before each measurement.
 (cd e2e && npm run measure -- --runs 3)
 ```
 
