@@ -583,6 +583,17 @@ Notable changes for operators and users. The format follows
   where it would be OK, or Unknown where no address could be read; the
   other addresses and every list are asked as before, and the reading is
   asked again after an hour.
+- **A mail host's unusable answer no longer ends the reputation reading.**
+  A malformed answer, or an error of the resolver such as SERVFAIL or
+  REFUSED, for a mail host's IPv4 or IPv6 addresses ended the whole
+  reading: both cards said "Nothing could be asked: …", and no list was
+  asked about any address. Such an answer now counts for that host alone:
+  both cards name the host and why, and are Partial where they would be OK,
+  or Unknown where no address could be read; the other hosts, and that
+  host's other addresses, are asked as before, and the reading is asked
+  again after an hour. A resolver that does not answer at all still ends
+  the reading, as the `dns` check stops asking it: each further question
+  would wait out its time.
 - **A DNS answer counts only for the question it repeats.** The `dns` and
   `reputation` checks numbered their questions in order, from the clock or
   counting from one, and took any answer with that number: whoever could

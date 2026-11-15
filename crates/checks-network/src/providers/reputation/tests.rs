@@ -125,6 +125,16 @@ fn a_clean_server_with_fitting_reverse_names_is_in_order() {
     assert_eq!(reverse.modules, [ModuleId::DnsTls].into());
 }
 
+/// The configuration check refuses a second check that would report one of
+/// these ids, so they are every id the check reports.
+#[test]
+fn the_ids_are_those_the_check_reports() {
+    let (resolver, _) = stand_in(mail_host(), None, 64);
+    let provider = provider(resolver, "");
+    let (blocklists, reverse) = observed(&provider, &Remembered::default(), 0);
+    assert_eq!(provider.ids(), [blocklists.id, reverse.id]);
+}
+
 #[test]
 fn a_listing_of_the_ipv6_address_is_a_failure_and_names_the_list() {
     let mut zone = mail_host();

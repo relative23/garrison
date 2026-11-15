@@ -50,18 +50,21 @@ impl Reputation {
                  asked: {why}."
             )
         });
-        let partial =
-            read.cut.is_some() || !read.left_out.is_empty() || lists_unasked || keyless.is_some();
+        let partial = read.incomplete() || lists_unasked || keyless.is_some();
         let state = match (unknown, listed.is_empty(), verdicts) {
             (Some(_), _, _) | (None, true, 0) => State::Unknown,
             (None, false, _) => State::Failed,
             (None, true, _) if partial => State::Partial,
             (None, true, _) => State::Ok,
         };
+        // No list was asked where no address could be read.
+        let unasked = read.addresses.is_empty() && !read.hosts_unread.is_empty();
         let mut findings = match (unknown, verdicts) {
             (Some(unknown), _) => vec![unknown.clone()],
             // What was not asked is said once, beside both cards.
-            (None, 0) if read.cut.is_some() || lists_unasked || keyless.is_some() => Vec::new(),
+            (None, 0) if read.cut.is_some() || lists_unasked || keyless.is_some() || unasked => {
+                Vec::new()
+            }
             (None, 0) => vec!["No list gave a verdict.".to_owned()],
             (None, _) => listed,
         };
@@ -142,7 +145,7 @@ impl Reputation {
                 json!(result),
             ]);
         }
-        let partial = read.cut.is_some() || !read.left_out.is_empty() || !unread.is_empty();
+        let partial = read.incomplete() || !unread.is_empty();
         let none_read = read.addresses.len() == unread.len();
         let state = match (unknown, findings.is_empty(), none_read) {
             (Some(_), _, _) | (None, true, true) => State::Unknown,
@@ -152,7 +155,9 @@ impl Reputation {
         };
         let findings = match (unknown, read.addresses.is_empty()) {
             (Some(unknown), _) => vec![unknown.clone()],
-            (None, true) if read.cut.is_some() => Vec::new(),
+            // Said beside both cards: why the time was up, or which host's
+            // addresses could not be read.
+            (None, true) if read.cut.is_some() || !read.hosts_unread.is_empty() => Vec::new(),
             (None, true) => vec!["The mail hosts have no address.".to_owned()],
             (None, false) => findings.into_iter().chain(unread).collect(),
         };

@@ -25,6 +25,27 @@ pub(crate) fn resolver_after(
     questions: usize,
     delay: Duration,
 ) -> (SocketAddr, thread::JoinHandle<Vec<u16>>) {
+    serve(zone, BTreeMap::new(), silent, questions, delay)
+}
+
+/// Like [`resolver`], answering each question of `errors`, `(name, type)`,
+/// with its error code instead (SERVFAIL 2, REFUSED 5), as a resolver does
+/// that cannot or will not answer it.
+pub(crate) fn resolver_erring(
+    zone: BTreeMap<(String, u16), Vec<Vec<u8>>>,
+    errors: BTreeMap<(String, u16), u8>,
+    questions: usize,
+) -> (SocketAddr, thread::JoinHandle<Vec<u16>>) {
+    serve(zone, errors, None, questions, Duration::ZERO)
+}
+
+fn serve(
+    zone: BTreeMap<(String, u16), Vec<Vec<u8>>>,
+    errors: BTreeMap<(String, u16), u8>,
+    silent: Option<&'static str>,
+    questions: usize,
+    delay: Duration,
+) -> (SocketAddr, thread::JoinHandle<Vec<u16>>) {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     let address = socket.local_addr().unwrap();
     let handle = thread::spawn(move || {
@@ -50,6 +71,11 @@ pub(crate) fn resolver_after(
             let kind = u16::from_be_bytes([question[at + 1], question[at + 2]]);
             let mut message = question.to_vec();
             message[2] = 0x81;
+            if let Some(code) = errors.get(&(name.clone(), kind)) {
+                message[3] = 0x80 | code;
+                socket.send_to(&message, client).unwrap();
+                continue;
+            }
             match zone.get(&(name, kind)) {
                 Some(records) => {
                     message[3] = 0x80;

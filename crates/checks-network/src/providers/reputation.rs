@@ -82,6 +82,10 @@ struct Read {
     /// key were not asked, where the run had no key.
     #[serde(default)]
     keyless: Option<String>,
+    /// The mail hosts whose addresses of a kind could not be read, and why:
+    /// an answer the check cannot use counts for that host alone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hosts_unread: Vec<String>,
 }
 
 impl Read {
@@ -98,6 +102,12 @@ impl Read {
     /// names card cannot be in order then.
     fn reverse_unread(&self) -> bool {
         self.addresses.iter().any(|asked| asked.unread.is_some())
+    }
+
+    /// Whether an address of the mail hosts was neither asked nor counted:
+    /// then neither card can be in order.
+    fn incomplete(&self) -> bool {
+        self.cut.is_some() || !self.left_out.is_empty() || !self.hosts_unread.is_empty()
     }
 
     /// Whether it names a zone with a key, as an earlier release kept it.
@@ -185,6 +195,23 @@ fn askable(key: &str, name: &str, before: Before) -> Checked<()> {
         return cannot(format!("{} {asked} octets", before.says()), 253);
     }
     Ok(())
+}
+
+/// Say in `said` that the addresses of `kind` of `host` could not be read,
+/// for `why`. The IPv6 question follows the host's IPv4 one, so one reason
+/// for both is said once.
+fn unread(said: &mut Vec<String>, host: &str, kind: Kind, why: &str) {
+    let ipv4 = format!("The IPv4 addresses of {host} could not be read: {why}.");
+    if kind == Kind::Aaaa && said.last() == Some(&ipv4) {
+        said.pop();
+        said.push(format!("The addresses of {host} could not be read: {why}."));
+    } else if kind == Kind::Aaaa {
+        said.push(format!(
+            "The IPv6 addresses of {host} could not be read: {why}."
+        ));
+    } else {
+        said.push(ipv4);
+    }
 }
 
 /// A list of DNS names from an option; `default` where it is absent. Each is
@@ -279,6 +306,7 @@ impl Reputation {
         }
         let mut asker = Asker::new(resolver, context.deadline, self.patience);
         let mut addresses = Vec::new();
+        let mut hosts_unread = Vec::new();
         let mut keyless = None;
         // The addresses after the first MOST_ADDRESSES, counted as they come.
         let mut more = 0;
@@ -296,7 +324,20 @@ impl Reputation {
                     cut = true;
                     break 'hosts;
                 }
-                for text in asker.records(host, kind)? {
+                let records = match asker.records(host, kind) {
+                    Ok(records) => records,
+                    // A resolver that did not answer is asked nothing more,
+                    // as the dns check does: each question would wait out
+                    // its time, and the run has only so long.
+                    Err(why) if why.contains("did not answer") => return Err(why),
+                    // An answer it cannot use, malformed or an error of the
+                    // resolver, concerns these addresses of this host alone.
+                    Err(why) => {
+                        unread(&mut hosts_unread, host, kind, &why);
+                        continue;
+                    }
+                };
+                for text in records {
                     let Ok(address) = text.parse::<IpAddr>() else {
                         continue;
                     };
@@ -344,6 +385,7 @@ impl Reputation {
             cut: (cut || asker.cut).then(|| RUN_OVER.to_owned()),
             left_out,
             keyless,
+            hosts_unread,
         })
     }
 
@@ -361,6 +403,7 @@ impl Reputation {
                 || read.cut.is_some()
                 || read.lists_unasked()
                 || read.reverse_unread()
+                || !read.hosts_unread.is_empty()
             {
                 AGAIN
             } else {
@@ -382,7 +425,10 @@ impl Provider for Reputation {
     }
 
     fn ids(&self) -> Vec<String> {
-        vec!["reputation.blocklists".to_owned()]
+        vec![
+            "reputation.blocklists".to_owned(),
+            "reputation.reverse".to_owned(),
+        ]
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
@@ -404,9 +450,13 @@ impl Provider for Reputation {
         for mut observation in cards {
             // The hosts of the domains left out are not asked; the state is
             // that of the hosts that are. What the reading's own limits left
-            // out keeps the cards from being in order.
+            // out, and a host whose addresses could not be read, keep the
+            // cards from being in order.
             observation.findings.extend(read.rest.clone());
             observation.findings.extend(read.left_out.iter().cloned());
+            observation
+                .findings
+                .extend(read.hosts_unread.iter().cloned());
             observation.findings.extend(
                 read.cut
                     .as_ref()

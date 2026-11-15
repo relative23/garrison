@@ -260,6 +260,14 @@ twelve addresses at the most, and asks the lists for 30 seconds in all.
 Where there are more, or a list was left unasked, the cards say so, and are
 Partial where they would be OK. So they are for a mail host Stalwart names
 that is longer than DNS takes, 253 octets: it has no address to ask about.
+So they are, too, where the resolver's answer for a mail host's IPv4 or
+IPv6 addresses cannot be used, as a malformed answer or an error of the
+resolver (SERVFAIL, REFUSED): both cards name the host and why, and are
+Unknown where no address could be read; the other hosts, and that host's
+other addresses, are asked as before, and the reading is asked again after
+an hour. A resolver that does not answer at all is asked nothing more:
+both cards are Unknown and say so, and the reading is asked again after an
+hour.
 
 - **Blocklists.** A listing is Failed and names the address and the list.
   IPv4 addresses are asked of `lists` (default `zen.spamhaus.org`,
