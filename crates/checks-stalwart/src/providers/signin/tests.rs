@@ -251,6 +251,8 @@ fn a_page_that_is_not_there() {
     assert_eq!(examined.state, State::Failed);
 }
 
+/// Only so many files are asked for, and the page says how many it loads:
+/// what was not asked keeps it from being in order.
 #[test]
 fn a_file_asked_for_twice_is_asked_once_and_only_so_many_are_asked() {
     let mut tags = String::new();
@@ -272,10 +274,46 @@ fn a_file_asked_for_twice_is_asked_once_and_only_so_many_are_asked() {
     );
     assert_eq!(
         examined.what,
-        format!("{page} shows Stalwart's sign-in page, which gets the {MOST} files it loads")
+        format!(
+            "{page} shows Stalwart's sign-in page, which gets the first {MOST} of the 20 files \
+             it loads; the 8 after them were not asked"
+        )
     );
+    assert_eq!(examined.state, State::Partial);
+    assert_eq!(examined.files, Some(20));
     assert_eq!(public.requests().len(), MOST + 1);
     own.requests();
+}
+
+/// A file of those after the first twelve is no more asked for where one
+/// of the twelve does not come: the failure names both.
+#[test]
+fn a_page_with_more_files_than_are_asked_names_them_beside_a_failure() {
+    let mut tags = String::new();
+    for index in 0..14 {
+        let _ = write!(tags, "<script src=\"/s{index}.js\"></script>");
+    }
+    let mut responses = vec![html(&tags), file(404, "text/html", "no")];
+    responses.extend((1..MOST).map(|_| file(200, "text/javascript", "1")));
+    let public = serve(responses);
+    let own = serve(vec![html(&tags)]);
+    let page = format!("{}/login", public.url);
+    let examined = examine(
+        &page,
+        &format!("{}/login", own.url),
+        "a=b",
+        Asking::by_hand(&roots()),
+    );
+    public.requests();
+    own.requests();
+    assert_eq!(examined.state, State::Failed);
+    assert_eq!(
+        examined.what,
+        format!(
+            "Stalwart's sign-in page {page} cannot load /s0.js (404, text/html); the 2 after \
+             the first {MOST} were not asked"
+        )
+    );
 }
 
 #[test]

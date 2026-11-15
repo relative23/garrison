@@ -358,6 +358,11 @@ Notable changes for operators and users. The format follows
   most, and left the others out without a word: the card was OK for what
   it had not probed. It now says how many endpoints there are and is
   Partial where it would be OK.
+- **The sign-in check says when it leaves files out.** It asks for the
+  first twelve scripts and style sheets the sign-in page names and left
+  the others out without a word, so the card was OK for files it had not
+  asked for. It now says how many files the page loads and is Partial
+  where it would be OK.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser

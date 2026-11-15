@@ -287,7 +287,8 @@ the newest of the last ten releases counts, pre-releases among them.
 Everybody signs in to Garrison on Stalwart's sign-in page under the issuer's
 name. The check loads that page from this host the way a browser does, with
 the request Garrison sends, and asks for every script and style sheet it
-names. It holds the page against the one Stalwart serves itself on loopback,
+names, twelve at the most: a page that names more is Partial and says how
+many. It holds the page against the one Stalwart serves itself on loopback,
 so a webmail that answers the same name with a sign-in page of its own is
 found as well. A page that does not answer, that is not Stalwart's or whose
 files do not come back is a failure, and the notifications report it after

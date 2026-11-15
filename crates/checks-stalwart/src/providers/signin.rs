@@ -28,7 +28,8 @@ use crate::fetch::{self, Answer, Roots, origin};
 use crate::kept::{Kept, keep, recalled};
 use crate::options::{Checked, Options};
 
-/// The most files of one page that are asked for.
+/// The most files of one page that are asked for; a page that loads more is
+/// in order only as far as they go.
 const MOST: usize = 12;
 /// A page in order is examined again after five minutes; one that is not, in
 /// the next run.
@@ -72,7 +73,8 @@ impl<'a> Asking<'a> {
 /// What an examination of the page found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Examined {
-    /// `Ok`, `Failed` or `Unknown`.
+    /// `Ok`, `Partial` (in order as far as it was asked, where the page loads
+    /// more files than are asked for), `Failed` or `Unknown`.
     pub state: State,
     /// What was seen, in one sentence.
     pub what: String,
@@ -146,9 +148,10 @@ fn listed(names: &[String]) -> String {
     }
 }
 
-/// Asks for every file of its own host that the page at `page` loads, while
-/// the run has time: how many there are, those that did not come back as
-/// what they are, and how many were not asked.
+/// Asks for the first [`MOST`] files of its own host that the page at `page`
+/// loads, while the run has time: how many it loads, those that did not come
+/// back as what they are, and how many of the first [`MOST`] were not asked
+/// for the run's time.
 fn files_of(page: &str, html: &str, asking: Asking<'_>) -> (usize, Vec<String>, usize) {
     let mut files: Vec<(Kind, String)> = Vec::new();
     for (kind, reference) in sign_in_page::files(html) {
@@ -158,6 +161,7 @@ fn files_of(page: &str, html: &str, asking: Asking<'_>) -> (usize, Vec<String>, 
             files.push((kind, address));
         }
     }
+    let count = files.len();
     files.truncate(MOST);
     let host = origin(page);
     let (mut broken, mut unasked) = (Vec::new(), 0);
@@ -182,7 +186,7 @@ fn files_of(page: &str, html: &str, asking: Asking<'_>) -> (usize, Vec<String>, 
             Err(error) => broken.push(format!("{path} ({error})")),
         }
     }
-    (files.len(), broken, unasked)
+    (count, broken, unasked)
 }
 
 /// The sign-in page at `page`, asked for as Garrison sends its users there,
@@ -253,9 +257,15 @@ fn judged(
 ) -> Examined {
     let (count, broken, unasked) = files_of(page, html, asking);
     let host = origin(page);
-    let left = match unasked {
+    // The files after the first MOST are never asked for, and are named.
+    let beyond = count.saturating_sub(MOST);
+    let after = match beyond {
         0 => String::new(),
-        more => format!("; {more} more were not asked: {RUN_OVER}"),
+        beyond => format!("; the {beyond} after the first {MOST} were not asked"),
+    };
+    let left = match unasked {
+        0 => after.clone(),
+        more => format!("; {more} more were not asked: {RUN_OVER}{after}"),
     };
     if !broken.is_empty() {
         return Examined {
@@ -278,16 +288,25 @@ fn judged(
             files: Some(count),
             ..Examined::unknown(format!(
                 "Of the {count} files the sign-in page at {page} loads, {unasked} were not \
-                 asked: {RUN_OVER}"
+                 asked: {RUN_OVER}{after}"
             ))
         };
     }
     let loads = match count {
         0 => "needs no files of its own".to_owned(),
         1 => "gets the 1 file it loads".to_owned(),
+        count if beyond > 0 => format!(
+            "gets the first {MOST} of the {count} files it loads; the {beyond} after them were \
+             not asked"
+        ),
         count => format!("gets the {count} files it loads"),
     };
     let (state, what) = match compared {
+        // In order as far as it was asked, which is not all of it.
+        Some(Whose::Stalwart) if beyond > 0 => (
+            State::Partial,
+            format!("{page} shows Stalwart's sign-in page, which {loads}"),
+        ),
         Some(Whose::Stalwart) => (
             State::Ok,
             format!("{page} shows Stalwart's sign-in page, which {loads}"),
