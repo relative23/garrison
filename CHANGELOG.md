@@ -911,6 +911,14 @@ Notable changes for operators and users. The format follows
   (Stalwart's rate limit, HTTP 429)", "Stalwart refused the collector's key
   for its rate limit (HTTP 429)" and "Stalwart refused the check for its
   rate limit (HTTP 429)"; an outage keeps its words.
+- **The sign-in page says when Stalwart did not answer or was busy.** Where
+  Stalwart did not answer a sign-in's code exchange, or turned it away for
+  its rate limit, or the user's rights could not be checked just then, the
+  sign-in page said "Your account may not have Garrison access, or the
+  sign-in expired", and only the journals said what had happened. It now
+  says that Stalwart did not answer, that it is busy, or that access could
+  not be checked, and when to try again; a code Stalwart refused and a user
+  the policy refuses keep their words.
 - **The broker admits an allowed user from another PID namespace.** The
   broker read its peer's credentials into a type whose PID is never 0,
   while the kernel gives 0 for a peer whose PID the broker's PID namespace

@@ -43,6 +43,27 @@ describe("sign-in", () => {
     expect(screen.queryByText(/from your network/)).toBeNull();
   });
 
+  it("says that Stalwart did not answer, and when to try again", async () => {
+    serve({ "GET session": { body: { session: null } } });
+    openApp("/admin/?login_error=unavailable");
+    expect(await screen.findByText(/Stalwart did not answer, .* Try again in a few minutes\./)).toBeTruthy();
+    expect(screen.queryByText(/may not have Garrison access/)).toBeNull();
+  });
+
+  it("says that Stalwart is busy with its rate limit, and to wait a minute", async () => {
+    serve({ "GET session": { body: { session: null } } });
+    openApp("/admin/?login_error=limited");
+    expect(await screen.findByText(/Stalwart is busy: .*rate limit\. Wait a minute and try again\./)).toBeTruthy();
+    expect(screen.queryByText(/may not have Garrison access/)).toBeNull();
+  });
+
+  it("says that access could not be checked just then, not that it is missing", async () => {
+    serve({ "GET session": { body: { session: null } } });
+    openApp("/admin/?login_error=unchecked");
+    expect(await screen.findByText(/Your access could not be checked just now\. Try again in a few minutes\./)).toBeTruthy();
+    expect(screen.queryByText(/may not have Garrison access/)).toBeNull();
+  });
+
   it("reads an unknown sign-in error as a failed sign-in", async () => {
     serve({ "GET session": { body: { session: null } } });
     openApp("/admin/?login_error=%3Cscript%3E");

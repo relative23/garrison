@@ -124,6 +124,40 @@ async fn login(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Respo
     Ok(response)
 }
 
+/// Why a sign-in got no session, as the sign-in page explains it. Stalwart
+/// that did not answer the code exchange, or turned it away for its rate
+/// limit, and rights that could not be checked just then, all pass: the
+/// page says so and when to try again. Anything else, a code Stalwart
+/// refused or a user the policy refuses, is a failed sign-in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ended {
+    Failed,
+    Unavailable,
+    Limited,
+    Unchecked,
+}
+
+impl Ended {
+    /// The `login_error` the sign-in page reads.
+    fn reason(self) -> &'static str {
+        match self {
+            Ended::Failed => "1",
+            Ended::Unavailable => "unavailable",
+            Ended::Limited => "limited",
+            Ended::Unchecked => "unchecked",
+        }
+    }
+
+    /// What a failed code exchange tells the person signing in.
+    fn exchanging(error: &Error) -> Self {
+        match error {
+            Error::Unavailable(_) => Ended::Unavailable,
+            Error::Limited(_) => Ended::Limited,
+            Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => Ended::Failed,
+        }
+    }
+}
+
 /// Back to the sign-in page with a reason it explains; the login cookie goes.
 fn sign_in_again(reason: &str) -> Response {
     let mut response = redirect(&format!("{INTERFACE}/?login_error={reason}"));
@@ -146,7 +180,7 @@ async fn callback(
     visitor: Visitor,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    let failure = || sign_in_again("1");
+    let failure = || sign_in_again(Ended::Failed.reason());
     let state = params.get("state").map_or("", String::as_str);
     let cookie = visitor.cookie(STATE_COOKIE).to_owned();
     let Some((expected, verifier)) = cookie.split_once('.') else {
@@ -166,32 +200,32 @@ async fn callback(
     let verifier = verifier.to_owned();
     let outcome = blocking(move || finish(&app, &visitor, &verifier, &params)).await;
     match outcome {
-        Ok(Some((identifier, lifetime))) => {
+        Ok(Ok((identifier, lifetime))) => {
             let mut response = redirect(&format!("{INTERFACE}/"));
             set_cookie(&mut response, SESSION_COOKIE, &identifier, lifetime);
             delete_cookie(&mut response, STATE_COOKIE);
             response
         }
-        Ok(None) => failure(),
+        Ok(Err(ended)) => sign_in_again(ended.reason()),
         Err(error) => error.into_response(),
     }
 }
 
 /// The rest of the callback: the new session's cookie value and lifetime, or
-/// `None` for a refused sign-in.
+/// why the sign-in got none.
 fn finish(
     app: &App,
     visitor: &Visitor,
     verifier: &str,
     params: &HashMap<String, String>,
-) -> ApiResult<Option<(String, u64)>> {
+) -> ApiResult<Result<(String, u64), Ended>> {
     let code = params.get("code").map_or("", String::as_str);
     let issuer = params.get("iss").map(String::as_str);
     let valid = issuer == Some(app.config.deployment.issuer.as_str())
         && !code.is_empty()
         && code.chars().count() <= MAX_CODE;
     if !valid {
-        return Ok(None);
+        return Ok(Err(Ended::Failed));
     }
     let address = visitor.client_ip();
     let (client_id, redirect_uri) = (app.client_id(), app.redirect_uri());
@@ -206,7 +240,7 @@ fn finish(
         Ok(token) => token,
         Err(error) => {
             log::warn!("Sign-in rejected at token exchange ({})", kind(&error));
-            return Ok(None);
+            return Ok(Err(Ended::exchanging(&error)));
         }
     };
     let grant = match app.gate.grant_for(&token.access_token) {
@@ -217,7 +251,14 @@ fn finish(
                 error.status.as_u16()
             );
             revoke(app, &token.access_token);
-            return Ok(None);
+            // 401 and 403 are what Stalwart and the policy say of this user;
+            // a 5xx refuses nobody: the rights could not be checked just then.
+            let ended = if error.status.is_server_error() {
+                Ended::Unchecked
+            } else {
+                Ended::Failed
+            };
+            return Ok(Err(ended));
         }
     };
     let lifetime = token
@@ -246,7 +287,7 @@ fn finish(
         }
     };
     log::info!("Sign-in successful");
-    Ok(Some((identifier, lifetime)))
+    Ok(Ok((identifier, lifetime)))
 }
 
 /// Ask the provider to revoke a token; a failure is logged, not shown.
@@ -283,6 +324,18 @@ mod tests {
         );
         assert_eq!(kind(&Error::Denied("no".into())), "denied");
         assert_eq!(kind(&Error::InvalidToken("old".into())), "denied");
+    }
+
+    /// Only what passes by itself gets words of its own on the sign-in
+    /// page; a refused code and Garrison's own setup are a failed sign-in.
+    #[test]
+    fn the_sign_in_page_hears_of_an_outage_and_of_the_rate_limit() {
+        let reason = |error: Error| Ended::exchanging(&error).reason();
+        assert_eq!(reason(Error::Unavailable("down".into())), "unavailable");
+        assert_eq!(reason(Error::Limited("HTTP 429".into())), "limited");
+        assert_eq!(reason(Error::Denied("invalid_grant".into())), "1");
+        assert_eq!(reason(Error::InvalidToken("old".into())), "1");
+        assert_eq!(reason(Error::Misconfigured("no key".into())), "1");
     }
 
     /// Stalwart's 429 is its rate limit, which passes once Stalwart's minute

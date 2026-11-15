@@ -135,6 +135,7 @@ impl Identity for Shared {
             "code-viewer" => "viewer-token",
             "code-expired" => return Err(Error::Denied("invalid_grant".into())),
             "code-outage" => return Err(Error::Unavailable("connection refused".into())),
+            "code-limited" => return Err(Error::Limited("Stalwart answered HTTP 429".into())),
             _ => "bad-token",
         };
         Ok(Token {

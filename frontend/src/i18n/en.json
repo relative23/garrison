@@ -512,7 +512,10 @@
       "busy": "Too many sign-ins from many networks in the last minute. Wait a minute and try again.",
       "crossSite": "Sign-in must start from this page.",
       "failed": "Sign-in could not be completed. Your account may not have Garrison access, or the sign-in expired.",
-      "rate": "Too many sign-ins from your network in the last minute. Wait a minute and try again."
+      "limited": "Stalwart is busy: it turned the sign-in away for its rate limit. Wait a minute and try again.",
+      "rate": "Too many sign-ins from your network in the last minute. Wait a minute and try again.",
+      "unavailable": "Stalwart did not answer, so the sign-in could not be completed. Try again in a few minutes.",
+      "unchecked": "Your access could not be checked just now. Try again in a few minutes."
     }
   },
   "state": {

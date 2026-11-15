@@ -8,7 +8,10 @@ const MESSAGES = {
   "1": "signIn.error.failed",
   busy: "signIn.error.busy",
   "cross-site": "signIn.error.crossSite",
+  limited: "signIn.error.limited",
   rate: "signIn.error.rate",
+  unavailable: "signIn.error.unavailable",
+  unchecked: "signIn.error.unchecked",
 } as const;
 
 function message(error: string) {

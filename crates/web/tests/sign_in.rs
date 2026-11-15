@@ -114,10 +114,43 @@ async fn a_rejected_identity_gets_no_session_and_its_token_is_revoked() {
     );
 }
 
+/// A broker that cannot check the user's rights just then, as when
+/// Stalwart does not answer its question, refuses nobody: the sign-in page
+/// says that access could not be checked, not that it is missing.
+#[tokio::test]
+async fn a_sign_in_whose_rights_cannot_be_checked_says_so() {
+    let mut setup = setup();
+    setup.broker.set(
+        "bad-token",
+        refused(503, "Authorization is temporarily unavailable"),
+    );
+    let state = login(&mut setup.client).await["state"].clone();
+    let result = setup
+        .client
+        .get(&format!(
+            "/auth/callback?state={state}&code=unknown&iss=https%3A%2F%2Fmail.example.test"
+        ))
+        .await;
+    assert_eq!(result.header("location"), "/admin/?login_error=unchecked");
+    // No session holds the token, so it is revoked as for a refusal.
+    assert_eq!(*setup.provider.revoked.lock().unwrap(), ["bad-token"]);
+    assert_eq!(
+        setup.client.get(&api("session")).await.json(),
+        json!({"session": null})
+    );
+}
+
+/// The sign-in page says why: a code Stalwart refused is a failed sign-in,
+/// while Stalwart that did not answer, or turned the exchange away for its
+/// rate limit, passes, so the page says that and when to try again.
 #[tokio::test]
 async fn a_code_stalwart_refuses_or_cannot_exchange_gets_no_session() {
     let mut setup = setup();
-    for code in ["code-expired", "code-outage"] {
+    for (code, reason) in [
+        ("code-expired", "1"),
+        ("code-outage", "unavailable"),
+        ("code-limited", "limited"),
+    ] {
         let login = setup.client.get("/auth/login").await;
         let location = url::Url::parse(login.header("location")).unwrap();
         let state = location
@@ -132,10 +165,12 @@ async fn a_code_stalwart_refuses_or_cannot_exchange_gets_no_session() {
                 "/auth/callback?state={state}&code={code}&iss=https%3A%2F%2Fmail.example.test"
             ))
             .await;
-        assert!(
-            result.header("location").ends_with("login_error=1"),
+        assert_eq!(
+            result.header("location"),
+            format!("/admin/?login_error={reason}"),
             "{code}"
         );
+        assert!(result.header("set-cookie").contains("Max-Age=0"), "{code}");
         assert_eq!(
             setup.client.get(&api("session")).await.json(),
             json!({"session": null}),
