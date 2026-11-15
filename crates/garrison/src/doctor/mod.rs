@@ -3,6 +3,7 @@
 //! to do. It changes nothing. A finding is in order, a warning, a failure or
 //! unknown, and unknown never counts as in order.
 
+mod files;
 mod host;
 mod milter;
 mod notify;
