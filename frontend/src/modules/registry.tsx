@@ -91,10 +91,12 @@ export const PAGE_VIEWS = {
   account: chunk(() => import("./Account").then((m) => m.Account)),
 };
 
-/** Loads the code of the view at `view`, a module or a section page. */
+/** Loads the code of the view at `view`, a module or a section page. Any other
+ * name loads nothing, also one that every object has, such as `constructor`. */
 export function preloadView(view: string): Promise<void> {
   if (isPage(view)) return PAGE_VIEWS[view].preload();
-  return VIEWS[view]?.chunk.preload() ?? Promise.resolve();
+  const module = Object.hasOwn(VIEWS, view) ? VIEWS[view] : undefined;
+  return module?.chunk.preload() ?? Promise.resolve();
 }
 
 type ModuleId = keyof typeof en.modules;

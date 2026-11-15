@@ -21,6 +21,16 @@ describe("a page with a drawn frame", () => {
     expect(state?.session?.email).toBe("admin@example.test");
   });
 
+  it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
+    "starts at a page named like a property every object has (%s)",
+    async (name) => {
+      serve({ "GET session": { body: { session: session() } } });
+      await expect(preloadView(name)).resolves.toBeUndefined();
+      const state = await prepare(`/admin/${name}`);
+      expect(state?.session?.email).toBe("admin@example.test");
+    },
+  );
+
   it("leaves the session to the app when the request fails", async () => {
     serve({ "GET session": { status: 500, body: { detail: "Internal error" } } });
     expect(await prepare("/admin/services")).toBeUndefined();
