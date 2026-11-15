@@ -235,11 +235,16 @@ settings, runs a maintenance action from the keyboard and signs out. It
 makes requests fail and checks what the pages say: a status refresh, a
 search and a look at a job (with the page's clock moved on), and answers
 over HTTP/2, which carries no status text, through the proxy of
-`npm run measure`; and it signs in as a viewer. It fails on an error in
-the console, a failed request other than those, a finding of axe (WCAG 2.2
-AA, in the light and the dark theme, each as the page switches to it with
-the system), a page that is wider than a phone's screen, a closed menu that
-takes the focus, a menu or a dialog that lets the focus out or drops it, or
+`npm run measure`; it signs in as a viewer; it takes a module from the
+profile and gives it back while a page is open, through the preview's broker
+(`crates/web/examples/preview/fakes.rs`), whose questions it counts: the menu
+must follow with the next refresh, at one question each; and in two tabs it
+saves a theme, signs out and signs in again, each of which the other tab
+must follow at once. It fails on an error in the console, a failed request
+other than those, a finding of axe (WCAG 2.2 AA, in the light and the dark
+theme, each as the page switches to it with the system), a page that is
+wider than a phone's screen, a closed menu that takes the focus, a menu or
+a dialog that lets the focus out or drops it, or
 a page that does not start in the theme its user chose, light on a dark
 system and dark on a light one, from the first frame it paints, or in the
 system's theme without a session or a choice; CI runs it. The build draws

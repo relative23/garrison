@@ -3,7 +3,9 @@
 //! observations, a week of metric history and the ingest test batch. The
 //! sign-in approves at once and the broker grants every module and action, so
 //! nothing here needs Stalwart or touches a real host; a sign-in asked for with
-//! `profile=viewer` gets a viewer's rights, the dashboard alone (`fakes.rs`).
+//! `profile=viewer` gets a viewer's rights, the dashboard alone, and the
+//! browser flows change the modules the broker grants while a page is open
+//! (`fakes.rs`).
 //!
 //! ```sh
 //! (cd frontend && npm run build)
@@ -75,9 +77,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .map(|action| action.id.clone())
         .collect();
+    let broker = Arc::new(fakes::Broker::new(&config));
     let gate = Gate::new(
         Arc::clone(&store),
-        Arc::new(fakes::Broker::new(&config)),
+        Arc::clone(&broker) as Arc<dyn garrison_web::security::Broker>,
         config.deployment.public_origin.clone(),
         actions,
         false,
@@ -97,7 +100,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     runtime.block_on(async move {
         let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
         println!("Preview on {origin}/ (Ctrl+C ends it)");
-        let routes = router(app).merge(fakes::sign_in(&origin));
+        let routes = router(app)
+            .merge(fakes::sign_in(&origin))
+            .merge(fakes::controls(broker));
         axum::serve(
             listener,
             routes.into_make_service_with_connect_info::<SocketAddr>(),

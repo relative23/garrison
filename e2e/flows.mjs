@@ -4,12 +4,13 @@
 // the event history, going Back, the page search on a phone, saving
 // settings, running a maintenance action from the keyboard, what each page
 // shows when a request fails (also over HTTP/2, as nginx serves Garrison),
-// a profile that grants the dashboard alone, and signing out. Along the way
-// nothing may write an error to the console, no request to the preview may
-// fail but those a step makes fail, and axe may find nothing on any page
-// (WCAG 2.2 AA, light and dark, as the system switches the page between
-// them); a page starts in the theme its user chose, from its first frame on,
-// and without a session or a choice in the system's.
+// a profile that grants the dashboard alone, a change of rights while a page
+// is open, two tabs that follow what the other does, and signing out. Along
+// the way nothing may write an error to the console, no request to the
+// preview may fail but those a step makes fail, and axe may find nothing on
+// any page (WCAG 2.2 AA, light and dark, as the system switches the page
+// between them); a page starts in the theme its user chose, from its first
+// frame on, and without a session or a choice in the system's.
 //
 // It is a check, not a measurement: it exits with 1 and lists what failed.
 // `measure.mjs` measures the same pages with Lighthouse, by hand.
@@ -19,6 +20,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { chromium } from "playwright";
 
 import { failingRequests } from "./failures.mjs";
+import { rightsChange, twoTabs } from "./tabs.mjs";
 import { chosenTheme, firstPaint } from "./themes.mjs";
 
 const options = Object.fromEntries(
@@ -135,7 +137,8 @@ async function accessible(name) {
   await page.setViewportSize(DESKTOP);
 }
 
-/** What the steps in the other files (themes.mjs, failures.mjs) share with these. */
+/** What the steps in the other files (themes.mjs, failures.mjs, tabs.mjs)
+ * share with these. */
 const shared = {
   browser,
   context,
@@ -364,6 +367,10 @@ try {
     await narrow.close();
   }
 
+  await rightsChange(shared);
+  // Its last step signs in again in one of the tabs, which the next one uses.
+  await twoTabs(shared, page);
+
   step = "sign out";
   await page.goto(`${origin}/admin/account`);
   await heading();
@@ -382,5 +389,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `Passed: sign-in, ${PAGES.length} pages, menu, search, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, failures, HTTP/2, a viewer and sign-out.`,
+  `Passed: sign-in, ${PAGES.length} pages, menu, search, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, failures, HTTP/2, a viewer, a change of rights, two tabs and sign-out.`,
 );

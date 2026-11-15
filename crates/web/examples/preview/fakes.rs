@@ -3,15 +3,21 @@
 //! `profile=viewer` gets the rights of a profile that grants little instead:
 //! the dashboard and no action. A started job is queued, and the first look
 //! at it finds it done, as a broker's job runs on its own.
+//!
+//! The browser flows change the modules the broker grants while a page is
+//! open, as an operator changes a profile, and count the questions about
+//! rights it was asked: `GET /preview-broker/grant` says both, `PUT` with
+//! `{"modules": [...]}` sets the modules of the preview's user.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
-use axum::Router;
-use axum::extract::Query;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
+use axum::{Json, Router};
 use garrison_broker::client::CallError;
 use garrison_broker::protocol::{BrokerError, Request};
 use garrison_core::config::Config;
@@ -52,10 +58,12 @@ impl garrison_web::Identity for Identity {
 }
 
 pub(crate) struct Broker {
-    grant: Value,
+    grant: Mutex<Value>,
     viewer: Value,
     actions: Vec<Value>,
     jobs: Mutex<Vec<Value>>,
+    /// The questions about a user's rights it was asked.
+    authorized: AtomicU64,
 }
 
 impl Broker {
@@ -67,14 +75,14 @@ impl Broker {
             .map(|action| action.id.as_str())
             .collect();
         Broker {
-            grant: json!({
+            grant: Mutex::new(json!({
                 "subject": "1",
                 "email": "preview@example.test",
                 "modules": ModuleId::all().map(ModuleId::as_str).collect::<Vec<_>>(),
                 "actions": actions,
                 "profiles": ["preview"],
                 "checkedAt": time::now_isoformat(),
-            }),
+            })),
             viewer: json!({
                 "subject": "2",
                 "email": "viewer@example.test",
@@ -90,6 +98,7 @@ impl Broker {
                 .map(|action| json!(action.public()))
                 .collect(),
             jobs: Mutex::new(Vec::new()),
+            authorized: AtomicU64::new(0),
         }
     }
 
@@ -98,6 +107,40 @@ impl Broker {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+
+    fn grant(&self) -> std::sync::MutexGuard<'_, Value> {
+        self.grant
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The modules it grants the preview's user, and how often it was asked.
+    fn controls(&self) -> Value {
+        json!({
+            "modules": self.grant()["modules"],
+            "authorized": self.authorized.load(Ordering::Relaxed),
+        })
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct Grant {
+    modules: Vec<String>,
+}
+
+/// What the browser flows ask of the broker and change in it.
+pub(crate) fn controls(broker: Arc<Broker>) -> Router {
+    Router::new()
+        .route(
+            "/preview-broker/grant",
+            get(|State(broker): State<Arc<Broker>>| async move { Json(broker.controls()) }).put(
+                |State(broker): State<Arc<Broker>>, Json(grant): Json<Grant>| async move {
+                    broker.grant()["modules"] = json!(grant.modules);
+                    Json(broker.controls())
+                },
+            ),
+        )
+        .with_state(broker)
 }
 
 fn refused(status: u16, message: &str) -> CallError {
@@ -110,9 +153,12 @@ fn refused(status: u16, message: &str) -> CallError {
 impl garrison_web::security::Broker for Broker {
     fn call(&self, request: &Request) -> Result<Value, CallError> {
         let viewer = request.token() == VIEWER_TOKEN;
+        if matches!(request, Request::Authorize { .. }) {
+            self.authorized.fetch_add(1, Ordering::Relaxed);
+        }
         match request {
             Request::Authorize { .. } if viewer => Ok(self.viewer.clone()),
-            Request::Authorize { .. } => Ok(self.grant.clone()),
+            Request::Authorize { .. } => Ok(self.grant().clone()),
             // The web service asks for no more than the viewer's rights
             // allow; this answers as a broker would if it did.
             _ if viewer => Err(refused(403, "This maintenance action is not authorized")),
@@ -120,12 +166,13 @@ impl garrison_web::security::Broker for Broker {
             Request::Submit {
                 action, request_id, ..
             } => {
+                let grant = self.grant().clone();
                 let mut jobs = self.jobs();
                 let job = json!({
                     "id": format!("{:032x}", jobs.len() + 1),
                     "actionId": action,
-                    "actor": self.grant["subject"],
-                    "actorEmail": self.grant["email"],
+                    "actor": grant["subject"],
+                    "actorEmail": grant["email"],
                     "requestId": request_id,
                     "status": "queued",
                     "createdAt": time::now_isoformat(),
