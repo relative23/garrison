@@ -82,18 +82,31 @@ brokers never repeat a job; pending jobs become "uncertain".
   it lasts. Networks already counted keep their own budget here, signed-in
   users stay signed in, the table holds no more than 4096 networks, and a
   minute after the flood ends everyone can sign in again.
-- Stalwart's own limit is lower and counts Garrison as one client. It
-  answers no more than 100 unauthenticated requests a minute from one
-  address (`rateLimitAnonymous`) and then 429 for up to a minute, and by
-  default it takes the address from the connection (`clientIpSource` is
-  `peer`), which for everything Garrison asks is 127.0.0.1. Code exchanges
-  and the broker's UserInfo check of a user's token both count against it
-  (measured on Stalwart 1.1.0 with its defaults). So 100 failed callbacks
-  within a minute, which Garrison's budget lets ten networks send, make
-  Stalwart refuse every code exchange and every check of a signed-in user's
-  rights until its minute is over: nobody can sign in, and signed-in users
-  get 503 and stay signed in. A minute after such a flood ends, both work
-  again.
+- Stalwart's own limits are lower and count Garrison as one client
+  (measured on Stalwart 1.1.0 with its defaults). By default Stalwart takes
+  the address from the connection (`clientIpSource` is `peer`), which for
+  everything Garrison asks is 127.0.0.1, as it is for everything nginx
+  forwards to Stalwart. It answers no more than 100 unauthenticated requests
+  a minute from one address (`rateLimitAnonymous`), code exchanges among
+  them, and then 429 for up to a minute. So 100 failed callbacks within a
+  minute, which Garrison's budget lets ten networks send, make Stalwart
+  refuse every code exchange, and its own sign-in page, until its minute is
+  over: nobody can sign in. A request with a valid token or key counts
+  against the 1000 a minute of its account instead
+  (`rateLimitAuthenticated`), so the broker's check of a signed-in user's
+  rights is not refused for that. Each such check makes three requests with
+  the broker's one key, though, which all users share: beyond about 330
+  checks a minute in all (an open page asks once a minute, an open
+  Maintenance page eight times) every check gets 503 until the minute is
+  over, and users stay signed in.
+- Stalwart blocks an address after 100 failed password sign-ins within a
+  day, with its defaults for good (`authBanRate`, `authBanPeriod`). Where
+  nginx forwards to Stalwart and Stalwart takes the address from the
+  connection, that is 127.0.0.1 for everyone: 100 mistyped passwords a day at
+  Stalwart's sign-in page, Garrison's sign-ins among them, make Stalwart
+  answer neither nginx nor Garrison until an administrator removes the
+  entry from an address that is not blocked (`x:BlockedIp`, then the action
+  `ReloadBlockedIps`).
 - Profiles are server-wide; the event history of all domains is visible to
   anyone with the Event history, Deliveries, Sessions or Attacks & bans
   module.

@@ -206,8 +206,9 @@ Notable changes for operators and users. The format follows
   in, and a minute after the flood ends sign-in works again. Stalwart's own
   limit is lower: it takes 100 unauthenticated requests a minute from one
   address and counts all of Garrison's as one, so 100 failed sign-ins in a
-  minute still stop every sign-in and every check of a signed-in user's
-  rights until that minute is over ([security model](docs/architecture/security.md#known-limits)).
+  minute still stop every sign-in, at Stalwart's own page too, until that
+  minute is over; people already signed in are not affected
+  ([security model](docs/architecture/security.md#known-limits)).
 - **Each IPv4 client keeps its own sign-in budget where nginx listens on one
   socket for both.** With `listen [::]:443 ipv6only=off` nginx names an IPv4
   client in IPv6's form, such as `::ffff:192.0.2.7`, and the web service
