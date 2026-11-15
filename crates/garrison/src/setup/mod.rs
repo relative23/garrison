@@ -210,6 +210,7 @@ fn ensure_webhook(
     url: Option<&str>,
     rotate: bool,
 ) -> Result<String, String> {
+    let types = objects::webhook_events(event_types(), &FORBIDDEN_EVENTS)?;
     let key_path = directory.join("webhook-signature-key");
     // Stalwart keeps a batch the ingest refuses during the switch and sends it again.
     if rotate || !key_path.exists() {
@@ -217,11 +218,6 @@ fn ensure_webhook(
     }
     let key = read_private(&key_path, 16384, Privacy::Owned).map_err(|error| error.to_string())?;
     let key = String::from_utf8_lossy(&key).trim().to_owned();
-    let types = event_types();
-    assert!(
-        types.iter().all(|kind| !FORBIDDEN_EVENTS.contains(kind)),
-        "policy invariant"
-    );
     let url = url.map_or_else(
         || format!("http://127.0.0.1:{}/webhook", config.ingest.port),
         str::to_owned,

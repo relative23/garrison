@@ -15,6 +15,23 @@ use serde::{Deserialize, Serialize};
 #[serde(transparent)]
 pub(super) struct Enabled(BTreeMap<String, bool>);
 
+/// The event types the webhook asks Stalwart for: those Garrison records,
+/// none of which may be one it must never record. The shipped lists keep to
+/// that, as a test holds, so only a broken build is refused here.
+pub(super) fn webhook_events(
+    recorded: Vec<&'static str>,
+    forbidden: &[&str],
+) -> Result<Vec<&'static str>, String> {
+    match recorded.iter().find(|kind| forbidden.contains(kind)) {
+        Some(kind) => Err(format!(
+            "This build of Garrison would ask Stalwart for the event {kind}, which Garrison \
+             must never record, so the webhook was not changed. Install Garrison again from \
+             its release archive."
+        )),
+        None => Ok(recorded),
+    }
+}
+
 impl Enabled {
     pub(super) fn of<S: Into<String>>(names: impl IntoIterator<Item = S>) -> Self {
         Enabled(names.into_iter().map(|name| (name.into(), true)).collect())
@@ -388,5 +405,26 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(long.first().unwrap().chars().count(), 400);
+    }
+
+    /// Garrison records no event it must never record, so the webhook asks
+    /// for every one it records; a build whose lists disagree is refused
+    /// with what is wrong, before the webhook changes.
+    #[test]
+    fn the_webhook_asks_for_every_recorded_event_and_none_that_is_forbidden() {
+        use garrison_ingest::policy::{FORBIDDEN_EVENTS, event_types};
+        let asked = webhook_events(event_types(), &FORBIDDEN_EVENTS).unwrap();
+        assert_eq!(asked, event_types());
+        assert_eq!(asked.len(), 111);
+        let broken = webhook_events(vec!["smtp.ehlo", "smtp.raw-input"], &FORBIDDEN_EVENTS);
+        assert_eq!(
+            broken,
+            Err(
+                "This build of Garrison would ask Stalwart for the event smtp.raw-input, which \
+                 Garrison must never record, so the webhook was not changed. Install Garrison \
+                 again from its release archive."
+                    .to_owned()
+            )
+        );
     }
 }
