@@ -122,6 +122,89 @@ fn macros_under_another_name_or_named_only_in_the_directory_are_found() {
     assert_eq!(macros(&whole[..30 + 4]), Outcome::Clean);
 }
 
+/// The header before a file and the directory's entry for it each say how
+/// the file is packed and how long it is. A program that goes by the
+/// directory, as most do, unpacks what the directory says: a header before
+/// the file that says otherwise does not hide it.
+#[test]
+fn a_header_before_the_file_that_says_otherwise_does_not_hide_it() {
+    let honest = archive(&[("invoice.docm", &document(), true)]);
+    assert_eq!(
+        macros(&message("invoice.zip", &honest)),
+        Outcome::Macros(Found::Zipped)
+    );
+    // Stored, a number no program unpacks, bzip2: the directory still says
+    // deflated, and the macros count before what the scan does not read.
+    for method in [0, 200, 12] {
+        let mut lying = honest.clone();
+        lying[8..10].copy_from_slice(&u16::to_le_bytes(method));
+        assert_eq!(
+            macros(&message("invoice.zip", &lying)),
+            Outcome::Macros(Found::Zipped),
+            "{method}"
+        );
+    }
+    // A size of one byte, or stored and of no size at all.
+    let mut short = honest.clone();
+    short[18..22].copy_from_slice(&1_u32.to_le_bytes());
+    assert_eq!(
+        macros(&message("invoice.zip", &short)),
+        Outcome::Macros(Found::Zipped)
+    );
+    let mut none = honest;
+    none[8..10].copy_from_slice(&0_u16.to_le_bytes());
+    none[18..22].copy_from_slice(&0_u32.to_le_bytes());
+    assert_eq!(
+        macros(&message("invoice.zip", &none)),
+        Outcome::Macros(Found::Zipped)
+    );
+}
+
+/// Every file is tried as deflate, whatever its header says. What is
+/// stored, as pictures and archives usually are, ends that try within a few
+/// bytes: a document without macros stays clean and is not incomplete.
+#[test]
+fn stored_files_tried_as_deflate_leave_a_clean_document_clean() {
+    let noise: Vec<u8> = (0..20_000_u32)
+        .flat_map(|value| value.wrapping_mul(2_654_435_761).to_le_bytes())
+        .collect();
+    let png = [b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".as_slice(), &noise[..4000]].concat();
+    let jpeg = [
+        b"\xff\xd8\xff\xe0\0\x10JFIF\0".as_slice(),
+        &noise[4000..8000],
+    ]
+    .concat();
+    let emf = [[1, 0, 0, 0, 0x6c, 0, 0, 0].as_slice(), &noise[8000..9000]].concat();
+    let letter = plain_document();
+    let stored = archive(&[
+        ("[Content_Types].xml", b"<Types/>", false),
+        ("word/document.xml", TEXT, false),
+        ("word/media/image1.png", &png, false),
+        ("word/media/image2.jpeg", &jpeg, false),
+        ("word/media/image3.emf", &emf, false),
+        ("word/media/image4.bin", &noise, false),
+        ("word/media/blank.bin", &[0; 4096], false),
+        ("word/embeddings/letter.docx", &letter, false),
+        ("word/styles.xml", &TEXT.repeat(50), true),
+    ]);
+    assert_eq!(macros(&message("letter.docx", &stored)), Outcome::Clean);
+    // Text in every first byte, as a file of text may begin.
+    let mut texts = Vec::new();
+    let names: Vec<String> = (0..=255_u8)
+        .map(|first| format!("notes/{first}.txt"))
+        .collect();
+    let bodies: Vec<Vec<u8>> = (0..=255_u8)
+        .map(|first| [[first].as_slice(), b"Nothing but text, and more of it."].concat())
+        .collect();
+    for (name, body) in names.iter().zip(&bodies) {
+        texts.push((name.as_str(), body.as_slice(), false));
+    }
+    assert_eq!(
+        macros(&message("notes.zip", &archive(&texts))),
+        Outcome::Clean
+    );
+}
+
 #[test]
 fn an_old_office_file_with_a_vba_project_is_found() {
     let with = compound(&["WordDocument", "Macros", "VBA", "_VBA_PROJECT"]);

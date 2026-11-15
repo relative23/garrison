@@ -215,6 +215,14 @@ Notable changes for operators and users. The format follows
   kind of reason. Macros the filter did see are refused or marked as before.
   Mail with large archives, which arrived unmarked before, now carries that
   header.
+- **A zip archive whose headers disagree no longer hides a document from the
+  macro filter.** An archive says twice how each file is packed and how long
+  it is: in the header before the file and in its directory at the end,
+  which Office and most other programs go by. The filter took both from the
+  header before the file, so a document with macros passed as clean where
+  that header called the file stored, or one byte long, and the directory
+  said deflated. The filter now tries every file as deflate, whatever the
+  header before it says.
 - **`garrison doctor` judges the collector by its last finished run.** It
   called the last collection run successful whenever systemd said so of the
   unit, and systemd says "success" also of a unit that has never run. Doctor

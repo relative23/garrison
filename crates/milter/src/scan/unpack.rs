@@ -1,9 +1,12 @@
 //! Opening the archives in a message, within bounds its sender cannot move.
 //!
-//! An archive's headers are the sender's words. What they claim (a size, a
-//! place, how many files there are) decides where the scan looks, never how
-//! much it does: what is unpacked, what is read to unpack it, the number of
-//! packed files and the time are each bounded here.
+//! An archive's headers are the sender's words. What they claim (a place,
+//! how many files there are) decides where the scan looks, never how much it
+//! does: what is unpacked, what is read to unpack it, the number of files
+//! and the time are each bounded here. Nor does the header before a file
+//! decide whether, or how much of, the file is unpacked: a program that goes
+//! by the directory at the archive's end takes both from there, and the two
+//! headers may disagree.
 
 use std::time::Instant;
 
@@ -15,10 +18,8 @@ use super::{Found, Gap};
 /// One file of an archive is unpacked up to this size, all of a message's
 /// together up to four times as much.
 pub(super) const UNPACKED: usize = 16 * 1024 * 1024;
-/// How a zip archive names a deflated file.
-const DEFLATED: usize = 8;
-/// So many packed files are opened in one message: what an archive lists
-/// without the format's 64-bit extension.
+/// So many files are opened in one message: what an archive lists without
+/// the format's 64-bit extension.
 const ENTRIES: usize = 65_535;
 /// Packed data is read, and unpacked data written, in pieces of this size,
 /// so that the scan looks at the clock in between.
@@ -29,8 +30,11 @@ const PIECE: usize = 64 * 1024;
 enum End {
     /// The file is there as a whole.
     Whole,
-    /// The packed data ended, or was no deflate, before the file did.
-    Short,
+    /// The packed data it was given was used up before the file ended.
+    Spent,
+    /// The data was no deflate from some point on, as a stored file's bytes
+    /// are: more of it would have given nothing more.
+    Broken,
     /// The file is larger than what the scan unpacks.
     Cut,
     /// The scan's time ran out.
@@ -113,9 +117,13 @@ impl Work {
         None
     }
 
-    /// The file behind the header at `header`: one that is stored was
-    /// searched with the data around it, one that is deflated is unpacked
-    /// and scanned, and one packed otherwise is a gap.
+    /// The file behind the header at `header`, unpacked as deflate whatever
+    /// that header says of how it is packed and how long it is: the
+    /// directory may call deflated what it calls stored, or give the file
+    /// its whole length where it gives one byte. Deflate ends by itself.
+    /// Bytes that are none, as a stored file's, end the try within a few,
+    /// and a stored file was searched with the data around it. A method the
+    /// scan does not read is a gap.
     fn file(
         &mut self,
         data: &[u8],
@@ -123,9 +131,8 @@ impl Work {
         depth: usize,
         readable: &mut usize,
     ) -> Option<Found> {
-        let (Some(method), Some(packed), Some(name), Some(extra)) = (
+        let (Some(method), Some(name), Some(extra)) = (
             number(data, header + 8, 2),
-            number(data, header + 18, 4),
             number(data, header + 26, 2),
             number(data, header + 28, 2),
         ) else {
@@ -134,23 +141,15 @@ impl Work {
         if unread(method) {
             self.gap.get_or_insert(Gap::Method);
         }
-        if method != DEFLATED {
-            return None;
-        }
+        // Where the file begins is the one thing every program takes from
+        // this header.
         let rest = data.get(header + 30 + name + extra..)?;
-        // The header's size is zero where the archive was written as a
-        // stream; the deflated data ends itself either way.
-        let claimed = if packed == 0 {
-            rest.len()
-        } else {
-            packed.min(rest.len())
-        };
-        if self.budget == 0 || self.entries == 0 || (*readable == 0 && claimed > 0) {
+        if self.budget == 0 || self.entries == 0 || (*readable == 0 && !rest.is_empty()) {
             self.gap.get_or_insert(Gap::Budget);
             return None;
         }
         self.entries -= 1;
-        let offered = claimed.min(*readable);
+        let offered = rest.len().min(*readable);
         let limit = self.budget.min(UNPACKED);
         let (unpacked, read, end) = self.unpacked(&rest[..offered], limit);
         *readable = readable.saturating_sub(read);
@@ -164,10 +163,12 @@ impl Work {
             End::Cut => {
                 self.gap.get_or_insert(Gap::Truncated);
             }
-            End::Short if offered < claimed => {
+            // The deflate went on to the end of what it was given, and the
+            // archive held more.
+            End::Spent if offered < rest.len() => {
                 self.gap.get_or_insert(Gap::Budget);
             }
-            End::Whole | End::Short => {}
+            End::Whole | End::Spent | End::Broken => {}
         }
         self.scanned(&unpacked, depth - 1)
     }
@@ -203,10 +204,10 @@ impl Work {
                 Ok(Status::StreamEnd) if data.len() <= limit => return (data, read, End::Whole),
                 Ok(Status::StreamEnd) => {}
                 // Nothing more can come: the packed data is used up.
-                Ok(_) if taken == 0 && written == 0 => return (data, read, End::Short),
+                Ok(_) if taken == 0 && written == 0 => return (data, read, End::Spent),
                 Ok(_) => {}
                 // No deflate from here on. What came out before is scanned.
-                Err(_) => return (data, read, End::Short),
+                Err(_) => return (data, read, End::Broken),
             }
         }
     }

@@ -58,6 +58,21 @@ fn two_thousand_headers_over_the_same_data_are_unpacked_in_time() {
 }
 
 #[test]
+fn a_megabyte_of_headers_of_stored_files_is_tried_in_time() {
+    // Each file is tried as deflate whatever its header says, here 34 953
+    // of them: each try ends at the next header's first bytes.
+    let mut data = Vec::new();
+    while data.len() < 1024 * 1024 {
+        data.extend_from_slice(b"PK\x03\x04");
+        data.extend_from_slice(&[20, 0, 0, 0, 0, 0]); // version, flags, stored
+        data.extend_from_slice(&[0; 20]);
+    }
+    let began = Instant::now();
+    assert_eq!(macros(&message("data.zip", &data)), Outcome::Clean);
+    assert!(began.elapsed() < in_time(), "{:?}", began.elapsed());
+}
+
+#[test]
 fn an_archive_of_many_small_files_is_read_to_its_last_one() {
     // Nothing overlaps here: every file is unpacked, the last one too.
     let names: Vec<String> = (0..3000)
