@@ -1,0 +1,112 @@
+//! What an answer says: its status, headers and body, a chunked body joined
+//! and a compressed one unpacked, and whether its own length calls it whole.
+
+use std::io::Read;
+
+use flate2::read::GzDecoder;
+
+/// The most a compressed body may unpack to.
+const UNPACKED: u64 = 4 * 1024 * 1024;
+
+#[derive(Debug)]
+pub struct Answer {
+    pub status: u16,
+    headers: Vec<(String, String)>,
+    pub body: String,
+}
+
+impl Answer {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+/// Whether `data` is an answer that its own length calls whole: the head,
+/// and a body as long as `Content-Length` says or with the last chunk of a
+/// chunked one. An answer that gives no length ends with its connection,
+/// and so is never known to be whole.
+pub(super) fn whole(data: &[u8]) -> bool {
+    let Some(end) = data.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return false;
+    };
+    let head = String::from_utf8_lossy(&data[..end]);
+    let body = &data[end + 4..];
+    let header = |name: &str| {
+        head.split("\r\n")
+            .skip(1)
+            .filter_map(|line| line.split_once(':'))
+            .find(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.trim().to_owned())
+    };
+    if header("transfer-encoding").is_some_and(|value| value.eq_ignore_ascii_case("chunked")) {
+        return dechunk(body).1;
+    }
+    header("content-length")
+        .and_then(|length| length.parse::<usize>().ok())
+        .is_some_and(|length| body.len() >= length)
+}
+
+/// Status line, headers and body; a chunked body is joined.
+pub(super) fn parse(data: &[u8]) -> Option<Answer> {
+    let end = data.windows(4).position(|window| window == b"\r\n\r\n")?;
+    let head = String::from_utf8_lossy(&data[..end]);
+    let mut lines = head.split("\r\n");
+    let status = lines.next()?.split_whitespace().nth(1)?.parse().ok()?;
+    let headers: Vec<(String, String)> = lines
+        .filter_map(|line| line.split_once(':'))
+        .map(|(key, value)| (key.trim().to_owned(), value.trim().to_owned()))
+        .collect();
+    let mut body = data[end + 4..].to_vec();
+    let chunked = headers.iter().any(|(key, value)| {
+        key.eq_ignore_ascii_case("transfer-encoding") && value.eq_ignore_ascii_case("chunked")
+    });
+    if chunked {
+        body = dechunk(&body).0;
+    }
+    // Stalwart sends its pages compressed whatever the request accepts.
+    let packed = headers.iter().any(|(key, value)| {
+        key.eq_ignore_ascii_case("content-encoding") && value.eq_ignore_ascii_case("gzip")
+    });
+    if packed {
+        body = unpack(&body);
+    }
+    Some(Answer {
+        status,
+        headers,
+        body: String::from_utf8_lossy(&body).into_owned(),
+    })
+}
+
+/// A gzip body as far as it unpacks: one cut off at the size limit ends early,
+/// and what came before the cut still counts.
+fn unpack(data: &[u8]) -> Vec<u8> {
+    let mut body = Vec::new();
+    let _ = GzDecoder::new(data).take(UNPACKED).read_to_end(&mut body);
+    body
+}
+
+/// A chunked body joined, and whether its last, empty chunk was there.
+fn dechunk(mut data: &[u8]) -> (Vec<u8>, bool) {
+    let mut body = Vec::new();
+    while let Some(line) = data.windows(2).position(|window| window == b"\r\n") {
+        let size = String::from_utf8_lossy(&data[..line]);
+        let Ok(size) = usize::from_str_radix(size.split(';').next().unwrap_or("").trim(), 16)
+        else {
+            break;
+        };
+        if size == 0 {
+            return (body, true);
+        }
+        let start = line + 2;
+        // A size from the server: an absurd one must not overflow the bounds.
+        let Some(end) = start.checked_add(size).filter(|end| *end <= data.len()) else {
+            break;
+        };
+        body.extend_from_slice(&data[start..end]);
+        data = data.get(end + 2..).unwrap_or_default();
+    }
+    (body, false)
+}
