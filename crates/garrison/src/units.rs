@@ -117,6 +117,25 @@ mod tests {
         assert_eq!(values("ListenStream="), [(BROKER_SOCKET, BROKER_PATH)]);
     }
 
+    /// Under `/proc` the web service, the receiver and the macro filter read
+    /// only their own process (the web service its binary's path, to find the
+    /// interface), so they see nothing else there. The collector's `host`
+    /// check reads the host's figures there (`meminfo`, `loadavg`, `uptime`).
+    #[test]
+    fn the_services_that_read_only_their_own_process_see_nothing_else_in_proc() {
+        for (key, value) in [("ProtectProc=", "invisible"), ("ProcSubset=", "pid")] {
+            let set = values(key);
+            for unit in [WEB, INGEST, MILTER] {
+                assert!(set.contains(&(unit, value)), "{unit} lacks {key}{value}");
+            }
+        }
+        let subsets = values("ProcSubset=");
+        assert!(
+            subsets.iter().all(|(unit, _)| *unit != COLLECT),
+            "{subsets:?}"
+        );
+    }
+
     /// The installer keeps a file for every notification credential the
     /// collector and the watch load, and they load every one it keeps: both
     /// send on the same channels.

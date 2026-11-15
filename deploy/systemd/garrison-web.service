@@ -31,6 +31,10 @@ ProtectKernelLogs=true
 ProtectControlGroups=true
 ProtectClock=true
 ProtectHostname=true
+# Under /proc the service sees only its own process, which is all it reads
+# there: its binary's path, next to which the interface lies.
+ProtectProc=invisible
+ProcSubset=pid
 RestrictNamespaces=true
 RestrictRealtime=true
 RestrictSUIDSGID=true

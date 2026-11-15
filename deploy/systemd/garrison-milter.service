@@ -27,6 +27,9 @@ ProtectKernelLogs=true
 ProtectControlGroups=true
 ProtectClock=true
 ProtectHostname=true
+# Under /proc the filter sees only its own process; it reads nothing there.
+ProtectProc=invisible
+ProcSubset=pid
 RestrictNamespaces=true
 RestrictRealtime=true
 RestrictSUIDSGID=true

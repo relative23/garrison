@@ -71,6 +71,12 @@ Notable changes for operators and users. The format follows
   page and in the collector's journal. All three now also name the entry's
   place in the configuration, as `garrison check-config` does: `systemd
   (providers[3])`.
+- **The web service, the event receiver and the macro filter see no other
+  process.** Their units set `ProtectProc=invisible` and `ProcSubset=pid`:
+  under `/proc` each sees only its own process, which is all that any of
+  them reads there, and neither the host's other processes nor the kernel's
+  files beside them. `systemd-analyze security` rates each of the three 1.1
+  instead of 1.3.
 - **The README's title is Garrison**, as the logo has been since 0.1.2.
   Stalwart is named where the text says what Garrison is for; the Ansible
   role's description says the same.
