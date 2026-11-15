@@ -7,7 +7,7 @@ use garrison_core::time;
 use serde_json::json;
 
 use super::*;
-use crate::providers::dns::tests::{guessable, resolver as stand_in};
+use crate::providers::dns::stand_in::{guessable, resolver as stand_in};
 use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 
 pub(super) type Zone = BTreeMap<(String, u16), Vec<Vec<u8>>>;

@@ -8,7 +8,7 @@ use garrison_core::observations::{Observation, State};
 use super::tests::{Zone, address, mail_host, pointer, provider, rows};
 use super::*;
 use crate::context::Deadline;
-use crate::providers::dns::tests::resolver as stand_in;
+use crate::providers::dns::stand_in::resolver as stand_in;
 use crate::testing::{Canned, Remembered, assert_dated, config};
 
 /// The two observations of `provider` with `deadline`, and how long they took.

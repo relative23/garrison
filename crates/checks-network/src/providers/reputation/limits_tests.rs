@@ -8,7 +8,7 @@ use garrison_core::observations::{Observation, State};
 
 use super::tests::{Zone, address, pointer, rows};
 use super::*;
-use crate::providers::dns::tests::resolver as stand_in;
+use crate::providers::dns::stand_in::resolver as stand_in;
 use crate::testing::{Canned, Remembered, config, table};
 
 /// The two cards of `provider`.

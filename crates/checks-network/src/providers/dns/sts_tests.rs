@@ -12,7 +12,7 @@ use garrison_testing::http::{json as answer_json, serve};
 use rustls::{RootCertStore, ServerConfig, ServerConnection, StreamOwned};
 use serde_json::json;
 
-use super::tests::{host, resolver, text};
+use super::stand_in::{host, resolver, text};
 use super::*;
 use crate::testing::{Canned, config, table};
 
