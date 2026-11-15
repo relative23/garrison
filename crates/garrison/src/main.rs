@@ -286,7 +286,7 @@ fn notify_test(config: &Config) -> u8 {
     u8::from(failed)
 }
 
-fn check_config(config: &Config) -> u8 {
+fn check_config(config: &Config, path: &Path) -> u8 {
     if let Err(error) = garrison_collector::build(&config.collector.providers) {
         complain(&format!("Configuration not usable: {error}"));
         return 2;
@@ -317,6 +317,15 @@ fn check_config(config: &Config) -> u8 {
     let include = unfollowed::installed_include();
     for setting in unfollowed::settings(config, include.as_deref()) {
         complain(&format!("Warning: {}. {}", setting.what, setting.fix));
+    }
+    // Root reads the policy here; the broker, in its unit's sandbox, may not.
+    match units::policy_place(&config.broker.policy, path) {
+        Err(refusal) => {
+            complain(&format!("Access policy not usable: {refusal}"));
+            return 1;
+        }
+        Ok(Some(warning)) => complain(&format!("Warning: {warning}")),
+        Ok(None) => {}
     }
     match Authority::new(config, credentials(config)).policy() {
         Ok(_) => {
@@ -377,7 +386,7 @@ fn dispatch(task: Task, config: &Config, path: &Path) -> u8 {
         }
         Task::Broker => service("broker", garrison_broker::run(config, credentials(config))),
         Task::Milter => service("milter", garrison_milter::run(config)),
-        Task::CheckConfig => check_config(config),
+        Task::CheckConfig => check_config(config, path),
         Task::Modules { set, yes, adopt } => {
             selection::run(path, config, set.as_deref(), yes, adopt)
         }

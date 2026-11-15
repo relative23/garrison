@@ -243,6 +243,35 @@ fn check_config_refuses_two_providers_that_report_one_observation() {
     );
 }
 
+/// The broker's unit hides /home from it, as /root, /run/user, /tmp,
+/// /var/tmp and /dev. check-config refuses a policy there in the file the
+/// units read (units.rs holds that) and warns in any other, such as this one.
+#[test]
+fn check_config_names_a_policy_where_the_broker_cannot_read_it() {
+    let directory = prepared();
+    let path = directory.path().join("garrison.toml");
+    let policy = directory.path().join("policy.json");
+    let config = std::fs::read_to_string(&path).unwrap().replace(
+        &format!("policy = \"{}\"", policy.display()),
+        "policy = \"/home/garrison-cli-test/policy.json\"",
+    );
+    std::fs::write(&path, config).unwrap();
+    let checked = run(directory.path(), &["check-config"]);
+    assert!(
+        text(&checked.stderr).contains(
+            "Warning: broker.policy is /home/garrison-cli-test/policy.json, under /home, which \
+             garrison-broker.service hides from the broker (ProtectHome=true): the broker cannot \
+             read it there, and nobody can sign in. Keep the policy where the broker sees it, \
+             such as /etc/garrison/access-policy.json, and name that in broker.policy.\n"
+        ),
+        "{}",
+        text(&checked.stderr)
+    );
+    // Nothing is there, which check-config says after it.
+    assert_eq!(checked.status.code(), Some(1));
+    assert!(text(&checked.stderr).contains("Access policy not usable: "));
+}
+
 #[test]
 fn the_switch_snippet_comes_from_the_interface_next_to_the_binary() {
     // A release layout: bin/garrison and static/ beside it.

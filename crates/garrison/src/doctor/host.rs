@@ -174,6 +174,10 @@ fn private(path: &Path, what: &str, group_read: bool) -> Finding {
 fn files(config: &Config) -> Vec<Finding> {
     // Where the broker reads it.
     let mut findings = vec![private(&config.broker.policy, "the access policy", true)];
+    // Root reads it; the broker, in its unit's sandbox, may not.
+    if let Some((what, fix)) = units::hidden_policy(&config.broker.policy) {
+        findings.push(Finding::fail(what, format!("{fix}.")));
+    }
     for name in CREDENTIALS {
         findings.push(private(
             &config.credentials_directory.join(name),
@@ -394,6 +398,15 @@ mod tests {
                 config.broker.policy.display()
             )
         );
+        // Root may read a policy that the broker's unit hides from it.
+        let mut hidden = config.clone();
+        hidden.broker.policy = "/home/doctor-test/policy.json".into();
+        let found = files(&hidden);
+        let named = found
+            .iter()
+            .find(|finding| finding.what.contains("(ProtectHome=true)"))
+            .unwrap();
+        assert_eq!(named.level, Level::Fail, "{}", named.line());
     }
 
     #[test]

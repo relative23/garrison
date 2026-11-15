@@ -359,7 +359,12 @@ Notable changes for operators and users. The format follows
   from where the setting names it, and a purge removes it there with the
   lock and the backups `garrison access` keeps beside it. Both act only on
   a file, as the broker reads only one: a folder or a link the setting
-  names stays as it is, and `check-config` refuses it.
+  names stays as it is, and `check-config` refuses it. A policy under
+  `/home`, `/root`, `/run/user`, `/tmp`, `/var/tmp` or `/dev`, which the
+  broker's unit hides from it, was called valid by `check-config`, which
+  reads it as root, while the broker could not read it and nobody could
+  sign in; `check-config`, and with it the installer, now refuses it with
+  the setting that hides it, and `garrison doctor` names it.
 - **`garrison access check` shows what the broker grants.** It listed the
   modules and actions of a user's profiles, also those the installation
   does not offer, and showed a user the broker refuses, because none of
