@@ -53,7 +53,28 @@ describe("event history", () => {
     expect(screen.queryByText("Newest event")).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.getByRole("button", { name: "Older" })).toHaveProperty("disabled", true);
-    expect(screen.getByText("Showing 0 entries, newest first")).toBeTruthy();
+    // How many entries this filter has is not known: no count, not zero.
+    expect(screen.queryByText(/^Showing/)).toBeNull();
+  });
+
+  it("gives no count while the list loads", async () => {
+    let answer: () => void = () => undefined;
+    const arrived = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    serve({
+      "GET coverage": { body: coverage() },
+      "GET events": async (call) => {
+        await arrived;
+        return pages(call);
+      },
+    });
+    renderView(<Logs />);
+    await screen.findByText(/Recording since/);
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    expect(screen.queryByText(/^Showing/)).toBeNull();
+    answer();
+    expect(await screen.findByText("Showing 1 entry, newest first")).toBeTruthy();
   });
 
   it("shows recorded fields and links to the delivery and SMTP session", async () => {

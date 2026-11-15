@@ -220,15 +220,19 @@ export function useCursors(): Cursors {
   };
 }
 
-/** The footer under a list: how many rows are shown and the page buttons. */
+/** The footer under a list: how many rows are shown and the page buttons.
+ * Without a page, while it loads or after it failed, the count is not known
+ * and none is given: zero would say that nothing matched. */
 export function Pager({ cursors, page }: { cursors: Cursors; page: { items: unknown[]; next: string | null } | null }) {
   const { t } = useTranslation();
-  const shown = page?.items.length ?? 0;
   const next = page?.next;
   const newest = cursors.before === null;
+  const count = page?.items.length;
+  let shown = "";
+  if (count !== undefined) shown = newest ? t("events.showingNewest", { count }) : t("events.showing", { count });
   return (
     <div className="flex items-center justify-between text-sm text-muted-foreground">
-      <span>{newest ? t("events.showingNewest", { count: shown }) : t("events.showing", { count: shown })}</span>
+      <span>{shown}</span>
       <div className="flex gap-2">
         <Button variant="outline" size="sm" disabled={newest} onClick={cursors.newest}>
           {t("events.newest")}

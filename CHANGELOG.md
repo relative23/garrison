@@ -86,6 +86,10 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A list gives no count before it is there.** Event history, Deliveries
+  and Sessions said "Showing 0 entries" under a list while it loaded and
+  after it failed, as if nothing matched. They now give the count once
+  the list has arrived.
 - **A page opened in Firefox asks for its data once.** Each page starts
   its first requests while its code loads. The interface then asked for the
   same answers in a way Firefox does not answer from requests already on
