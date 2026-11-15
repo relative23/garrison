@@ -303,6 +303,7 @@ fn init(config: &Config, force: bool) -> Result<u8, String> {
     Ok(0)
 }
 
+/// What the broker would grant `subject` now, as it decides it.
 fn check(config: &Config, subject: &str) -> Result<u8, String> {
     let policy = load(config)?;
     let account = policy
@@ -311,6 +312,7 @@ fn check(config: &Config, subject: &str) -> Result<u8, String> {
     let rights = native_rights(&native(config)?, &account).map_err(|error| error.to_string())?;
     let result = policy
         .capabilities(subject, &rights.permissions, &rights.roles)
+        .and_then(|capabilities| authority(config).offered(capabilities))
         .map_err(|error| error.to_string())?;
     let mut modules: Vec<&str> = result.modules.iter().map(|id| id.as_str()).collect();
     modules.sort_unstable();

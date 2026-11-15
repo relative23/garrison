@@ -307,6 +307,11 @@ Notable changes for operators and users. The format follows
   yet counted. Where a clock that ran ahead had carried the thinning past
   the present, it takes up again from the oldest sample, so the minutes
   written since, by this release or an earlier one, are thinned as well.
+- **`garrison access check` shows what the broker grants.** It listed the
+  modules and actions of a user's profiles, also those the installation
+  does not offer, and showed a user the broker refuses, because none of
+  those modules is offered, as one with access. It now narrows them as the
+  broker does and says so where the broker refuses.
 - **Two collection runs at once no longer count events twice.** A
   `garrison collect` started by hand beside the timer's run could read
   Stalwart's counters after it and store before it, and the next run

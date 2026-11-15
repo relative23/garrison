@@ -20,7 +20,7 @@ use garrison_stalwart::permissions::native_rights;
 
 use crate::Error;
 use crate::grant::Grant;
-use crate::policy::{Policy, parse_policy};
+use crate::policy::{Capabilities, Policy, parse_policy};
 
 /// The policy is small; anything larger is not a policy.
 const MAX_POLICY: usize = 65536;
@@ -77,6 +77,37 @@ impl Authority {
         Ok(JmapClient::new(&self.stalwart_url, &key))
     }
 
+    /// What `capabilities` leave to grant on this installation: only the
+    /// modules it offers, actions only with the maintenance module, and a
+    /// refusal where no module is left. The broker grants this, and
+    /// `garrison access check` shows it.
+    pub fn offered(&self, capabilities: Capabilities) -> Result<Capabilities, Error> {
+        let modules: BTreeSet<ModuleId> = capabilities
+            .modules
+            .intersection(&self.modules)
+            .copied()
+            .collect();
+        // Profiles that name only modules this installation does not offer
+        // leave nothing to grant. That is what the policy says of this user,
+        // as a missing profile is, and no grant the web service must refuse.
+        if modules.is_empty() {
+            return Err(Error::Denied(
+                "This identity's profiles grant no module this installation offers".into(),
+            ));
+        }
+        // Actions belong to the maintenance module.
+        let actions = if modules.contains(&ModuleId::Actions) {
+            capabilities.actions
+        } else {
+            BTreeSet::new()
+        };
+        Ok(Capabilities {
+            modules,
+            actions,
+            profiles: capabilities.profiles,
+        })
+    }
+
     pub fn authorize(&self, token: &str) -> Result<Grant, Error> {
         self.evaluate(token).map_err(|error| match error {
             Error::Unavailable(_) => {
@@ -100,32 +131,17 @@ impl Authority {
                 )),
                 other => other,
             })?;
-        let result = policy.capabilities(&identity.subject, &rights.permissions, &rights.roles)?;
-        let modules: BTreeSet<ModuleId> = result
-            .modules
-            .intersection(&self.modules)
-            .copied()
-            .collect();
-        // Profiles that name only modules this installation does not offer
-        // leave nothing to grant. That is what the policy says of this user,
-        // as a missing profile is, and no grant the web service must refuse.
-        if modules.is_empty() {
-            return Err(Error::Denied(
-                "This identity's profiles grant no module this installation offers".into(),
-            ));
-        }
-        // Actions belong to the maintenance module.
-        let actions = if modules.contains(&ModuleId::Actions) {
-            result.actions
-        } else {
-            BTreeSet::new()
-        };
+        let offered = self.offered(policy.capabilities(
+            &identity.subject,
+            &rights.permissions,
+            &rights.roles,
+        )?)?;
         Ok(Grant {
             subject: identity.subject,
             email: identity.email,
-            modules,
-            actions,
-            profiles: result.profiles,
+            modules: offered.modules,
+            actions: offered.actions,
+            profiles: offered.profiles,
             checked_at: time::now_isoformat(),
         })
     }

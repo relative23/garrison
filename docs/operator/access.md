@@ -47,6 +47,10 @@ garrison access check <subject>              # what would this user get now?
 
 Role IDs are shown in the native administration (Roles). The subject of a local
 Stalwart account is its numeric account ID; `access check` shows the mapping.
+It shows what the broker grants: the modules of the user's profiles that this
+installation offers (`modules` in `garrison.toml`), their actions only with
+the maintenance module, and the refusal the user gets where none of those
+modules is offered.
 
 Every change keeps the previous file as `access-policy.json.<timestamp>.bak`.
 There is deliberately no web page that edits the policy.

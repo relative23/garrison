@@ -142,6 +142,63 @@ fn check_shows_what_a_subject_may_use() {
     server.requests();
 }
 
+/// What the broker would grant: only the modules this installation offers,
+/// actions only with the maintenance module, and nothing at all where no
+/// module is left.
+#[test]
+fn check_shows_only_what_this_installation_offers() {
+    let account = json!({"id": "b", "@type": "User",
+                         "roles": {"@type": "Custom", "roleIds": names(&["e"])},
+                         "permissions": {"@type": "Inherit"}});
+    let authentication =
+        json!({"id": "singleton", "defaultAdminRoleIds": {}, "defaultUserRoleIds": {}});
+    let rights = ["authenticate", "sysActionCreate", "sysRoleUpdate"];
+    let answers = [
+        respond("x:Account/get", &json!([account])),
+        respond("x:Authentication/get", &json!([authentication])),
+        respond("x:Role/get", &json!([role("e", &rights, "Editors")])),
+    ];
+    // Two checks, one answer of each kind for each.
+    let server = serve([answers.clone(), answers].concat());
+    let directory = against(&server.url);
+    let settings = directory.path().join("garrison.toml");
+    let written = std::fs::read_to_string(&settings).unwrap();
+    let offered = written.replacen("schema = 1\n", "schema = 1\nmodules = [\"logs\"]\n", 1);
+    std::fs::write(&settings, offered).unwrap();
+    let policy = |document: &Value| {
+        garrison_testing::write_private(
+            &directory.path().join("policy.json"),
+            document.to_string().as_bytes(),
+        );
+    };
+    policy(&garrison_testing::policy_document());
+    let check = run(directory.path(), &["access", "check", "1"]);
+    assert_eq!(check.status.code(), Some(0), "{}", text(&check.stderr));
+    let shown: Value = serde_json::from_str(&text(&check.stdout)).unwrap();
+    assert_eq!(shown["profiles"], json!(["administrator"]));
+    assert_eq!(shown["modules"], json!(["dashboard", "logs", "services"]));
+    assert_eq!(shown["actions"], json!([]));
+    // A profile that names only modules this installation does not offer
+    // grants nothing: the broker refuses such a user.
+    let mut only_actions = garrison_testing::policy_document();
+    only_actions["profiles"]["administrator"]["modules"] = json!(["actions"]);
+    policy(&only_actions);
+    let refused = run(directory.path(), &["access", "check", "1"]);
+    assert_eq!(
+        (
+            refused.status.code(),
+            text(&refused.stdout),
+            text(&refused.stderr)
+        ),
+        (
+            Some(1),
+            String::new(),
+            "This identity's profiles grant no module this installation offers\n".to_owned()
+        )
+    );
+    server.requests();
+}
+
 #[test]
 fn a_role_is_bound_to_a_known_profile_once_stalwart_knows_it() {
     let server = serve(vec![respond("x:Role/get", &json!([{"id": "r2"}]))]);
