@@ -12,6 +12,7 @@ mod layering;
 mod notices;
 mod release;
 mod sbom;
+mod scripts;
 mod sizes;
 
 use std::path::{Path, PathBuf};
@@ -24,6 +25,7 @@ Tasks:
   check     run every structural check below
   layering  privileged crates must not depend on a web framework or async runtime
   sizes     handwritten source files stay at or below 500 lines
+  scripts   a script that names its interpreter is executable, as its header runs it
   api       write frontend/api/ from the Rust service (cargo test checks it)
   brand     write the logo files in docs/brand (needs Inkscape, rsvg-convert, Noto Sans)
   event-types SCHEMA.json  write crates/ingest/event_types.json from Stalwart's /api/schema
@@ -69,10 +71,12 @@ fn main() -> ExitCode {
     let passed = match task.as_deref() {
         Some("layering") => report("layering", layering::check(&root)),
         Some("sizes") => report("sizes", Ok(sizes::check(&root))),
+        Some("scripts") => report("scripts", scripts::check(&root)),
         Some("check") => {
             let layering = report("layering", layering::check(&root));
             let sizes = report("sizes", Ok(sizes::check(&root)));
-            layering && sizes
+            let scripts = report("scripts", scripts::check(&root));
+            layering && sizes && scripts
         }
         Some("api") => api::api(&root)
             .map_err(|error| eprintln!("api: {error}"))

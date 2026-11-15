@@ -36,7 +36,7 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
       - run: cargo test --workspace --locked
-      - name: Layering and file sizes
+      - name: Layering, file sizes and runnable scripts
         run: cargo xtask check
       - name: Licenses, advisories and sources
         run: |

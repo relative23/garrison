@@ -113,7 +113,7 @@ cargo check --manifest-path fuzz/Cargo.toml --locked --bins
 cargo clippy --workspace --all-targets --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo test --workspace --locked
-cargo xtask check                              # layering and file sizes
+cargo xtask check                              # layering, file sizes and runnable scripts
 cargo deny --locked check                      # licenses, advisories, sources
 cargo machete                                  # no crate declares a dependency it does not use
 cargo coverage                                 # the tests again, with the lines they run
@@ -131,6 +131,7 @@ npm run audit                                  # known vulnerabilities, needs th
 | `fuzz/` format and `check --locked` | The fuzz targets, which `--all` and `--workspace` do not reach, keep the format and build from their own lockfile; running them is the weekly fuzz workflow's |
 | `cargo xtask layering` | `core`, `stalwart`, `authz`, `broker`, the `checks` crates, `collector` and `milter` never depend on a web framework or an async runtime |
 | `cargo xtask sizes` | Handwritten files stay at or below 500 lines |
+| `cargo xtask scripts` | A script that names its interpreter is executable, so that `scripts/<name>.sh` runs as its header shows |
 | `contract_files` test | `frontend/api/openapi.json` and `modules.json` match the code |
 | `cargo coverage` | The tests run at least 90 % of the lines, counted without build tooling, test fixtures, and the installer and the Stalwart setup, which acceptance and contract tests check on a real host; `cargo coverage --html` shows the lines no test runs |
 | `npm run lint` | No visible text outside the catalog, no rendered HTML |
