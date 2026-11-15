@@ -83,6 +83,7 @@ fn collect(
         now: time::now(),
         native_key: key,
         metrics_credential: metrics,
+        dqs_key: garrison_collector::context::DqsKey::Unset,
         events_database: directory.path().join("events.sqlite"),
         runner: &SystemRunner,
         memory: &garrison_collector::context::Forgetful,

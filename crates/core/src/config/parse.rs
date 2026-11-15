@@ -206,6 +206,7 @@ fn collector(
         "state_directory",
         "native_key",
         "metrics_credential",
+        "dqs_key",
         "history_days",
     ];
     let table = Section::take(value, "collector", &allowed)?;
@@ -243,6 +244,10 @@ fn collector(
             "collector.native_key",
         )?,
         metrics_credential: metrics,
+        dqs_key: match table.get("dqs_key") {
+            None => None,
+            value => Some(secret_source(value, "", "collector.dqs_key")?),
+        },
         history_days: integer(
             table.get("history_days"),
             Some(90),

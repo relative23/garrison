@@ -259,6 +259,18 @@ fn secrets_name_absolute_files_or_systemd_credentials() {
         SecretSource::File("/etc/garrison/hmac".into())
     );
     assert_eq!(config.collector.metrics_credential, None);
+    assert_eq!(config.collector.dqs_key, None);
+    section(&mut raw, "collector").insert("dqs_key".into(), "credential:spamhaus-dqs-key".into());
+    assert_eq!(
+        parse(&raw).unwrap().collector.dqs_key,
+        Some(SecretSource::Credential("spamhaus-dqs-key".into()))
+    );
+    section(&mut raw, "collector").insert("dqs_key".into(), "".into());
+    assert_eq!(
+        error(&raw),
+        "collector.dqs_key must be an absolute path or credential:NAME"
+    );
+    section(&mut raw, "collector").remove("dqs_key");
     section(&mut raw, "collector").insert("metrics_credential".into(), "credential:metrics".into());
     assert_eq!(
         parse(&raw).unwrap().collector.metrics_credential,

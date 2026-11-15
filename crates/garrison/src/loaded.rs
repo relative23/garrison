@@ -40,6 +40,7 @@ fn source<'a>(config: &'a Config, setting: &str) -> Option<&'a SecretSource> {
         "ingest.signature_key" => Some(&config.ingest.signature_key),
         "collector.native_key" => Some(&config.collector.native_key),
         "collector.metrics_credential" => config.collector.metrics_credential.as_ref(),
+        "collector.dqs_key" => config.collector.dqs_key.as_ref(),
         "broker.native_key" => Some(&config.broker.native_key),
         "notifications.token" => Some(&notifications.token),
         "notifications.webhook_token" => Some(&notifications.webhook_token),
@@ -108,6 +109,8 @@ mod tests {
         config.notifications.webhook_url = Some(Endpoint::File(SecretSource::Credential(
             "notify-webhook-url".into(),
         )));
+        config.collector.dqs_key = Some(SecretSource::Credential("spamhaus-dqs-key".into()));
+        assert_eq!(unloaded(&config), []);
         for (setting, _, _) in units::SECRETS {
             assert!(source(&config, setting).is_some(), "{setting}");
         }

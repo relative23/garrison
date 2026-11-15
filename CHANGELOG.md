@@ -8,6 +8,14 @@ Notable changes for operators and users. The format follows
 
 ### Upgrade notes
 
+- A zone of Spamhaus' Data Query Service written with its key in `lists`,
+  such as `KEY.zen.dq.spamhaus.net`, keeps working, and `check-config`,
+  the installer and `garrison doctor` warn of it: write the zone without
+  the key, `zen.dq.spamhaus.net`, keep the key in
+  `/etc/garrison/credentials/spamhaus-dqs-key` (root, mode 0600) and set
+  `collector.dqs_key = "credential:spamhaus-dqs-key"`. A zone written
+  without its key while that setting is missing is refused, and with it the
+  upgrade, before anything stops.
 - A secret that `garrison.toml` names by its path, such as `token =
   "/etc/garrison/ntfy.token"`, or by a credential name other than the one
   its unit loads, is refused by `garrison check-config` now, and with it
@@ -17,6 +25,16 @@ Notable changes for operators and users. The format follows
 
 ### Added
 
+- **The key of Spamhaus' Data Query Service has a credential file.** A
+  zone of the service holds the subscriber's key in its name, and
+  `garrison.toml`, where it stood, is read by every user of the host. With
+  `collector.dqs_key = "credential:spamhaus-dqs-key"` the collector reads
+  the key from `/etc/garrison/credentials/spamhaus-dqs-key` for each run
+  and asks a zone written without it, such as `zen.dq.spamhaus.net`, with
+  it; the key goes into the question and nowhere else. The collector's unit
+  loads the file, and the installer keeps an empty one, which means none:
+  such a zone is then not asked, and the card says why. See
+  [checks](docs/operator/checks.md#reputation).
 - **Stalwart can count and block each client under its own address.**
   Behind nginx, Stalwart sees every client at nginx's address: on
   Garrison's host that is 127.0.0.1, which Stalwart neither limits nor

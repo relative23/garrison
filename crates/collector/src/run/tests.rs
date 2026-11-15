@@ -117,6 +117,63 @@ fn providers_receive_the_credentials_that_could_be_read() {
     assert_eq!(run().1, None);
 }
 
+/// What a run handed to its provider of the key of Spamhaus' Data Query Service.
+struct Keyed(Arc<Mutex<Option<DqsKey>>>);
+
+impl Provider for Keyed {
+    fn name(&self) -> &'static str {
+        "keyed"
+    }
+
+    fn collect(&self, context: &Context<'_>) -> Collected {
+        *self.0.lock().unwrap() = Some(context.dqs_key.clone());
+        Ok(Report::default())
+    }
+}
+
+/// The key is read from its file for each run; where there is none, the
+/// checks are told why, with the file to write it into and never what the
+/// file holds.
+#[test]
+fn the_key_of_spamhaus_dqs_is_read_for_each_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = crate::testing::config(directory.path());
+    let credentials = Credentials::new(directory.path().join("credentials"));
+    let handed = Arc::new(Mutex::new(None));
+    let providers = vec![Box::new(Keyed(Arc::clone(&handed))) as Box<dyn Provider>];
+    let runner = Canned(String::new());
+    let run = |config: &Config| {
+        collect_from(&providers, config, &credentials, &runner, now()).unwrap();
+        handed.lock().unwrap().take().unwrap()
+    };
+    assert_eq!(run(&config), DqsKey::Unset);
+    config.collector.dqs_key = Some(SecretSource::Credential("spamhaus-dqs-key".into()));
+    let file = config.credentials_directory.join("spamhaus-dqs-key");
+    let why = |what: &str| {
+        DqsKey::Missing(format!(
+            "{} {what}; write the key of Spamhaus' Data Query Service into it",
+            file.display()
+        ))
+    };
+    assert_eq!(run(&config), why("cannot be read"));
+    private(&file, "\n");
+    assert_eq!(run(&config), why("is empty"));
+    for wrong in ["two words", "key.with.dots", "ünïcode"] {
+        private(&file, wrong);
+        let said = run(&config);
+        assert_eq!(
+            said,
+            why("holds no such key, one word of letters and digits")
+        );
+        assert!(!format!("{said:?}").contains(wrong), "{said:?}");
+    }
+    private(&file, "abcdefghijklmnopqrstuvwxyz\n");
+    assert_eq!(
+        run(&config),
+        DqsKey::Key("abcdefghijklmnopqrstuvwxyz".into())
+    );
+}
+
 #[test]
 fn a_scrape_credential_is_written_as_it_is_read_and_never_shows_its_secret() {
     let credential = ScrapeCredential {

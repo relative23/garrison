@@ -75,6 +75,18 @@ fn reader(config: &Config, name: &str) -> Option<(&'static str, String)> {
         && config.collector.providers.iter().any(|provider| {
             provider.get("type").and_then(toml::Value::as_str) == Some("prometheus")
         });
+    if name == "spamhaus-dqs-key" {
+        let zone = crate::dqs::asked_with_key(config)?;
+        let path = config.credentials_directory.join(name);
+        return Some((
+            "the reputation check asks a list of Spamhaus' Data Query Service with it",
+            format!(
+                "Write the key into it ({zone} is asked with it): install -m 600 /dev/null {0} \
+                 && sh -c 'cat > {0}', then paste the key and press Enter and Ctrl-D.",
+                path.display()
+            ),
+        ));
+    }
     (name == "metrics-credential" && scraped).then(|| {
         (
             "the prometheus check reads Stalwart's exporter with it",
@@ -384,5 +396,54 @@ mod tests {
         );
         // The notification channels' files are judged with the channels.
         assert_eq!(reader(&config, "ntfy-token"), None);
+    }
+
+    /// The key of Spamhaus' Data Query Service is read where a list written
+    /// without it is configured and `collector.dqs_key` names its file.
+    #[test]
+    fn the_dqs_key_is_read_where_a_list_written_without_it_is_asked() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        assert_eq!(reader(&config, "spamhaus-dqs-key"), None);
+        let reputation: toml::Table = "type = \"reputation\"\nhosts = [\"mail.example.test\"]\n\
+             lists = [\"zen.dq.spamhaus.net\"]\nlists_ipv6 = []"
+            .parse()
+            .unwrap();
+        config.collector.providers.push(reputation);
+        assert_eq!(reader(&config, "spamhaus-dqs-key"), None);
+        config.collector.dqs_key = Some(garrison_core::credentials::SecretSource::Credential(
+            "spamhaus-dqs-key".into(),
+        ));
+        let path = config.credentials_directory.join("spamhaus-dqs-key");
+        let found = files(&config);
+        let missing = starting(&found, "spamhaus-dqs-key is missing");
+        assert_eq!(missing.level, Level::Fail);
+        assert_eq!(
+            missing.fix.as_deref(),
+            Some(
+                format!(
+                    "Write the key into it (zen.dq.spamhaus.net is asked with it): install -m 600 \
+                     /dev/null {0} && sh -c 'cat > {0}', then paste the key and press Enter and \
+                     Ctrl-D.",
+                    path.display()
+                )
+                .as_str()
+            )
+        );
+        let empty = judged(
+            "spamhaus-dqs-key",
+            true,
+            0o600,
+            reader(&config, "spamhaus-dqs-key"),
+            Finding::ok("spamhaus-dqs-key is private (600)"),
+        );
+        assert_eq!(
+            (empty.level, empty.what.as_str()),
+            (
+                Level::Fail,
+                "spamhaus-dqs-key is empty, but the reputation check asks a list of Spamhaus' \
+                 Data Query Service with it"
+            )
+        );
     }
 }

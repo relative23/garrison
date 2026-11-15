@@ -12,6 +12,9 @@ LoadCredential=collector-native-key:/etc/garrison/credentials/collector-native-k
 # the exporter is Garrison's; an empty file, which the installer keeps,
 # means none.
 LoadCredential=metrics-credential:/etc/garrison/credentials/metrics-credential
+# The key of Spamhaus' Data Query Service, for its lists written without it
+# (collector.dqs_key); an empty file, which the installer keeps, means none.
+LoadCredential=spamhaus-dqs-key:/etc/garrison/credentials/spamhaus-dqs-key
 # The access token of the notification topic; the installer keeps an empty
 # file there, since systemd refuses a unit whose credential is missing.
 LoadCredential=ntfy-token:/etc/garrison/credentials/ntfy-token

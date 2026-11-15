@@ -61,6 +61,9 @@ pub struct CollectorConfig {
     pub state_directory: PathBuf,
     pub native_key: SecretSource,
     pub metrics_credential: Option<SecretSource>,
+    /// Where the key of Spamhaus' Data Query Service is read from, for the
+    /// lists written without it; `None` where none is.
+    pub dqs_key: Option<SecretSource>,
     pub history_days: u32,
     /// Provider tables as written; each provider validates its own options.
     pub providers: Vec<toml::Table>,

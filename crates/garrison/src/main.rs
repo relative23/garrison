@@ -10,6 +10,7 @@ mod backup_check;
 mod config_file;
 mod detect;
 mod doctor;
+mod dqs;
 mod install;
 mod loaded;
 mod nginx;
@@ -252,9 +253,13 @@ fn check_config(config: &Config, path: &Path) -> u8 {
         return 2;
     }
     let unloaded = loaded::unloaded(config);
-    if !unloaded.is_empty() {
+    let unaskable = dqs::refused(config);
+    if !unloaded.is_empty() || !unaskable.is_empty() {
         for secret in &unloaded {
             complain(&format!("Configuration not usable: {}", secret.line()));
+        }
+        for (what, fix) in &unaskable {
+            complain(&format!("Configuration not usable: {what}. {fix}"));
         }
         return 2;
     }
@@ -277,6 +282,9 @@ fn check_config(config: &Config, path: &Path) -> u8 {
     let include = unfollowed::installed_include();
     for setting in unfollowed::settings(config, include.as_deref()) {
         complain(&format!("Warning: {}. {}", setting.what, setting.fix));
+    }
+    for (what, fix) in dqs::warned(config) {
+        complain(&format!("Warning: {what}. {fix}"));
     }
     // Root reads the policy here; the broker, in its unit's sandbox, may not.
     match units::policy_place(&config.broker.policy, path) {

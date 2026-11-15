@@ -260,13 +260,22 @@ Partial where they would be OK.
   your own on the host gets one. An answer outside 127.0.0.0/8 comes from a
   resolver that answers names that do not exist with an address of its own:
   no list can be read through it, and the card stays Unknown until the
-  check asks another (`resolver`). A zone of Spamhaus' Data Query Service,
-  such as `KEY.zen.dq.spamhaus.net`, is read by Spamhaus' own codes too: a
-  key that is disabled or used against its terms gives no verdict, never a
-  listing. Such a zone's name holds the key: the check asks the zone as
-  written, but names it without its key, `….zen.dq.spamhaus.net`, on the
-  card, in its findings and in what the status database keeps. The key still
-  stands in `garrison.toml`, which every user of the host may read.
+  check asks another (`resolver`). A zone of Spamhaus' Data Query Service
+  is read by Spamhaus' own codes too: a key that is disabled or used
+  against its terms gives no verdict, never a listing. Its name holds the
+  subscriber's key, `KEY.zen.dq.spamhaus.net`, and `garrison.toml` is read
+  by every user of the host, so write the zone without it,
+  `zen.dq.spamhaus.net`, keep the key in
+  `/etc/garrison/credentials/spamhaus-dqs-key` and set
+  `collector.dqs_key = "credential:spamhaus-dqs-key"`
+  ([configuration](configuration.md)): the collector reads the key for each
+  run and asks the zone with it, and the key goes into the question and
+  nowhere else. Without a key in that file the zone is not asked, gives no
+  verdict and the card says why; the first run with one asks at once.
+  `garrison check-config` refuses such a zone while `collector.dqs_key` is
+  not set. A zone written with its key still works, named without it,
+  `….zen.dq.spamhaus.net`, on the card, in its findings and in what the
+  status database keeps, and check-config and `garrison doctor` warn of it.
   `garrison check-config` refuses a name DNS can never ask, and says which:
   one with a label of more than 63 octets, or one longer than 253 octets as
   it is asked, which is with the reversed address before a list's zone, so

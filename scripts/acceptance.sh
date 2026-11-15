@@ -86,11 +86,11 @@ check "a user outside the group garrison cannot reach the broker" "
         grep -q 'Permission denied'"
 
 step "The collector's files where setup made none"
-# Where Stalwart's exporter is another's, setup writes no metrics credential.
-# The collector's unit loads it, and systemd starts no unit whose credential
-# file is missing.
+# Where Stalwart's exporter is another's, setup writes no metrics credential,
+# and only a list of Spamhaus' Data Query Service needs a key. The collector's
+# unit loads both, and systemd starts no unit whose credential file is missing.
 credentials=/etc/garrison/credentials
-inside "rm -f $credentials/metrics-credential"
+inside "rm -f $credentials/metrics-credential $credentials/spamhaus-dqs-key"
 check "systemd starts no collection run whose credential file is missing" "
     ! systemctl start garrison-collect.service 2>/dev/null &&
         systemctl status garrison-collect.service --no-pager 2>&1 |
@@ -104,9 +104,11 @@ if ! installer '/root/release/bin/garrison install' >"$again" 2>&1; then
 fi
 rm -f "$again"
 check "after the installer, a collection run starts" 'systemctl start garrison-collect.service'
-check "the installer keeps the file, empty and root's alone" "
-    test -f $credentials/metrics-credential && test ! -s $credentials/metrics-credential &&
-        test \"\$(stat -c %U:%a $credentials/metrics-credential)\" = root:600"
+check "the installer keeps both files, empty and root's alone" "
+    for name in metrics-credential spamhaus-dqs-key; do
+        test -f $credentials/\$name && test ! -s $credentials/\$name &&
+            test \"\$(stat -c %U:%a $credentials/\$name)\" = root:600 || exit 1
+    done"
 check "the collector reads an empty metrics credential as none" \
     "! journalctl -u garrison-collect.service --since @$since --no-pager |
         grep -q 'metrics credential is unavailable'"
@@ -117,10 +119,49 @@ check "doctor names the missing metrics credential" \
 inside "sed -n '/FAIL  metrics-credential is missing/{n;s/^.*: //;p;}' /root/doctor.log > /root/doctor-fix.sh &&
     grep -q /etc/garrison/credentials/metrics-credential /root/doctor-fix.sh && sh -e /root/doctor-fix.sh"
 check "the file doctor's command makes lets a collection run start" 'systemctl start garrison-collect.service'
-check "doctor finds the empty file in order where nothing reads it" "
+check "doctor finds both empty files in order where nothing reads them" "
     garrison doctor > /root/doctor.log 2>&1;
-    ! grep -q 'FAIL  .*metrics-credential' /root/doctor.log &&
-        grep -q 'ok    metrics-credential is empty' /root/doctor.log"
+    ! grep -E -q 'FAIL  .*(metrics-credential|spamhaus-dqs-key)' /root/doctor.log &&
+        grep -q 'ok    metrics-credential is empty' /root/doctor.log &&
+        grep -q 'ok    spamhaus-dqs-key is empty' /root/doctor.log"
+
+step "The key of Spamhaus' Data Query Service from its file"
+# A stand-in resolver on 127.0.0.1:5353 that knows the mail host, answers no
+# name of the service and logs every question; it asks nothing of anyone.
+# The key is made up for the run: no real key, and no question to Spamhaus.
+case $distro in
+    debian-* | ubuntu-*) resolver='apt-get update -q >/dev/null && DEBIAN_FRONTEND=noninteractive
+        apt-get install -y -q --no-install-recommends dnsmasq-base >/dev/null' ;;
+    opensuse-*) resolver='zypper -n -q install dnsmasq >/dev/null' ;;
+    *) resolver='dnf -y -q install dnsmasq >/dev/null' ;;
+esac
+inside "$resolver && systemd-run --quiet --unit=acceptance-dns dnsmasq --keep-in-foreground --user=root \
+    --no-resolv --no-hosts --listen-address=127.0.0.1 --port=5353 --bind-interfaces \
+    --log-queries --log-facility=- --address=/mail.example.test/192.0.2.25 \
+    --ptr-record=25.2.0.192.in-addr.arpa,mail.example.test --local=/dq.spamhaus.net/"
+key=garrisonacceptancenotakey
+inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.before-dqs &&
+    printf "\n[[providers]]\ntype = \"reputation\"\nresolver = \"127.0.0.1:5353\"\nhosts = [\"mail.example.test\"]\nlists = [\"zen.dq.spamhaus.net\"]\nlists_ipv6 = []\n" \
+        >> /etc/garrison/garrison.toml'
+check "check-config refuses a list written without its key while collector.dqs_key is unset" \
+    '! garrison check-config >/root/check.log 2>&1 && grep -q "written without its key" /root/check.log'
+inside 'printf "\n[collector]\ndqs_key = \"credential:spamhaus-dqs-key\"\n" >> /etc/garrison/garrison.toml'
+check "check-config takes it with collector.dqs_key" 'garrison check-config >/dev/null'
+latest='sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT document FROM snapshots ORDER BY id DESC LIMIT 1"'
+check "with an empty key file the list is not asked, and the card says why" "
+    systemctl start garrison-collect.service &&
+        $latest | grep -q 'spamhaus-dqs-key is empty' &&
+        ! journalctl -u acceptance-dns --no-pager | grep -q 'dq.spamhaus.net'"
+inside "printf '%s\n' $key > $credentials/spamhaus-dqs-key"
+check "with a key in the file the list is asked with it" "
+    systemctl start garrison-collect.service &&
+        journalctl -u acceptance-dns --no-pager | grep -q '\.$key\.zen\.dq\.spamhaus\.net' &&
+        ! $latest | grep -q 'spamhaus-dqs-key is empty'"
+check "the key is nowhere but in the question" "
+    ! grep -a -q $key /var/lib/garrison/collector/status.sqlite* &&
+        ! journalctl -u garrison-collect.service --no-pager | grep -q $key"
+inside "systemctl stop acceptance-dns && : > $credentials/spamhaus-dqs-key &&
+    cp -p /root/garrison.toml.before-dqs /etc/garrison/garrison.toml"
 
 step "Making room in a full audit, as operations.md says"
 # The audit as it stands an hour later, filled up: the jobs so far have

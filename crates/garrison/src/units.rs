@@ -46,9 +46,10 @@ pub(crate) const NOTIFICATION_FILES: [&str; 5] = [
 ];
 /// The collector's own files that may be empty, which means none: Stalwart's
 /// metrics exporter's credential, which setup writes only where the exporter
-/// is Garrison's. The installer keeps an empty file for each, as for the
+/// is Garrison's, and the key of Spamhaus' Data Query Service, which only
+/// its lists need. The installer keeps an empty file for each, as for the
 /// notification files.
-pub(crate) const COLLECTOR_FILES: [&str; 1] = ["metrics-credential"];
+pub(crate) const COLLECTOR_FILES: [&str; 2] = ["metrics-credential", "spamhaus-dqs-key"];
 /// Where `garrison-broker.socket` listens; systemd hands it to the broker.
 pub(crate) const BROKER_PATH: &str = "/run/garrison/broker.sock";
 /// The places `garrison-broker.service` hides from the broker, each with the
@@ -132,7 +133,7 @@ pub(crate) fn policy_place(policy: &Path, configuration: &Path) -> Result<Option
 /// Each setting that names a secret, the units whose services read it, and
 /// the one name those units load it as (`LoadCredential=`): systemd hands a
 /// service no other.
-pub(crate) const SECRETS: [(&str, &[&str], &str); 9] = [
+pub(crate) const SECRETS: [(&str, &[&str], &str); 10] = [
     ("ingest.signature_key", &[INGEST], "webhook-signature-key"),
     ("collector.native_key", &[COLLECT], "collector-native-key"),
     (
@@ -140,6 +141,7 @@ pub(crate) const SECRETS: [(&str, &[&str], &str); 9] = [
         &[COLLECT],
         "metrics-credential",
     ),
+    ("collector.dqs_key", &[COLLECT], "spamhaus-dqs-key"),
     ("broker.native_key", &[BROKER], "broker-native-key"),
     ("notifications.token", &[COLLECT, WATCH], "ntfy-token"),
     (

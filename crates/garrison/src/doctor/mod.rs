@@ -143,6 +143,19 @@ fn secrets(config: &Config) -> (Vec<Finding>, bool) {
     (findings, channels)
 }
 
+/// The lists of Spamhaus' Data Query Service, as check-config judges them:
+/// one written without its key that nothing could ask fails, one that holds
+/// its key in garrison.toml is a warning.
+fn lists(config: &Config) -> Vec<Finding> {
+    let refused = crate::dqs::refused(config)
+        .into_iter()
+        .map(|(what, fix)| Finding::fail(what, fix));
+    let warned = crate::dqs::warned(config)
+        .into_iter()
+        .map(|(what, fix)| Finding::warn(what, fix));
+    refused.chain(warned).collect()
+}
+
 /// `1 problem`, `2 problems`.
 fn counted(number: usize, one: &str, more: &str) -> String {
     format!("{number} {}", if number == 1 { one } else { more })
@@ -159,6 +172,7 @@ pub(crate) fn run(config: &Config) -> u8 {
     findings.extend(unfollowed(config));
     let (unloaded, channels) = secrets(config);
     findings.extend(unloaded);
+    findings.extend(lists(config));
     // A channel whose secret the collector would not have is not judged by
     // what root reads.
     if channels {
@@ -222,6 +236,56 @@ mod tests {
         config.notifications.token =
             garrison_core::credentials::SecretSource::Credential("token".into());
         assert!(matches!(secrets(&config), (found, false) if found.len() == 2));
+    }
+
+    /// A list of Spamhaus' Data Query Service: one written without its key
+    /// fails while nothing could ask it; one that holds its key is a warning
+    /// that never repeats the key.
+    #[test]
+    fn the_lists_of_spamhaus_dqs_are_judged_as_check_config_judges_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        let key = "abcdefghijklmnopqrstuvwxyz";
+        let reputation: toml::Table = format!(
+            "type = \"reputation\"\nhosts = [\"mail.example.test\"]\n\
+             lists = [\"zen.dq.spamhaus.net\", \"{key}.sbl.dq.spamhaus.net\"]\nlists_ipv6 = []"
+        )
+        .parse()
+        .unwrap();
+        config.collector.providers.push(reputation);
+        let found = lists(&config);
+        let lines: Vec<(Level, String)> = found
+            .iter()
+            .map(|finding| (finding.level, finding.what.clone()))
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                (
+                    Level::Fail,
+                    "providers[1].lists names zen.dq.spamhaus.net, a list of Spamhaus' Data \
+                     Query Service written without its key, but collector.dqs_key is not set, so \
+                     it could not be asked"
+                        .to_owned()
+                ),
+                (
+                    Level::Warn,
+                    "providers[1].lists names ….sbl.dq.spamhaus.net with the key of Spamhaus' \
+                     Data Query Service in it, in garrison.toml, which every user of this host \
+                     may read"
+                        .to_owned()
+                ),
+            ]
+        );
+        assert!(found.iter().all(|finding| !finding.line().contains(key)));
+        config.collector.dqs_key = Some(garrison_core::credentials::SecretSource::Credential(
+            "spamhaus-dqs-key".into(),
+        ));
+        assert_eq!(lists(&config).len(), 1);
+        assert_eq!(
+            crate::dqs::asked_with_key(&config).as_deref(),
+            Some("zen.dq.spamhaus.net")
+        );
     }
 
     #[test]

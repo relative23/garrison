@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 use std::{fmt, io};
 
 use garrison_core::config::{Config, ConfigError, Database};
-use garrison_core::credentials::Credentials;
+use garrison_core::credentials::{Credentials, SecretSource};
+use garrison_core::files::{Form, ProtectedFileError};
 use garrison_core::json;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Observation, Required, State};
@@ -21,7 +22,7 @@ use garrison_core::time::{self, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::command::Runner;
-use crate::context::{Context, Deadline, Provider};
+use crate::context::{Context, Deadline, DqsKey, Provider};
 use crate::notify::{Channels, Secrets};
 use crate::snapshot::{ProviderError, SCHEMA, Snapshot};
 use crate::store::StatusStore;
@@ -130,6 +131,37 @@ fn metrics_credential(config: &Config, credentials: &Credentials) -> Option<(Str
     };
     let ScrapeCredential { username, secret } = json::object(value).ok()?;
     Some((username, secret))
+}
+
+/// The key of Spamhaus' Data Query Service from its credential, read anew
+/// for each run as the metrics credential is. Why there is none names the
+/// file an operator writes it into, never what it holds.
+fn dqs_key(config: &Config, credentials: &Credentials) -> DqsKey {
+    let Some(source) = &config.collector.dqs_key else {
+        return DqsKey::Unset;
+    };
+    let file = match source {
+        SecretSource::Credential(name) => config.credentials_directory.join(name),
+        SecretSource::File(path) => path.clone(),
+    };
+    let missing = |what: &str| {
+        DqsKey::Missing(format!(
+            "{} {what}; write the key of Spamhaus' Data Query Service into it",
+            file.display()
+        ))
+    };
+    // A key is the first label of the zone's name: letters and digits.
+    let label = |key: &str| {
+        (1..=63).contains(&key.len()) && key.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    };
+    match credentials.read_optional_secret(source, Form::Address) {
+        Ok(Some(key)) if label(&key) => DqsKey::Key(key),
+        Ok(Some(_)) | Err(ProtectedFileError::InvalidSecret(_)) => {
+            missing("holds no such key, one word of letters and digits")
+        }
+        Ok(None) => missing("is empty"),
+        Err(_) => missing("cannot be read"),
+    }
 }
 
 /// One of the configured providers, as the run speaks of it.
@@ -265,6 +297,7 @@ pub fn collect_within(
         deadline: Deadline::within(time.checks),
         native_key: native_key(config, credentials),
         metrics_credential: metrics_credential(config, credentials),
+        dqs_key: dqs_key(config, credentials),
         events_database: config.database(Database::Events),
         runner,
         memory: &store,

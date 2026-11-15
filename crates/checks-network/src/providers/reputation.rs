@@ -7,7 +7,8 @@
 //! address of the mail hosts Stalwart names, IPv4 and IPv6 alike: a listing
 //! of the IPv6 address is the one that is overlooked. The lists learn the
 //! addresses they are asked about, through this host's resolver. Asked every
-//! six hours.
+//! six hours. A zone of Spamhaus' Data Query Service written without its key
+//! is asked with the key the collector reads (`dqs.rs`).
 
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
@@ -24,6 +25,7 @@ use crate::options::{Checked, Options, fail};
 
 mod asker;
 mod cards;
+mod dqs;
 mod verdict;
 
 use asker::{Asker, PATIENCE, RUN_OVER, SLOW};
@@ -72,6 +74,10 @@ struct Read {
     /// [`MOST_HOSTS`], addresses after the first [`MOST_ADDRESSES`].
     #[serde(default)]
     left_out: Vec<String>,
+    /// Why the zones of Spamhaus' Data Query Service written without their
+    /// key were not asked, where the run had no key.
+    #[serde(default)]
+    keyless: Option<String>,
 }
 
 impl Read {
@@ -263,6 +269,7 @@ impl Reputation {
         }
         let mut asker = Asker::new(resolver, context.deadline, self.patience);
         let mut addresses = Vec::new();
+        let mut keyless = None;
         // The addresses after the first MOST_ADDRESSES, counted as they come.
         let mut more = 0;
         // Once the run's time is up, the reading keeps what it has.
@@ -311,10 +318,7 @@ impl Reputation {
                     } else {
                         &self.lists_ipv6
                     };
-                    let lists = lists
-                        .iter()
-                        .map(|zone| (shown(zone), asker.list(zone, address)))
-                        .collect();
+                    let lists = dqs::said(lists, address, &mut asker, context, &mut keyless);
                     addresses.push(Asked {
                         host: host.clone(),
                         address: text,
@@ -338,15 +342,19 @@ impl Reputation {
             rest,
             cut: (cut || asker.cut).then(|| RUN_OVER.to_owned()),
             left_out,
+            keyless,
         })
     }
 
     /// The last reading, or a new one where that is due: after six hours,
     /// after an hour where not everything could be asked, and at once for
-    /// one that an earlier release kept with a zone's key.
+    /// one that an earlier release kept with a zone's key, and for one that
+    /// had no key for the Data Query Service where this run has one, or
+    /// another reason to have none.
     fn known(&self, context: &Context<'_>) -> Kept<Read> {
+        let missing = dqs::missing(&context.dqs_key);
         let wait = |_, read: &Read| {
-            if read.names_a_key() {
+            if read.names_a_key() || (read.keyless.is_some() && read.keyless != missing) {
                 0
             } else if read.problem.is_some() || read.cut.is_some() || read.lists_unasked() {
                 AGAIN

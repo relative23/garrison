@@ -67,6 +67,30 @@ impl Deadline {
     }
 }
 
+/// The key of Spamhaus' Data Query Service, as the collector read it from
+/// its credential for this run: the lists written without it are asked
+/// with it before their name.
+#[derive(Clone, PartialEq, Eq)]
+pub enum DqsKey {
+    /// `collector.dqs_key` is not set.
+    Unset,
+    /// Its file gives no key: why, in words that hold no key.
+    Missing(String),
+    /// The key, one DNS label.
+    Key(String),
+}
+
+impl fmt::Debug for DqsKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The key stays out of logs and panic messages.
+        match self {
+            DqsKey::Unset => formatter.write_str("Unset"),
+            DqsKey::Missing(why) => formatter.debug_tuple("Missing").field(why).finish(),
+            DqsKey::Key(_) => formatter.write_str("Key(…)"),
+        }
+    }
+}
+
 pub struct Context<'a> {
     pub deployment: &'a Deployment,
     pub now: Timestamp,
@@ -76,6 +100,8 @@ pub struct Context<'a> {
     pub native_key: Option<String>,
     /// User name and secret for the metrics exporter.
     pub metrics_credential: Option<(String, String)>,
+    /// The key of Spamhaus' Data Query Service.
+    pub dqs_key: DqsKey,
     pub events_database: PathBuf,
     pub runner: &'a dyn Runner,
     /// The status database, for what a provider asks only now and then.
@@ -189,9 +215,11 @@ mod tests {
         let (config, runner) = (config(directory.path()), Canned(String::new()));
         let mut context = context(&config, &runner);
         context.native_key = Some("collector-secret-key".into());
+        context.dqs_key = super::DqsKey::Key("abcdefghijklmnopqrstuvwxyz".into());
         let text = format!("{context:?}");
         assert!(text.starts_with("Context { now: "), "{text}");
         assert!(text.contains("native_key: Some(\"…\")"), "{text}");
         assert!(!text.contains("collector-secret-key"), "{text}");
+        assert_eq!(format!("{:?}", context.dqs_key), "Key(…)");
     }
 }
