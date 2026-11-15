@@ -2,9 +2,10 @@
 # Sourced by scripts/acceptance-failures.sh: the scenarios of the
 # configuration the installer checks. The installer passes on what
 # check-config warns of, names a file it could not write, refuses a secret
-# its unit would not hand over and follows a policy kept elsewhere, but
-# leaves a folder named as the policy as it is. They use that script's
-# helpers and its `old` and `new`.
+# its unit would not hand over, and a policy that the broker's unit
+# hides, and follows a policy kept elsewhere, but leaves a folder named as
+# the policy as it is. They use that script's helpers and its `old` and
+# `new`.
 # shellcheck disable=SC2154
 
 scenario_warnings() {
@@ -94,3 +95,27 @@ scenario_unwritten() {
     installer '/root/release/bin/garrison install'
     running "after the unwritten file" "$new"
 }
+
+# A policy that the broker's unit hides from it: root reads it, the broker
+# never does, so the installer refuses it before an upgrade and changes
+# nothing, and doctor names it.
+scenario_hidden_policy() {
+    step "A policy where the broker's unit hides it stops the upgrade"
+    current=$(inside 'basename "$(readlink -f /opt/garrison/current)"')
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.hidden && mkdir -p /home/admin &&
+        cp -p /etc/garrison/access-policy.json /home/admin/access-policy.json &&
+        printf "\n[broker]\npolicy = \"/home/admin/access-policy.json\"\n" >> /etc/garrison/garrison.toml &&
+        cp -p /etc/garrison/garrison.toml /root/garrison.toml.named'
+    backups=$(inside 'ls /var/backups/garrison | wc -l')
+    refused "the installer refuses a policy the broker's unit hides" '/root/release/bin/garrison install' \
+        "broker.policy is /home/admin/access-policy.json, under /home, which garrison-broker.service hides from the broker (ProtectHome=true): the broker cannot read it there, and nobody can sign in"
+    check "and changes nothing: the release that ran is current, garrison.toml as it was, nothing backed up" \
+        "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$current' &&
+            cmp -s /etc/garrison/garrison.toml /root/garrison.toml.named &&
+            test \$(ls /var/backups/garrison | wc -l) -eq $backups"
+    says "doctor names the policy the broker cannot read" '/opt/garrison/current/bin/garrison doctor || true' \
+        "FAIL  broker.policy is /home/admin/access-policy.json, under /home, which garrison-broker.service hides"
+    inside 'cat /root/garrison.toml.hidden > /etc/garrison/garrison.toml && rm -r /home/admin'
+    running "after the policy under /home" "$current"
+}
+
