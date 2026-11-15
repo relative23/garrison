@@ -216,6 +216,20 @@ mod tests {
         assert_eq!(port_of("location / { return 404; }"), None);
     }
 
+    /// The web service answers only under `public_origin`, port included, so
+    /// the include passes the Host as the browser sent it: `$host` drops the
+    /// port (measured on nginx 1.18 to 1.31, over HTTP/1.1 and HTTP/2).
+    #[test]
+    fn the_include_passes_the_host_with_its_port() {
+        let location = SHIPPED.split("location / {").nth(1).unwrap();
+        let hosts: Vec<&str> = location
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("proxy_set_header Host "))
+            .collect();
+        assert_eq!(hosts, ["proxy_set_header Host $http_host;"]);
+    }
+
     #[test]
     fn stalwart_hosts_are_named_once() {
         let text = site(&config(), None);

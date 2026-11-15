@@ -220,8 +220,8 @@ lets nginx reach Garrison's web port and nothing else (`semodule -l` lists it).
 
 Garrison serves that whole host, laid out like Stalwart's: the interface under
 `/admin/` (the root leads there), the API under `/api/` and the sign-in under
-`/auth/`. A request that reaches it under another host name is redirected to
-the same path on `public_origin`.
+`/auth/`. A request that reaches it under another host name or port is
+redirected to the same path on `public_origin`.
 
 `stalwart setup` enables Stalwart's Prometheus exporter at `/metrics/`, with a
 password; Garrison reads it on loopback. Keep it off the internet: add

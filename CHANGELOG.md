@@ -493,6 +493,16 @@ Notable changes for operators and users. The format follows
   reading said of it "no verdict: … is no DNS name". `garrison check-config`,
   and with it the installer before an upgrade, now refuses it and names the
   entry and why.
+- **A Garrison on a port other than 443 no longer sends requests back to
+  itself.** The web service answers only under `public_origin`, port
+  included, and the nginx include passed the host name without the port the
+  browser asked for (`$host`): with a `public_origin` such as
+  `https://garrison.example.org:8443`, every request was redirected to the
+  address it came to, without end. The include now passes the host as the
+  browser sent it (`$http_host`), which nginx 1.18 to 1.31 do with the port
+  over HTTP/1.1 and HTTP/2 (measured); the installer writes it and reloads
+  nginx. On 443 nothing changes, and a request under another port of
+  Garrison's name now goes to `public_origin` too.
 - **A name longer than DNS takes is not asked, and the checks say so.** The
   DNS client refused a label longer than 63 octets, but sent a name longer
   than DNS takes, 253 octets as written, which resolvers answer with an
