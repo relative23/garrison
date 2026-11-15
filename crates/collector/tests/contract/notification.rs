@@ -1,4 +1,5 @@
-//! Stalwart takes a notification that its own account submits.
+//! Stalwart takes a notification that its own account submits, also one
+//! whose account signs in with a password that has spaces in it.
 
 use std::time::{Duration, Instant};
 
@@ -144,4 +145,89 @@ fn stalwart_takes_a_notification_its_own_account_submits_past_the_spam_filter() 
     };
     // A stranger's mail gets a verdict of the spam filter; the account's own does not.
     assert_eq!(verdict, "", "the spam filter judged the notification");
+}
+
+/// An account whose password has spaces in it signs in for a notification
+/// with the password as the collector reads it from its credential file,
+/// where a token's form would refuse it (T-32).
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn a_password_with_spaces_read_from_its_file_signs_the_account_in() {
+    use garrison_collector::notify::mail::{Mail, message, submit_over};
+    use garrison_collector::notify::{Secret, Secrets};
+    use garrison_core::credentials::Credentials;
+    use serde_json::json;
+
+    let _guard = one_at_a_time();
+    let mut lab = Lab::from_environment();
+    let smtp = std::env::var("GARRISON_LAB_SMTP").expect("GARRISON_LAB_SMTP");
+    let admin = std::env::var("GARRISON_LAB_ADMIN").expect("GARRISON_LAB_ADMIN");
+    let (admin_name, _) = admin.split_once(':').expect("user:password");
+    let name = format!("notify-{}", random_hex(4));
+    let password = format!("correct horse {} battery staple", random_hex(6));
+    let domains = lab.call("x:Domain/get", &json!({"ids": null, "properties": ["id"]}));
+    lab.create(
+        "Account",
+        &json!({
+            "@type": "User",
+            "name": name,
+            "domainId": domains["list"][0]["id"],
+            "credentials": {"0": {"@type": "Password", "secret": password}},
+            "roles": {"@type": "User"},
+            "permissions": {"@type": "Inherit"},
+        }),
+    );
+    // As the operator writes it: one line, with its end of line.
+    let directory = tempfile::tempdir().unwrap();
+    garrison_testing::write_private(
+        &directory.path().join("notify-mail-password"),
+        format!("{password}\n").as_bytes(),
+    );
+    let read = Secrets::loaded(&Credentials::new(directory.path())).mail;
+    assert!(read == Secret::Text(password.clone()), "{read:?}");
+    let account = format!("{name}@example.test");
+    let mail = Mail {
+        host: smtp.clone(),
+        port: 465,
+        user: account.clone(),
+        password: read,
+        from: account,
+        to: admin_name.to_owned(),
+    };
+    let host = format!("garrison-{}.example.org", random_hex(4));
+    let text = message(
+        &mail,
+        &host,
+        &format!("Garrison on {host}: 1 failed"),
+        "Failed: Local full backup: The last run failed.\n",
+        time::now(),
+    );
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(AnyCertificate(provider)))
+        .with_no_client_auth();
+    let server = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+    let connection = rustls::ClientConnection::new(std::sync::Arc::new(config), server).unwrap();
+    let stream = std::net::TcpStream::connect((smtp.as_str(), 465)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .unwrap();
+    submit_over(
+        rustls::StreamOwned::new(connection, stream),
+        &mail,
+        &host,
+        &text,
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !delivered(&lab).iter().any(|(id, _)| id.ends_with(&host)) {
+        assert!(
+            Instant::now() < deadline,
+            "the notification was not delivered"
+        );
+        std::thread::sleep(Duration::from_secs(1));
+    }
 }
