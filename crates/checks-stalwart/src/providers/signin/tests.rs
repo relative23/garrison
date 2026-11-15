@@ -2,15 +2,13 @@ use std::fmt::Write as _;
 
 use garrison_testing::http::{answer, serve};
 
-use garrison_core::time;
-
 use super::*;
-use crate::context::{Deadline, Memory};
+use crate::context::Memory;
 use crate::fetch::roots;
 use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 
 /// The head of Stalwart 1.1.0's sign-in page, as it is served.
-const STALWART: &str = r#"<!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8">
+pub(super) const STALWART: &str = r#"<!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8">
 <title>Sign in</title> <link rel="stylesheet" href="/ui-c2d53b4371a7.css">
 <script src="/ui-c2d53b4371a7.js"></script> <style>.app-header{display:flex}</style></head>"#;
 /// A webmail's sign-in page: a page in order, only not Stalwart's.
@@ -27,12 +25,12 @@ fn file(status: u16, media: &str, body: &str) -> String {
     )
 }
 
-fn html(body: &str) -> String {
+pub(super) fn html(body: &str) -> String {
     file(200, "text/html; charset=utf-8", body)
 }
 
 /// Stalwart's page and the two files it loads, all in order.
-fn in_order() -> Vec<String> {
+pub(super) fn in_order() -> Vec<String> {
     vec![
         html(STALWART),
         file(200, "text/css; charset=utf-8", "a{}"),
@@ -47,7 +45,7 @@ fn served(public: Vec<String>, own: Vec<String>) -> (Examined, String, String) {
     let own = serve(own);
     let page = format!("{}/login", public.url);
     let stalwart = format!("{}/login", own.url);
-    let examined = examine(&page, &stalwart, "client_id=x", &roots(), Deadline::NONE);
+    let examined = examine(&page, &stalwart, "client_id=x", Asking::by_hand(&roots()));
     public.requests();
     own.requests();
     (examined, page, stalwart)
@@ -69,8 +67,7 @@ fn stalwarts_page_that_gets_its_files_is_in_order() {
         &page,
         &format!("{}/login", own.url),
         "client_id=x",
-        &roots(),
-        Deadline::NONE,
+        Asking::by_hand(&roots()),
     );
     assert_eq!(examined.state, State::Ok, "{examined:?}");
     assert_eq!(
@@ -210,7 +207,7 @@ fn without_stalwarts_own_answer_the_page_is_not_called_in_order() {
             (format!("{}/login", server.url), Some(server))
         };
         let page = format!("{}/login", public.url);
-        let examined = examine(&page, &stalwart, "a=b", &roots(), Deadline::NONE);
+        let examined = examine(&page, &stalwart, "a=b", Asking::by_hand(&roots()));
         assert_eq!(examined.state, State::Unknown);
         assert_eq!(
             examined.what,
@@ -234,8 +231,7 @@ fn a_page_that_is_not_there() {
         &page,
         "http://127.0.0.1:9/login",
         "a=b",
-        &roots(),
-        Deadline::NONE,
+        Asking::by_hand(&roots()),
     );
     assert_eq!(examined.state, State::Failed);
     assert_eq!(
@@ -250,8 +246,7 @@ fn a_page_that_is_not_there() {
         "http://127.0.0.1:9/login",
         "http://127.0.0.1:9/login",
         "a=b",
-        &roots(),
-        Deadline::NONE,
+        Asking::by_hand(&roots()),
     );
     assert_eq!(examined.state, State::Failed);
 }
@@ -273,8 +268,7 @@ fn a_file_asked_for_twice_is_asked_once_and_only_so_many_are_asked() {
         &page,
         &format!("{}/login", own.url),
         "a=b",
-        &roots(),
-        Deadline::NONE,
+        Asking::by_hand(&roots()),
     );
     assert_eq!(
         examined.what,
@@ -309,7 +303,7 @@ fn collected(memory: &Remembered, seconds: i64, public: &str, own: &str) -> Obse
     config.deployment.stalwart_url = own.to_owned();
     let runner = Canned(String::new());
     let context = Context {
-        now: time::Timestamp::from_second(now().as_second() + seconds).unwrap(),
+        now: Timestamp::from_second(now().as_second() + seconds).unwrap(),
         memory,
         ..crate::testing::context(&config, &runner)
     };

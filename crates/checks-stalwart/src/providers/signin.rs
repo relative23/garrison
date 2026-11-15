@@ -19,11 +19,12 @@ use std::collections::BTreeSet;
 use garrison_core::config::Deployment;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
+use garrison_core::time::Timestamp;
 use garrison_stalwart::sign_in_page::{self, Kind};
 use serde::{Deserialize, Serialize};
 
 use crate::context::{Collected, Context, Deadline, Provider, Report};
-use crate::fetch::{self, Roots, get, origin};
+use crate::fetch::{self, Answer, Roots, origin};
 use crate::kept::{Kept, keep, recalled};
 use crate::options::{Checked, Options};
 
@@ -36,6 +37,37 @@ const EVERY: i64 = 300;
 const KEPT: &str = "signin.page";
 /// Why an examination stopped before it had asked everything.
 const RUN_OVER: &str = "the collection run's time was used up";
+
+/// How an examination asks for the page and its files: the authorities
+/// their server's certificate must come from, until when it asks, and the
+/// time it judges that certificate at, a run's, as every check judges what
+/// it finds; `None` judges by the clock.
+#[derive(Clone, Copy, Debug)]
+pub struct Asking<'a> {
+    pub roots: &'a Roots,
+    pub deadline: Deadline,
+    pub at: Option<Timestamp>,
+}
+
+impl<'a> Asking<'a> {
+    /// Asked by hand, as `garrison doctor` asks: no run's time to keep, and
+    /// the certificate judged by the clock.
+    #[must_use]
+    pub fn by_hand(roots: &'a Roots) -> Self {
+        Asking {
+            roots,
+            deadline: Deadline::NONE,
+            at: None,
+        }
+    }
+
+    fn get(self, url: &str) -> Result<Answer, String> {
+        match self.at {
+            Some(at) => fetch::get_at(url, self.roots, at),
+            None => fetch::get(url, self.roots),
+        }
+    }
+}
 
 /// What an examination of the page found.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,12 +149,7 @@ fn listed(names: &[String]) -> String {
 /// Asks for every file of its own host that the page at `page` loads, while
 /// the run has time: how many there are, those that did not come back as
 /// what they are, and how many were not asked.
-fn files_of(
-    page: &str,
-    html: &str,
-    roots: &Roots,
-    deadline: Deadline,
-) -> (usize, Vec<String>, usize) {
+fn files_of(page: &str, html: &str, asking: Asking<'_>) -> (usize, Vec<String>, usize) {
     let mut files: Vec<(Kind, String)> = Vec::new();
     for (kind, reference) in sign_in_page::files(html) {
         if let Some(address) = sign_in_page::address(page, &reference)
@@ -135,12 +162,12 @@ fn files_of(
     let host = origin(page);
     let (mut broken, mut unasked) = (Vec::new(), 0);
     for (index, (kind, address)) in files.iter().enumerate() {
-        if deadline.expired() {
+        if asking.deadline.expired() {
             unasked = files.len() - index;
             break;
         }
         let path = address.strip_prefix(host).unwrap_or(address);
-        match get(address, roots) {
+        match asking.get(address) {
             Ok(file)
                 if file.status == 200
                     && sign_in_page::media_fits(
@@ -160,16 +187,16 @@ fn files_of(
 
 /// The sign-in page at `page`, asked for as Garrison sends its users there,
 /// held against the page Stalwart serves at `own`, and every file of its own
-/// host that it loads; each asked only while there is time before
-/// `deadline`, and what was not asked is said.
-pub fn examine(page: &str, own: &str, query: &str, roots: &Roots, deadline: Deadline) -> Examined {
-    if deadline.expired() {
+/// host that it loads; each asked only while there is time before the
+/// deadline of `asking`, and what was not asked is said.
+pub fn examine(page: &str, own: &str, query: &str, asking: Asking<'_>) -> Examined {
+    if asking.deadline.expired() {
         return Examined::unknown(format!(
             "Stalwart's sign-in page {page} was not asked: {RUN_OVER}"
         ));
     }
     let page_fix = "This address must reach Stalwart; check the proxy rules of the issuer's host.";
-    let answer = match get(&format!("{page}?{query}"), roots) {
+    let answer = match asking.get(&format!("{page}?{query}")) {
         Ok(answer) if answer.status == 200 => answer,
         Ok(answer) => {
             return Examined::failed(
@@ -181,13 +208,14 @@ pub fn examine(page: &str, own: &str, query: &str, roots: &Roots, deadline: Dead
             return Examined::failed(format!("Stalwart's sign-in page {page}: {error}"), page_fix);
         }
     };
-    if deadline.expired() {
+    if asking.deadline.expired() {
         return Examined::unknown(format!(
             "{page} answered, but Stalwart's own page at {own} and the files it loads were not \
              asked: {RUN_OVER}"
         ));
     }
-    let stalwart = get(&format!("{own}?{query}"), roots)
+    let stalwart = asking
+        .get(&format!("{own}?{query}"))
         .ok()
         .filter(|stalwart| stalwart.status == 200)
         .map(|stalwart| stalwart.body);
@@ -211,7 +239,7 @@ pub fn examine(page: &str, own: &str, query: &str, roots: &Roots, deadline: Dead
             ),
         );
     }
-    judged(page, own, &answer.body, compared.as_ref(), roots, deadline)
+    judged(page, own, &answer.body, compared.as_ref(), asking)
 }
 
 /// What the files that the page at `page` loads, and whose page it is, make
@@ -221,10 +249,9 @@ fn judged(
     own: &str,
     html: &str,
     compared: Option<&Whose>,
-    roots: &Roots,
-    deadline: Deadline,
+    asking: Asking<'_>,
 ) -> Examined {
-    let (count, broken, unasked) = files_of(page, html, roots, deadline);
+    let (count, broken, unasked) = files_of(page, html, asking);
     let host = origin(page);
     let left = match unasked {
         0 => String::new(),
@@ -296,7 +323,7 @@ pub fn page(deployment: &Deployment) -> String {
 
 /// The page as Garrison's users get it, held against the one Stalwart serves
 /// itself on loopback.
-pub fn check(deployment: &Deployment, roots: &Roots, deadline: Deadline) -> Examined {
+pub fn check(deployment: &Deployment, asking: Asking<'_>) -> Examined {
     examine(
         &page(deployment),
         &format!(
@@ -305,8 +332,7 @@ pub fn check(deployment: &Deployment, roots: &Roots, deadline: Deadline) -> Exam
             sign_in_page::PATH
         ),
         &sign_in_page::query(&deployment.public_origin),
-        roots,
-        deadline,
+        asking,
     )
 }
 
@@ -322,6 +348,9 @@ struct InOrder {
 #[derive(Debug)]
 pub struct SignIn {
     modules: BTreeSet<ModuleId>,
+    /// The authorities the page's server is checked against: the system's,
+    /// unless a test gives its own.
+    roots: Option<Roots>,
 }
 
 impl SignIn {
@@ -329,13 +358,22 @@ impl SignIn {
         let options = Options::new(raw, &["modules"])?;
         Ok(SignIn {
             modules: options.modules(&["services"])?,
+            roots: None,
         })
+    }
+
+    /// For tests: trust these roots for the page's server.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_roots(mut self, roots: Roots) -> Self {
+        self.roots = Some(roots);
+        self
     }
 
     /// What was found of the page and when: a page in order is examined
     /// again after five minutes, any other in every run. Only a page in
     /// order is kept, so nothing kept can stand for one that is not.
-    fn examined(context: &Context<'_>, page: &str) -> Kept<Examined> {
+    fn examined(&self, context: &Context<'_>, page: &str) -> Kept<Examined> {
         let now = context.now.as_second();
         let kept = recalled::<InOrder>(context, KEPT).filter(|(at, kept)| {
             kept.page == page && (0..EVERY).contains(&now.saturating_sub(*at))
@@ -353,7 +391,14 @@ impl SignIn {
                 answer,
             };
         }
-        let answer = check(context.deployment, &fetch::roots(), context.deadline);
+        // Within the run's time, with the certificate judged at that time.
+        let roots = self.roots.clone().unwrap_or_else(fetch::roots);
+        let asking = Asking {
+            roots: &roots,
+            deadline: context.deadline,
+            at: Some(context.now),
+        };
+        let answer = check(context.deployment, asking);
         let wait = if answer.state == State::Ok {
             let page = page.to_owned();
             let files = answer.files;
@@ -381,7 +426,7 @@ impl Provider for SignIn {
 
     fn collect(&self, context: &Context<'_>) -> Collected {
         let page = page(context.deployment);
-        let kept = Self::examined(context, &page);
+        let kept = self.examined(context, &page);
         let examined = kept.answer.clone();
         // A page in order needs no words; what is wrong comes with what to do.
         let findings = if examined.state == State::Ok {
@@ -417,6 +462,8 @@ impl Provider for SignIn {
     }
 }
 
+#[cfg(test)]
+mod clock_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

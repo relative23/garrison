@@ -90,8 +90,11 @@ fn a_file_that_never_comes_costs_one_wait_and_the_others_are_said() {
         &page,
         &format!("{}/login", own.url),
         "a=b",
-        &roots(),
-        Deadline::within(Duration::from_secs(1)),
+        Asking {
+            roots: &roots(),
+            deadline: Deadline::within(Duration::from_secs(1)),
+            at: None,
+        },
     );
     let took = began.elapsed();
     own.requests();
@@ -124,8 +127,11 @@ fn nothing_is_asked_once_the_runs_time_is_over() {
         &page,
         &format!("{}/login", own.url),
         "a=b",
-        &roots(),
-        Deadline::within(Duration::ZERO),
+        Asking {
+            roots: &roots(),
+            deadline: Deadline::within(Duration::ZERO),
+            at: None,
+        },
     );
     assert_eq!((public.finish(), own.finish()), (0, 0));
     assert_eq!(examined.state, State::Unknown);
@@ -147,8 +153,11 @@ fn a_page_that_came_late_is_not_held_against_stalwarts_own() {
         &page,
         &stalwart,
         "a=b",
-        &roots(),
-        Deadline::within(Duration::from_secs(1)),
+        Asking {
+            roots: &roots(),
+            deadline: Deadline::within(Duration::from_secs(1)),
+            at: None,
+        },
     );
     assert_eq!((public.finish(), own.finish()), (1, 0));
     assert_eq!(examined.state, State::Unknown);
@@ -174,8 +183,11 @@ fn files_in_order_that_used_up_the_time_leave_the_page_unknown() {
         &page,
         &format!("{}/login", own.url),
         "a=b",
-        &roots(),
-        Deadline::within(Duration::from_secs(1)),
+        Asking {
+            roots: &roots(),
+            deadline: Deadline::within(Duration::from_secs(1)),
+            at: None,
+        },
     );
     own.requests();
     assert_eq!(public.finish(), 2);

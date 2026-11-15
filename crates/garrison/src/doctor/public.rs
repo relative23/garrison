@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use garrison_collector::context::Deadline;
 use garrison_collector::providers::signin;
 use garrison_collector::providers::tls::probe;
 use garrison_core::config::Config;
@@ -153,8 +152,8 @@ fn sign_in(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
 /// Stalwart's sign-in page as a visitor's browser loads it, with the files it
 /// names; the `sign-in` check examines it the same way every few minutes.
 fn sign_in_page(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
-    // Asked by hand: no run's time to keep.
-    let examined = signin::check(&config.deployment, roots, Deadline::NONE);
+    // Asked by hand: no run's time to keep, the certificate judged by the clock.
+    let examined = signin::check(&config.deployment, signin::Asking::by_hand(roots));
     match examined.state {
         State::Ok => Finding::ok(examined.what),
         State::Failed => Finding::fail(examined.what, examined.fix.unwrap_or_default()),
