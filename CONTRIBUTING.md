@@ -128,7 +128,7 @@ npm run audit                                  # known vulnerabilities, needs th
 
 | Check | What it protects |
 |---|---|
-| `clippy` | Pedantic lints; `unsafe` is forbidden and `unwrap` is a warning, so an error |
+| `clippy` | Pedantic lints; `unsafe` is forbidden, and `unwrap`, `expect` and `panic!` outside tests are warnings, so errors |
 | `fuzz/` format and `check --locked` | The fuzz targets, which `--all` and `--workspace` do not reach, keep the format and build from their own lockfile; running them is the weekly fuzz workflow's |
 | `cargo xtask layering` | `core`, `stalwart`, `authz`, `broker`, the `checks` crates, `collector` and `milter` never depend on a web framework or an async runtime |
 | `cargo xtask sizes` | Handwritten files stay at or below 500 lines |
@@ -327,7 +327,9 @@ Source, comments, identifiers, file names and documents are in English.
 
 - **Don't panic.** Product code uses no `unwrap`, `expect` or `panic!`; it
   returns an error that says what failed. `unreachable!` is allowed with a
-  comment that proves the case cannot happen. Tests may unwrap.
+  comment that proves the case cannot happen. Tests may unwrap. Clippy holds
+  the rule (`unwrap_used`, `expect_used`, `panic`); the helpers of the tests,
+  `crates/testing` and `xtask` allow the three, each with its reason.
 - **Don't exit.** Only `main` decides the exit code. Libraries return errors,
   so every service can report a failure in its own way.
 - **No `unsafe`.** The workspace forbids it; system calls go through `rustix`.

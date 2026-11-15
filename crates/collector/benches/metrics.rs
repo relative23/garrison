@@ -9,7 +9,7 @@
 //! before it on the same machine. Nothing here is a limit a test checks.
 
 // A benchmark fails by panicking, like a test.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;

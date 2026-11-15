@@ -1,7 +1,8 @@
 //! What the binary's tests share: running it on a prepared directory.
 
-// Each test file uses a part of these helpers.
-#![allow(dead_code, clippy::unwrap_used)]
+// Each test file uses a part of these helpers, which fail the test by
+// panicking, like the tests themselves.
+#![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::io::Read;
 use std::path::Path;

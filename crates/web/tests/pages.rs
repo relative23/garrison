@@ -1,6 +1,8 @@
 //! The pages the build draws ahead (frontend/prerender.mjs): which one a path
 //! gets, with a session and without.
-#![allow(clippy::unwrap_used)]
+
+// Helpers fail the test by panicking, like the tests themselves.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod support;
 

@@ -2,7 +2,7 @@
 //! development dependency.
 
 // Fixtures fail the calling test by panicking, like the tests themselves.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod http;
 pub mod lab;

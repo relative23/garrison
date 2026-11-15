@@ -92,6 +92,8 @@ print_stderr = "warn"
 print_stdout = "warn"
 todo = "warn"
 unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
 # Error and panic sections would repeat what the types and messages already say.
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"

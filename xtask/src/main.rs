@@ -2,6 +2,9 @@
 
 // A command-line tool reports on the terminal.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
+// No product code: a build and maintenance task, run by a developer or in
+// CI and never shipped, may stop with a panic where it cannot go on.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod api;
 mod brand;

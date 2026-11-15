@@ -2,7 +2,7 @@
 //! changes it makes and the backups it keeps.
 
 // Helpers fail the test by panicking, like the tests themselves.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod support;
 

@@ -3,7 +3,7 @@
 //! SIGTERM, as systemd stops them.
 
 // Helpers fail the test by panicking, like the tests themselves.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::net::TcpListener;
 use std::os::unix::net::UnixDatagram;

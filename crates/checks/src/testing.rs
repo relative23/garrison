@@ -5,6 +5,8 @@
 // Helpers fail the test by panicking, like the test itself.
 #![allow(
     clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
     clippy::missing_panics_doc,
     clippy::must_use_candidate
 )]

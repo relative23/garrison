@@ -5,7 +5,7 @@
 //! there to `RENAMED` in the code.
 
 // Helpers fail the test by panicking, like the test itself.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::BTreeSet;
 use std::io;

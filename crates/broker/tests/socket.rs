@@ -1,7 +1,7 @@
 //! The broker on a real Unix socket: peer checks, the protocol and the client.
 
 // Helpers fail the test by panicking, like the tests themselves.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::BTreeSet;
 use std::io::{Read, Write};

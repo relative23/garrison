@@ -9,7 +9,7 @@
 //! contract -- --ignored`.
 
 // Helpers fail the test by panicking, like the test itself.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::net::TcpListener;
 use std::time::Duration;

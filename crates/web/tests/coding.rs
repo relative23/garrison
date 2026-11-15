@@ -2,7 +2,9 @@
 //! gzipped as JSON, never the session, which carries the CSRF token; the
 //! interface's files in the best coding the browser accepts, each with its
 //! media type.
-#![allow(clippy::unwrap_used)]
+
+// Helpers fail the test by panicking, like the tests themselves.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod support;
 

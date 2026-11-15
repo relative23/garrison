@@ -1,7 +1,7 @@
 //! The `garrison` binary: exit codes, outputs and the files it writes.
 
 // Helpers fail the test by panicking, like the tests themselves.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod support;
 
