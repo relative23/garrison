@@ -24,6 +24,12 @@ jobs:
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup toolchain install
       - run: cargo fmt --all --check
+      # fuzz/ is a workspace of its own, which no other step reaches; running
+      # the targets needs a nightly compiler (fuzz.yml), reading them does not.
+      - name: The fuzz targets' format, and that they build from their lockfile
+        run: |
+          cargo fmt --manifest-path fuzz/Cargo.toml --check
+          cargo check --manifest-path fuzz/Cargo.toml --locked --bins
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Documentation without warnings
         run: cargo doc --workspace --no-deps --locked

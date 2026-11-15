@@ -108,6 +108,8 @@ exception needs the same review as the code it excuses.
 
 ```sh
 cargo fmt --all --check
+cargo fmt --manifest-path fuzz/Cargo.toml --check   # fuzz/ is a workspace of its own
+cargo check --manifest-path fuzz/Cargo.toml --locked --bins
 cargo clippy --workspace --all-targets --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo test --workspace --locked
@@ -126,6 +128,7 @@ npm run audit                                  # known vulnerabilities, needs th
 | Check | What it protects |
 |---|---|
 | `clippy` | Pedantic lints; `unsafe` is forbidden and `unwrap` is a warning, so an error |
+| `fuzz/` format and `check --locked` | The fuzz targets, which `--all` and `--workspace` do not reach, keep the format and build from their own lockfile; running them is the weekly fuzz workflow's |
 | `cargo xtask layering` | `core`, `stalwart`, `authz`, `broker`, the `checks` crates, `collector` and `milter` never depend on a web framework or an async runtime |
 | `cargo xtask sizes` | Handwritten files stay at or below 500 lines |
 | `contract_files` test | `frontend/api/openapi.json` and `modules.json` match the code |
@@ -291,8 +294,9 @@ service's routes, signed in or not, with real databases behind them
 (`web_request`), a message as the macro milter scans it (`milter_scan`) and
 what a mail server sends that milter on a connection (`milter_session`). A
 target fails on a panic, on an answer "Internal error", and where what was
-stored cannot be read again. The targets need a nightly compiler and
-cargo-fuzz, so they are no part of the checks before a commit;
+stored cannot be read again. Running the targets needs a nightly compiler
+and cargo-fuzz, so that is no part of the checks before a commit (their
+format and their lockfile are, see [Checks](#checks));
 `.github/workflows/fuzz.yml` runs each for five minutes every week and
 whenever `fuzz/` changes. The two milter targets get inputs of up to a
 megabyte there (`-max_len=1048576`), and an input that takes longer than 20
