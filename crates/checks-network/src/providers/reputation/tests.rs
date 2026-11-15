@@ -8,9 +8,9 @@ use super::*;
 use crate::providers::dns::tests::{guessable, resolver as stand_in};
 use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 
-type Zone = BTreeMap<(String, u16), Vec<Vec<u8>>>;
+pub(super) type Zone = BTreeMap<(String, u16), Vec<Vec<u8>>>;
 
-fn address(zone: &mut Zone, name: &str, address: &str) {
+pub(super) fn address(zone: &mut Zone, name: &str, address: &str) {
     let (kind, data) = match address.parse::<IpAddr>().unwrap() {
         IpAddr::V4(address) => (Kind::A, address.octets().to_vec()),
         IpAddr::V6(address) => (Kind::Aaaa, address.octets().to_vec()),
@@ -21,7 +21,7 @@ fn address(zone: &mut Zone, name: &str, address: &str) {
 }
 
 /// A name as DNS writes it: each label with its length, then a zero.
-fn pointer(zone: &mut Zone, address: &str, name: &str) {
+pub(super) fn pointer(zone: &mut Zone, address: &str, name: &str) {
     let mut data = Vec::new();
     for label in name.split('.') {
         data.push(u8::try_from(label.len()).unwrap());
@@ -38,11 +38,11 @@ fn listed(zone: &mut Zone, address: &str, list: &str, code: [u8; 4]) {
     zone.insert((name, Kind::A.code()), vec![code.to_vec()]);
 }
 
-const V4: &str = "203.0.113.5";
+pub(super) const V4: &str = "203.0.113.5";
 const V6: &str = "2001:db8::5";
 
 /// A mail host with both kinds of address, each with its reverse name.
-fn mail_host() -> Zone {
+pub(super) fn mail_host() -> Zone {
     let mut zone = Zone::new();
     address(&mut zone, "mail.example.test", V4);
     address(&mut zone, "mail.example.test", V6);
@@ -51,7 +51,7 @@ fn mail_host() -> Zone {
     zone
 }
 
-fn provider(resolver: SocketAddr, more: &str) -> Reputation {
+pub(super) fn provider(resolver: SocketAddr, more: &str) -> Reputation {
     Reputation::new(&table(&format!(
         "type = \"reputation\"\nresolver = \"{resolver}\"\nhosts = [\"mail.example.test\"]\n{more}"
     )))
@@ -74,7 +74,7 @@ fn observed(provider: &Reputation, memory: &Remembered, later: i64) -> (Observat
     (observations.remove(0), reverse)
 }
 
-fn rows(observation: &Observation) -> Vec<String> {
+pub(super) fn rows(observation: &Observation) -> Vec<String> {
     let table = observation.table.as_ref().unwrap();
     table
         .rows

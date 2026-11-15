@@ -28,7 +28,7 @@ use crate::options::{Checked, Options, fail};
 mod asker;
 mod verdict;
 
-use asker::Asker;
+use asker::{Asker, RUN_OVER};
 use verdict::Said;
 
 const EVERY: i64 = 6 * 3600;
@@ -65,6 +65,9 @@ struct Read {
     /// What to say of Stalwart's domains after the first `max_domains`.
     #[serde(default)]
     rest: Option<String>,
+    /// Why not every address or list was asked, where that is so.
+    #[serde(default)]
+    cut: Option<String>,
 }
 
 #[derive(Debug)]
@@ -155,16 +158,26 @@ impl Reputation {
         if hosts.is_empty() {
             return Err("Stalwart names no mail host for its domains".to_owned());
         }
-        let mut asker = Asker::new(resolver);
+        let mut asker = Asker::new(resolver, context.deadline);
         let mut addresses = Vec::new();
-        for host in &hosts {
+        // Once the run's time is up, the reading keeps what it has.
+        let mut cut = false;
+        'hosts: for host in &hosts {
             for kind in [Kind::A, Kind::Aaaa] {
+                if asker.over() {
+                    cut = true;
+                    break 'hosts;
+                }
                 for text in asker.records(host, kind)? {
                     let Ok(address) = text.parse::<IpAddr>() else {
                         continue;
                     };
                     if addresses.len() == MOST_ADDRESSES {
                         break;
+                    }
+                    if asker.over() {
+                        cut = true;
+                        break 'hosts;
                     }
                     let pointer = asker
                         .records(&dns::reversed(address, None), Kind::Ptr)?
@@ -177,6 +190,10 @@ impl Reputation {
                         Kind::Aaaa
                     };
                     let confirmed = match &pointer {
+                        Some(_) if asker.over() => {
+                            cut = true;
+                            break 'hosts;
+                        }
                         Some(name) => asker
                             .records(name, back)?
                             .iter()
@@ -207,13 +224,20 @@ impl Reputation {
             addresses,
             problem: None,
             rest,
+            cut: (cut || asker.cut).then(|| RUN_OVER.to_owned()),
         })
     }
 
     /// The last reading, or a new one where that is due: after six hours,
-    /// and after one where nothing could be asked.
+    /// and after an hour where not everything could be asked.
     fn known(&self, context: &Context<'_>) -> Kept<Read> {
-        let wait = |_, read: &Read| if read.problem.is_some() { AGAIN } else { EVERY };
+        let wait = |_, read: &Read| {
+            if read.problem.is_some() || read.cut.is_some() {
+                AGAIN
+            } else {
+                EVERY
+            }
+        };
         cached(context, MEMORY, wait, |_| {
             self.read(context).unwrap_or_else(|problem| Read {
                 problem: Some(problem),
@@ -253,10 +277,13 @@ impl Reputation {
         let state = match (unknown, listed.is_empty(), verdicts) {
             (Some(_), _, _) | (None, true, 0) => State::Unknown,
             (None, false, _) => State::Failed,
+            (None, true, _) if read.cut.is_some() => State::Partial,
             (None, true, _) => State::Ok,
         };
         let findings = match (unknown, verdicts) {
             (Some(unknown), _) => vec![unknown.clone()],
+            // What was not asked is said once, beside both cards.
+            (None, 0) if read.cut.is_some() => Vec::new(),
             (None, 0) => vec!["No list gave a verdict.".to_owned()],
             (None, _) => listed,
         };
@@ -317,10 +344,12 @@ impl Reputation {
         let state = match (unknown, findings.is_empty(), read.addresses.is_empty()) {
             (Some(_), _, _) | (None, _, true) => State::Unknown,
             (None, false, false) => State::Warning,
+            (None, true, false) if read.cut.is_some() => State::Partial,
             (None, true, false) => State::Ok,
         };
         let findings = match (unknown, read.addresses.is_empty()) {
             (Some(unknown), _) => vec![unknown.clone()],
+            (None, true) if read.cut.is_some() => Vec::new(),
             (None, true) => vec!["The mail hosts have no address.".to_owned()],
             (None, false) => findings,
         };
@@ -399,6 +428,11 @@ impl Provider for Reputation {
             // The hosts of the domains left out are not asked; the state is
             // that of the hosts that are.
             observation.findings.extend(read.rest.clone());
+            observation.findings.extend(
+                read.cut
+                    .as_ref()
+                    .map(|reason| format!("Not every address or list was asked: {reason}.")),
+            );
             // Both cards are as old as the reading they are made from.
             report.observations.push(kept.dated(observation));
         }
@@ -408,3 +442,5 @@ impl Provider for Reputation {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod time_tests;
