@@ -109,9 +109,10 @@ scenario_hidden_policy() {
     backups=$(inside 'ls /var/backups/garrison | wc -l')
     refused "the installer refuses a policy the broker's unit hides" '/root/release/bin/garrison install' \
         "broker.policy is /home/admin/access-policy.json, under /home, which garrison-broker.service hides from the broker (ProtectHome=true): the broker cannot read it there, and nobody can sign in"
+    # Without cmp, which minimal images lack.
     check "and changes nothing: the release that ran is current, garrison.toml as it was, nothing backed up" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$current' &&
-            cmp -s /etc/garrison/garrison.toml /root/garrison.toml.named &&
+            test \"\$(cat /etc/garrison/garrison.toml)\" = \"\$(cat /root/garrison.toml.named)\" &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
     says "doctor names the policy the broker cannot read" '/opt/garrison/current/bin/garrison doctor || true' \
         "FAIL  broker.policy is /home/admin/access-policy.json, under /home, which garrison-broker.service hides"
@@ -135,9 +136,10 @@ scenario_hidden_check() {
     backups=$(inside 'ls /var/backups/garrison | wc -l')
     refused "the installer refuses a check's path the collector's unit hides" '/root/release/bin/garrison install' \
         "providers[receipt].path is /home/jobs/nightly.json, under /home, which garrison-collect.service hides from the collector (ProtectHome=true): the check cannot read it there"
+    # Without cmp, which minimal images lack.
     check "and changes nothing: the release that ran is current, garrison.toml as it was, nothing backed up" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$current' &&
-            cmp -s /etc/garrison/garrison.toml /root/garrison.toml.named &&
+            test \"\$(cat /etc/garrison/garrison.toml)\" = \"\$(cat /root/garrison.toml.named)\" &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
     says "doctor names the check's path the collector cannot see" '/opt/garrison/current/bin/garrison doctor || true' \
         "FAIL  providers[receipt].path is /home/jobs/nightly.json, under /home, which garrison-collect.service hides"
