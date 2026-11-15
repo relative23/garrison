@@ -8,6 +8,9 @@ User=garrison-collector
 Group=garrison
 ExecStart=/opt/garrison/current/bin/garrison collect
 LoadCredential=collector-native-key:/etc/garrison/credentials/collector-native-key
+# Stalwart's metrics exporter's user and password, which setup writes where
+# the exporter is Garrison's; an empty file, which the installer keeps,
+# means none.
 LoadCredential=metrics-credential:/etc/garrison/credentials/metrics-credential
 # The access token of the notification topic; the installer keeps an empty
 # file there, since systemd refuses a unit whose credential is missing.

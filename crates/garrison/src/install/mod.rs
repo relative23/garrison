@@ -275,11 +275,16 @@ fn check_config(release: &Path, warnings: bool) -> Step {
 }
 
 /// The collector's units load the notification channels' secrets and the
-/// addresses kept as secrets. systemd refuses to start a unit whose
-/// credential file is missing, so an installation that has none gets empty
-/// ones, which mean: no secret, no address kept there.
+/// addresses kept as secrets, and the collector its metrics credential,
+/// which setup writes only where Stalwart's exporter is Garrison's. systemd
+/// refuses to start a unit whose credential file is missing, so an
+/// installation that has none gets empty ones, which mean: no secret, no
+/// address kept there.
 fn keep_secret_files() -> Step {
-    for name in units::NOTIFICATION_FILES {
+    for name in units::NOTIFICATION_FILES
+        .iter()
+        .chain(&units::COLLECTOR_FILES)
+    {
         let secret = Path::new(CONFIG).join("credentials").join(name);
         if secret.symlink_metadata().is_ok() {
             continue;

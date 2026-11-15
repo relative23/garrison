@@ -44,6 +44,11 @@ pub(crate) const NOTIFICATION_FILES: [&str; 5] = [
     "ntfy-url",
     "notify-webhook-url",
 ];
+/// The collector's own files that may be empty, which means none: Stalwart's
+/// metrics exporter's credential, which setup writes only where the exporter
+/// is Garrison's. The installer keeps an empty file for each, as for the
+/// notification files.
+pub(crate) const COLLECTOR_FILES: [&str; 1] = ["metrics-credential"];
 /// Where `garrison-broker.socket` listens; systemd hands it to the broker.
 pub(crate) const BROKER_PATH: &str = "/run/garrison/broker.sock";
 /// The places `garrison-broker.service` hides from the broker, each with the
@@ -402,5 +407,13 @@ mod tests {
         }
         let watch = loaded(WATCH);
         assert_eq!(watch.len(), NOTIFICATION_FILES.len(), "{watch:?}");
+        // The collector's own files that may be empty are its alone.
+        for name in COLLECTOR_FILES {
+            assert!(
+                loaded(COLLECT).contains(&name),
+                "{COLLECT} does not load {name}"
+            );
+            assert!(!watch.contains(&name), "{name}");
+        }
     }
 }

@@ -1,5 +1,8 @@
 //! Files that must stay private: the access policy, root's and readable by
-//! the broker's group alone, and the credentials, root's alone.
+//! the broker's group alone, and the credentials, root's alone. The units
+//! load every credential (`LoadCredential=`), and systemd starts none of
+//! them without its file, so each must be there; a file that may be empty,
+//! which means none, is in order empty unless the configuration reads it.
 
 use std::fs;
 use std::os::unix::fs::MetadataExt;
@@ -7,14 +10,14 @@ use std::path::Path;
 
 use garrison_core::config::Config;
 
-use super::Finding;
+use super::{Finding, Level};
 use crate::units;
 
-const CREDENTIALS: [&str; 4] = [
+/// The keys setup writes, which every installation reads.
+const KEYS: [&str; 3] = [
     "webhook-signature-key",
     "collector-native-key",
     "broker-native-key",
-    "metrics-credential",
 ];
 
 /// One of the files doctor checks: what it is, whether its group may read
@@ -64,6 +67,90 @@ fn private(path: &Path, file: &Private<'_>) -> Finding {
     }
 }
 
+/// What of the configuration reads the file `name` and so needs it filled,
+/// with how to fill it; `None` where an empty file serves. The notification
+/// channels' files are judged with the channels.
+fn reader(config: &Config, name: &str) -> Option<(&'static str, String)> {
+    let scraped = config.collector.metrics_credential.is_some()
+        && config.collector.providers.iter().any(|provider| {
+            provider.get("type").and_then(toml::Value::as_str) == Some("prometheus")
+        });
+    (name == "metrics-credential" && scraped).then(|| {
+        (
+            "the prometheus check reads Stalwart's exporter with it",
+            "Run `garrison stalwart setup`, which writes it while Stalwart's exporter is \
+             Garrison's or off; for an exporter of another's, write its user name and password \
+             into it as configuration.md says (collector.metrics_credential)."
+                .to_owned(),
+        )
+    })
+}
+
+/// The units that load the file `name`, as a sentence names them.
+fn loaders(name: &str) -> String {
+    let loading: Vec<&str> = units::SECRETS
+        .iter()
+        .filter(|(_, _, loaded)| *loaded == name)
+        .flat_map(|(_, units, _)| units.iter().copied())
+        .collect();
+    loading.join(" and ")
+}
+
+/// An empty file that may be empty: in order where nothing reads it, a
+/// failure with the way to fill it where something does. A file that holds
+/// something is judged by owner and mode alone (`kept`).
+fn judged(
+    name: &str,
+    empty: bool,
+    mode: u32,
+    reader: Option<(&str, String)>,
+    kept: Finding,
+) -> Finding {
+    match (empty, reader) {
+        (true, Some((reads, fill))) => Finding::fail(format!("{name} is empty, but {reads}"), fill),
+        (true, None) => Finding::ok(format!("{name} is empty, which means none ({mode:o})")),
+        (false, _) => kept,
+    }
+}
+
+/// A file the units load that may be empty, which means none.
+fn optional(config: &Config, name: &str) -> Finding {
+    let path = config.credentials_directory.join(name);
+    let made = format!("install -m 600 /dev/null {}", path.display());
+    let reads = reader(config, name);
+    let Ok(metadata) = fs::symlink_metadata(&path) else {
+        let fix = reads.map_or_else(
+            || format!("Make it, empty, which means none: {made}"),
+            |(_, fill)| fill,
+        );
+        return Finding::fail(
+            format!(
+                "{name} is missing: {}; systemd starts {} only with it",
+                path.display(),
+                loaders(name)
+            ),
+            fix,
+        );
+    };
+    let kept = private(
+        &path,
+        &Private {
+            what: name,
+            group_read: false,
+            made_by: &made,
+            kept: format!(
+                "Make it root's with mode 600: chown root {0} && chmod 600 {0}",
+                path.display()
+            ),
+        },
+    );
+    if kept.level != Level::Ok {
+        return kept;
+    }
+    let empty = fs::read(&path).is_ok_and(|data| data.trim_ascii().is_empty());
+    judged(name, empty, metadata.mode() & 0o777, reads, kept)
+}
+
 pub(super) fn files(config: &Config) -> Vec<Finding> {
     // Where the broker reads it. The installer gives it owner and mode.
     let policy = Private {
@@ -78,7 +165,7 @@ pub(super) fn files(config: &Config) -> Vec<Finding> {
         findings.push(Finding::fail(what, format!("{fix}.")));
     }
     // Setup writes these root's with mode 600, and nothing changes them after.
-    for name in CREDENTIALS {
+    for name in KEYS {
         let path = config.credentials_directory.join(name);
         let credential = Private {
             what: name,
@@ -90,6 +177,13 @@ pub(super) fn files(config: &Config) -> Vec<Finding> {
             ),
         };
         findings.push(private(&path, &credential));
+    }
+    // The installer keeps these, empty where nothing needs them.
+    for name in units::COLLECTOR_FILES
+        .into_iter()
+        .chain(units::NOTIFICATION_FILES)
+    {
+        findings.push(optional(config, name));
     }
     findings
 }
@@ -141,7 +235,7 @@ mod tests {
             fix(&missing, "the access policy is missing"),
             "Run `garrison access init`, which makes it."
         );
-        for name in CREDENTIALS {
+        for name in KEYS {
             assert_eq!(
                 fix(&missing, &format!("{name} is missing")),
                 "Run `garrison stalwart setup`, which makes it.",
@@ -175,5 +269,120 @@ mod tests {
             ),
             "Run the installer again; it sets owner and mode."
         );
+    }
+
+    /// The finding that starts with `what`.
+    fn starting<'a>(findings: &'a [Finding], what: &str) -> &'a Finding {
+        findings
+            .iter()
+            .find(|finding| finding.what.starts_with(what))
+            .unwrap_or_else(|| panic!("no finding {what}: {findings:?}"))
+    }
+
+    /// systemd starts no unit whose credential file is missing. A file that
+    /// may be empty is named with the command that makes it, empty, which
+    /// means none; where the configuration reads it, with how to fill it.
+    #[test]
+    fn a_file_the_units_load_is_named_where_it_is_missing() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        let found = files(&config);
+        for name in ["metrics-credential", "ntfy-token", "notify-webhook-url"] {
+            let path = config.credentials_directory.join(name);
+            let missing = starting(&found, &format!("{name} is missing"));
+            assert_eq!(missing.level, Level::Fail, "{name}");
+            assert!(
+                missing.what.contains("garrison-collect.service"),
+                "{}",
+                missing.what
+            );
+            assert_eq!(
+                missing.fix.as_deref(),
+                Some(
+                    format!(
+                        "Make it, empty, which means none: install -m 600 /dev/null {}",
+                        path.display()
+                    )
+                    .as_str()
+                ),
+                "{name}"
+            );
+        }
+        assert!(
+            starting(&found, "ntfy-token is missing")
+                .what
+                .contains("garrison-watch.service")
+        );
+    }
+
+    /// A file that may be empty is in order empty where nothing reads it;
+    /// where the configuration reads it, empty is a failure with the way to
+    /// fill it. (Owner and mode come first, which a test cannot give a
+    /// file unless it runs as root.)
+    #[test]
+    fn an_empty_file_is_in_order_unless_the_configuration_reads_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        let kept = || Finding::ok("metrics-credential is private (600)");
+        let unread = judged(
+            "metrics-credential",
+            true,
+            0o600,
+            reader(&config, "metrics-credential"),
+            kept(),
+        );
+        assert_eq!(
+            (unread.level, unread.what.as_str()),
+            (
+                Level::Ok,
+                "metrics-credential is empty, which means none (600)"
+            )
+        );
+        let mut prometheus = toml::Table::new();
+        prometheus.insert("type".into(), "prometheus".into());
+        config.collector.providers.push(prometheus);
+        let read = judged(
+            "metrics-credential",
+            true,
+            0o600,
+            reader(&config, "metrics-credential"),
+            kept(),
+        );
+        assert_eq!(read.level, Level::Fail, "{}", read.line());
+        assert_eq!(
+            read.what,
+            "metrics-credential is empty, but the prometheus check reads Stalwart's exporter with it"
+        );
+        assert!(
+            read.fix
+                .as_deref()
+                .unwrap()
+                .starts_with("Run `garrison stalwart setup`, which writes it"),
+            "{}",
+            read.line()
+        );
+        // Filled, it is judged by owner and mode alone.
+        let filled = judged(
+            "metrics-credential",
+            false,
+            0o600,
+            reader(&config, "metrics-credential"),
+            kept(),
+        );
+        assert_eq!(filled.what, "metrics-credential is private (600)");
+        // Missing where it is read, it is named with how to fill it.
+        let found = files(&config);
+        let missing = starting(&found, "metrics-credential is missing");
+        assert!(
+            missing
+                .fix
+                .as_deref()
+                .unwrap()
+                .starts_with("Run `garrison stalwart setup`, which writes it"),
+            "{}",
+            missing.line()
+        );
+        // The notification channels' files are judged with the channels.
+        assert_eq!(reader(&config, "ntfy-token"), None);
     }
 }

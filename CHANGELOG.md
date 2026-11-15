@@ -106,6 +106,16 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **The collector starts where setup wrote no metrics credential.** Its
+  unit loads `metrics-credential`, and systemd starts no unit whose
+  credential file is missing ("Failed to set up credentials",
+  `status=243/CREDENTIALS`), while setup writes none where Stalwart's
+  exporter is another's: no collection ran at all. The installer now keeps
+  an empty file there, as for the notification files, which the collector
+  reads as none and setup fills where the exporter is Garrison's. `garrison
+  doctor` checks every file the units load, names a missing one with the
+  command that makes it, and calls an empty one in order unless the
+  configuration reads it.
 - **A check that asks many times stops when the run's time is up.** The
   TLS, reputation, sign-in page and test message checks went on asking
   after the run's 70 seconds: five seconds for each listener that did not

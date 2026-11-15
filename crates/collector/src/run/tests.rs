@@ -112,6 +112,9 @@ fn providers_receive_the_credentials_that_could_be_read() {
     // A list of the two values is no credential.
     private(&credentials.path(metrics), r#"["scraper", "s3cret"]"#);
     assert_eq!(run().1, None);
+    // An empty file, as the installer keeps one, is none.
+    private(&credentials.path(metrics), "\n");
+    assert_eq!(run().1, None);
 }
 
 #[test]

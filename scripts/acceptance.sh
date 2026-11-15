@@ -85,6 +85,43 @@ check "a user outside the group garrison cannot reach the broker" "
         timeout 10 runuser -u nobody -- /usr/local/bin/acceptance-connect /run/garrison/broker.sock 2>&1 |
         grep -q 'Permission denied'"
 
+step "The collector's files where setup made none"
+# Where Stalwart's exporter is another's, setup writes no metrics credential.
+# The collector's unit loads it, and systemd starts no unit whose credential
+# file is missing.
+credentials=/etc/garrison/credentials
+inside "rm -f $credentials/metrics-credential"
+check "systemd starts no collection run whose credential file is missing" "
+    ! systemctl start garrison-collect.service 2>/dev/null &&
+        systemctl status garrison-collect.service --no-pager 2>&1 |
+            grep -E -q -i '243/CREDENTIALS|set up credentials'"
+since=$(inside 'date +%s')
+again=$(mktemp)
+if ! installer '/root/release/bin/garrison install' >"$again" 2>&1; then
+    cat "$again"
+    echo "FAIL  the installer runs again"
+    exit 1
+fi
+rm -f "$again"
+check "after the installer, a collection run starts" 'systemctl start garrison-collect.service'
+check "the installer keeps the file, empty and root's alone" "
+    test -f $credentials/metrics-credential && test ! -s $credentials/metrics-credential &&
+        test \"\$(stat -c %U:%a $credentials/metrics-credential)\" = root:600"
+check "the collector reads an empty metrics credential as none" \
+    "! journalctl -u garrison-collect.service --since @$since --no-pager |
+        grep -q 'metrics credential is unavailable'"
+# doctor names a missing file with a command that makes it.
+inside "rm -f $credentials/metrics-credential"
+check "doctor names the missing metrics credential" \
+    "garrison doctor > /root/doctor.log 2>&1; grep -q 'FAIL  metrics-credential is missing' /root/doctor.log"
+inside "sed -n '/FAIL  metrics-credential is missing/{n;s/^.*: //;p;}' /root/doctor.log > /root/doctor-fix.sh &&
+    grep -q /etc/garrison/credentials/metrics-credential /root/doctor-fix.sh && sh -e /root/doctor-fix.sh"
+check "the file doctor's command makes lets a collection run start" 'systemctl start garrison-collect.service'
+check "doctor finds the empty file in order where nothing reads it" "
+    garrison doctor > /root/doctor.log 2>&1;
+    ! grep -q 'FAIL  .*metrics-credential' /root/doctor.log &&
+        grep -q 'ok    metrics-credential is empty' /root/doctor.log"
+
 step "Making room in a full audit, as operations.md says"
 # The audit as it stands an hour later, filled up: the jobs so far have
 # settled, and records of a finished check make up the 1000.

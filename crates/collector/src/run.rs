@@ -114,10 +114,16 @@ impl fmt::Debug for ScrapeCredential {
 
 fn metrics_credential(config: &Config, credentials: &Credentials) -> Option<(String, String)> {
     let source = config.collector.metrics_credential.as_ref()?;
-    let value = credentials
-        .read_private(source, MAX_CREDENTIAL)
-        .ok()
-        .and_then(|data| json::parse(&data, MAX_CREDENTIAL).ok());
+    let data = credentials.read_private(source, MAX_CREDENTIAL).ok();
+    // An empty file, as the installer keeps one where setup wrote none
+    // because Stalwart's exporter is another's, means none: nothing to warn of.
+    if data
+        .as_ref()
+        .is_some_and(|data| data.trim_ascii().is_empty())
+    {
+        return None;
+    }
+    let value = data.and_then(|data| json::parse(&data, MAX_CREDENTIAL).ok());
     let Some(value) = value else {
         log::warn!("The metrics credential is unavailable");
         return None;
