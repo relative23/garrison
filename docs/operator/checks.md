@@ -249,7 +249,11 @@ Partial where they would be OK.
   your own on the host gets one. An answer outside 127.0.0.0/8 comes from a
   resolver that answers names that do not exist with an address of its own:
   no list can be read through it, and the card stays Unknown until the
-  check asks another (`resolver`).
+  check asks another (`resolver`). A zone of Spamhaus' Data Query Service,
+  such as `KEY.zen.dq.spamhaus.net`, is read by Spamhaus' own codes too: a
+  key that is disabled or used against its terms gives no verdict, never a
+  listing. Such a zone's name holds the key, which then stands in
+  `garrison.toml`, which every user of the host may read, and on the card.
 - **Reverse names.** Each address should have a reverse name that leads back
   to it and is one of the mail hosts, the name the server greets with. One
   that is missing, leads elsewhere or is the hosting provider's default is a

@@ -320,7 +320,10 @@ Notable changes for operators and users. The format follows
   127.0.0.0/8, where lists give theirs; another address leaves that list
   without a verdict, and such a resolver leaves the card Unknown. Spamhaus'
   errors also say which one it gave: a mistyped list name, a public
-  resolver, or too many questions.
+  resolver, or too many questions. The zones of Spamhaus' Data Query
+  Service, under `dq.spamhaus.net`, were not taken for Spamhaus', so a key
+  it reports as disabled counted as a listing; they are now read by
+  Spamhaus' own codes as well.
 - **A DNS answer counts only for the question it repeats.** The `dns` and
   `reputation` checks numbered their questions in order, from the clock or
   counting from one, and took any answer with that number: whoever could
