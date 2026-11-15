@@ -24,7 +24,7 @@ use crate::options::{Checked, Options, fail};
 mod sts;
 mod zone;
 
-use zone::{Verdict, expected, mx_hosts, needed, plain, verdict};
+use zone::{Expected, Verdict, expected, mx_hosts, needed, plain, verdict};
 
 const RESOLV_CONF: &str = "/etc/resolv.conf";
 const MOST_DOMAINS: usize = 20;
@@ -100,35 +100,66 @@ pub(super) fn mail_hosts(
     Ok((hosts, rest))
 }
 
-/// The state of a domain and what to say of it: the records that are not as
-/// Stalwart names them, then what the MTA-STS policy leaves open.
-fn summed(
-    empty: bool,
-    open: &[String],
+/// Why records were not asked.
+const RUN_OVER: &str = "the collection run's time was used up";
+
+/// What the questions about a domain's records came to.
+#[derive(Debug, Default)]
+struct Tally {
+    /// The records Stalwart names for the domain.
+    records: usize,
+    /// The records that are not as Stalwart names them.
+    open: Vec<String>,
+    /// The needed records the resolver gave no answer for.
     unanswered: usize,
-    policy: Option<String>,
-) -> (State, Vec<String>) {
-    let (mut state, mut findings) = if empty {
+    /// The records not asked, as the run's time for its checks was over.
+    unasked: usize,
+}
+
+/// The state of a domain and what to say of it: the records that are not as
+/// Stalwart names them, those that were not asked, then what the MTA-STS
+/// policy leaves open. What was asked counts; what was not keeps the domain
+/// from being in order.
+fn summed(tally: &Tally, policy: Option<String>) -> (State, Vec<String>) {
+    let (mut state, mut findings) = if tally.records == 0 {
         (
             State::Unknown,
             vec!["Stalwart names no records for this domain.".to_owned()],
         )
-    } else if !open.is_empty() {
+    } else if !tally.open.is_empty() {
         (
             State::Warning,
-            vec![format!("Not as Stalwart names them: {}.", open.join(", "))],
+            vec![format!(
+                "Not as Stalwart names them: {}.",
+                tally.open.join(", ")
+            )],
         )
-    } else if unanswered > 0 {
+    } else if tally.unanswered > 0 {
         (
             State::Unknown,
             vec![format!(
-                "The resolver gave no answer for {unanswered} of the needed records."
+                "The resolver gave no answer for {} of the needed records.",
+                tally.unanswered
             )],
         )
+    } else if tally.unasked == tally.records {
+        (State::Unknown, Vec::new())
+    } else if tally.unasked > 0 {
+        (State::Partial, Vec::new())
     } else {
         (State::Ok, Vec::new())
     };
-    if open.iter().any(|record| record.starts_with("TLSA ")) {
+    if tally.unasked > 0 && tally.unasked == tally.records {
+        findings.push(format!("Not asked: {RUN_OVER}."));
+    } else if tally.unasked > 0 {
+        findings.push(format!(
+            "{} of its {} records {} not asked: {RUN_OVER}.",
+            tally.unasked,
+            tally.records,
+            if tally.unasked == 1 { "was" } else { "were" }
+        ));
+    }
+    if tally.open.iter().any(|record| record.starts_with("TLSA ")) {
         findings.push(
             "A published TLSA record that is not the one of Stalwart's certificate makes \
              senders that check DANE refuse this server."
@@ -142,6 +173,33 @@ fn summed(
         findings.push(finding);
     }
     (state, findings)
+}
+
+/// What the resolver answers for `record`, and what it found. A resolver
+/// that was silent once is not asked again in this run, for this domain or
+/// the next: each question would wait out its time, and the run has only so
+/// long. Once the run's time for its checks is over, nothing more is asked.
+fn asked(
+    context: &Context<'_>,
+    resolver: SocketAddr,
+    record: &Expected,
+    silent: &mut bool,
+) -> (Verdict, Vec<String>) {
+    if *silent {
+        return (Verdict::Unanswered, Vec::new());
+    }
+    if context.deadline.expired() {
+        return (Verdict::Unasked, Vec::new());
+    }
+    match dns::ask(resolver, &record.name, record.kind) {
+        Ok(Answer::Records(found)) => (verdict(record, &found), found),
+        Ok(Answer::NoSuchName) => (Verdict::Missing, Vec::new()),
+        Err(error) => {
+            // An error for one name, such as SERVFAIL, is that name's.
+            *silent = error.is_empty() || error.contains("did not answer");
+            (Verdict::Unanswered, Vec::new())
+        }
+    }
 }
 
 /// A domain as far as it is read.
@@ -207,8 +265,8 @@ impl Dns {
         .with_max_age(180))
     }
 
-    /// `silent` is whether the resolver has stopped being asked in this run:
-    /// it did not answer once, or the run's time for its checks is over.
+    /// `silent` is whether the resolver has stopped being asked in this run
+    /// because it did not answer once.
     fn domain(
         &self,
         context: &Context<'_>,
@@ -219,26 +277,12 @@ impl Dns {
         let name = plain(&domain.name);
         let records = expected(domain.dns_zone_file.as_deref().unwrap_or_default());
         let mut rows = Vec::new();
-        let (mut open, mut unanswered) = (Vec::new(), 0);
+        let mut tally = Tally {
+            records: records.len(),
+            ..Tally::default()
+        };
         for record in &records {
-            // A resolver that is silent once is not asked again in this run,
-            // for this domain or the next: each question would wait out its
-            // time, and the run has only so long.
-            *silent = *silent || context.deadline.expired();
-            let asked = if *silent {
-                Err(String::new())
-            } else {
-                dns::ask(resolver, &record.name, record.kind)
-            };
-            let (verdict, found) = match asked {
-                Ok(Answer::Records(found)) => (verdict(record, &found), found),
-                Ok(Answer::NoSuchName) => (Verdict::Missing, Vec::new()),
-                Err(error) => {
-                    // An error for one name, such as SERVFAIL, is that name's.
-                    *silent = *silent || error.is_empty() || error.contains("did not answer");
-                    (Verdict::Unanswered, Vec::new())
-                }
-            };
+            let (verdict, found) = asked(context, resolver, record, silent);
             let needed = needed(&name, record);
             let counts = match verdict {
                 Verdict::Missing => needed,
@@ -252,13 +296,19 @@ impl Dns {
                             && (record.kind == Kind::Mx || record.name.contains("._domainkey."))
                 }
                 Verdict::Unanswered => {
-                    unanswered += usize::from(needed);
+                    tally.unanswered += usize::from(needed);
+                    false
+                }
+                Verdict::Unasked => {
+                    tally.unasked += 1;
                     false
                 }
                 Verdict::Published => false,
             };
             if counts {
-                open.push(format!("{} {}", record.kind.name(), record.name));
+                tally
+                    .open
+                    .push(format!("{} {}", record.kind.name(), record.name));
             }
             let short = |text: &str| text.chars().take(120).collect::<String>();
             rows.push(vec![
@@ -287,7 +337,7 @@ impl Dns {
             rows.push(row);
             finding
         });
-        let (state, findings) = summed(records.is_empty(), &open, unanswered, policy.flatten());
+        let (state, findings) = summed(&tally, policy.flatten());
         let text = |label: &str| Column {
             label: label.to_owned(),
             format: Format::Text,

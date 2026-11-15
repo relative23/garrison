@@ -98,7 +98,9 @@ Notable changes for operators and users. The format follows
   file "not asked", a test message "not sent", and are not in order for it.
   A TLS probe has ten seconds in all and a test message's session twenty; a
   reputation reading cut short is asked again after an hour, and a test
-  message the run had no time for is sent in the next run.
+  message the run had no time for is sent in the next run. The DNS records
+  of a domain, which already stopped asking, said that the resolver gave no
+  answer for the records left; they now say "not asked" too.
 - **A mail server that sends a line without end no longer stops the
   collector.** The test messages and the mail notifications read each line
   of a reply whole before they looked at its length, so a listener that

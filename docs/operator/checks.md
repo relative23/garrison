@@ -223,7 +223,10 @@ check asks the resolver for them and compares:
   mail hosts, is a warning: senders that honour it stop delivering.
 
 The answers are those of this resolver at this moment; another resolver may
-still hold older ones. The check takes the first `max_domains` of the domains
+still hold older ones. A resolver that does not answer once is not asked again
+in that run, and the records left say "no answer"; once the run's time for its
+checks is up, the records left say "not asked", and the domain is Partial, or
+Unknown where nothing was asked. The check takes the first `max_domains` of the domains
 Stalwart lists, 100 at the most: each run asks every record of each of them
 again, and each is a card of its own. Where Stalwart has more, the card "DNS
 records" is Unknown and says how many it has; it sends no notification. With

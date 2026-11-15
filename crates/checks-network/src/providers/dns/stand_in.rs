@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::thread;
+use std::time::Duration;
 
 /// A resolver on a free port that answers from `zone`: `(name, type)` to texts.
 /// Names it does not hold do not exist; `silent` is never answered. The
@@ -14,6 +15,16 @@ pub(crate) fn resolver(
     silent: Option<&'static str>,
     questions: usize,
 ) -> (SocketAddr, thread::JoinHandle<Vec<u16>>) {
+    resolver_after(zone, silent, questions, Duration::ZERO)
+}
+
+/// Like [`resolver`], answering each question `delay` after it came.
+pub(crate) fn resolver_after(
+    zone: BTreeMap<(String, u16), Vec<Vec<u8>>>,
+    silent: Option<&'static str>,
+    questions: usize,
+    delay: Duration,
+) -> (SocketAddr, thread::JoinHandle<Vec<u16>>) {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     let address = socket.local_addr().unwrap();
     let handle = thread::spawn(move || {
@@ -21,6 +32,7 @@ pub(crate) fn resolver(
         for _ in 0..questions {
             let mut buffer = [0; 512];
             let (length, client) = socket.recv_from(&mut buffer).unwrap();
+            thread::sleep(delay);
             let question = &buffer[..length];
             numbers.push(u16::from_be_bytes([question[0], question[1]]));
             // The name: labels from byte 12 to the zero.

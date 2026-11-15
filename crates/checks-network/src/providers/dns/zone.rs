@@ -108,6 +108,8 @@ pub(super) enum Verdict {
     Missing,
     /// The resolver gave no answer.
     Unanswered,
+    /// The resolver was not asked: the run's time for its checks was over.
+    Unasked,
 }
 
 impl Verdict {
@@ -117,6 +119,7 @@ impl Verdict {
             Verdict::Differs => "differs",
             Verdict::Missing => "missing",
             Verdict::Unanswered => "no answer",
+            Verdict::Unasked => "not asked",
         }
     }
 }
