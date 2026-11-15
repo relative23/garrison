@@ -231,7 +231,10 @@ A receiving server looks the sender's address up in blocklists and asks for
 its reverse name. The check asks the same questions, every six hours, for
 every address of the mail hosts: `hosts`, or without it the hosts Stalwart
 names in the MX records of its domains, of the first `max_domains` of them;
-the cards say when Stalwart has more.
+the cards say when Stalwart has more. It asks about eight mail hosts and
+twelve addresses at the most, and asks the lists for 30 seconds in all.
+Where there are more, or a list was left unasked, the cards say so, and are
+Partial where they would be OK.
 
 - **Blocklists.** A listing is Failed and names the address and the list.
   IPv4 addresses are asked of `lists` (default `zen.spamhaus.org`,

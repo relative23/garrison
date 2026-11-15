@@ -6,6 +6,7 @@ use garrison_core::observations::{
 };
 use serde_json::json;
 
+use super::asker::SLOW;
 use super::verdict::Said;
 use super::{Read, Reputation};
 use crate::context::{Context, Provider};
@@ -39,19 +40,25 @@ impl Reputation {
                 rows.push(vec![json!(address.address), json!(list), json!(result)]);
             }
         }
+        // A list left unasked for its time concerns this card alone.
+        let lists_unasked = read.lists_unasked();
+        let partial = read.cut.is_some() || !read.left_out.is_empty() || lists_unasked;
         let state = match (unknown, listed.is_empty(), verdicts) {
             (Some(_), _, _) | (None, true, 0) => State::Unknown,
             (None, false, _) => State::Failed,
-            (None, true, _) if read.cut.is_some() => State::Partial,
+            (None, true, _) if partial => State::Partial,
             (None, true, _) => State::Ok,
         };
-        let findings = match (unknown, verdicts) {
+        let mut findings = match (unknown, verdicts) {
             (Some(unknown), _) => vec![unknown.clone()],
             // What was not asked is said once, beside both cards.
-            (None, 0) if read.cut.is_some() => Vec::new(),
+            (None, 0) if read.cut.is_some() || lists_unasked => Vec::new(),
             (None, 0) => vec!["No list gave a verdict.".to_owned()],
             (None, _) => listed,
         };
+        if unknown.is_none() && lists_unasked {
+            findings.push(format!("Not every list was asked: {SLOW}."));
+        }
         Ok(self
             .observation(context, "blocklists", "Blocklists", state)?
             .with_scope(
@@ -106,10 +113,11 @@ impl Reputation {
                 json!(result),
             ]);
         }
+        let partial = read.cut.is_some() || !read.left_out.is_empty();
         let state = match (unknown, findings.is_empty(), read.addresses.is_empty()) {
             (Some(_), _, _) | (None, _, true) => State::Unknown,
             (None, false, false) => State::Warning,
-            (None, true, false) if read.cut.is_some() => State::Partial,
+            (None, true, false) if partial => State::Partial,
             (None, true, false) => State::Ok,
         };
         let findings = match (unknown, read.addresses.is_empty()) {

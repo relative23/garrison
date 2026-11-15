@@ -26,12 +26,14 @@ mod asker;
 mod cards;
 mod verdict;
 
-use asker::{Asker, RUN_OVER};
+use asker::{Asker, PATIENCE, RUN_OVER, SLOW};
 use verdict::Said;
 
 const EVERY: i64 = 6 * 3600;
 const AGAIN: i64 = 3600;
 const MEMORY: &str = "reputation.read";
+/// So many mail hosts and addresses are asked about at the most: each
+/// address costs a question to each list, every six hours.
 const MOST_HOSTS: usize = 8;
 const MOST_ADDRESSES: usize = 12;
 /// Lists asked about IPv4 addresses, and those that also list IPv6.
@@ -66,6 +68,21 @@ struct Read {
     /// Why not every address or list was asked, where that is so.
     #[serde(default)]
     cut: Option<String>,
+    /// What the reading's own limits left out: mail hosts after the first
+    /// [`MOST_HOSTS`], addresses after the first [`MOST_ADDRESSES`].
+    #[serde(default)]
+    left_out: Vec<String>,
+}
+
+impl Read {
+    /// Whether a list went unasked about an address because the lists had
+    /// had their time: the blocklists card cannot be in order then.
+    fn lists_unasked(&self) -> bool {
+        let unasked = Said::Unanswered(format!("not asked: {SLOW}"));
+        self.addresses
+            .iter()
+            .any(|asked| asked.lists.iter().any(|(_, said)| *said == unasked))
+    }
 }
 
 #[derive(Debug)]
@@ -78,6 +95,8 @@ pub struct Reputation {
     lists: Vec<String>,
     lists_ipv6: Vec<String>,
     modules: BTreeSet<ModuleId>,
+    /// How long the lists are asked in all; tests shorten it.
+    patience: std::time::Duration,
 }
 
 /// A list of DNS names from an option; `default` where it is absent.
@@ -138,7 +157,16 @@ impl Reputation {
             lists: names(raw, "lists", &LISTS)?,
             lists_ipv6: names(raw, "lists_ipv6", &LISTS_IPV6)?,
             modules: options.modules(&["dns_tls"])?,
+            patience: PATIENCE,
         })
+    }
+
+    /// For tests: ask the lists for `patience` in all instead of 30 seconds.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_patience(mut self, patience: std::time::Duration) -> Self {
+        self.patience = patience;
+        self
     }
 
     /// Ask about every address of the mail hosts.
@@ -152,12 +180,21 @@ impl Reputation {
         } else {
             (self.hosts.clone(), None)
         };
-        hosts.truncate(MOST_HOSTS);
+        let mut left_out = Vec::new();
+        if hosts.len() > MOST_HOSTS {
+            left_out.push(format!(
+                "There are {} mail hosts; only the first {MOST_HOSTS} are asked.",
+                hosts.len()
+            ));
+            hosts.truncate(MOST_HOSTS);
+        }
         if hosts.is_empty() {
             return Err("Stalwart names no mail host for its domains".to_owned());
         }
-        let mut asker = Asker::new(resolver, context.deadline);
+        let mut asker = Asker::new(resolver, context.deadline, self.patience);
         let mut addresses = Vec::new();
+        // The addresses after the first MOST_ADDRESSES, counted as they come.
+        let mut more = 0;
         // Once the run's time is up, the reading keeps what it has.
         let mut cut = false;
         'hosts: for host in &hosts {
@@ -171,7 +208,8 @@ impl Reputation {
                         continue;
                     };
                     if addresses.len() == MOST_ADDRESSES {
-                        break;
+                        more += 1;
+                        continue;
                     }
                     if asker.over() {
                         cut = true;
@@ -217,12 +255,19 @@ impl Reputation {
                 }
             }
         }
+        if more > 0 {
+            left_out.push(format!(
+                "The mail hosts have {} addresses; only the first {MOST_ADDRESSES} are asked.",
+                MOST_ADDRESSES + more
+            ));
+        }
         Ok(Read {
             hosts,
             addresses,
             problem: None,
             rest,
             cut: (cut || asker.cut).then(|| RUN_OVER.to_owned()),
+            left_out,
         })
     }
 
@@ -230,7 +275,7 @@ impl Reputation {
     /// and after an hour where not everything could be asked.
     fn known(&self, context: &Context<'_>) -> Kept<Read> {
         let wait = |_, read: &Read| {
-            if read.problem.is_some() || read.cut.is_some() {
+            if read.problem.is_some() || read.cut.is_some() || read.lists_unasked() {
                 AGAIN
             } else {
                 EVERY
@@ -272,8 +317,10 @@ impl Provider for Reputation {
         let mut report = Report::default();
         for mut observation in cards {
             // The hosts of the domains left out are not asked; the state is
-            // that of the hosts that are.
+            // that of the hosts that are. What the reading's own limits left
+            // out keeps the cards from being in order.
             observation.findings.extend(read.rest.clone());
+            observation.findings.extend(read.left_out.iter().cloned());
             observation.findings.extend(
                 read.cut
                     .as_ref()
@@ -286,6 +333,8 @@ impl Provider for Reputation {
     }
 }
 
+#[cfg(test)]
+mod limits_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

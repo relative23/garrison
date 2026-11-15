@@ -12,10 +12,12 @@ use crate::dns::{self, Answer, Kind};
 
 /// Why a reading stopped before it had asked everything.
 pub(super) const RUN_OVER: &str = "the collection run's time was used up";
+/// Why a list was not asked about an address: the lists had their time.
+pub(super) const SLOW: &str = "the lists took too long";
 
 /// The lists are asked for this long at most: the collector's run has a
 /// limit of its own, and a list that is down answers nothing for seconds.
-const PATIENCE: Duration = Duration::from_secs(30);
+pub(super) const PATIENCE: Duration = Duration::from_secs(30);
 
 /// Asks one resolver.
 pub(super) struct Asker {
@@ -30,11 +32,13 @@ pub(super) struct Asker {
 }
 
 impl Asker {
-    pub(super) fn new(resolver: SocketAddr, deadline: Deadline) -> Self {
+    /// An asker of `resolver` until `deadline`, which asks the lists for
+    /// `patience` in all.
+    pub(super) fn new(resolver: SocketAddr, deadline: Deadline, patience: Duration) -> Self {
         Asker {
             resolver,
             silent: BTreeSet::new(),
-            until: Instant::now() + PATIENCE,
+            until: Instant::now() + patience,
             deadline,
             cut: false,
         }
@@ -55,7 +59,7 @@ impl Asker {
             return Said::Unanswered(format!("not asked: {RUN_OVER}"));
         }
         if Instant::now() > self.until {
-            return Said::Unanswered("not asked: the lists took too long".to_owned());
+            return Said::Unanswered(format!("not asked: {SLOW}"));
         }
         let answer = dns::ask(self.resolver, &dns::reversed(address, Some(zone)), Kind::A);
         if answer.is_err() {

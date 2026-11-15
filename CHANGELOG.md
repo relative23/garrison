@@ -338,6 +338,13 @@ Notable changes for operators and users. The format follows
   Stalwart's domains, whatever the DNS check's `max_domains` said, and said
   nothing of the rest. Both now have `max_domains` of their own, 20 by
   default, and their cards say when Stalwart has more domains.
+- **The reputation check says what its own limits leave out.** It asks
+  about eight mail hosts and twelve addresses at the most, and asks the
+  lists for 30 seconds in all. The hosts and addresses beyond were left out
+  without a word, and a list left unasked showed only in its row, so the
+  cards were OK for what was not looked at. The cards now name what was
+  left out and are Partial where they would be OK, and a reading whose
+  lists ran out of time is asked again after an hour.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser
