@@ -6,7 +6,8 @@
 # backs up, waits for the services to settle or switches back, leaves
 # nothing a later run cannot finish. The installer passes on what
 # check-config warns of, names a file it could not write, refuses a secret
-# its unit would not hand over and follows a policy kept elsewhere. Beside
+# its unit would not hand over and follows a policy kept elsewhere, but
+# leaves a folder named as the policy as it is. Beside
 # the installer: a collector that stops is reported, a collection run beside
 # one under way collects nothing, and setup after a rotation that failed
 # restarts the services that hold the old secrets.
@@ -400,6 +401,21 @@ scenario_policy_elsewhere() {
     check "the broker grants by that policy" "$catalog | grep -q run_check"
     check "doctor finds that policy private" \
         '/opt/garrison/current/bin/garrison doctor | grep -q "ok    the access policy is private (640)"'
+    # A folder named as the policy is none: the installer leaves it as it is
+    # and refuses, and a purge would not take it.
+    inside 'mkdir -p /srv/policy-folder/mail && echo kept > /srv/policy-folder/mail/inbox &&
+        chmod 755 /srv/policy-folder &&
+        sed -i "s|^policy = \"/etc/garrison-policy/access.json\"\$|policy = \"/srv/policy-folder\"|" \
+            /etc/garrison/garrison.toml'
+    refused "the installer refuses a policy that is a folder" '/root/release/bin/garrison install' \
+        "Access policy not usable"
+    check "and leaves that folder as it was" \
+        'test "$(stat -c "%U %a" /srv/policy-folder)" = "root 755" && test -s /srv/policy-folder/mail/inbox'
+    check "a purge would not remove it" \
+        '/opt/garrison/current/bin/garrison uninstall --purge --dry-run > /root/purge-plan.log 2>&1 &&
+            grep -q "Would remove /var/lib/garrison$" /root/purge-plan.log &&
+            ! grep -q /srv/policy-folder /root/purge-plan.log'
+    inside 'rm -r /srv/policy-folder /root/purge-plan.log'
     inside 'mv /etc/garrison-policy/access.json /etc/garrison/access-policy.json && rmdir /etc/garrison-policy &&
         cat /root/garrison.toml.policy > /etc/garrison/garrison.toml'
     installer '/root/release/bin/garrison install'
