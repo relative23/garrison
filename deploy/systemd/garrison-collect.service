@@ -33,6 +33,10 @@ UMask=0027
 # time of its own: no check begins after 70 seconds, the notifications are
 # given up at 100, and the snapshot is written with what was found.
 TimeoutStartSec=120
+# Once its snapshot is stored, a run may rebuild the status database without
+# what an earlier release kept of a key, and asks for more time while that
+# runs, for eight minutes at the most.
+NotifyAccess=main
 # Providers read host files (configuration, receipts) but never write them.
 ReadOnlyPaths=/var/lib/garrison/ingest
 NoNewPrivileges=true

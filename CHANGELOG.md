@@ -43,9 +43,15 @@ Notable changes for operators and users. The format follows
   kept the key with the zone's name in the status database, which the group
   `garrison` reads, and SQLite leaves what it frees in place: the first
   collection run of this release names such a zone without its key in every
-  row and rebuilds the file, so that no copy of the key is left in it
-  (measured: half a second for 90 days of history), and the collector's
-  journal says so. See [checks](docs/operator/checks.md#reputation).
+  row and, once its snapshot is stored, rebuilds the file beside it and puts
+  the copy in its place, with the file's owner, mode and SELinux label, so
+  that no copy of the key is left in it, and the collector's journal says
+  so. The web service reads on meanwhile (measured: 90 days of history in
+  some 20 seconds on a disk that writes 2 MB a second, a reader waiting a
+  quarter of a second at the most). A rebuild asks systemd for more time
+  while it runs, eight minutes at the most; one that does not finish then
+  is tried again a day later, one that fails, as on a full disk, in the next
+  run. See [checks](docs/operator/checks.md#reputation).
 - **Stalwart can count and block each client under its own address.**
   Behind nginx, Stalwart sees every client at nginx's address: on
   Garrison's host that is 127.0.0.1, which Stalwart neither limits nor

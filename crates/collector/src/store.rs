@@ -10,8 +10,10 @@
 //! clock that jumps ahead takes nothing with it.
 
 use std::collections::BTreeMap;
-use std::path::Path;
-use std::time::Instant;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use garrison_core::config::Database;
 use garrison_core::sqlite::{self, Migration, SqliteError};
@@ -22,6 +24,7 @@ use crate::snapshot::Snapshot;
 
 mod clock;
 mod history;
+mod replace;
 mod residue;
 mod thinning;
 
@@ -70,31 +73,84 @@ const MIGRATIONS: [Migration; 2] = [
     ],
 ];
 
+/// A rebuild of the status database (residue.rs) begins only where the run
+/// leaves it this long: what a disk that writes 2 MB a second takes for 90
+/// days of history, some 20 seconds, and room besides. A later run that
+/// leaves more does it.
+const REBUILD_FOR: Duration = Duration::from_secs(60);
+/// While a rebuild runs, systemd is asked for this much more time again and
+/// again, as long as the rebuild may run, so that its unit's 120 seconds do
+/// not end it (`NotifyAccess=main`).
+const ASK_FOR: Duration = Duration::from_secs(60);
+const ASK_EVERY: Duration = Duration::from_secs(20);
+
 #[derive(Debug)]
 pub struct StatusStore {
     db: Connection,
+    path: PathBuf,
     history_days: u32,
 }
 
 impl StatusStore {
     pub fn open(path: &Path, history_days: u32) -> Result<Self, SqliteError> {
-        let mut db = sqlite::open_database(path, &MIGRATIONS, Database::Status)?;
-        let began = Instant::now();
-        match residue::clear(&mut db, path) {
-            Ok(Some(rows)) => log::info!(
-                "The status database held a key of Spamhaus' Data Query Service that an earlier \
-                 release kept: {rows} rows named it, now without it, and the file was rebuilt in \
-                 {} ms",
-                began.elapsed().as_millis()
-            ),
-            Ok(None) => {}
-            // A full disk must not cost the run; the next one tries again.
-            Err(error) => log::warn!(
+        // A copy that a rebuild ended midway left may hold a key; collection
+        // runs are one at a time (run.rs), so no rebuild is under way.
+        replace::remove(&replace::copy_of(path));
+        let db = sqlite::open_database(path, &MIGRATIONS, Database::Status)?;
+        Ok(StatusStore {
+            db,
+            path: path.to_owned(),
+            history_days,
+        })
+    }
+
+    /// Rebuild the database without what earlier releases kept of a key of
+    /// Spamhaus' Data Query Service, where it may hold some (residue.rs), by
+    /// `until`; `now` is the run's time. A run's last step, so that it costs
+    /// no run: a rebuild that did not finish is said in the journal.
+    pub fn clear_residue(&mut self, now: i64, until: Instant) {
+        let unread = |error: &dyn std::fmt::Display| {
+            log::warn!(
                 "The status database could not be cleared of a key of Spamhaus' Data Query \
                  Service that an earlier release kept: {error}; the next run tries again"
-            ),
+            );
+        };
+        match residue::due(&self.db, &self.path, now) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => return unread(&error),
         }
-        Ok(StatusStore { db, history_days })
+        if until.saturating_duration_since(Instant::now()) < REBUILD_FOR {
+            log::info!(
+                "The status database may hold a key of Spamhaus' Data Query Service that an \
+                 earlier release kept; this run left too little time to rebuild it, a later \
+                 one does"
+            );
+            return;
+        }
+        let began = Instant::now();
+        let (db, path) = (&mut self.db, self.path.as_path());
+        match with_more_time(until, || residue::clear(db, path, now, until)) {
+            Ok(rows) => {
+                log::info!(
+                    "The status database held a key of Spamhaus' Data Query Service that an \
+                     earlier release kept: {rows} rows named it, now without it, and the file was \
+                     rebuilt beside it in {} ms and put in its place",
+                    began.elapsed().as_millis()
+                );
+                // The connection holds the file that the copy replaced.
+                match sqlite::open_database(&self.path, &MIGRATIONS, Database::Status) {
+                    Ok(db) => self.db = db,
+                    Err(error) => log::warn!("The rebuilt status database did not open: {error}"),
+                }
+            }
+            Err(residue::Unfinished::Late) => log::warn!(
+                "The status database could not be cleared of a key of Spamhaus' Data Query \
+                 Service that an earlier release kept within the time this run left: the copy \
+                 was removed, and a run tries again in a day"
+            ),
+            Err(residue::Unfinished::Failed(error)) => unread(&error),
+        }
     }
 
     pub fn write(
@@ -150,6 +206,24 @@ impl StatusStore {
         transaction.commit()?;
         Ok(())
     }
+}
+
+/// `work`, with systemd asked for more time while it runs, until `until`.
+fn with_more_time<T>(until: Instant, work: impl FnOnce() -> T) -> T {
+    let (done, waiting) = mpsc::channel::<()>();
+    thread::scope(|scope| {
+        scope.spawn(move || {
+            while Instant::now() < until {
+                garrison_core::systemd::extend_timeout(ASK_FOR);
+                if waiting.recv_timeout(ASK_EVERY) != Err(RecvTimeoutError::Timeout) {
+                    return;
+                }
+            }
+        });
+        let result = work();
+        drop(done);
+        result
+    })
 }
 
 impl Memory for StatusStore {

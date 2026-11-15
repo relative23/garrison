@@ -42,6 +42,12 @@ pub struct Time {
     /// The notifications are sent or given up by then; the snapshot is
     /// written after.
     pub run: Duration,
+    /// What an earlier release kept of a key of Spamhaus' Data Query Service
+    /// is cleared from the status database by then, after the snapshot is
+    /// stored, and systemd is asked for more time while that runs: on a disk
+    /// that writes 1 MB a second, some 400 MB of history. The watch counts
+    /// from the snapshot and sees no stop before ten minutes.
+    pub rebuild: Duration,
 }
 
 impl Time {
@@ -49,6 +55,7 @@ impl Time {
     pub const OF_A_RUN: Time = Time {
         checks: Duration::from_secs(70),
         run: Duration::from_secs(100),
+        rebuild: Duration::from_secs(480),
     };
 }
 
@@ -287,6 +294,7 @@ pub fn collect_within(
 ) -> Result<Snapshot, Error> {
     let _alone = alone(&config.database(Database::Status))?;
     let run = Deadline::within(time.run);
+    let rebuild = Instant::now() + time.rebuild;
     let mut store = StatusStore::open(
         &config.database(Database::Status),
         config.collector.history_days,
@@ -383,6 +391,9 @@ pub fn collect_within(
         snapshot.observations.len(),
         providers.len()
     );
+    // Last, once the snapshot is stored: a rebuild that takes long costs
+    // nothing of the run.
+    store.clear_residue(now.as_second(), rebuild);
     Ok(snapshot)
 }
 

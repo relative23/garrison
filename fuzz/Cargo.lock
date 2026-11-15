@@ -531,6 +531,7 @@ dependencies = [
  "garrison-stalwart",
  "log",
  "rusqlite",
+ "rustix",
  "rustls",
  "serde",
  "serde_json",

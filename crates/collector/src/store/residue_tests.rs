@@ -1,15 +1,16 @@
 //! What earlier releases kept of a key of Spamhaus' Data Query Service: the
 //! first run of this release leaves no copy of it anywhere in the status
 //! database's files, in a row, a free page or a journal, while readers go on
-//! reading and the file keeps its inode, owner and mode.
+//! reading, and the file keeps its owner, group, mode and SELinux label.
 
+use std::fs::File;
 use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 use std::{fs, thread};
 
 use garrison_core::sqlite::reading;
+use garrison_core::time;
 use rusqlite::{Connection, params};
 
 use super::*;
@@ -31,6 +32,11 @@ fn holding(folder: &Path) -> Vec<String> {
         .collect();
     files.sort();
     files
+}
+
+/// The SELinux label of the file at `path`, where it has one.
+fn label(path: &Path) -> Option<Vec<u8>> {
+    replace::attribute_of(&File::open(path).unwrap(), "security.selinux").unwrap()
 }
 
 /// A status database as a release before this one left it: the reputation
@@ -81,6 +87,7 @@ fn the_first_run_of_this_release_leaves_no_copy_of_a_dqs_key_in_the_status_datab
     // The test's own residue, in the rows and the free pages.
     assert_eq!(holding(directory.path()), ["status.sqlite"]);
     let before = fs::metadata(&path).unwrap();
+    let label_before = label(&path);
     // The web service reads the database for each request meanwhile.
     let (stop, failed) = (
         Arc::new(AtomicBool::new(false)),
@@ -109,18 +116,26 @@ fn the_first_run_of_this_release_leaves_no_copy_of_a_dqs_key_in_the_status_datab
         }
     });
     thread::sleep(Duration::from_millis(50));
-    let store = StatusStore::open(&path, 90).unwrap();
+    // The run's last step, once its snapshot is stored.
+    let mut store = StatusStore::open(&path, 90).unwrap();
+    store.clear_residue(
+        time::now().as_second(),
+        Instant::now() + Duration::from_secs(120),
+    );
     thread::sleep(Duration::from_millis(50));
     stop.store(true, Ordering::SeqCst);
     let reads = reader.join().unwrap();
     assert!(reads > 0 && !failed.load(Ordering::SeqCst), "{reads} reads");
     drop(store);
     assert_eq!(holding(directory.path()), Vec::<String>::new());
+    // A file of its own now, made as the one it replaced.
     let after = fs::metadata(&path).unwrap();
+    assert_ne!(after.ino(), before.ino());
     assert_eq!(
-        (after.ino(), after.uid(), after.mode()),
-        (before.ino(), before.uid(), before.mode())
+        (after.uid(), after.gid(), after.mode()),
+        (before.uid(), before.gid(), before.mode())
     );
+    assert_eq!(label(&path), label_before);
     // The rows read on, with the zone named without its key.
     let db = Connection::open(&path).unwrap();
     let kept: String = db
@@ -149,4 +164,123 @@ fn the_first_run_of_this_release_leaves_no_copy_of_a_dqs_key_in_the_status_datab
         newest.contains("is listed on ….zen.dq.spamhaus.net (127.0.0.2)."),
         "{newest}"
     );
+}
+
+/// What a run that ran out of time before the copy was done leaves: the
+/// database as it was, no copy, and a day's wait before the next rebuild,
+/// which a disk too slow for it would otherwise write in every run.
+#[test]
+fn a_rebuild_out_of_time_leaves_the_database_as_it_was_and_waits_a_day() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("status.sqlite");
+    as_an_earlier_release_left_it(&path);
+    // A history, so that the copy takes long enough to be stopped midway.
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+         INSERT INTO samples(name, ts, value, kind) SELECT 'gauge', i * 60, i, 'gauge' FROM n",
+    )
+    .unwrap();
+    drop(db);
+    let mut store = StatusStore::open(&path, 90).unwrap();
+    let now = time::now().as_second();
+    assert!(residue::due(&store.db, &path, now).unwrap());
+    let late = residue::clear(&mut store.db, &path, now, Instant::now());
+    assert!(matches!(late, Err(residue::Unfinished::Late)), "{late:?}");
+    assert_eq!(holding(directory.path()), ["status.sqlite"]);
+    assert!(!replace::copy_of(&path).exists());
+    for later in [0, 3600, 86_399] {
+        assert!(
+            !residue::due(&store.db, &path, now + later).unwrap(),
+            "{later}"
+        );
+    }
+    // A day on, or a clock that went back since, it is due again.
+    assert!(residue::due(&store.db, &path, now + 86_400).unwrap());
+    assert!(residue::due(&store.db, &path, now - 60).unwrap());
+    store.clear_residue(now + 86_400, Instant::now() + Duration::from_secs(120));
+    assert_eq!(holding(directory.path()), Vec::<String>::new());
+    assert!(!residue::due(&store.db, &path, now + 86_400).unwrap());
+}
+
+/// A rebuild that fails, as on a full disk, costs nothing but the rebuild:
+/// no copy stays, the store reads and writes on, and the next run tries
+/// again. Here the copy's place is taken by a folder.
+#[test]
+fn a_rebuild_that_fails_leaves_no_copy_and_the_next_run_tries_again() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("status.sqlite");
+    as_an_earlier_release_left_it(&path);
+    let mut store = StatusStore::open(&path, 90).unwrap();
+    let taken = replace::copy_of(&path);
+    fs::create_dir(&taken).unwrap();
+    let now = time::now().as_second();
+    let failed = residue::clear(
+        &mut store.db,
+        &path,
+        now,
+        Instant::now() + Duration::from_secs(120),
+    );
+    assert!(
+        matches!(failed, Err(residue::Unfinished::Failed(_))),
+        "{failed:?}"
+    );
+    assert!(taken.is_dir());
+    assert!(residue::due(&store.db, &path, now).unwrap());
+    store.keep("check.value", "kept");
+    assert_eq!(store.recall("check.value").as_deref(), Some("kept"));
+    fs::remove_dir(&taken).unwrap();
+    store.clear_residue(now, Instant::now() + Duration::from_secs(120));
+    assert_eq!(holding(directory.path()), Vec::<String>::new());
+    assert_eq!(store.recall("check.value").as_deref(), Some("kept"));
+}
+
+/// A run that leaves less time than a rebuild may need begins none; a
+/// later run does it. A copy that a rebuild ended midway left, which may
+/// hold the key, goes when the store opens, with its journal.
+#[test]
+fn a_late_run_begins_no_rebuild_and_a_copy_left_behind_goes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("status.sqlite");
+    as_an_earlier_release_left_it(&path);
+    let mut store = StatusStore::open(&path, 90).unwrap();
+    let now = time::now().as_second();
+    store.clear_residue(now, Instant::now() + Duration::from_secs(10));
+    assert_eq!(holding(directory.path()), ["status.sqlite"]);
+    assert!(residue::due(&store.db, &path, now).unwrap());
+    drop(store);
+    // As a run ended in the copy's last transaction leaves them.
+    let copy = replace::copy_of(&path);
+    fs::copy(&path, &copy).unwrap();
+    let journal = copy.with_file_name("status.sqlite-clearing-journal");
+    fs::write(&journal, KEY).unwrap();
+    let store = StatusStore::open(&path, 90).unwrap();
+    assert!(!copy.exists() && !journal.exists());
+    drop(store);
+}
+
+/// The copy is made as the database is: its mode, owner and group, and an
+/// attribute such as the SELinux label, which this host cannot set, so the
+/// test copies one of the user's own.
+#[test]
+fn the_copy_is_made_with_the_mode_owner_group_and_label_of_the_database() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("status.sqlite");
+    drop(StatusStore::open(&path, 90).unwrap());
+    let attribute = "user.garrison-test";
+    let live = File::open(&path).unwrap();
+    let set = rustix::fs::fsetxattr(&live, attribute, b"label", rustix::fs::XattrFlags::empty());
+    let copy = replace::copy_of(&path);
+    replace::made_with(&path, &copy, attribute).unwrap();
+    let (before, after) = (fs::metadata(&path).unwrap(), fs::metadata(&copy).unwrap());
+    assert_eq!(
+        (after.uid(), after.gid(), after.mode(), after.len()),
+        (before.uid(), before.gid(), before.mode(), 0)
+    );
+    if set.is_ok() {
+        assert_eq!(
+            replace::attribute_of(&File::open(&copy).unwrap(), attribute).unwrap(),
+            Some(b"label".to_vec())
+        );
+    }
 }

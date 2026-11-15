@@ -19,6 +19,7 @@ garrison-core.workspace = true
 garrison-stalwart.workspace = true
 log.workspace = true
 rusqlite.workspace = true
+rustix.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -365,6 +365,7 @@ fn a_check_that_uses_up_the_runs_time_costs_only_the_checks_after_it() {
     let time = Time {
         checks: Duration::from_millis(100),
         run: Duration::from_secs(30),
+        rebuild: Duration::from_secs(30),
     };
     let snapshot = collect_within(&providers, &config, &credentials, &runner, now(), time).unwrap();
     // What ran is there, the slow check too: it was done, only late. The

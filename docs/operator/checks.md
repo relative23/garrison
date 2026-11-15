@@ -281,8 +281,12 @@ that is longer than DNS takes, 253 octets: it has no address to ask about.
   `….zen.dq.spamhaus.net`, on the card, in its findings and in what the
   status database keeps, and check-config and `garrison doctor` warn of it.
   Earlier releases kept the key in the status database; the first
-  collection run after an upgrade from one removes every copy of it there
-  and rebuilds the file, which the collector's journal says.
+  collection run after an upgrade from one removes every copy of it there:
+  once its snapshot is stored, it rebuilds the file beside it and puts the
+  copy in its place, which the collector's journal says, while the web
+  service reads on. On a slow disk with a long history that may take
+  minutes, for which that one run asks systemd for more time, eight minutes
+  at the most; the cards may show as out of date meanwhile.
   `garrison check-config` refuses a name DNS can never ask, and says which:
   one with a label of more than 63 octets, or one longer than 253 octets as
   it is asked, which is with the reversed address before a list's zone, so

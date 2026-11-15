@@ -644,6 +644,7 @@ dependencies = [
  "garrison-testing",
  "log",
  "rusqlite",
+ "rustix",
  "rustls",
  "serde",
  "serde_json",
