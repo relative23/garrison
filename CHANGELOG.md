@@ -328,6 +328,11 @@ Notable changes for operators and users. The format follows
   `check-config`, and with it the installer, now refuse both and give the
   name to use; `garrison doctor` reports them, and `notify-test` sends
   nothing on a channel whose secret the collector would not have.
+- **The installer says which file it could not write from the
+  configuration.** Where `garrison.toml` was there but did not load, the
+  installer left the polkit rule and the switch row's include as they were
+  without a word. It now names each with the reason, in the words of the
+  command that makes it.
 - **What the units do not follow is said during an upgrade and by
   `garrison doctor`.** `check-config` warns of a state directory,
   `credentials_directory` or `broker.socket` that the units do not follow,

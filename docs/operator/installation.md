@@ -171,7 +171,9 @@ sudo ./bin/garrison install
 
 This run checks the configuration, writes the polkit rule for its
 `[[actions]]`, the nginx include for its `web.port` and the include for the
-switch row (step 6), and starts the services.
+switch row (step 6), and starts the services. Where the configuration does
+not load, the installer says which of these files it could not write and
+why, as `garrison check-config` would.
 
 ## 6. Publish through nginx
 
