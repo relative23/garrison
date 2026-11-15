@@ -345,6 +345,11 @@ Notable changes for operators and users. The format follows
   cards were OK for what was not looked at. The cards now name what was
   left out and are Partial where they would be OK, and a reading whose
   lists ran out of time is asked again after an hour.
+- **The TLS check says when it leaves endpoints out.** Without endpoints of
+  its own it probes Stalwart's listeners under each mail host, 24 at the
+  most, and left the others out without a word: the card was OK for what
+  it had not probed. It now says how many endpoints there are and is
+  Partial where it would be OK.
 - **The "Switch to Garrison WebUI" row shows only when Garrison says so.**
   The row in the Stalwart WebUI appeared whenever Garrison gave no answer:
   when Garrison could not be reached, answered with an error or the browser

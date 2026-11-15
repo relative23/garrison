@@ -116,7 +116,9 @@ authorities and valid for that name; one that expires within 14 days is a
 warning. Without `endpoints` the check asks Stalwart what to probe: every
 listener that speaks TLS (25 with STARTTLS, 465, 993, 443 and whatever else
 is set up), once under the name of each mail host of Stalwart's domains, of
-the first `max_domains` of them; the card says when Stalwart has more. A
+the first `max_domains` of them; the card says when Stalwart has more. It
+probes 24 such endpoints at the most; where there are more, the card says how
+many and is Partial where it would be OK. A
 listener added later is then checked without a change here, and a
 certificate that does not cover a mail host's name shows as untrusted, which
 is what a sender that honours MTA-STS would find. Listeners that begin in

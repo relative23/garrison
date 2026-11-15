@@ -20,7 +20,18 @@ use super::Endpoint;
 use crate::context::Context;
 use crate::providers::dns::mail_hosts;
 
+/// So many endpoints are probed at the most.
 const MOST: usize = 24;
+
+/// What to probe, and what to say of what is not.
+pub(super) struct Found {
+    pub(super) endpoints: Vec<Endpoint>,
+    /// What to say of Stalwart's domains after the first `max_domains`.
+    pub(super) rest: Option<String>,
+    /// What to say of the endpoints after the first [`MOST`], which are not
+    /// probed and keep the card from being in order.
+    pub(super) cut: Option<String>,
+}
 
 /// A listener as far as it is read.
 #[derive(Debug, Deserialize)]
@@ -69,17 +80,13 @@ pub(super) fn derived(listeners: &[Listener], hosts: &[String]) -> Vec<Endpoint>
             });
         }
     }
-    endpoints.truncate(MOST);
     endpoints
 }
 
 /// What to probe, asked of Stalwart, under the mail hosts of its first
-/// `most` domains, and what to say of the domains after them; why not,
-/// where Stalwart does not say.
-pub(super) fn endpoints(
-    context: &Context<'_>,
-    most: usize,
-) -> Result<(Vec<Endpoint>, Option<String>), String> {
+/// `most` domains, up to [`MOST`] endpoints, and what to say of the rest;
+/// why not, where Stalwart does not say.
+pub(super) fn endpoints(context: &Context<'_>, most: usize) -> Result<Found, String> {
     let key = context
         .native_key
         .as_deref()
@@ -97,11 +104,23 @@ pub(super) fn endpoints(
              stalwart setup` again to let it read them, or name `endpoints`"
         })?;
     let (hosts, rest) = mail_hosts(context, most)?;
-    let endpoints = derived(&listeners, &hosts);
+    let mut endpoints = derived(&listeners, &hosts);
     if endpoints.is_empty() {
         return Err("Stalwart names no mail host with a listener that speaks TLS".to_owned());
     }
-    Ok((endpoints, rest))
+    let cut = (endpoints.len() > MOST).then(|| {
+        format!(
+            "Stalwart's listeners and mail hosts make {} endpoints; only the first {MOST} are \
+             checked.",
+            endpoints.len()
+        )
+    });
+    endpoints.truncate(MOST);
+    Ok(Found {
+        endpoints,
+        rest,
+        cut,
+    })
 }
 
 #[cfg(test)]

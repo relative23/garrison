@@ -359,6 +359,57 @@ fn the_hosts_of_the_first_max_domains_domains_are_probed_and_the_rest_named() {
     }
 }
 
+/// Stalwart's listeners under each mail host are probed up to 24 endpoints;
+/// the card names how many more there are and is not in order for them.
+#[test]
+fn endpoints_after_the_first_24_are_named_and_keep_the_card_from_being_in_order() {
+    use crate::providers::dns::domains_tests::with_stalwart;
+    use garrison_testing::http::{json as answer_json, serve};
+
+    let certificates = certificates();
+    let ports: Vec<u16> = (0..25).map(|_| listener(&certificates, None)).collect();
+    let listed: Vec<Value> = ports
+        .iter()
+        .map(|port| {
+            serde_json::json!({"id": port.to_string(), "protocol": "smtp",
+                "bind": {format!("127.0.0.1:{port}"): true}, "useTls": true, "implicitTls": true})
+        })
+        .collect();
+    let stalwart = serve(vec![
+        answer_json(
+            &serde_json::json!({"methodResponses": [["x:NetworkListener/get", {"list": listed}, "0"]]}),
+        ),
+        answer_json(
+            &serde_json::json!({"methodResponses": [["x:Domain/get", {"list": [
+            {"id": "b0", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 localhost.\n"}
+        ]}, "0"]]}),
+        ),
+    ]);
+    let provider = Tls::new(&crate::testing::table("type = \"tls\""))
+        .unwrap()
+        .with_roots(roots(&certificates));
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = crate::testing::config(directory.path());
+    let runner = crate::testing::Canned(String::new());
+    let context = with_stalwart(&mut config, &runner, &stalwart.url);
+    let observation = provider.collect(&context).unwrap().observations.remove(0);
+    stalwart.requests();
+    let results: Vec<&str> = observation
+        .table
+        .as_ref()
+        .unwrap()
+        .rows
+        .iter()
+        .map(|row| row[1].as_str().unwrap())
+        .collect();
+    assert_eq!(results, ["valid"; 24]);
+    assert_eq!(
+        observation.findings,
+        ["Stalwart's listeners and mail hosts make 25 endpoints; only the first 24 are checked."]
+    );
+    assert_eq!(observation.state, State::Partial);
+}
+
 #[test]
 fn the_observation_reports_each_endpoint() {
     let certificates = certificates();

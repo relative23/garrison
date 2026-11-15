@@ -408,12 +408,12 @@ impl Provider for Tls {
     fn collect(&self, context: &Context<'_>) -> Collected {
         let roots = self.roots.clone().unwrap_or_else(system_roots);
         let found;
-        let mut rest = None;
+        let (mut rest, mut cut) = (None, None);
         let endpoints = if self.endpoints.is_empty() {
             match listeners::endpoints(context, self.max_domains) {
-                Ok((endpoints, left_out)) => {
-                    found = endpoints;
-                    rest = left_out;
+                Ok(derived) => {
+                    found = derived.endpoints;
+                    (rest, cut) = (derived.rest, derived.cut);
                 }
                 Err(reason) => return self.unknown(context, &reason),
             }
@@ -422,14 +422,21 @@ impl Provider for Tls {
             &self.endpoints
         };
         let Probes {
-            state,
+            mut state,
             rows,
             mut findings,
             lowest,
         } = probe_each(endpoints, &roots, context);
         // The hosts of the domains left out are not probed; the state is that
-        // of the endpoints that are.
+        // of the endpoints that are. The endpoints after the first 24 are not
+        // probed either, and keep the card from being in order.
         findings.extend(rest);
+        if let Some(cut) = cut {
+            findings.push(cut);
+            if state == State::Ok {
+                state = State::Partial;
+            }
+        }
         let column = |label: &str, format| Column {
             label: label.to_owned(),
             format,
