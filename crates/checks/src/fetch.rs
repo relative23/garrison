@@ -26,6 +26,8 @@ use flate2::read::GzDecoder;
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 
+use crate::timed::Timed;
+
 /// One step waits this long at most: the lookup, the connection, one read
 /// or write.
 const TIMEOUT: Duration = Duration::from_secs(8);
@@ -111,63 +113,6 @@ fn split(url: &str) -> Result<(bool, String, u16, String), String> {
     Ok((secure, host.to_owned(), port, path.to_owned()))
 }
 
-/// A connection whose every read and write must be done by `until`.
-#[derive(Debug)]
-pub struct Timed {
-    stream: TcpStream,
-    until: Instant,
-}
-
-impl Timed {
-    /// How long the next step may wait; an error once the time is up.
-    fn patience(&self) -> std::io::Result<Duration> {
-        let left = self.until.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "the request was not done in its time",
-            ));
-        }
-        Ok(left.min(TIMEOUT))
-    }
-
-    /// A step that waited out its time says so in words: the system's own
-    /// error for it reads "Resource temporarily unavailable".
-    fn waited<T>(&self, step: std::io::Result<T>) -> std::io::Result<T> {
-        use std::io::ErrorKind::{TimedOut, WouldBlock};
-        step.map_err(|error| match error.kind() {
-            WouldBlock | TimedOut => match self.patience() {
-                Ok(_) => std::io::Error::new(
-                    TimedOut,
-                    format!("the server was silent for {} s", TIMEOUT.as_secs()),
-                ),
-                Err(over) => over,
-            },
-            _ => error,
-        })
-    }
-}
-
-impl Read for Timed {
-    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        self.stream.set_read_timeout(Some(self.patience()?))?;
-        let read = self.stream.read(buffer);
-        self.waited(read)
-    }
-}
-
-impl Write for Timed {
-    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        self.stream.set_write_timeout(Some(self.patience()?))?;
-        let written = self.stream.write(data);
-        self.waited(written)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.stream.flush()
-    }
-}
-
 /// The addresses of `host`, asked of the system on a thread of its own: the
 /// system's lookup has no time limit, and a resolver that does not answer
 /// would hold the caller for as long as its own configuration says.
@@ -200,7 +145,7 @@ fn connect(host: &str, port: u16, until: Instant) -> Result<Timed, String> {
             return Err(format!("{host}:{port}: not reached in the request's time"));
         }
         match TcpStream::connect_timeout(&target, patience) {
-            Ok(stream) => return Ok(Timed { stream, until }),
+            Ok(stream) => return Ok(Timed::new(stream, until, TIMEOUT)),
             Err(error) => last = format!("{host}:{port}: {error}"),
         }
     }

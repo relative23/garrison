@@ -1,6 +1,7 @@
 //! What every check is built from: the `Provider` contract and its context,
 //! the options of a `[[providers]]` table, commands with a time limit, HTTPS
-//! and DNS clients, answers that are kept between runs, and value helpers.
+//! and DNS clients, connections with a time for all of an exchange, answers
+//! that are kept between runs, and value helpers.
 //! The checks themselves live in the `garrison-checks-*` crates, and
 //! `garrison-collector` runs them.
 //!
@@ -13,6 +14,7 @@ pub mod dns;
 pub mod fetch;
 pub mod kept;
 pub mod options;
+pub mod timed;
 pub mod values;
 
 #[cfg(any(test, feature = "testing"))]
