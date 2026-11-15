@@ -3,6 +3,8 @@
 
 use std::time::{Duration, Instant};
 
+use garrison_core::observations::{Observation, State};
+
 use super::tests::{Zone, address, mail_host, pointer, provider, rows};
 use super::*;
 use crate::context::Deadline;

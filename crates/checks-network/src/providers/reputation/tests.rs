@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, Instant};
 
+use garrison_core::observations::{Observation, State};
 use garrison_core::time;
+use serde_json::json;
 
 use super::*;
 use crate::providers::dns::tests::{guessable, resolver as stand_in};
