@@ -171,6 +171,12 @@ fn write_secret(path: &Path, value: &str) -> Result<(), String> {
     atomic_write(path, format!("{value}\n").as_bytes(), 0o600).map_err(|error| error.to_string())
 }
 
+/// Whether the file at `path` holds something: an empty one, as the
+/// installer keeps where setup wrote none, holds no credential.
+fn holds(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0)
+}
+
 /// Register Garrison as an OAuth client of Stalwart.
 ///
 /// Sign-in uses a client ID URL. Stalwart accepts such IDs from any website
@@ -179,12 +185,6 @@ fn write_secret(path: &Path, value: &str) -> Result<(), String> {
 /// It may only return to the callback, gets no service such as mail (sign-in
 /// only) and no grant but the authorization code: Stalwart allows a client a
 /// refresh token unless told otherwise, and Garrison never asks for one.
-/// Whether the file at `path` holds something: an empty one, as the
-/// installer keeps where setup wrote none, holds no credential.
-fn holds(path: &Path) -> bool {
-    std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0)
-}
-
 fn ensure_oauth_client(admin: &Admin, config: &Config) -> Result<String, String> {
     let origin = &config.deployment.public_origin;
     let client_id = garrison_web::app::client_id(origin);
