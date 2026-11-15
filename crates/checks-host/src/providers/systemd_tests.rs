@@ -63,6 +63,19 @@ fn an_alias_shows_the_state_of_the_unit_it_names() {
         &json!("active (running)")
     );
     assert_eq!(observations[0].findings, Vec::<String>::new());
+    // The alias's card names the unit it stands for; the others stand for
+    // themselves.
+    assert_eq!(
+        value_of(&observations[0], "Alias of"),
+        &json!("chrony.service")
+    );
+    for unit in &observations[1..] {
+        assert!(
+            unit.fields.iter().all(|field| field.label != "Alias of"),
+            "{}",
+            unit.id
+        );
+    }
 }
 
 /// Fails as a systemctl that is not there does.

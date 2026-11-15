@@ -319,6 +319,10 @@ impl Systemd {
                 ),
             ),
         ];
+        // An alias is answered as the unit it stands for: the card says which.
+        if let Some(named) = get("Id").filter(|id| !id.is_empty() && *id != unit.name) {
+            fields.push(Field::text("Alias of", named));
+        }
         if timer {
             fields.extend([
                 Field::text(

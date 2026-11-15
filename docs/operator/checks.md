@@ -25,7 +25,7 @@ observation the checks report is in [observation ids](observations.md).
 |---|---|---|
 | `host` | `disk_path`, `modules` | Memory, load, disk, uptime |
 | `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path`, `firewall_units`, `modules` | What the host needs from its operator; see below |
-| `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; an alias, such as `sshd.service`, shows the unit it names. Timers show their schedule and next run. For one-shot jobs see below |
+| `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; an alias, such as `sshd.service`, shows the state of the unit it names and names that unit ("Alias of"). Timers show their schedule and next run. For one-shot jobs see below |
 | `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `max_domains` (20, at most 100), `modules` | Certificate validity per endpoint; see below |
 | `mail-flow` | `checks` (default: all of `spam`, `milter`, `authentication`, `tls`) | A week of the recorded events in numbers; see below |
 | `stalwart` | `milter_host`, `milter_port`, `max_accounts` | Spam settings, classifier, milter, queue, mailbox storage, running version |

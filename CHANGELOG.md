@@ -330,7 +330,8 @@ Notable changes for operators and users. The format follows
   such as `sshd.service` where the unit is `ssh.service`, under the name of
   the unit it stands for, and the check looked for the answer under the
   alias: such an entry stayed Unknown, without a reason. Each entry now
-  takes the answer that lists it among the unit's names. A unit that
+  takes the answer that lists it among the unit's names, and its card names
+  the unit it stands for ("Alias of"). A unit that
   systemd gives no answer for, and every unit while `systemctl` cannot be
   run, is Unknown and says why.
 - **Only a blocklist's own answer is a listing.** Any address a resolver
