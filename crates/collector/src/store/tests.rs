@@ -324,6 +324,41 @@ fn a_host_that_is_off_every_night_still_has_its_history_cleaned_up() {
     );
 }
 
+/// The clock goes back an hour, and the collector runs through that hour a
+/// second time. Each minute it passes again holds the increases of both
+/// times, so that the history loses no event, and the later reading of each
+/// gauge; the step back itself counts nothing.
+#[test]
+fn the_minutes_a_clock_passes_again_hold_both_times() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("status.sqlite");
+    let mut store = StatusStore::open(&path, 90).unwrap();
+    let mut delivered = 0.0;
+    for (load, minute) in (0..=60)
+        .map(|minute| (1.0, minute))
+        .chain((0..=60).map(|minute| (2.0, minute)))
+    {
+        delivered += 1.0;
+        let gauges = BTreeMap::from([("load_1m".to_owned(), load)]);
+        store
+            .write(
+                T0 + minute * 60,
+                &snapshot(""),
+                &gauges,
+                &counters(delivered),
+            )
+            .unwrap();
+    }
+    let db = reading(&path, Duration::from_secs(2)).unwrap().unwrap();
+    let result = json!(history(&db, T0, T0 + 61 * 60, 61).unwrap());
+    // 122 readings, 120 steps of a minute between them.
+    assert_eq!(result["totals"]["delivery_completed"], json!(120.0));
+    assert_eq!(result["points"][30]["delivery_completed"], json!(2.0));
+    assert_eq!(result["points"][30]["load_1m"], json!(2.0));
+    assert_eq!(result["sampledMinutes"], json!(61));
+    assert_eq!(result["counterResets"], json!(0));
+}
+
 /// What a damaged or hand-edited status database holds is read as data: a
 /// reading at a time that is none stops no run.
 #[test]

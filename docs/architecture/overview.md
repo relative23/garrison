@@ -111,7 +111,9 @@ most ten minutes from one run to the next moves on, and a longer one, a
 pause or a jump, does not. A run's own time is taken again once it is within
 ten minutes of that, or once the collector has run at the new time for a
 day. So a clock that jumps ahead takes no history with it, and no pattern of
-pauses stops the clean-up.
+pauses stops the clean-up. A clock that goes back makes the collector write
+minutes a second time: such a minute then holds the increases of both times,
+so that the history loses no event, and the later reading of each gauge.
 The web service filters observations by the modules the user may see. Every
 observation has an id that notifications and operators' scripts rely on, so
 the ids are kept like an interface ([observation ids](../operator/observations.md)).
