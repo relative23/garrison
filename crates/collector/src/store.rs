@@ -196,8 +196,12 @@ fn counter(db: &Connection, name: &str, now: i64, minute: i64, value: f64) -> ru
         return Ok(());
     };
     // Also a second run within the same second: what the counter rose by
-    // since the reading before still happened.
-    if !(0..=MAX_COUNTER_INTERVAL).contains(&(now - at)) {
+    // since the reading before still happened. A reading at a time that is
+    // none, in a damaged database, is no interval either.
+    if !now
+        .checked_sub(at)
+        .is_some_and(|step| (0..=MAX_COUNTER_INTERVAL).contains(&step))
+    {
         return Ok(());
     }
     let increase = if value < last {

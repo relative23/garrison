@@ -68,7 +68,8 @@ fn start(transaction: &Transaction<'_>, newest: i64) -> rusqlite::Result<Option<
         transaction.query_row("SELECT min(ts) FROM samples WHERE ts >= ?", [from], |row| {
             row.get(0)
         })?;
-    let oldest = oldest.map(|at| at - at.rem_euclid(STEP));
+    // A time that is none, in a damaged database, is read as data.
+    let oldest = oldest.map(|at| at.saturating_sub(at.rem_euclid(STEP)));
     if kept.is_some_and(|at| at > newest) {
         mark(transaction, oldest.unwrap_or(newest))?;
     }
@@ -83,7 +84,9 @@ pub(super) fn thin(transaction: &mut Transaction<'_>, minute: i64) -> rusqlite::
         return Ok(());
     };
     let horizon = minute - FINE;
-    let to = (from + MOST).min(horizon - horizon.rem_euclid(STEP));
+    let to = from
+        .saturating_add(MOST)
+        .min(horizon - horizon.rem_euclid(STEP));
     if to <= from {
         return Ok(());
     }

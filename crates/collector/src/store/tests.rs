@@ -324,6 +324,55 @@ fn a_host_that_is_off_every_night_still_has_its_history_cleaned_up() {
     );
 }
 
+/// What a damaged or hand-edited status database holds is read as data: a
+/// reading at a time that is none stops no run.
+#[test]
+fn a_reading_at_a_time_that_is_none_stops_no_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("status.sqlite");
+    let mut store = StatusStore::open(&path, 90).unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO counters VALUES('delivery_completed', ?, 5.0)",
+            [i64::MIN],
+        )
+        .unwrap();
+    // The run before had a reading of no time: this one counts nothing.
+    store
+        .write(T0, &snapshot(""), &BTreeMap::new(), &counters(7.0))
+        .unwrap();
+    store
+        .write(T0 + 60, &snapshot(""), &BTreeMap::new(), &counters(9.0))
+        .unwrap();
+    let increases: Vec<(i64, f64)> = store
+        .db
+        .prepare("SELECT ts, value FROM samples ORDER BY ts")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(increases, [(T0 + 60, 2.0)]);
+}
+
+/// Nor does a sample at the end of time, the only one a run of no samples
+/// of its own finds to thin.
+#[test]
+fn a_sample_at_the_end_of_time_stops_no_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = StatusStore::open(&directory.path().join("status.sqlite"), 90).unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO samples(name, ts, value, kind) VALUES('far', ?, 1.0, 'gauge')",
+            [i64::MAX - 100],
+        )
+        .unwrap();
+    run_at(&mut store, T0);
+    assert_eq!(samples_from(&store, i64::MAX - 100), 1);
+}
+
 #[test]
 fn a_stored_document_that_is_no_snapshot_is_an_error() {
     let directory = tempfile::tempdir().unwrap();

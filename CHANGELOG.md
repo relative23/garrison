@@ -301,6 +301,10 @@ Notable changes for operators and users. The format follows
   yet counted. Where a clock that ran ahead had carried the thinning past
   the present, it takes up again from the oldest sample, so the minutes
   written since, by this release or an earlier one, are thinned as well.
+- **A status database with a time that is none no longer stops every
+  collection run.** A counter's reading or a sample at a time no clock
+  gives, in a database that was edited by hand or damaged, made each run
+  fail before it stored anything. Such a time now counts as no interval.
 - **A `systemd` entry may name an alias.** systemd answers for an alias,
   such as `sshd.service` where the unit is `ssh.service`, under the name of
   the unit it stands for, and the check looked for the answer under the
