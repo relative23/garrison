@@ -307,6 +307,13 @@ Notable changes for operators and users. The format follows
   yet counted. Where a clock that ran ahead had carried the thinning past
   the present, it takes up again from the oldest sample, so the minutes
   written since, by this release or an earlier one, are thinned as well.
+- **Two collection runs at once no longer count events twice.** A
+  `garrison collect` started by hand beside the timer's run could read
+  Stalwart's counters after it and store before it, and the next run
+  counted the deliveries, sign-ins and other events between the two
+  readings a second time. One run at a time now holds the collector's
+  state directory: a run that finds another under way ends at once without
+  collecting, says so in its journal and exits as a success.
 - **A status database with a time that is none no longer stops every
   collection run.** A counter's reading or a sample at a time no clock
   gives, in a database that was edited by hand or damaged, made each run

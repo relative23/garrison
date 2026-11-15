@@ -345,10 +345,16 @@ fn dispatch(task: Task, config: &Config, path: &Path) -> u8 {
         Task::Ingest => service("ingest", garrison_ingest::run(config, &credentials(config))),
         Task::Collect => {
             let runner = garrison_collector::SystemRunner;
-            service(
-                "collector",
-                garrison_collector::collect(config, &credentials(config), &runner).map(drop),
-            )
+            match garrison_collector::collect(config, &credentials(config), &runner) {
+                // No failure: the run under way stores what this one would.
+                Err(garrison_collector::run::Error::Busy) => {
+                    log::warn!(
+                        "Another collection run is under way; this one ends without collecting"
+                    );
+                    0
+                }
+                collected => service("collector", collected.map(drop)),
+            }
         }
         Task::Broker => service("broker", garrison_broker::run(config, credentials(config))),
         Task::Milter => service("milter", garrison_milter::run(config)),

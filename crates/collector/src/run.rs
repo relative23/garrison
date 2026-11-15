@@ -5,9 +5,11 @@
 //! run.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::fs::{self, File, TryLockError};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use std::{fmt, io};
 
 use garrison_core::config::{Config, ConfigError, Database};
 use garrison_core::credentials::Credentials;
@@ -55,6 +57,33 @@ pub enum Error {
     Config(#[from] ConfigError),
     #[error("status database: {0}")]
     Store(#[from] SqliteError),
+    /// Another run holds the state directory: this one collects nothing.
+    #[error("another collection run is under way")]
+    Busy,
+    #[error("the collector's state directory {}: {}", .0.display(), .1)]
+    Directory(PathBuf, io::Error),
+}
+
+/// Held for the whole of a run: a second run at the same time, such as a
+/// `garrison collect` by hand beside the timer's, ends without collecting.
+/// Two runs whose readings cross would count a counter's events twice: the
+/// one that read first and writes last leaves its older reading behind.
+/// The lock is the state directory's own, so that root and the collector's
+/// user share it without a file that belongs to either; the kernel lets it
+/// go when the run ends, however it ends.
+fn alone(database: &Path) -> Result<File, Error> {
+    let directory = database
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let failed = |error| Error::Directory(directory.to_owned(), error);
+    fs::create_dir_all(directory).map_err(failed)?;
+    let held = File::open(directory).map_err(failed)?;
+    match held.try_lock() {
+        Ok(()) => Ok(held),
+        Err(TryLockError::WouldBlock) => Err(Error::Busy),
+        Err(TryLockError::Error(error)) => Err(failed(error)),
+    }
 }
 
 fn native_key(config: &Config, credentials: &Credentials) -> Option<String> {
@@ -218,6 +247,7 @@ pub fn collect_within(
     now: Timestamp,
     time: Time,
 ) -> Result<Snapshot, Error> {
+    let _alone = alone(&config.database(Database::Status))?;
     let run = Deadline::within(time.run);
     let mut store = StatusStore::open(
         &config.database(Database::Status),

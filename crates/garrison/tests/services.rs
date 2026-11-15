@@ -221,3 +221,33 @@ fn one_collection_run_writes_a_snapshot() {
     let document: Value = serde_json::from_str(&document).unwrap();
     assert_eq!(document["observations"][0]["id"], "host.resources");
 }
+
+/// A run beside one under way ends at once and collects nothing. That is no
+/// failure: the run under way stores its snapshot, so a timer's run that
+/// meets one started by hand leaves no failed unit behind.
+#[test]
+fn a_collection_run_beside_one_under_way_ends_without_collecting() {
+    let directory = prepared(free_port(), free_port());
+    let state = directory.path().join("collector");
+    std::fs::create_dir_all(&state).unwrap();
+    // The run under way holds the collector's state directory.
+    let under_way = std::fs::File::open(&state).unwrap();
+    under_way.try_lock().unwrap();
+    let (mut child, _) = start(directory.path(), "collect");
+    let mut said = String::new();
+    let stderr = child.stderr.take().unwrap();
+    let status = ended(child, "the collection run did not end");
+    std::io::Read::read_to_string(&mut { stderr }, &mut said).unwrap();
+    assert!(status.success(), "{said}");
+    assert!(
+        said.contains("Another collection run is under way; this one ends without collecting"),
+        "{said}"
+    );
+    assert!(!state.join("status.sqlite").exists());
+    // Once that run has ended, the next one collects.
+    drop(under_way);
+    std::fs::remove_file(directory.path().join("notify")).unwrap();
+    let (child, _) = start(directory.path(), "collect");
+    assert!(ended(child, "the collection run did not end").success());
+    assert!(state.join("status.sqlite").exists());
+}

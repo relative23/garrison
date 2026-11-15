@@ -71,11 +71,11 @@ impl Provider for Probe {
     }
 }
 
-fn private(path: &std::path::Path, data: &str) {
+fn private(path: &Path, data: &str) {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, data).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, data).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
 }
 
 #[test]
@@ -343,4 +343,78 @@ fn a_check_that_uses_up_the_runs_time_costs_only_the_checks_after_it() {
         ids(&all),
         ["first.done", "slow.done", "late.done", "later.done"]
     );
+}
+
+/// A counter's reading, and what its run waits for once it has read it.
+struct Reading {
+    value: f64,
+    read: Option<std::sync::mpsc::Sender<()>>,
+    until: Option<Mutex<std::sync::mpsc::Receiver<()>>>,
+}
+
+impl Provider for Reading {
+    fn name(&self) -> &'static str {
+        "reading"
+    }
+
+    fn collect(&self, _: &Context<'_>) -> Collected {
+        if let Some(read) = &self.read {
+            read.send(()).unwrap();
+        }
+        if let Some(until) = &self.until {
+            until.lock().unwrap().recv().unwrap();
+        }
+        let mut report = Report::default();
+        report.counters.insert("delivered".to_owned(), self.value);
+        Ok(report)
+    }
+}
+
+/// Two runs at once, such as one by hand beside the timer's, would both
+/// count: the one that read the counter first and writes last leaves its
+/// older reading behind, and the next run counts the events between the
+/// two readings a second time.
+#[test]
+fn a_run_beside_one_under_way_counts_no_event_twice() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = crate::testing::config(directory.path());
+    let credentials = Credentials::new(directory.path().join("credentials"));
+    let start = now().as_second();
+    let run = |value: f64, at: i64, read, until| {
+        let reading = Reading { value, read, until };
+        let providers = vec![Box::new(reading) as Box<dyn Provider>];
+        let at = Timestamp::from_second(start + at).unwrap();
+        collect_from(
+            &providers,
+            &config,
+            &credentials,
+            &Canned(String::new()),
+            at,
+        )
+    };
+    run(90.0, 0, None, None).unwrap();
+    // The timer's run reads 100 and is still under way when one by hand
+    // reads 110.
+    let (read, has_read) = std::sync::mpsc::channel();
+    let (go, until) = std::sync::mpsc::channel();
+    let (first, beside) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| run(100.0, 60, Some(read), Some(Mutex::new(until))));
+        has_read.recv().unwrap();
+        let beside = run(110.0, 70, None, None);
+        go.send(()).unwrap();
+        (first.join().unwrap(), beside)
+    });
+    first.unwrap();
+    run(120.0, 120, None, None).unwrap();
+    // The counter rose from 90 to 120: thirty events, each counted once.
+    let stored = rusqlite::Connection::open(config.database(Database::Status)).unwrap();
+    let counted: f64 = stored
+        .query_row(
+            "SELECT total(value) FROM samples WHERE name = 'delivered'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(matches!(beside, Err(Error::Busy)), "{beside:?}");
+    assert_eq!(counted, 30.0);
 }
