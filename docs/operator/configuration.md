@@ -54,11 +54,13 @@ each of the four sections). Keep the defaults: systemd makes these
 directories, and each service may write only in its own. To keep the data on
 another disk, mount it at `/var/lib/garrison`. `check-config` warns about a
 state directory, `credentials_directory` or `broker.socket` that the units do
-not follow, and says what to do.
+not follow, and says what to do; so do the installer, as it starts the
+services, and `garrison doctor`.
 
 The installer writes `web.port` into nginx's include,
 `/etc/nginx/snippets/garrison.conf`, and into the SELinux module that lets
-nginx reach it; `check-config` warns while the include names another port.
+nginx reach it; `check-config` and `garrison doctor` warn while the include
+names another port.
 After changing the port, run the installer again. Without it, restart
 `garrison-web` and write the include anew; the SELinux module then moves with
 the next run of the installer:

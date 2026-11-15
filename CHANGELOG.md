@@ -328,6 +328,13 @@ Notable changes for operators and users. The format follows
   `check-config`, and with it the installer, now refuse both and give the
   name to use; `garrison doctor` reports them, and `notify-test` sends
   nothing on a channel whose secret the collector would not have.
+- **What the units do not follow is said during an upgrade and by
+  `garrison doctor`.** `check-config` warns of a state directory,
+  `credentials_directory` or `broker.socket` that the units do not follow,
+  and of an nginx include for another port, but the installer showed what
+  check-config said only when it failed, and doctor did not look. The
+  installer now passes its warnings on as it starts the services, and
+  doctor lists each setting as a warning with what to do.
 - **Another `broker.policy` is followed everywhere.** The broker and
   `garrison access` used the policy the setting names, but the installer
   counted an installation as configured only with

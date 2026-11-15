@@ -118,6 +118,16 @@ fn summary(findings: &[Finding]) -> String {
     }
 }
 
+/// The settings that the units or nginx's include do not follow, as
+/// check-config warns of them.
+fn unfollowed(config: &Config) -> Vec<Finding> {
+    let include = crate::unfollowed::installed_include();
+    crate::unfollowed::settings(config, include.as_deref())
+        .into_iter()
+        .map(|setting| Finding::warn(setting.what, setting.fix))
+        .collect()
+}
+
 /// The secrets the units would not hand to their services, and whether the
 /// notification channels' are all handed to the collector.
 fn secrets(config: &Config) -> (Vec<Finding>, bool) {
@@ -145,6 +155,7 @@ pub(crate) fn run(config: &Config) -> u8 {
     let mut findings = origins(config);
     findings.extend(host::checks(config));
     findings.extend(milter::checks(config, &config.credentials_directory));
+    findings.extend(unfollowed(config));
     let (unloaded, channels) = secrets(config);
     findings.extend(unloaded);
     // A channel whose secret the collector would not have is not judged by
@@ -163,6 +174,32 @@ pub(crate) fn run(config: &Config) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the units do not follow is a warning with what to do, as in
+    /// check-config: the test configuration's own folders are not the units'.
+    #[test]
+    fn a_setting_the_units_do_not_follow_is_a_warning() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        let found = unfollowed(&config);
+        assert!(found.iter().all(|finding| finding.level == Level::Warn));
+        let said: Vec<&str> = found.iter().map(|finding| finding.what.as_str()).collect();
+        for start in [
+            "web.state_directory is ",
+            "collector.state_directory is ",
+            "credentials_directory is ",
+            "broker.socket is ",
+        ] {
+            assert!(said.iter().any(|what| what.starts_with(start)), "{said:?}");
+        }
+        assert!(
+            found[0]
+                .line()
+                .contains("Remove the setting. To keep Garrison's data on another disk"),
+            "{}",
+            found[0].line()
+        );
+    }
 
     #[test]
     fn a_secret_the_units_do_not_hand_over_fails_and_no_channel_is_judged_by_it() {

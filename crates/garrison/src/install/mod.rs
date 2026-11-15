@@ -253,8 +253,11 @@ The command is available as {command}.",
 
 /// The release's own `check-config` against the system configuration. What
 /// it said goes to standard error with the installer's own reason, so that
-/// a script that keeps only that stream learns which setting failed.
-fn check_config(release: &Path) -> Step {
+/// a script that keeps only that stream learns which setting failed. Where
+/// it passes, its warnings, such as a setting the units do not follow, are
+/// passed on with `warnings`: the installer's output is where an operator
+/// reads them during an upgrade.
+fn check_config(release: &Path, warnings: bool) -> Step {
     let check = cli(release, &["check-config"])?;
     if !check.status.success() {
         crate::complain(&format!(
@@ -263,6 +266,10 @@ fn check_config(release: &Path) -> Step {
             String::from_utf8_lossy(&check.stderr)
         ));
         return Err("check-config failed".into());
+    }
+    let said = String::from_utf8_lossy(&check.stderr);
+    if warnings && !said.trim().is_empty() {
+        crate::complain(said.trim_end());
     }
     Ok(())
 }
@@ -288,7 +295,7 @@ fn keep_secret_files() -> Step {
 }
 
 fn start(release: &Path) -> Step {
-    check_config(release)?;
+    check_config(release, true)?;
     keep_secret_files()?;
     reset_failed();
     // Only what this release ships: an older one has fewer units.
@@ -364,8 +371,9 @@ fn install() -> Step {
         // The installer sets the policy's owner and mode anyway; the check must
         // not refuse what it is about to correct.
         protect_policy()?;
-        // A configuration the new release refuses leaves the running one alone.
-        check_config(&release)
+        // A configuration the new release refuses leaves the running one
+        // alone. Its warnings follow as it starts.
+        check_config(&release, false)
             .map_err(|error| format!("{error}; the running release was not touched"))?;
         backup = Some(backup_state(&current, old.as_ref() != Some(&release))?);
         // Compared with the state --restore-state returns to, the one from
