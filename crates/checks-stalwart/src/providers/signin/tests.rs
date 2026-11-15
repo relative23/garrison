@@ -5,7 +5,7 @@ use garrison_testing::http::{answer, serve};
 use garrison_core::time;
 
 use super::*;
-use crate::context::Memory;
+use crate::context::{Deadline, Memory};
 use crate::fetch::roots;
 use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 
@@ -47,7 +47,7 @@ fn served(public: Vec<String>, own: Vec<String>) -> (Examined, String, String) {
     let own = serve(own);
     let page = format!("{}/login", public.url);
     let stalwart = format!("{}/login", own.url);
-    let examined = examine(&page, &stalwart, "client_id=x", &roots());
+    let examined = examine(&page, &stalwart, "client_id=x", &roots(), Deadline::NONE);
     public.requests();
     own.requests();
     (examined, page, stalwart)
@@ -70,6 +70,7 @@ fn stalwarts_page_that_gets_its_files_is_in_order() {
         &format!("{}/login", own.url),
         "client_id=x",
         &roots(),
+        Deadline::NONE,
     );
     assert_eq!(examined.state, State::Ok, "{examined:?}");
     assert_eq!(
@@ -209,7 +210,7 @@ fn without_stalwarts_own_answer_the_page_is_not_called_in_order() {
             (format!("{}/login", server.url), Some(server))
         };
         let page = format!("{}/login", public.url);
-        let examined = examine(&page, &stalwart, "a=b", &roots());
+        let examined = examine(&page, &stalwart, "a=b", &roots(), Deadline::NONE);
         assert_eq!(examined.state, State::Unknown);
         assert_eq!(
             examined.what,
@@ -229,7 +230,13 @@ fn without_stalwarts_own_answer_the_page_is_not_called_in_order() {
 fn a_page_that_is_not_there() {
     let server = serve(vec![answer(502, "bad gateway")]);
     let page = format!("{}/login", server.url);
-    let examined = examine(&page, "http://127.0.0.1:9/login", "a=b", &roots());
+    let examined = examine(
+        &page,
+        "http://127.0.0.1:9/login",
+        "a=b",
+        &roots(),
+        Deadline::NONE,
+    );
     assert_eq!(examined.state, State::Failed);
     assert_eq!(
         examined.what,
@@ -244,6 +251,7 @@ fn a_page_that_is_not_there() {
         "http://127.0.0.1:9/login",
         "a=b",
         &roots(),
+        Deadline::NONE,
     );
     assert_eq!(examined.state, State::Failed);
 }
@@ -261,7 +269,13 @@ fn a_file_asked_for_twice_is_asked_once_and_only_so_many_are_asked() {
     let public = serve(responses);
     let own = serve(vec![html(&tags)]);
     let page = format!("{}/login", public.url);
-    let examined = examine(&page, &format!("{}/login", own.url), "a=b", &roots());
+    let examined = examine(
+        &page,
+        &format!("{}/login", own.url),
+        "a=b",
+        &roots(),
+        Deadline::NONE,
+    );
     assert_eq!(
         examined.what,
         format!("{page} shows Stalwart's sign-in page, which gets the {MOST} files it loads")

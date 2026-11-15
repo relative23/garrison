@@ -87,13 +87,14 @@ Notable changes for operators and users. The format follows
 ### Fixed
 
 - **A check that asks many times stops when the run's time is up.** The
-  TLS and reputation checks went on asking after the run's 70 seconds: five
-  seconds for each listener that did not answer, three for each question a
-  resolver let pass, and a listener that sent a byte now and then held one
-  probe for as long as it liked. systemd then ended the run, and nothing of
-  it was stored. They now ask only while the run has time and say what they
-  left, an endpoint "not checked" or a list "not asked", and are not in
-  order for it; a TLS probe has ten seconds in all, and a reputation
+  TLS, reputation and sign-in page checks went on asking after the run's 70
+  seconds: five seconds for each listener that did not answer, three for
+  each question a resolver let pass, up to twenty for each file of the
+  sign-in page, and a listener that sent a byte now and then held one probe
+  for as long as it liked. systemd then ended the run, and nothing of it
+  was stored. They now ask only while the run has time and say what they
+  left, an endpoint "not checked", a list or a file "not asked", and are
+  not in order for it; a TLS probe has ten seconds in all, and a reputation
   reading cut short is asked again after an hour.
 - **A tab follows what changes beside it.** The page that says the session
   has ended stayed so after a sign-in in another tab, a sign-out reached the

@@ -22,7 +22,7 @@ use garrison_core::observations::{Evidence, Field, Format, Observation, Required
 use garrison_stalwart::sign_in_page::{self, Kind};
 use serde::{Deserialize, Serialize};
 
-use crate::context::{Collected, Context, Provider, Report};
+use crate::context::{Collected, Context, Deadline, Provider, Report};
 use crate::fetch::{self, Roots, get, origin};
 use crate::kept::{Kept, keep, recalled};
 use crate::options::{Checked, Options};
@@ -34,6 +34,8 @@ const MOST: usize = 12;
 const EVERY: i64 = 300;
 /// Where the status database keeps the last page in order.
 const KEPT: &str = "signin.page";
+/// Why an examination stopped before it had asked everything.
+const RUN_OVER: &str = "the collection run's time was used up";
 
 /// What an examination of the page found.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,6 +56,15 @@ impl Examined {
             state: State::Failed,
             what,
             fix: Some(fix.into()),
+            files: None,
+        }
+    }
+
+    fn unknown(what: String) -> Self {
+        Examined {
+            state: State::Unknown,
+            what,
+            fix: None,
             files: None,
         }
     }
@@ -103,9 +114,15 @@ fn listed(names: &[String]) -> String {
     }
 }
 
-/// Asks for every file of its own host that the page at `page` loads: how
-/// many there are, and those that did not come back as what they are.
-fn files_of(page: &str, html: &str, roots: &Roots) -> (usize, Vec<String>) {
+/// Asks for every file of its own host that the page at `page` loads, while
+/// the run has time: how many there are, those that did not come back as
+/// what they are, and how many were not asked.
+fn files_of(
+    page: &str,
+    html: &str,
+    roots: &Roots,
+    deadline: Deadline,
+) -> (usize, Vec<String>, usize) {
     let mut files: Vec<(Kind, String)> = Vec::new();
     for (kind, reference) in sign_in_page::files(html) {
         if let Some(address) = sign_in_page::address(page, &reference)
@@ -116,36 +133,41 @@ fn files_of(page: &str, html: &str, roots: &Roots) -> (usize, Vec<String>) {
     }
     files.truncate(MOST);
     let host = origin(page);
-    let broken = files
-        .iter()
-        .filter_map(|(kind, address)| {
-            let path = address.strip_prefix(host).unwrap_or(address);
-            match get(address, roots) {
-                Ok(file)
-                    if file.status == 200
-                        && sign_in_page::media_fits(
-                            *kind,
-                            file.header("content-type").unwrap_or(""),
-                        ) =>
-                {
-                    None
-                }
-                Ok(file) => Some(format!(
-                    "{path} ({}, {})",
-                    file.status,
-                    file.header("content-type").unwrap_or("no content type")
-                )),
-                Err(error) => Some(format!("{path} ({error})")),
-            }
-        })
-        .collect();
-    (files.len(), broken)
+    let (mut broken, mut unasked) = (Vec::new(), 0);
+    for (index, (kind, address)) in files.iter().enumerate() {
+        if deadline.expired() {
+            unasked = files.len() - index;
+            break;
+        }
+        let path = address.strip_prefix(host).unwrap_or(address);
+        match get(address, roots) {
+            Ok(file)
+                if file.status == 200
+                    && sign_in_page::media_fits(
+                        *kind,
+                        file.header("content-type").unwrap_or(""),
+                    ) => {}
+            Ok(file) => broken.push(format!(
+                "{path} ({}, {})",
+                file.status,
+                file.header("content-type").unwrap_or("no content type")
+            )),
+            Err(error) => broken.push(format!("{path} ({error})")),
+        }
+    }
+    (files.len(), broken, unasked)
 }
 
 /// The sign-in page at `page`, asked for as Garrison sends its users there,
 /// held against the page Stalwart serves at `own`, and every file of its own
-/// host that it loads.
-pub fn examine(page: &str, own: &str, query: &str, roots: &Roots) -> Examined {
+/// host that it loads; each asked only while there is time before
+/// `deadline`, and what was not asked is said.
+pub fn examine(page: &str, own: &str, query: &str, roots: &Roots, deadline: Deadline) -> Examined {
+    if deadline.expired() {
+        return Examined::unknown(format!(
+            "Stalwart's sign-in page {page} was not asked: {RUN_OVER}"
+        ));
+    }
     let page_fix = "This address must reach Stalwart; check the proxy rules of the issuer's host.";
     let answer = match get(&format!("{page}?{query}"), roots) {
         Ok(answer) if answer.status == 200 => answer,
@@ -159,6 +181,12 @@ pub fn examine(page: &str, own: &str, query: &str, roots: &Roots) -> Examined {
             return Examined::failed(format!("Stalwart's sign-in page {page}: {error}"), page_fix);
         }
     };
+    if deadline.expired() {
+        return Examined::unknown(format!(
+            "{page} answered, but Stalwart's own page at {own} and the files it loads were not \
+             asked: {RUN_OVER}"
+        ));
+    }
     let stalwart = get(&format!("{own}?{query}"), roots)
         .ok()
         .filter(|stalwart| stalwart.status == 200)
@@ -183,14 +211,31 @@ pub fn examine(page: &str, own: &str, query: &str, roots: &Roots) -> Examined {
             ),
         );
     }
-    let (count, broken) = files_of(page, &answer.body, roots);
+    judged(page, own, &answer.body, compared.as_ref(), roots, deadline)
+}
+
+/// What the files that the page at `page` loads, and whose page it is, make
+/// of a page that answered with `html`.
+fn judged(
+    page: &str,
+    own: &str,
+    html: &str,
+    compared: Option<&Whose>,
+    roots: &Roots,
+    deadline: Deadline,
+) -> Examined {
+    let (count, broken, unasked) = files_of(page, html, roots, deadline);
     let host = origin(page);
+    let left = match unasked {
+        0 => String::new(),
+        more => format!("; {more} more were not asked: {RUN_OVER}"),
+    };
     if !broken.is_empty() {
         return Examined {
             files: Some(count),
             ..Examined::failed(
                 format!(
-                    "Stalwart's sign-in page {page} cannot load {}",
+                    "Stalwart's sign-in page {page} cannot load {}{left}",
                     broken.join(", ")
                 ),
                 format!(
@@ -199,6 +244,15 @@ pub fn examine(page: &str, own: &str, query: &str, roots: &Roots) -> Examined {
                      nothing and nobody can sign in."
                 ),
             )
+        };
+    }
+    if unasked > 0 {
+        return Examined {
+            files: Some(count),
+            ..Examined::unknown(format!(
+                "Of the {count} files the sign-in page at {page} loads, {unasked} were not \
+                 asked: {RUN_OVER}"
+            ))
         };
     }
     let loads = match count {
@@ -242,7 +296,7 @@ pub fn page(deployment: &Deployment) -> String {
 
 /// The page as Garrison's users get it, held against the one Stalwart serves
 /// itself on loopback.
-pub fn check(deployment: &Deployment, roots: &Roots) -> Examined {
+pub fn check(deployment: &Deployment, roots: &Roots, deadline: Deadline) -> Examined {
     examine(
         &page(deployment),
         &format!(
@@ -252,6 +306,7 @@ pub fn check(deployment: &Deployment, roots: &Roots) -> Examined {
         ),
         &sign_in_page::query(&deployment.public_origin),
         roots,
+        deadline,
     )
 }
 
@@ -298,7 +353,7 @@ impl SignIn {
                 answer,
             };
         }
-        let answer = check(context.deployment, &fetch::roots());
+        let answer = check(context.deployment, &fetch::roots(), context.deadline);
         let wait = if answer.state == State::Ok {
             let page = page.to_owned();
             let files = answer.files;
@@ -364,3 +419,5 @@ impl Provider for SignIn {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod time_tests;
