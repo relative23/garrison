@@ -61,9 +61,13 @@ Notable changes for operators and users. The format follows
   address: a `map` and an `X-Forwarded-For` line in nginx, Stalwart's
   "Client IP source" setting, its listeners kept out of reach, and an end
   for a block, which Stalwart, as the client IP source, takes only once
-  its settings are reloaded. It says what a blocked client sees, and that
+  its settings are reloaded. It says what a blocked client sees, at the
+  sign-in page and at each of Stalwart's mail listeners, and that
   Garrison's event history then names each client's own address, an IPv6
-  client's too, for its failed sign-ins and for Stalwart's blocks.
+  client's too, for its failed sign-ins and for Stalwart's blocks. Where
+  Stalwart sees nginx under another address, as behind a published port,
+  the guide has that address allowed in Stalwart, since the clients nginx
+  sees at loopback still count under it and could block it for everyone.
   Garrison names the user's address when it exchanges a sign-in code, but
   not one of loopback, which Stalwart answers with 400. `garrison nginx`
   prints the same `map` and line, as optional ones. See

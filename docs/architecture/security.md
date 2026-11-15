@@ -107,8 +107,13 @@ brokers never repeat a job; pending jobs become "uncertain".
   IPv6 client by its whole address and not by its /64, so a client with
   many addresses of one network meets each limit once for every address
   ([installation](../operator/installation.md#client-addresses-for-stalwarts-limits));
-  a request without the header, such as Garrison's own, counts under the
-  connection's address, and one whose header names a loopback address is
+  a request without the header, such as Garrison's own or one of a client
+  that nginx sees at loopback, which the documented map leaves unnamed,
+  counts under the connection's address. Under one other address, such
+  clients' failed passwords block it, and Stalwart then closes every
+  connection from it, those nginx forwards for any client included, unless
+  that address is among Stalwart's allowed IPs, which neither limits nor
+  blocks it (measured). One whose header names a loopback address is
   refused (400), so Garrison names no such user.
 - Profiles are server-wide; the event history of all domains is visible to
   anyone with the Event history, Deliveries, Sessions or Attacks & bans

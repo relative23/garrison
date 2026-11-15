@@ -319,11 +319,12 @@ network, also those of its IPv6 /64, are neither limited nor blocked with
 it. A blocked client gets 403 for everything of Stalwart's that nginx
 forwards, its sign-in page and the WebUI included, which a browser shows
 as `{"detail":"Forbidden",...}`, and Stalwart closes the connections that
-address opens to its mail listeners too, so a mail program there is
-turned away as well. Garrison's own pages, and a Garrison session begun
-before the block, go on working. Once the duration is over, Stalwart
-answers the address again by itself; its list of blocked IPs goes on
-showing the block, with its end.
+address opens to its mail listeners too, SMTP, submission, IMAP, POP3 and
+ManageSieve, with TLS and without, so a mail program there is turned away
+as well. Garrison's own pages, and a Garrison session begun before the
+block, go on working. Once the duration is over, Stalwart answers the
+address again by itself; its list of blocked IPs goes on showing the
+block, with its end.
 
 Garrison's event history then names each client's own address, for every
 failed sign-in at Stalwart's page and for every block Stalwart makes, in
@@ -334,6 +335,21 @@ connection, nginx's, also with forwarding.
 Garrison names the user's address when it exchanges a sign-in code. Its
 other requests carry a token or its key and count under its own address,
 which Stalwart on this host neither limits nor blocks.
+
+Where Stalwart sees nginx under another address than 127.0.0.1, as in a
+container behind a published port, nginx's map still names no client that
+nginx sees at loopback, such as one through an SSH tunnel to this host:
+Stalwart counts it under nginx's address, as it counts everything that
+reaches it through the published port without a forwarded address. 100
+failed passwords from such clients in a day block nginx's address, and
+Stalwart then closes every connection from it: nginx answers every client
+502, whatever address it forwards, and nothing reaches Stalwart through
+the published port, until the block ends or is removed. Add that address,
+which Stalwart's log names as the `remoteIp` of such requests, under
+Settings → Security → Allowed IPs, then run Management → Actions →
+Blocked IPs list and Server settings: Stalwart then neither limits nor
+blocks it, as it does 127.0.0.1, and still counts each client that nginx
+names under its own address.
 
 ## 7. Check the installation
 
