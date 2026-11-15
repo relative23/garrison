@@ -33,19 +33,27 @@ const BUDGET: Duration = Duration::from_secs(2);
 
 /// The history the queries read, filled once.
 static HISTORY: OnceLock<PathBuf> = OnceLock::new();
+/// The same history with letters beyond ASCII in every event's fields.
+static BEYOND_ASCII: OnceLock<PathBuf> = OnceLock::new();
 /// The history the batches go into; it grows while the benchmark runs.
 static RECEIVER: OnceLock<EventStore> = OnceLock::new();
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 fn main() {
     let directory = tempfile::tempdir().unwrap();
-    let history = directory.path().join("events.sqlite");
-    let store = open(&history);
-    for from in (0..STORED).step_by(1000) {
-        store.ingest(&events(from, 1000), received(STORED)).unwrap();
+    for (name, letters, place) in [
+        ("events.sqlite", "example", &HISTORY),
+        ("beyond-ascii.sqlite", "exämple", &BEYOND_ASCII),
+    ] {
+        let history = directory.path().join(name);
+        let store = open(&history);
+        for from in (0..STORED).step_by(1000) {
+            let batch = events(from, 1000, letters);
+            store.ingest(&batch, received(STORED)).unwrap();
+        }
+        drop(store);
+        place.set(history).unwrap();
     }
-    drop(store);
-    HISTORY.set(history).unwrap();
     RECEIVER
         .set(open(&directory.path().join("receiver.sqlite")))
         .unwrap();
@@ -61,13 +69,14 @@ fn received(index: u64) -> i64 {
 }
 
 /// `count` events from number `from` on, as Stalwart sends them: by turns a
-/// message queued for one of 500 recipients and its delivery.
-fn events(from: u64, count: u64) -> Vec<Value> {
+/// message queued for one of 500 recipients and its delivery, all in the
+/// domain `letters`.test.
+fn events(from: u64, count: u64, letters: &str) -> Vec<Value> {
     (from..from + count)
         .map(|index| {
             let at = time::isoformat(Timestamp::from_second(received(index)).unwrap());
             let queue = index / 2 + 1;
-            let to = [format!("user{}@example.test", queue % 500)];
+            let to = [format!("user{}@{letters}.test", queue % 500)];
             let (kind, data) = if index % 2 == 0 {
                 (
                     "queue.message-queued",
@@ -92,7 +101,7 @@ fn store_a_batch(bencher: Bencher, size: u64) {
     bencher
         .with_inputs(|| {
             let from = NEXT.fetch_add(size, Ordering::Relaxed);
-            (events(from, size), received(from + size))
+            (events(from, size, "example"), received(from + size))
         })
         .bench_local_values(|(batch, at)| {
             let outcome = store.ingest(&batch, at).unwrap();
@@ -102,7 +111,11 @@ fn store_a_batch(bencher: Bencher, size: u64) {
 
 /// One request's query: a reader of its own, as the web service opens it.
 fn events_matching(filter: &Filter) -> Page<EventItem> {
-    let db = reading(HISTORY.get().unwrap(), BUDGET).unwrap().unwrap();
+    events_in(&HISTORY, filter)
+}
+
+fn events_in(history: &OnceLock<PathBuf>, filter: &Filter) -> Page<EventItem> {
+    let db = reading(history.get().unwrap(), BUDGET).unwrap().unwrap();
     list_events(&db, filter).unwrap()
 }
 
@@ -119,6 +132,21 @@ fn search_for_a_recipient() -> Page<EventItem> {
         search: "USER7@example.test".into(),
         ..Filter::default()
     });
+    assert_eq!(page.items.len(), 40);
+    page
+}
+
+/// The same in a history whose every event has letters beyond ASCII, which
+/// take the longer way to capitals.
+#[divan::bench]
+fn search_for_a_recipient_beyond_ascii() -> Page<EventItem> {
+    let page = events_in(
+        &BEYOND_ASCII,
+        &Filter {
+            search: "user7@exämple.test".into(),
+            ..Filter::default()
+        },
+    );
     assert_eq!(page.items.len(), 40);
     page
 }

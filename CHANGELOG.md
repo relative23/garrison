@@ -464,8 +464,8 @@ Notable changes for operators and users. The format follows
   event; it never found a quote or a backslash; and capital letters beyond
   ASCII in the search term were folded where stored ones were not. A search
   now reads the recorded values and the type's name, finds every character
-  as it was written, and treats ASCII letters alike in either case and
-  other letters as written.
+  as it was written, and treats every letter alike in either case, those
+  beyond ASCII too: "müller" finds "MÜLLER", "strasse" finds "Straße".
 - **The event history finds a rare category without reading everything.**
   Choosing a category with few events, such as Security, walked the whole
   history from its newest event and could run into the two seconds a query

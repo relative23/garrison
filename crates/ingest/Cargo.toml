@@ -14,7 +14,8 @@ base64.workspace = true
 garrison-core.workspace = true
 hmac.workspace = true
 log.workspace = true
-rusqlite.workspace = true
+# Functions: the search folds the case of every letter (queries/select.rs).
+rusqlite = { workspace = true, features = ["functions"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

@@ -315,9 +315,9 @@ fn a_search_reads_what_was_recorded_not_how_it_is_stored() {
     assert_eq!(found("said \"no\""), 1);
     assert_eq!(found("twice \\ back"), 1);
     assert_eq!(found("\\\""), 0);
-    // Letters of ASCII match in either case, in the needle and in what is
-    // stored alike; other letters as they are written.
-    assert_eq!(found("müller.EXAMPLE"), 0);
+    // Letters match in either case, those beyond ASCII too, in the needle
+    // and in what is stored alike.
+    assert_eq!(found("müller.EXAMPLE"), 1);
     assert_eq!(found("MÜLLER.EXAMPLE"), 1);
     assert_eq!(found("mÜller.example"), 1);
     // Sessions and deliveries are searched the same way.
@@ -329,6 +329,51 @@ fn a_search_reads_what_was_recorded_not_how_it_is_stored() {
         list_sessions(&db, &filter).unwrap().items.len()
     };
     assert_eq!((sessions("remoteip"), sessions("client.EXAMPLE")), (0, 1));
+}
+
+#[test]
+fn a_search_finds_letters_beyond_ascii_in_either_case() {
+    let directory = tempfile::tempdir().unwrap();
+    drop(store(directory.path(), 100));
+    let db = Connection::open(directory.path().join("events.sqlite")).unwrap();
+    for (id, fields) in [
+        ("a", json!({"from": "Jörg@Exämple.test"})),
+        ("b", json!({"domain": "Straße.example"})),
+        ("c", json!({"reason": "ΟΔΟΣ \"closed\""})),
+    ] {
+        db.execute(
+            "INSERT INTO events(event_id,created_at,received_at,type,category,fields) \
+             VALUES(?,1,1,'smtp.ehlo','smtp',?)",
+            [id.to_owned(), fields.to_string()],
+        )
+        .unwrap();
+    }
+    drop(db);
+    let db = read(directory.path());
+    let found = |search: &str| {
+        let filter = Filter {
+            search: search.into(),
+            ..Filter::default()
+        };
+        let events: Vec<String> = list_events(&db, &filter)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
+        let sessions = list_sessions(&db, &filter).unwrap().items.len();
+        (events.join(","), sessions)
+    };
+    assert_eq!(found("jörg@exämple"), ("a".to_owned(), 0));
+    assert_eq!(found("JÖRG@EXÄMPLE.TEST"), ("a".to_owned(), 0));
+    // ß is SS in capitals, so either spelling finds it.
+    assert_eq!(found("strasse.EXAMPLE"), ("b".to_owned(), 0));
+    assert_eq!(found("STRASSE"), ("b".to_owned(), 0));
+    assert_eq!(found("straße"), ("b".to_owned(), 0));
+    // A final sigma is a sigma, beside a quote that JSON escapes.
+    assert_eq!(found("οδος \"closed"), ("c".to_owned(), 0));
+    assert_eq!(found("Οδοσ"), ("c".to_owned(), 0));
+    assert_eq!(found("ΟΔΟΣ \"CLOSED\""), ("c".to_owned(), 0));
 }
 
 #[test]

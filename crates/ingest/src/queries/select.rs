@@ -1,7 +1,9 @@
 //! Which events a filter selects: the terms of a `WHERE`, the search in
 //! what the events say, and the way to a page of one category.
 
-use rusqlite::types::Value as Sql;
+use rusqlite::Connection;
+use rusqlite::functions::FunctionFlags;
+use rusqlite::types::{Value as Sql, ValueRef};
 
 use super::{Filter, limit_plus_one};
 use crate::policy::EventType;
@@ -40,28 +42,56 @@ pub(super) fn conditions(filter: &Filter) -> (Vec<String>, Vec<Sql>) {
 /// the stored text is asked first, with the needle written as JSON writes
 /// it: only an event that passes is taken apart.
 ///
-/// SQLite's `lower()` folds the letters of ASCII only. The needle is folded
-/// the same way, so both sides agree: ASCII letters match in either case,
-/// other letters as they are written.
+/// Both sides are folded with [`fold`], which the connection has as
+/// `garrison_fold` ([`foldable`]): every letter matches in either case.
+/// SQLite's own `lower()` folds the letters of ASCII only.
 pub(super) fn searched(search: &str) -> (String, [Sql; 3]) {
-    let needle = search.to_ascii_lowercase();
-    // The needle between the quotes of a JSON string.
-    let written = serde_json::to_string(&needle).unwrap_or_default();
+    // The search between the quotes of a JSON string, folded as the stored
+    // text is: an escape such as `\n` is folded with it.
+    let written = serde_json::to_string(search).unwrap_or_default();
     let written = written
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'))
-        .unwrap_or(&needle)
-        .to_owned();
+        .unwrap_or(search);
+    let needle = fold(search);
     (
-        "(instr(lower(type),?)>0 OR (instr(lower(fields),?)>0 AND EXISTS \
+        "(instr(garrison_fold(type),?)>0 OR (instr(garrison_fold(fields),?)>0 AND EXISTS \
          (SELECT 1 FROM json_tree(events.fields) AS part \
-          WHERE part.atom IS NOT NULL AND instr(lower(part.atom),?)>0)))"
+          WHERE part.atom IS NOT NULL \
+          AND instr(garrison_fold(CAST(part.atom AS TEXT)),?)>0)))"
             .to_owned(),
         [
             Sql::Text(needle.clone()),
-            Sql::Text(written),
+            Sql::Text(fold(written)),
             Sql::Text(needle),
         ],
+    )
+}
+
+/// `text` with every letter in capitals, for a search that does not care
+/// for case. Capitals rather than small letters: they write ß as SS and
+/// every sigma as Σ, so that "strasse" finds "Straße" and "οδος" "ΟΔΟΣ".
+pub(super) fn fold(text: &str) -> String {
+    if text.is_ascii() {
+        text.to_ascii_uppercase()
+    } else {
+        text.to_uppercase()
+    }
+}
+
+/// Gives `db` the function `garrison_fold`, which [`searched`] uses: [`fold`]
+/// of a text, and NULL for anything else.
+pub(super) fn foldable(db: &Connection) -> rusqlite::Result<()> {
+    db.create_scalar_function(
+        "garrison_fold",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |context| {
+            Ok(match context.get_raw(0) {
+                ValueRef::Text(text) => Some(fold(&String::from_utf8_lossy(text))),
+                _ => None,
+            })
+        },
     )
 }
 

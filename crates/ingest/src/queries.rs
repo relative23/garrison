@@ -19,7 +19,7 @@ use crate::policy::identifier;
 
 mod select;
 
-use select::{chosen, clause, conditions, searched};
+use select::{chosen, clause, conditions, foldable, searched};
 
 const MAX_RESPONSE_BYTES: usize = 768 * 1024;
 
@@ -141,6 +141,9 @@ fn bounded(items: Vec<EventItem>, limit: usize) -> (Vec<EventItem>, bool) {
 }
 
 pub fn list_events(db: &Connection, filter: &Filter) -> Result<Page<EventItem>> {
+    if !filter.search.is_empty() {
+        foldable(db)?;
+    }
     let (mut terms, mut values) = conditions(filter);
     if let Some(before) = &filter.before {
         terms.push("seq<?".to_owned());
@@ -300,6 +303,7 @@ fn grouped(db: &Connection, group: Group, filter: &Filter) -> Result<Vec<GroupRo
     }
     if !filter.search.is_empty() {
         // Match groups that contain at least one event with the literal text.
+        foldable(db)?;
         let (term, found) = searched(&filter.search);
         terms.push(format!(
             "{key} IN (SELECT {key} FROM events WHERE {key} IS NOT NULL AND {term})"
