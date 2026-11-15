@@ -46,6 +46,41 @@ fn userinfo_forwards_the_public_host_and_reads_the_subject() {
     }
 }
 
+/// Stalwart, told to take the client's address from X-Forwarded-For,
+/// answers 400 to a request that names a loopback address there (measured
+/// on Stalwart 1.1.0), and an address that is none. A user nginx saw at
+/// loopback, through a tunnel, is not named: the request then counts under
+/// Garrison's own address, which Stalwart limits and bans not at all.
+#[test]
+fn a_loopback_client_is_not_named_to_stalwart() {
+    let token = respond(&json!({"access_token": TOKEN, "token_type": "Bearer", "expires_in": 60}));
+    let unnamed = [
+        "127.0.0.1",
+        "127.0.1.1",
+        "::1",
+        "::ffff:127.0.0.1",
+        "unknown",
+    ];
+    let server = serve(vec![token; unnamed.len() + 2]);
+    let oidc = provider(&server.url);
+    let exchange = |client_ip| CodeExchange {
+        client_id: "garrison",
+        redirect_uri: "https://admin.example.test/auth/callback",
+        code: "code",
+        verifier: "verifier",
+        client_ip: Some(client_ip),
+    };
+    for address in unnamed.into_iter().chain(["192.0.2.7", "2001:db8::7"]) {
+        oidc.exchange_code(&exchange(address)).unwrap();
+    }
+    let requests = server.requests();
+    for (request, address) in requests.iter().zip(unnamed) {
+        assert!(!request.contains("x-forwarded-for"), "{address}: {request}");
+    }
+    assert!(requests[unnamed.len()].contains("x-forwarded-for: 192.0.2.7\r\n"));
+    assert!(requests[unnamed.len() + 1].contains("x-forwarded-for: 2001:db8::7\r\n"));
+}
+
 #[test]
 fn bad_tokens_and_subjects_are_told_apart() {
     let long = "x".repeat(300);

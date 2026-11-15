@@ -6,6 +6,7 @@
 //! loopback, never from an unverified ID token.
 
 use std::fmt;
+use std::net::IpAddr;
 
 use garrison_core::json;
 use serde_json::Value;
@@ -39,6 +40,21 @@ pub fn client_id(public_origin: &str) -> String {
 /// The only address Stalwart may send a sign-in back to.
 pub fn redirect_uri(public_origin: &str) -> String {
     format!("{public_origin}/auth/callback")
+}
+
+/// Whether the user's address goes to Stalwart in X-Forwarded-For, which it
+/// counts and bans by where its `clientIpSource` says so: an IP address,
+/// but none of loopback, which Stalwart refuses there with 400, also in
+/// IPv4's form within IPv6 (measured on Stalwart 1.1.0). A request without
+/// the header counts under Garrison's own address.
+fn forwardable(address: &str) -> bool {
+    match address.parse::<IpAddr>() {
+        Ok(IpAddr::V4(address)) => !address.is_loopback(),
+        Ok(IpAddr::V6(address)) => {
+            !address.is_loopback() && !address.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+        }
+        Err(_) => false,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,9 +112,9 @@ impl Provider {
             .header("Accept", "application/json")
             .header("Host", &self.host)
             .header("X-Forwarded-Proto", "https");
-        match client_ip {
-            Some(address) if !address.is_empty() => request.header("X-Forwarded-For", address),
-            _ => request,
+        match client_ip.filter(|address| forwardable(address)) {
+            Some(address) => request.header("X-Forwarded-For", address),
+            None => request,
         }
     }
 
