@@ -201,7 +201,12 @@ impl Live {
             live.events.ingest(&attacks(now), now)?;
             live.events.ingest(&delivery_problems(now), now)?;
         }
-        live.tick(now)?;
+        // The first collector minute and receiver heartbeat when the data is
+        // ready, not when the seed began: the busy server's history takes a
+        // while to fill, on a slow machine longer than the event history
+        // waits for a heartbeat (90 s), and an older one would show the
+        // receiver as quiet until the next minute.
+        live.tick(time::now().as_second())?;
         Ok(live)
     }
 
