@@ -229,7 +229,9 @@ finish_host() {
     # A stand-in for Stalwart that knows one administrator token: subject 1, native
     # account b, role e. Any other token is invalid, as in production. With it the
     # broker authorizes a request as usual, so an action runs through polkit and
-    # systemctl for real.
+    # systemctl for real. It also answers what `garrison stalwart setup` asks:
+    # the API keys it makes are kept in /root/stand-in-keys, and refused while
+    # /root/stand-in-refuses exists.
     inside_input 'cat > /root/stalwart-stub.sh' <<'STUB'
 read -r method path rest
 length=0
@@ -246,6 +248,7 @@ body=$(head -c "$length")
 answer=
 status="200 OK"
 respond() { answer="{\"methodResponses\": [[\"$1\", {\"list\": [$2], \"notFound\": []}, \"0\"]]}"; }
+answered() { answer="{\"methodResponses\": [[\"$1\", $2, \"0\"]]}"; }
 case "$method $path" in
     "GET /auth/userinfo")
         if [ "$authorization" = "Bearer acceptance-token-0123456789abcdef" ]; then
@@ -253,7 +256,10 @@ case "$method $path" in
         else
             status="401 Unauthorized"
         fi ;;
+    "GET /jmap/session")
+        if [ -e /root/stand-in-refuses ]; then status="401 Unauthorized"; else answer='{}'; fi ;;
     "POST /jmap/")
+        call=$(printf %s "$body" | grep -o 'x:[A-Za-z]*/[a-z]*' | head -n 1)
         case "$body" in
             *x:Account/get*) respond x:Account/get '{"id": "b", "@type": "User", "memberTenantId": null,
                 "roles": {"@type": "Custom", "roleIds": {"e": true}}, "permissions": {"@type": "Inherit"}}' ;;
@@ -261,6 +267,22 @@ case "$method $path" in
                 '{"id": "singleton", "defaultAdminRoleIds": {}, "defaultUserRoleIds": {}}' ;;
             *x:Role/get*) respond x:Role/get '{"id": "e", "roleIds": {}, "memberTenantId": null, "disabledPermissions": {},
                 "enabledPermissions": {"authenticate": true, "sysActionCreate": true, "sysRoleUpdate": true}}' ;;
+            *x:ApiKey/get*)
+                respond "$call" "$(sed 's/^\([^ ]*\) \(.*\)$/{"id": "\1", "description": "\2"}/' \
+                    /root/stand-in-keys 2>/dev/null | paste -s -d , -)" ;;
+            *x:ApiKey/set*'"create"'*)
+                id=k$(date +%s%N)
+                printf '%s %s\n' "$id" "$(printf %s "$body" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')" \
+                    >> /root/stand-in-keys
+                answered "$call" "{\"created\": {\"new\": {\"id\": \"$id\", \"secret\": \"stand-in-$id-secret\"}}}" ;;
+            *x:ApiKey/set*'"destroy"'*)
+                for id in $(cut -d ' ' -f 1 /root/stand-in-keys); do
+                    case $body in *"\"$id\""*) sed -i "/^$id /d" /root/stand-in-keys ;; esac
+                done
+                answered "$call" '{}' ;;
+            *x:WebHook/get*) respond "$call" '{"id": "w1", "httpHeaders": {"X-Garrison": "events"}}' ;;
+            */get*) respond "$call" '' ;;
+            */set*) answered "$call" '{}' ;;
         esac ;;
 esac
 printf 'HTTP/1.1 %s\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' "$status" "${#answer}" "$answer"
