@@ -18,7 +18,7 @@ use garrison_core::observations::{
 };
 use garrison_core::time::{self, Timestamp};
 use rustls::pki_types::ServerName;
-use rustls::{ClientConnection, RootCertStore};
+use rustls::{CertificateError, ClientConnection, RootCertStore};
 use serde_json::{Value, json};
 
 use super::certificate::not_after;
@@ -65,7 +65,7 @@ fn failure(error: &io::Error) -> Failure {
         .and_then(|inner| inner.downcast_ref::<rustls::Error>())
     {
         return Failure(match tls {
-            rustls::Error::InvalidCertificate(_) => "certificate not trusted",
+            rustls::Error::InvalidCertificate(reason) => certificate(reason),
             _ => "TLS error",
         });
     }
@@ -75,6 +75,23 @@ fn failure(error: &io::Error) -> Failure {
         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => "timed out",
         _ => "connection failed",
     })
+}
+
+/// A certificate's fault as the card names it.
+fn certificate(reason: &CertificateError) -> &'static str {
+    match reason {
+        CertificateError::Expired | CertificateError::ExpiredContext { .. } => {
+            "certificate expired"
+        }
+        CertificateError::NotValidYet | CertificateError::NotValidYetContext { .. } => {
+            "certificate not valid yet"
+        }
+        CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. } => {
+            "certificate not valid for this name"
+        }
+        CertificateError::UnknownIssuer => "certificate not from a trusted authority",
+        _ => "certificate not trusted",
+    }
 }
 
 fn protocol_error(message: &str) -> io::Error {

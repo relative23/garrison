@@ -23,10 +23,10 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use flate2::read::GzDecoder;
-use garrison_core::time::Timestamp;
+use garrison_core::time::{self, Timestamp};
 use rustls::pki_types::{ServerName, UnixTime};
 use rustls::time_provider::{DefaultTimeProvider, TimeProvider};
-use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
+use rustls::{CertificateError, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 
 use crate::timed::Timed;
 
@@ -225,11 +225,49 @@ pub fn tls_error(error: &std::io::Error) -> String {
         .get_ref()
         .and_then(|inner| inner.downcast_ref::<rustls::Error>())
     {
-        Some(rustls::Error::InvalidCertificate(reason)) => {
-            format!("the certificate is not valid for this name: {reason:?}")
-        }
+        Some(rustls::Error::InvalidCertificate(reason)) => certificate_fault(reason),
         Some(other) => format!("TLS failed: {other}"),
         None => error.to_string(),
+    }
+}
+
+/// What is wrong with a server's certificate, in the words of a finding:
+/// the common faults as what they are, with the time where the certificate
+/// gives one, and any other in the TLS library's words.
+#[must_use]
+pub fn certificate_fault(reason: &CertificateError) -> String {
+    let at = |at: &UnixTime| {
+        i64::try_from(at.as_secs())
+            .ok()
+            .and_then(|second| Timestamp::from_second(second).ok())
+            .map_or_else(|| format!("{} (UNIX)", at.as_secs()), time::isoformat)
+    };
+    match reason {
+        CertificateError::Expired => "the certificate has expired".to_owned(),
+        CertificateError::ExpiredContext { not_after, .. } => {
+            format!("the certificate expired at {}", at(not_after))
+        }
+        CertificateError::NotValidYet => "the certificate is not valid yet".to_owned(),
+        CertificateError::NotValidYetContext { not_before, .. } => {
+            format!("the certificate is valid only from {}", at(not_before))
+        }
+        CertificateError::UnknownIssuer => {
+            "the certificate is not from an authority this host trusts".to_owned()
+        }
+        CertificateError::NotValidForName => {
+            "the certificate is not valid for this name".to_owned()
+        }
+        CertificateError::NotValidForNameContext { presented, .. } if !presented.is_empty() => {
+            format!(
+                "the certificate is not valid for this name; it is for {}",
+                presented.join(", ")
+            )
+        }
+        CertificateError::NotValidForNameContext { .. } => {
+            "the certificate is not valid for this name; it names none".to_owned()
+        }
+        CertificateError::Revoked => "the certificate is revoked".to_owned(),
+        other => format!("the certificate is not valid: {other}"),
     }
 }
 

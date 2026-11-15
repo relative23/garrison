@@ -220,7 +220,7 @@ fn a_certificate_is_judged_at_the_time_of_the_run() {
     assert_eq!(after.state, State::Failed);
     assert_eq!(after.findings.len(), 1);
     assert!(
-        after.findings[0].ends_with(" — TLS check failed (certificate not trusted)."),
+        after.findings[0].ends_with(" — TLS check failed (certificate expired)."),
         "{:?}",
         after.findings
     );
@@ -276,7 +276,7 @@ fn untrusted_or_misnamed_certificates_fail_verification() {
     let empty = Arc::new(RootCertStore::empty());
     assert_eq!(
         probe("localhost", untrusted, "127.0.0.1", false, &empty, now()),
-        Err(Failure("certificate not trusted"))
+        Err(Failure("certificate not from a trusted authority"))
     );
     let misnamed = listener(&certificates, None);
     assert_eq!(
@@ -288,7 +288,7 @@ fn untrusted_or_misnamed_certificates_fail_verification() {
             &trusted(&certificates),
             now()
         ),
-        Err(Failure("certificate not trusted"))
+        Err(Failure("certificate not valid for this name"))
     );
 }
 

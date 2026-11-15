@@ -267,7 +267,7 @@ fn a_certificate_is_judged_at_the_time_of_the_run_it_is_asked_for() {
     // Valid until 2026-11-13 00:00 UTC.
     let certificates = garrison_testing::tls::certificates_until(2026, 11, 13);
     let answer: &'static [u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
-    let at = |text: &str| garrison_core::time::parse(text).unwrap();
+    let at = |text: &str| time::parse(text).unwrap();
     let (port, roots) = closes_without_notice_with(&certificates, answer);
     let read = get_at(
         &format!("https://localhost:{port}/"),
@@ -282,5 +282,62 @@ fn a_certificate_is_judged_at_the_time_of_the_run_it_is_asked_for() {
         at("2026-11-13T00:01:00Z"),
     )
     .unwrap_err();
-    assert!(error.contains("not valid for this name"), "{error}");
+    // Named as what it is, with the time it ended at.
+    assert_eq!(
+        error,
+        "the certificate expired at 2026-11-13T00:00:00+00:00"
+    );
+}
+
+/// A certificate's fault is named as what it is, with the time where the
+/// certificate gives one; any other is named in the TLS library's words.
+#[test]
+fn a_certificates_fault_is_named_in_plain_words() {
+    let at = |second| UnixTime::since_unix_epoch(Duration::from_secs(second));
+    let named = |reason: CertificateError| certificate_fault(&reason);
+    assert_eq!(
+        named(CertificateError::ExpiredContext {
+            time: at(1_794_728_591),
+            not_after: at(1_794_528_000),
+        }),
+        "the certificate expired at 2026-11-13T00:00:00+00:00"
+    );
+    assert_eq!(
+        named(CertificateError::Expired),
+        "the certificate has expired"
+    );
+    assert_eq!(
+        named(CertificateError::NotValidYetContext {
+            time: at(1_794_528_000),
+            not_before: at(1_794_728_591),
+        }),
+        "the certificate is valid only from 2026-11-15T07:43:11+00:00"
+    );
+    assert_eq!(
+        named(CertificateError::UnknownIssuer),
+        "the certificate is not from an authority this host trusts"
+    );
+    let expected = ServerName::try_from("mail.example.test").unwrap();
+    assert_eq!(
+        named(CertificateError::NotValidForNameContext {
+            expected: expected.clone(),
+            presented: vec!["localhost".to_owned(), "127.0.0.1".to_owned()],
+        }),
+        "the certificate is not valid for this name; it is for localhost, 127.0.0.1"
+    );
+    assert_eq!(
+        named(CertificateError::NotValidForNameContext {
+            expected,
+            presented: Vec::new(),
+        }),
+        "the certificate is not valid for this name; it names none"
+    );
+    assert_eq!(
+        named(CertificateError::Revoked),
+        "the certificate is revoked"
+    );
+    assert_eq!(
+        named(CertificateError::BadSignature),
+        "the certificate is not valid: BadSignature"
+    );
 }

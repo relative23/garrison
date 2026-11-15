@@ -358,6 +358,15 @@ Notable changes for operators and users. The format follows
   most, and left the others out without a word: the card was OK for what
   it had not probed. It now says how many endpoints there are and is
   Partial where it would be OK.
+- **A fault of a server's certificate is named as what it is.** The
+  checks and the notifications called every fault of a certificate "not
+  valid for this name", with the TLS library's own text after it, or "not
+  trusted": an expired certificate read "the certificate is not valid for
+  this name: ExpiredContext { time: UnixTime(…), not_after: UnixTime(…) }".
+  They now say that it expired and when, that it is not valid yet, that it
+  is not from an authority this host trusts, or which names it is for, and
+  the TLS card says "certificate expired" or "certificate not valid for this
+  name" where it said "certificate not trusted".
 - **The sign-in check says when it leaves files out.** It asks for the
   first twelve scripts and style sheets the sign-in page names and left
   the others out without a word, so the card was OK for files it had not

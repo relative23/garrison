@@ -110,7 +110,7 @@ fn the_policy_servers_certificate_is_judged_at_the_runs_time() {
     assert_eq!(policy_result(&after), json!("not readable"));
     assert_eq!(after.state, State::Warning);
     assert!(
-        after.findings[0].contains("the certificate is not valid for this name"),
+        after.findings[0].contains("the certificate expired at 2026-11-13T00:00:00+00:00"),
         "{:?}",
         after.findings
     );
