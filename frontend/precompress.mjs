@@ -8,7 +8,10 @@ import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 const dist = join(import.meta.dirname, "dist");
 const files = [
   ...["assets", "pages"].flatMap((folder) => readdirSync(join(dist, folder)).map((name) => join(dist, folder, name))),
-  join(dist, "index.html"),
+  // index.html and its copy for each theme (prerender.mjs).
+  ...readdirSync(dist)
+    .filter((name) => name.endsWith(".html"))
+    .map((name) => join(dist, name)),
 ];
 for (const path of files.filter((file) => !/\.(br|gz)$/.test(file))) {
   const data = readFileSync(path);

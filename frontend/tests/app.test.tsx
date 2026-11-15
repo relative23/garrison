@@ -91,6 +91,41 @@ describe("first paint", () => {
     expect(screen.getByRole("link", { name: "Sign in with Stalwart" })).toBeTruthy();
     expect(await screen.findByRole("link", { name: "Sign in with Stalwart" })).toBeTruthy();
   });
+
+  it("keeps the theme the server sent the page in until the session arrives", async () => {
+    // A detail gets no drawn frame: the server sends the index, in the theme
+    // the user chose, here dark on a light system (tests/setup.ts).
+    document.documentElement.className = "dark";
+    let answer: () => void = () => undefined;
+    const arrived = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const dark = session({ preferences: { theme: "dark", hiddenModules: [], showSwitch: false } }, ["deliveries"]);
+    serve({
+      "GET session": async () => {
+        await arrived;
+        return { body: { session: dark } };
+      },
+      "GET status": { body: status([]) },
+      "GET coverage": { body: coverage() },
+      "GET deliveries/abc": { status: 404, body: { detail: "Not found" } },
+    });
+    openApp("/admin/deliveries/abc");
+    expect(screen.getByText("Loading Garrison…")).toBeTruthy();
+    await act(async () => undefined);
+    expect(document.documentElement.className).toBe("dark");
+    answer();
+    expect(await screen.findByText("Not found")).toBeTruthy();
+    expect(document.documentElement.className).toBe("dark");
+  });
+
+  it("follows the system for a visitor without a session", async () => {
+    document.documentElement.className = "dark";
+    serve({ "GET session": { body: { session: null } } });
+    openApp("/admin/");
+    expect(await screen.findByRole("link", { name: "Sign in with Stalwart" })).toBeTruthy();
+    expect(document.documentElement.className).toBe("light");
+  });
 });
 
 describe("navigation", () => {

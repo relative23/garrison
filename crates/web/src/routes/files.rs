@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 use crate::app::{App, INTERFACE, InlineStyle};
 use crate::coding::accepts;
 use crate::error::ApiError;
+use crate::models::Theme;
 use crate::security::Visitor;
 use crate::switch::{SCRIPT, origin};
 
@@ -100,28 +101,61 @@ fn drawn(view: &str) -> Option<&str> {
     (plain && parts.all(str::is_empty)).then_some(name)
 }
 
+/// The theme a signed-in user chose, which the web service keeps with the
+/// user's other preferences. Preferences that cannot be read leave the page
+/// to follow the system, as before anything is chosen; the interface then
+/// says what failed when it asks for the session.
+fn chosen_theme(app: &App, subject: &str) -> Theme {
+    app.store
+        .preferences(subject)
+        .map(|preferences| preferences.theme)
+        .unwrap_or_default()
+}
+
+/// The files that may hold `name` (a page, or the index) for `theme`, best
+/// first. The build draws each page once more for each theme a user can
+/// choose, as `name.dark.html` beside `name.html`, so that the first paint
+/// is in that theme; the plain page follows the system. No request names a
+/// file: `drawn` takes no dot.
+fn themed(name: &str, theme: Theme) -> Vec<String> {
+    let plain = format!("{name}.html");
+    match theme {
+        Theme::System => vec![plain],
+        Theme::Light => vec![format!("{name}.light.html"), plain],
+        Theme::Dark => vec![format!("{name}.dark.html"), plain],
+    }
+}
+
 /// The page for a path: with a session the view's frame, without one the
-/// sign-in page, both drawn by the build so the first paint needs no script.
-/// The root leads to the dashboard. Anything else gets the plain index.
+/// sign-in page, both drawn by the build so the first paint needs no script,
+/// and with a session in the theme its user chose. The root leads to the
+/// dashboard. Anything else gets the plain index, in that theme as well.
 async fn page(app: Arc<App>, visitor: Visitor, headers: &HeaderMap, view: &str) -> Response {
-    let gate = Arc::clone(&app);
-    let session = tokio::task::spawn_blocking(move || gate.gate.session(&visitor)).await;
-    let name = match session {
-        Ok(Ok(Some(_))) => drawn(view).or(view.is_empty().then_some("dashboard")),
-        Ok(Ok(None)) => Some("sign-in"),
+    let reader = Arc::clone(&app);
+    let visit = tokio::task::spawn_blocking(move || {
+        let session = reader.gate.session(&visitor)?;
+        Ok::<_, ApiError>(session.map(|session| chosen_theme(&reader, &session.subject)))
+    })
+    .await;
+    let (name, theme) = match visit {
+        Ok(Ok(Some(theme))) => (
+            drawn(view).or(view.is_empty().then_some("dashboard")),
+            theme,
+        ),
+        // Nobody's choice is known: the sign-in page follows the system.
+        Ok(Ok(None)) => (Some("sign-in"), Theme::System),
         // The plain index asks for the session itself.
-        _ => None,
+        _ => (None, Theme::System),
     };
     if let Some(name) = name {
-        let path = app
-            .static_directory
-            .join("pages")
-            .join(format!("{name}.html"));
-        if let Some(response) = drawn_page(path, headers).await {
-            return response;
+        let pages = app.static_directory.join("pages");
+        for file in themed(name, theme) {
+            if let Some(response) = drawn_page(pages.join(file), headers).await {
+                return response;
+            }
         }
     }
-    index(&app, headers).await
+    index(&app, headers, theme).await
 }
 
 /// A page the build drew, with the hash of the stylesheet it carries inline
@@ -147,21 +181,19 @@ fn inline_style(page: &[u8]) -> Option<String> {
     Some(format!("sha256-{}", STANDARD.encode(Sha256::digest(style))))
 }
 
-async fn index(app: &App, headers: &HeaderMap) -> Response {
-    encoded(
-        app.static_directory.join("index.html"),
-        "text/html; charset=utf-8",
-        headers,
-    )
-    .await
-    .unwrap_or_else(|| {
-        let mut response = (StatusCode::SERVICE_UNAVAILABLE, NOT_BUILT).into_response();
-        response.headers_mut().insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/html; charset=utf-8"),
-        );
-        response
-    })
+async fn index(app: &App, headers: &HeaderMap, theme: Theme) -> Response {
+    for file in themed("index", theme) {
+        let path = app.static_directory.join(file);
+        if let Some(response) = encoded(path, "text/html; charset=utf-8", headers).await {
+            return response;
+        }
+    }
+    let mut response = (StatusCode::SERVICE_UNAVAILABLE, NOT_BUILT).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    response
 }
 
 async fn asset(

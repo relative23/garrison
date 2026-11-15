@@ -4,6 +4,12 @@
 // inline, so it needs no second request either, and with its view's chunk and
 // first requests started at once. The web service picks the file by path and by
 // whether the visitor has a session, and allows the stylesheet by its hash.
+//
+// Each page of a signed-in user, and the index, is written once more for each
+// theme a user can choose (`logs.dark.html` beside `logs.html`), with <html>
+// marked as the interface marks it (src/lib/theme.ts): the web service sends
+// the one of the user's theme, so the first paint has it; the plain page
+// follows the system. The sign-in page knows nobody's choice and has none.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -48,8 +54,19 @@ function page(shell, markup, first) {
     .replace(root, () => `<div id="root" data-shell="${shell}">${markup}</div>`);
 }
 
+const THEMES = ["light", "dark"];
+const html = '<html lang="en">';
+if (index.split(html).length !== 2) throw new Error(`dist/index.html has no single ${html}`);
+/** `text` with <html> marked for `theme`. */
+const themed = (text, theme) => text.replace(html, () => `<html lang="en" class="${theme}">`);
+
 mkdirSync(join(dist, "pages"), { recursive: true });
-for (const view of pages) writeFileSync(join(dist, "pages", `${view}.html`), page("frame", frame(view), FIRST[view]));
+for (const view of pages) {
+  const drawn = page("frame", frame(view), FIRST[view]);
+  writeFileSync(join(dist, "pages", `${view}.html`), drawn);
+  for (const theme of THEMES) writeFileSync(join(dist, "pages", `${view}.${theme}.html`), themed(drawn, theme));
+}
 writeFileSync(join(dist, "pages", "sign-in.html"), page("sign-in", signIn(), null));
+for (const theme of THEMES) writeFileSync(join(dist, `index.${theme}.html`), themed(index, theme));
 rmSync(bundle, { recursive: true, force: true });
 rmSync(join(dist, ".vite"), { recursive: true, force: true });

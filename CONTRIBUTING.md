@@ -240,12 +240,16 @@ the console, a failed request other than those, a finding of axe (WCAG 2.2
 AA, in the light and the dark theme, each as the page switches to it with
 the system), a page that is wider than a phone's screen, a closed menu that
 takes the focus, a menu or a dialog that lets the focus out or drops it, or
-a page as the build drew it that does not start in the system's theme; CI
-runs it. `npm run measure` measures every page
-with Lighthouse (Performance, Accessibility and Best Practices, desktop and
-mobile) and axe on both screen sizes, by hand. It measures over HTTP/2 with
-TLS, as nginx serves Garrison, through a proxy with a certificate it makes
-with `openssl` for the run; `--http1` measures the preview directly:
+a page that does not start in the theme its user chose, light on a dark
+system and dark on a light one, from the first frame it paints, or in the
+system's theme without a session or a choice; CI runs it. The build draws
+each page once more in each theme a user can choose, and the web service
+sends the one its signed-in user chose. `npm run measure` measures every
+page with Lighthouse (Performance, Accessibility and Best Practices,
+desktop and mobile) and axe on both screen sizes, by hand. It measures over
+HTTP/2 with TLS, as nginx serves Garrison, through a proxy with a
+certificate it makes with `openssl` for the run; `--http1` measures the
+preview directly:
 
 ```sh
 (cd frontend && npm run build)

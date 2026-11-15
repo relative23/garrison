@@ -8,7 +8,8 @@
 // nothing may write an error to the console, no request to the preview may
 // fail but those a step makes fail, and axe may find nothing on any page
 // (WCAG 2.2 AA, light and dark, as the system switches the page between
-// them); a page as the build drew it starts in the system's theme.
+// them); a page starts in the theme its user chose, from its first frame on,
+// and without a session or a choice in the system's.
 //
 // It is a check, not a measurement: it exits with 1 and lists what failed.
 // `measure.mjs` measures the same pages with Lighthouse, by hand.
@@ -18,7 +19,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { chromium } from "playwright";
 
 import { failingRequests } from "./failures.mjs";
-import { firstPaint } from "./themes.mjs";
+import { chosenTheme, firstPaint } from "./themes.mjs";
 
 const options = Object.fromEntries(
   process.argv
@@ -148,6 +149,8 @@ const shared = {
   watch,
   unavailable,
   failing,
+  /** The theme the signed-in user saved, as read at the sign-in. */
+  savedTheme: () => savedTheme,
 };
 
 try {
@@ -281,6 +284,8 @@ try {
   await page.reload();
   await heading();
   expect(await page.evaluate(() => document.documentElement.classList.contains("dark")), "the saved theme is used after a reload");
+  // Left dark, as this step saved it.
+  await chosenTheme(shared, page, "dark");
 
   step = "maintenance";
   const catalog = await (await page.request.get(`${origin}/api/actions`)).json();
@@ -377,5 +382,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `Passed: sign-in, ${PAGES.length} pages, menu, search, phone, back, first paint, settings, maintenance, failures, HTTP/2, a viewer and sign-out.`,
+  `Passed: sign-in, ${PAGES.length} pages, menu, search, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, failures, HTTP/2, a viewer and sign-out.`,
 );

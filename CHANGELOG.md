@@ -86,6 +86,13 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A page starts in the theme chosen in the settings.** A theme chosen
+  against the system's, light where the system asks for dark or dark where
+  it asks for light, was taken only once a page had its session, so every
+  page and every reload showed the other theme first and then changed. The
+  web service now sends a signed-in user's pages in that user's theme from
+  the first paint. Without a session, and with "Follow the system", pages
+  start in the system's theme as before.
 - **A list gives no count before it is there.** Event history, Deliveries
   and Sessions said "Showing 0 entries" under a list while it loaded and
   after it failed, as if nothing matched. They now give the count once
@@ -280,8 +287,8 @@ Notable changes for operators and users. The format follows
   light and turned dark only once its session had arrived, and with "Follow
   the system" a change of the system's theme while a page was open was not
   followed. Pages now start in the system's theme from the first paint and
-  follow its changes; a theme chosen in the settings takes over as soon as
-  the page has its session.
+  follow its changes; a theme chosen in the settings is the first paint's
+  as well (see above).
 - **Ctrl+K opens the page search on a narrow screen too.** Where the header
   has no room for the search button, on a phone or in a narrow window, the
   shortcut opened the search where it was not drawn: nothing could be seen,

@@ -109,10 +109,14 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
     return () => document.removeEventListener("visibilitychange", shown);
   }, [readAgain]);
 
+  // Without a session the page follows the system, as the server sent it.
+  // While the session is on its way the page keeps the theme the server sent
+  // it in, which is the one its user chose (routes/files.rs).
   const system = useSystemDark();
+  const signedOut = session.data !== null && !signedIn;
   useEffect(() => {
-    if (!signedIn) applyTheme("system", system);
-  }, [signedIn, system]);
+    if (signedOut) applyTheme("system", system);
+  }, [signedOut, system]);
 
   let content;
   if (ended) content = <SignIn expired />;
