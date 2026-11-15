@@ -196,6 +196,13 @@ Notable changes for operators and users. The format follows
   address and counts all of Garrison's as one, so 100 failed sign-ins in a
   minute still stop every sign-in and every check of a signed-in user's
   rights until that minute is over ([security model](docs/architecture/security.md#known-limits)).
+- **Each IPv4 client keeps its own sign-in budget where nginx listens on one
+  socket for both.** With `listen [::]:443 ipv6only=off` nginx names an IPv4
+  client in IPv6's form, such as `::ffff:192.0.2.7`, and the web service
+  took all such clients for one IPv6 network: ten sign-ins a minute from any
+  of them used up the budget of all the others. Such an address now counts
+  as the IPv4 address it holds. The server block of the installation guide
+  and of `garrison nginx` listens on two sockets and was not affected.
 - **Quick filter changes no longer end in "Too many concurrent history
   queries".** The web service runs two history queries at a time and refused
   a third at once, and a query kept its turn until it ended even when the

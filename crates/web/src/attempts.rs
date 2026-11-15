@@ -5,7 +5,7 @@
 //! and replay one; without a budget a single visitor could make Garrison
 //! send Stalwart failed exchanges without end, all from its loopback address.
 //! A network is an IPv4 address or an IPv6 /64 prefix, which one client
-//! usually holds whole.
+//! usually holds whole; an IPv4 address written as IPv6 is the IPv4 address.
 //!
 //! The table of networks is bounded, and anyone with a large IPv6 prefix has
 //! more networks than it holds. The networks beyond a full table therefore
@@ -26,13 +26,18 @@ const WINDOW: Duration = Duration::from_secs(60);
 /// everybody new, nor let everybody pass.
 pub const MAX_NETWORKS: usize = 4096;
 
-/// The network of a client address; `None` when nginx sent none.
+/// The network of a client address; `None` when nginx sent none. An IPv4
+/// address in IPv6's form, such as `::ffff:192.0.2.7`, is that IPv4
+/// address: nginx names IPv4 clients so where one socket listens for both
+/// (`listen [::]:443 ipv6only=off`), and as an IPv6 /64 all of them would
+/// be one network.
 pub fn network(address: Option<&str>) -> Option<IpAddr> {
     match address?.parse::<IpAddr>().ok()? {
         IpAddr::V4(address) => Some(IpAddr::V4(address)),
-        IpAddr::V6(address) => Some(IpAddr::V6(Ipv6Addr::from(
-            u128::from(address) & (u128::MAX << 64),
-        ))),
+        IpAddr::V6(address) => Some(match address.to_ipv4_mapped() {
+            Some(mapped) => IpAddr::V4(mapped),
+            None => IpAddr::V6(Ipv6Addr::from(u128::from(address) & (u128::MAX << 64))),
+        }),
     }
 }
 
@@ -138,6 +143,33 @@ mod tests {
         );
         assert_eq!(network(Some("not an address")), None);
         assert_eq!(network(None), None);
+    }
+
+    /// nginx names an IPv4 client so where it listens on IPv6 for both
+    /// (`listen [::]:443 ipv6only=off`).
+    #[test]
+    fn an_ipv4_address_in_ipv6_form_is_that_ipv4_address() {
+        let parsed = |text: &str| network(Some(text)).map(|address| address.to_string());
+        assert_eq!(parsed("::ffff:192.0.2.7").as_deref(), Some("192.0.2.7"));
+        assert_eq!(parsed("::ffff:c000:207").as_deref(), Some("192.0.2.7"));
+        // Two such clients are two networks, each with its own budget, and a
+        // client is one network in either form.
+        let attempts = Attempts::default();
+        let one = network(Some("::ffff:192.0.2.1"));
+        let two = network(Some("::ffff:198.51.100.1"));
+        let start = Instant::now();
+        for _ in 0..BUDGET {
+            assert_eq!(attempts.allow(one, start), Ok(()));
+        }
+        assert_eq!(attempts.allow(one, start), Err(Refusal::Network));
+        assert_eq!(attempts.allow(two, start), Ok(()));
+        assert_eq!(
+            attempts.allow(network(Some("192.0.2.1")), start),
+            Err(Refusal::Network)
+        );
+        // An IPv6 address that only begins with zeros stays an IPv6 /64.
+        assert_eq!(parsed("::1").as_deref(), Some("::"));
+        assert_eq!(parsed("64:ff9b::c000:207").as_deref(), Some("64:ff9b::"));
     }
 
     #[test]
