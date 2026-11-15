@@ -210,6 +210,63 @@ fn a_certificate_that_is_not_trusted_ends_the_session_before_the_password() {
     assert!(unreachable.is_err());
 }
 
+/// A reply ends with its line: a server that ends TLS without its closing
+/// notice right after it took the message, before QUIT, has taken it. Only
+/// a reply cut within its line is no reply.
+#[test]
+fn a_reply_line_counts_however_the_session_then_ends() {
+    let certificates = certificates();
+    for (last, taken) in [("250 2.0.0 Message queued\r\n", true), ("250 2.0", false)] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (server, key) = (certificates.server.clone(), certificates.key.clone_key());
+        let ended = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let config = ServerConfig::builder_with_provider(Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![server], key)
+            .unwrap();
+            let connection = ServerConnection::new(Arc::new(config)).unwrap();
+            let mut session = BufReader::new(StreamOwned::new(connection, stream));
+            for answer in [
+                "220 mail.example.test ESMTP\r\n",
+                "250 AUTH PLAIN\r\n",
+                "235 OK\r\n",
+                "250 OK\r\n",
+                "250 OK\r\n",
+                "354 Go on\r\n",
+            ] {
+                session.get_mut().write_all(answer.as_bytes()).unwrap();
+                session.get_mut().flush().unwrap();
+                let mut line = String::new();
+                session.read_line(&mut line).unwrap();
+            }
+            let mut line = String::new();
+            while line.trim_end() != "." {
+                line.clear();
+                session.read_line(&mut line).unwrap();
+            }
+            session.get_mut().write_all(last.as_bytes()).unwrap();
+            session.get_mut().flush().unwrap();
+            // Dropped as it is: the socket closes, and TLS was never ended.
+        });
+        let sent = submit(
+            &mail(port),
+            "garrison.example.org",
+            "x",
+            "y",
+            now(),
+            &trusted(&certificates),
+        );
+        ended.join().unwrap();
+        assert_eq!(sent.is_ok(), taken, "{last:?}: {sent:?}");
+    }
+}
+
 #[test]
 fn headers_stay_one_line_and_other_scripts_are_encoded() {
     assert_eq!(

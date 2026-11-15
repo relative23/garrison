@@ -1,8 +1,9 @@
 //! Test certificates for TLS servers in the tests: a CA and a server
 //! certificate it issued, made at run time, so no key material is stored;
-//! and a TLS server with such a certificate. Here and not with the checks'
-//! helpers, so that the certificate library stays out of every crate that
-//! ships.
+//! and TLS servers with such a certificate, one that ends each connection
+//! with TLS's closing notice and one that ends it without. Here and not
+//! with the checks' helpers, so that the certificate library stays out of
+//! every crate that ships.
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -86,7 +87,20 @@ impl Server {
 /// with `responses` for the connections in turn.
 #[must_use]
 pub fn serve_until(responses: Vec<String>, year: i32, month: u8, day: u8) -> Server {
-    let certificates = certificates_until(year, month, day);
+    serving(responses, certificates_until(year, month, day), true)
+}
+
+/// A server with a certificate of [`certificates`] that ends each
+/// connection without the notice TLS ends with: after its answer the
+/// socket just closes, as Python's `http.server` behind `ssl` does.
+#[must_use]
+pub fn serve_without_notice(responses: Vec<String>) -> Server {
+    serving(responses, certificates(), false)
+}
+
+/// The server of [`serve_until`] and [`serve_without_notice`]: `notice`
+/// says whether it sends TLS's closing notice after each answer.
+fn serving(responses: Vec<String>, certificates: Certificates, notice: bool) -> Server {
     let mut roots = RootCertStore::empty();
     roots.add(certificates.ca.clone()).unwrap();
     let config = Arc::new(
@@ -118,9 +132,11 @@ pub fn serve_until(responses: Vec<String>, year: i32, month: u8, day: u8) -> Ser
                 let mut tls = StreamOwned::new(connection, stream);
                 // A client that refuses the certificate ends the handshake,
                 // and so this read, with an error.
-                if head(&mut tls).is_ok() {
+                if request(&mut tls).is_ok() {
                     let _ = tls.write_all(response.as_bytes());
-                    tls.conn.send_close_notify();
+                    if notice {
+                        tls.conn.send_close_notify();
+                    }
                     let _ = tls.flush();
                 }
             }
@@ -155,8 +171,10 @@ fn accepted(listener: &TcpListener, done: &AtomicBool) -> Option<TcpStream> {
     None
 }
 
-/// Reads a request's head, up to its empty line.
-fn head(tls: &mut impl Read) -> io::Result<Vec<u8>> {
+/// Reads a request: its head, up to its empty line, and the body its
+/// `Content-Length` names. A socket that closes with something of the
+/// request unread is reset rather than ended, and its answer may be lost.
+fn request(tls: &mut impl Read) -> io::Result<Vec<u8>> {
     let mut head = Vec::new();
     let mut byte = [0; 1];
     while !head.ends_with(b"\r\n\r\n") {
@@ -165,5 +183,14 @@ fn head(tls: &mut impl Read) -> io::Result<Vec<u8>> {
         }
         head.push(byte[0]);
     }
+    let length = String::from_utf8_lossy(&head)
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    let mut body = vec![0; length];
+    tls.read_exact(&mut body)?;
+    head.extend(body);
     Ok(head)
 }

@@ -32,7 +32,7 @@ use crate::timed::Timed;
 mod answer;
 
 pub use answer::Answer;
-use answer::{parse, whole};
+use answer::{enough, parse};
 
 /// One step waits this long at most: the lookup, the connection, one read
 /// or write.
@@ -285,12 +285,12 @@ fn exchange(
     match stream.take(LIMIT).read_to_end(&mut data) {
         Ok(_) => Ok(data),
         // Many servers close the socket without the notice TLS ends with.
-        // What arrived before counts where its own length says that it is
-        // all of it: otherwise whoever can end the connection could cut the
-        // answer anywhere, and a message that did arrive would count as lost
-        // and be sent again.
+        // What arrived before counts where it holds what the request needs:
+        // whoever can end the connection could cut the answer anywhere, so
+        // a body counts only where its own length says that it is all of
+        // it, and a head only where it ended before the cut.
         Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
-            if whole(&data) {
+            if enough(&data, request.needs) {
                 Ok(data)
             } else {
                 Err(std::io::Error::new(
@@ -306,6 +306,17 @@ fn exchange(
 trait ReadWrite: Read + Write {}
 impl<T: Read + Write> ReadWrite for T {}
 
+/// What of an answer a request needs, where the server ends TLS without
+/// its closing notice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Needs {
+    /// All of it, as its own length says: what reads the body.
+    Whole,
+    /// The status line and the headers: a notification needs only the
+    /// status, which a cut after the head cannot change.
+    Head,
+}
+
 /// A request to send: `GET` without a body, or `POST` with one.
 #[derive(Clone, Copy, Debug)]
 pub struct Request<'a> {
@@ -313,6 +324,7 @@ pub struct Request<'a> {
     pub url: &'a str,
     pub headers: &'a [(&'a str, &'a str)],
     pub body: &'a [u8],
+    pub needs: Needs,
 }
 
 /// `GET url` with no headers of its own.
@@ -323,6 +335,7 @@ pub fn get(url: &str, roots: &Arc<RootCertStore>) -> Result<Answer, String> {
             url,
             headers: &[],
             body: &[],
+            needs: Needs::Whole,
         },
         roots,
     )
@@ -336,6 +349,7 @@ pub fn get_at(url: &str, roots: &Arc<RootCertStore>, at: Timestamp) -> Result<An
         url,
         headers: &[],
         body: &[],
+        needs: Needs::Whole,
     };
     send_at(&request, roots, Instant::now() + WITHIN, Some(at))
 }

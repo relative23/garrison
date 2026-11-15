@@ -1,9 +1,12 @@
 //! What an answer says: its status, headers and body, a chunked body joined
-//! and a compressed one unpacked, and whether its own length calls it whole.
+//! and a compressed one unpacked, and whether it holds what its request
+//! needs.
 
 use std::io::Read;
 
 use flate2::read::GzDecoder;
+
+use super::Needs;
 
 /// The most a compressed body may unpack to.
 const UNPACKED: u64 = 4 * 1024 * 1024;
@@ -24,14 +27,17 @@ impl Answer {
     }
 }
 
-/// Whether `data` is an answer that its own length calls whole: the head,
-/// and a body as long as `Content-Length` says or with the last chunk of a
-/// chunked one. An answer that gives no length ends with its connection,
-/// and so is never known to be whole.
-pub(super) fn whole(data: &[u8]) -> bool {
+/// Whether `data` holds what `needs` asks of an answer: its whole head, and
+/// for the whole answer a body as long as `Content-Length` says or with the
+/// last chunk of a chunked one. An answer that gives no length ends with its
+/// connection, and so is never known to be whole.
+pub(super) fn enough(data: &[u8], needs: Needs) -> bool {
     let Some(end) = data.windows(4).position(|window| window == b"\r\n\r\n") else {
         return false;
     };
+    if needs == Needs::Head {
+        return true;
+    }
     let head = String::from_utf8_lossy(&data[..end]);
     let body = &data[end + 4..];
     let header = |name: &str| {

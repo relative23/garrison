@@ -95,6 +95,11 @@ when it is back and in order. A check that stays away, such as one taken out
 of the configuration, is forgotten after a day.
 A message counts as sent once one channel took it; a channel that did not
 take it is not sent it again, and the Alerts page says which one that was.
+ntfy and a webhook have taken it once the status line and headers of their
+answer have arrived, with 200 from ntfy or anything from 200 to 299 from a
+webhook, also where the receiver then ends the connection without TLS's
+closing notice and gives its answer no length, as Python's `http.server`
+behind `ssl` does.
 
 All these messages come out of collection runs, so a collector that stops
 could not report its own end. A watch beside it does (`garrison-watch.timer`,

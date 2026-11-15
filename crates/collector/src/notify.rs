@@ -425,6 +425,8 @@ fn after_run_with(
 #[cfg(test)]
 mod address_tests;
 #[cfg(test)]
+mod notice_tests;
+#[cfg(test)]
 mod secret_tests;
 #[cfg(test)]
 mod state_tests;

@@ -484,6 +484,8 @@ impl Provider for SignIn {
 #[cfg(test)]
 mod clock_tests;
 #[cfg(test)]
+mod notice_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod time_tests;

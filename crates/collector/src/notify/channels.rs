@@ -14,7 +14,7 @@ use serde_json::json;
 use super::mail::{self, Mail};
 use super::secrets::{Address, Secret, Secrets};
 use crate::context::Deadline;
-use crate::fetch::{self, Request};
+use crate::fetch::{self, Needs, Request};
 
 /// Where notifications go. Its stored form holds no secret, and no address
 /// that is kept in a file.
@@ -70,6 +70,11 @@ pub(crate) fn host_of(url: &str) -> &str {
 /// Send `body` as JSON to `url`, done by `until`; an empty token sends none.
 /// An error names the server, not the whole address: a webhook's may carry
 /// its key, and the error goes to the journal and onto the Alerts page.
+///
+/// The status is all a channel reads of the answer. A receiver that ends
+/// TLS without its closing notice and gives its answer no length, as
+/// Python's `http.server` behind `ssl` does, has taken the message once its
+/// head arrived: a message counted as lost would be sent again every run.
 fn post(
     url: &str,
     token: &str,
@@ -88,6 +93,7 @@ fn post(
         url,
         headers: &headers,
         body: body.as_bytes(),
+        needs: Needs::Head,
     };
     fetch::send_until(&request, roots, until)
         .map(|answer| answer.status)

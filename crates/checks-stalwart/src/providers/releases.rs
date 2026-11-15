@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use super::stalwart::running_version;
 use crate::context::{Collected, Context, Provider, Report};
-use crate::fetch::{self, Request};
+use crate::fetch::{self, Needs, Request};
 use crate::kept::{Kept, cached};
 use crate::options::{Checked, Options, fail};
 
@@ -173,6 +173,7 @@ impl Releases {
                 ("X-GitHub-Api-Version", "2022-11-28"),
             ],
             body: &[],
+            needs: Needs::Whole,
         };
         let answer = fetch::send(&request, &fetch::roots())?;
         match answer.status {

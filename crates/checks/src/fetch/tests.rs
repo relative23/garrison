@@ -91,6 +91,7 @@ fn a_post_sends_its_headers_and_its_body() {
             ("X-Also-Bad", "1\r\nInjected: 2"),
         ],
         body: b"Backup job: failed",
+        needs: Needs::Whole,
     };
     assert_eq!(send(&request, &roots()).unwrap().status, 200);
     let sent = server.requests().remove(0);
@@ -154,6 +155,7 @@ fn a_server_that_sends_a_byte_now_and_then_does_not_hold_a_request_beyond_its_ti
         url: &url,
         headers: &[],
         body: &[],
+        needs: Needs::Whole,
     };
     let began = Instant::now();
     let error = send_until(&request, &roots(), began + Duration::from_millis(400)).unwrap_err();
@@ -256,6 +258,42 @@ fn an_answer_cut_short_without_notice_is_no_answer() {
             error.contains("ended before its answer was whole"),
             "{error}"
         );
+    }
+}
+
+/// A request that needs only the head, as a notification does, takes a
+/// complete head whatever follows it; one that needs the whole answer does
+/// not take an answer without a length, and neither takes a cut head.
+#[test]
+fn a_request_that_needs_the_head_takes_it_where_the_rest_may_be_cut() {
+    let ask = |answer: &'static [u8], needs: Needs| {
+        let (port, roots) = closes_without_notice(answer);
+        let url = format!("https://localhost:{port}/topic");
+        // Without a body: this server reads a request's head alone.
+        let request = Request {
+            method: "GET",
+            url: &url,
+            headers: &[],
+            body: &[],
+            needs,
+        };
+        send(&request, &roots).map(|answer| answer.status)
+    };
+    let no_length: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"ok\":tr";
+    assert_eq!(ask(no_length, Needs::Head), Ok(200));
+    let refused = ask(no_length, Needs::Whole).unwrap_err();
+    assert!(
+        refused.contains("ended before its answer was whole"),
+        "{refused}"
+    );
+    // Another status is that status, for the caller to judge.
+    assert_eq!(
+        ask(b"HTTP/1.1 503 Service Unavailable\r\n\r\n", Needs::Head),
+        Ok(503)
+    );
+    for needs in [Needs::Head, Needs::Whole] {
+        let cut = ask(b"HTTP/1.1 200 OK\r\nContent-Ty", needs).unwrap_err();
+        assert!(cut.contains("ended before its answer was whole"), "{cut}");
     }
 }
 
