@@ -16,6 +16,8 @@ log.workspace = true
 
 [dev-dependencies]
 garrison-testing.workspace = true
+# The limit tests lower a child process's own limits (server/limit_tests.rs).
+rustix.workspace = true
 serde_json.workspace = true
 
 [lints]

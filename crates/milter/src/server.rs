@@ -297,6 +297,8 @@ fn timed(stream: &TcpStream) -> io::Result<()> {
 }
 
 #[cfg(test)]
+mod limit_tests;
+#[cfg(test)]
 mod room_tests;
 #[cfg(test)]
 pub(crate) mod tests;

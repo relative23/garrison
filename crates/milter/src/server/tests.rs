@@ -31,14 +31,14 @@ impl Write for Wire {
     }
 }
 
-const SETTINGS: Settings = Settings {
+pub(super) const SETTINGS: Settings = Settings {
     tag: false,
     on_incomplete: IncompleteAction::Defer,
     max_bytes: 8 * 1024 * 1024,
     scan_time: SCAN_TIME,
 };
 /// Everything a mail server of protocol 6 can leave out or do without.
-const MODERN: u32 = 0x001f_ffff;
+pub(super) const MODERN: u32 = 0x001f_ffff;
 
 /// One message as the mail server sends it: headers one by one, then the
 /// body in pieces of `piece` bytes.
@@ -70,7 +70,11 @@ fn answers(frames: Vec<u8>, settings: Settings) -> Vec<(u8, Vec<u8>)> {
 }
 
 /// The same on a connection that shares the filter's room with others.
-fn answers_among(frames: Vec<u8>, settings: Settings, shared: &Shared) -> Vec<(u8, Vec<u8>)> {
+pub(super) fn answers_among(
+    frames: Vec<u8>,
+    settings: Settings,
+    shared: &Shared,
+) -> Vec<(u8, Vec<u8>)> {
     let mut wire = Wire {
         sent: Cursor::new(frames),
         answered: Vec::new(),
