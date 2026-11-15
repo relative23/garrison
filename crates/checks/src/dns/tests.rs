@@ -42,7 +42,7 @@ fn txt(pieces: &[&str]) -> Vec<u8> {
     data
 }
 
-fn asked(kind: Kind, flags: [u8; 2], records: &[(u16, Vec<u8>)]) -> Result<Option<Answer>, String> {
+fn asked(kind: Kind, flags: [u8; 2], records: &[(u16, Vec<u8>)]) -> Result<Option<Answer>, Error> {
     let question = question(7, "example.test", kind).unwrap();
     read(&answer(&question, flags, records), 7, kind)
 }
@@ -108,16 +108,11 @@ fn what_a_resolver_says_instead_of_records() {
         Ok(Some(Answer::NoSuchName))
     );
     assert_eq!(asked(Kind::Mx, [0x83, 0x80], &[]), Ok(None), "cut off");
-    assert_eq!(
-        asked(Kind::Mx, [0x81, 0x82], &[]),
-        Err("the resolver could not answer (SERVFAIL)".to_owned())
-    );
-    assert_eq!(
-        asked(Kind::Mx, [0x81, 0x85], &[]),
-        Err("the resolver refused the question".to_owned())
-    );
+    assert_eq!(asked(Kind::Mx, [0x81, 0x82], &[]), Err(Error::Code(2)));
+    assert_eq!(asked(Kind::Mx, [0x81, 0x85], &[]), Err(Error::Code(5)));
+    assert_eq!(asked(Kind::Mx, [0x81, 0x84], &[]), Err(Error::Code(4)));
     let question = question(7, "example.test", Kind::Mx).unwrap();
-    let malformed = Err("the resolver's answer is malformed".to_owned());
+    let malformed = Err(Error::Malformed);
     // Another question's answer, a question sent back, a record longer than
     // the message, a name that points at itself.
     assert_eq!(read(&answer(&question, FINE, &[]), 8, Kind::Mx), malformed);
@@ -130,6 +125,37 @@ fn what_a_resolver_says_instead_of_records() {
     let mut looping = looping;
     looping[at + 1] = u8::try_from(at).unwrap();
     assert_eq!(read(&looping, 7, Kind::Cname), malformed);
+}
+
+/// The cards, their findings and the readings the collector keeps carry an
+/// error's words, so each kind keeps the words it had; the callers decide by
+/// the kind.
+#[test]
+fn each_failure_keeps_its_words() {
+    let server: SocketAddr = "192.0.2.53:53".parse().unwrap();
+    for (error, words) in [
+        (
+            Error::NoAnswer {
+                server,
+                why: "Resource temporarily unavailable (os error 11)".to_owned(),
+            },
+            "the resolver 192.0.2.53:53 did not answer: Resource temporarily unavailable (os error \
+             11)",
+        ),
+        (Error::Code(2), "the resolver could not answer (SERVFAIL)"),
+        (Error::Code(5), "the resolver refused the question"),
+        (Error::Code(4), "the resolver answered with error 4"),
+        (Error::Malformed, "the resolver's answer is malformed"),
+        (Error::CutOff, "the resolver's answer is cut off"),
+        (Error::NoName("a..b".to_owned()), "a..b is no DNS name"),
+        (
+            Error::NoRandom,
+            "this host gave no random number for the question",
+        ),
+    ] {
+        assert_eq!(error.to_string(), words, "{error:?}");
+    }
+    assert_eq!(no_name("a..b"), "a..b is no DNS name");
 }
 
 #[test]
@@ -186,7 +212,7 @@ fn a_name_longer_than_dns_takes_is_no_dns_name_and_not_sent() {
     let server = resolver.local_addr().unwrap();
     assert_eq!(
         ask(server, &long, Kind::A),
-        Err(format!("{long} is no DNS name"))
+        Err(Error::NoName(long.clone()))
     );
     assert!(resolver.recv_from(&mut [0; 512]).is_err(), "it was sent");
 }
@@ -217,7 +243,7 @@ fn an_answer_that_names_more_than_dns_takes_is_malformed() {
         for kind in [Kind::Ptr, Kind::Cname, Kind::Mx, Kind::Srv] {
             assert_eq!(
                 named(kind, &long),
-                Err("the resolver's answer is malformed".to_owned()),
+                Err(Error::Malformed),
                 "{kind:?}, {octets} octets"
             );
         }
@@ -264,11 +290,56 @@ fn an_answer_cut_off_over_udp_is_asked_for_again_over_tcp() {
         .unwrap()
         .local_addr()
         .unwrap();
+    let error = ask(silent, "example.test", Kind::Txt).unwrap_err();
     assert!(
-        ask(silent, "example.test", Kind::Txt)
-            .unwrap_err()
-            .contains("did not answer")
+        matches!(error, Error::NoAnswer { server, .. } if server == silent),
+        "{error:?}"
     );
+}
+
+/// An answer cut off over UDP is asked for over TCP: where nothing listens
+/// for TCP, the resolver did not answer; where TCP cuts it off as well, it
+/// is cut off.
+#[test]
+fn the_question_over_tcp_has_no_answer_or_one_cut_off_again() {
+    let cut = |question: &[u8]| answer(question, [0x83, 0x80], &[]);
+    // No listener for TCP on the UDP port: the connection is refused.
+    let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let server = udp.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let mut buffer = [0; 512];
+        let (length, client) = udp.recv_from(&mut buffer).unwrap();
+        udp.send_to(&cut(&buffer[..length]), client).unwrap();
+    });
+    let error = ask(server, "example.test", Kind::Txt).unwrap_err();
+    assert!(matches!(error, Error::NoAnswer { .. }), "{error:?}");
+    handle.join().unwrap();
+    // TCP answers, cut off again.
+    let (udp, tcp) = (0..50)
+        .find_map(|_| {
+            let udp = UdpSocket::bind("127.0.0.1:0").ok()?;
+            let tcp = TcpListener::bind(udp.local_addr().ok()?).ok()?;
+            Some((udp, tcp))
+        })
+        .expect("a port that is free for UDP and TCP");
+    let server = udp.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let mut buffer = [0; 512];
+        let (length, client) = udp.recv_from(&mut buffer).unwrap();
+        udp.send_to(&cut(&buffer[..length]), client).unwrap();
+        let (mut stream, _) = tcp.accept().unwrap();
+        let mut size = [0; 2];
+        stream.read_exact(&mut size).unwrap();
+        let mut asked = vec![0; usize::from(u16::from_be_bytes(size))];
+        stream.read_exact(&mut asked).unwrap();
+        let again = cut(&asked);
+        stream
+            .write_all(&u16::try_from(again.len()).unwrap().to_be_bytes())
+            .unwrap();
+        stream.write_all(&again).unwrap();
+    });
+    assert_eq!(ask(server, "example.test", Kind::Txt), Err(Error::CutOff));
+    handle.join().unwrap();
 }
 
 /// First an answer with the question's number for another name, then the
@@ -350,7 +421,7 @@ fn a_resolver_that_answers_only_other_questions_did_not_answer() {
     });
     let began = Instant::now();
     let error = ask(server, "example.test", Kind::Txt).unwrap_err();
-    assert!(error.contains("did not answer"), "{error}");
+    assert!(matches!(error, Error::NoAnswer { .. }), "{error:?}");
     assert!(
         began.elapsed() < Duration::from_secs(4),
         "{:?}",

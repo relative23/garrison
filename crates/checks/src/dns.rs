@@ -1,4 +1,5 @@
-//! A small DNS client: one question to one resolver, the answers as text.
+//! A small DNS client: one question to one resolver, the answers as text,
+//! or what went wrong.
 //!
 //! The collector asks this host's resolver for the records Stalwart names for
 //! a domain. It asks over UDP and, where the answer was cut off, again over
@@ -11,6 +12,7 @@
 //! both. An answer counts only where it repeats the question as asked; any
 //! other is dropped as if it had not arrived, and the wait goes on.
 
+use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream, UdpSocket};
 use std::time::{Duration, Instant};
@@ -84,6 +86,50 @@ pub enum Answer {
     NoSuchName,
 }
 
+/// Why a question got no answer that can be used. Callers decide by what
+/// went wrong; the words for it, as `Display` writes them, are those the
+/// cards, the findings and the kept readings carry, so they stay as they
+/// are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    /// No answer came in the question's time, over UDP, or over TCP for one
+    /// that was cut off: the resolver did not answer or could not be
+    /// reached, and would likely keep the next question waiting as long.
+    NoAnswer { server: SocketAddr, why: String },
+    /// The resolver answered with an error code (RFC 1035, 4.1.1), such as
+    /// 2, SERVFAIL, or 5, REFUSED: about this question, not every one.
+    Code(u8),
+    /// The answer breaks what DNS allows, or the bounds it is read in.
+    Malformed,
+    /// The answer was cut off over UDP and again over TCP.
+    CutOff,
+    /// The name is no DNS name, so no question was sent.
+    NoName(String),
+    /// This host gave no random number for the question's number.
+    NoRandom,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::NoAnswer { server, why } => {
+                write!(formatter, "the resolver {server} did not answer: {why}")
+            }
+            Error::Code(2) => formatter.write_str("the resolver could not answer (SERVFAIL)"),
+            Error::Code(5) => formatter.write_str("the resolver refused the question"),
+            Error::Code(code) => write!(formatter, "the resolver answered with error {code}"),
+            Error::Malformed => formatter.write_str("the resolver's answer is malformed"),
+            Error::CutOff => formatter.write_str("the resolver's answer is cut off"),
+            Error::NoName(name) => write!(formatter, "{name} is no DNS name"),
+            Error::NoRandom => {
+                formatter.write_str("this host gave no random number for the question")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
 /// The name under which an address's reverse record stands, or, with a
 /// blocklist's `zone`, the name that list answers for it: the octets of an
 /// IPv4 address, the 32 hexadecimal digits of an IPv6 address, last first.
@@ -155,7 +201,7 @@ pub fn is_name(name: &str) -> bool {
 
 /// What the client says of a name that DNS cannot ask, as [`ask`] does.
 pub fn no_name(name: &str) -> String {
-    format!("{name} is no DNS name")
+    Error::NoName(name.to_owned()).to_string()
 }
 
 /// The name that starts at `at`, and where the record goes on after it;
@@ -258,10 +304,9 @@ fn data(message: &[u8], kind: Kind, start: usize, end: usize) -> Option<String> 
 
 /// The answers to the question `id` asked, or why the message gives none.
 /// `Ok(None)` means it was cut off and must be asked for again over TCP.
-pub fn read(message: &[u8], id: u16, kind: Kind) -> Result<Option<Answer>, String> {
-    let malformed = || "the resolver's answer is malformed".to_owned();
+pub fn read(message: &[u8], id: u16, kind: Kind) -> Result<Option<Answer>, Error> {
     if message.len() < 12 || number(message, 0) != Some(id) || message[2] & 0x80 == 0 {
-        return Err(malformed());
+        return Err(Error::Malformed);
     }
     if message[2] & 0x02 != 0 {
         return Ok(None);
@@ -269,29 +314,27 @@ pub fn read(message: &[u8], id: u16, kind: Kind) -> Result<Option<Answer>, Strin
     match message[3] & 0x0f {
         0 => {}
         3 => return Ok(Some(Answer::NoSuchName)),
-        2 => return Err("the resolver could not answer (SERVFAIL)".to_owned()),
-        5 => return Err("the resolver refused the question".to_owned()),
-        code => return Err(format!("the resolver answered with error {code}")),
+        code => return Err(Error::Code(code)),
     }
-    let questions = number(message, 4).ok_or_else(malformed)?;
-    let answers = usize::from(number(message, 6).ok_or_else(malformed)?);
+    let questions = number(message, 4).ok_or(Error::Malformed)?;
+    let answers = usize::from(number(message, 6).ok_or(Error::Malformed)?);
     let mut position = 12;
     for _ in 0..questions {
-        position = name_at(message, position).ok_or_else(malformed)?.1 + 4;
+        position = name_at(message, position).ok_or(Error::Malformed)?.1 + 4;
     }
     let mut records = Vec::new();
     for _ in 0..answers.min(MOST_ANSWERS) {
-        position = name_at(message, position).ok_or_else(malformed)?.1;
-        let found = number(message, position).ok_or_else(malformed)?;
-        let length = usize::from(number(message, position + 8).ok_or_else(malformed)?);
+        position = name_at(message, position).ok_or(Error::Malformed)?.1;
+        let found = number(message, position).ok_or(Error::Malformed)?;
+        let length = usize::from(number(message, position + 8).ok_or(Error::Malformed)?);
         let start = position + 10;
         let end = start + length;
         if end > message.len() {
-            return Err(malformed());
+            return Err(Error::Malformed);
         }
         // A CNAME on the way to the asked type is followed by the resolver.
         if found == kind.code() {
-            records.push(data(message, kind, start, end).ok_or_else(malformed)?);
+            records.push(data(message, kind, start, end).ok_or(Error::Malformed)?);
         }
         position = end;
     }
@@ -360,19 +403,21 @@ fn over_tcp(server: SocketAddr, question: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 /// Ask `server` for the records of `kind` at `name`.
-pub fn ask(server: SocketAddr, name: &str, kind: Kind) -> Result<Answer, String> {
+pub fn ask(server: SocketAddr, name: &str, kind: Kind) -> Result<Answer, Error> {
     let mut number = [0; 2];
-    getrandom::fill(&mut number)
-        .map_err(|_| "this host gave no random number for the question".to_owned())?;
+    getrandom::fill(&mut number).map_err(|_| Error::NoRandom)?;
     let id = u16::from_be_bytes(number);
-    let question = question(id, name, kind).ok_or_else(|| no_name(name))?;
-    let unreachable = |error: io::Error| format!("the resolver {server} did not answer: {error}");
-    let answer = over_udp(server, &question).map_err(unreachable)?;
+    let question = question(id, name, kind).ok_or_else(|| Error::NoName(name.to_owned()))?;
+    let unanswered = |error: io::Error| Error::NoAnswer {
+        server,
+        why: error.to_string(),
+    };
+    let answer = over_udp(server, &question).map_err(unanswered)?;
     if let Some(answer) = read(&answer, id, kind)? {
         return Ok(answer);
     }
-    let answer = over_tcp(server, &question).map_err(unreachable)?;
-    read(&answer, id, kind)?.ok_or_else(|| "the resolver's answer is cut off".to_owned())
+    let answer = over_tcp(server, &question).map_err(unanswered)?;
+    read(&answer, id, kind)?.ok_or(Error::CutOff)
 }
 
 #[cfg(test)]

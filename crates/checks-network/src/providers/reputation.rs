@@ -329,11 +329,11 @@ impl Reputation {
                     // A resolver that did not answer is asked nothing more,
                     // as the dns check does: each question would wait out
                     // its time, and the run has only so long.
-                    Err(why) if why.contains("did not answer") => return Err(why),
+                    Err(error @ dns::Error::NoAnswer { .. }) => return Err(error.to_string()),
                     // An answer it cannot use, malformed or an error of the
                     // resolver, concerns these addresses of this host alone.
-                    Err(why) => {
-                        unread(&mut hosts_unread, host, kind, &why);
+                    Err(error) => {
+                        unread(&mut hosts_unread, host, kind, &error.to_string());
                         continue;
                     }
                 };

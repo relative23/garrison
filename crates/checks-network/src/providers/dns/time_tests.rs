@@ -9,10 +9,42 @@ use std::time::Duration;
 use garrison_testing::http::{json as answer_json, serve};
 use serde_json::json;
 
-use super::stand_in::{host, resolver_after};
+use super::stand_in::{host, resolver_after, resolver_erring, text};
 use super::tests::collected;
 use super::*;
 use crate::testing::{Canned, config, table};
+
+/// An error of the resolver for one name, SERVFAIL or REFUSED, is that
+/// name's: the next record is asked as before. Only a resolver that did not
+/// answer at all is asked no more. What went wrong decides, not its words.
+#[test]
+fn an_error_of_the_resolver_for_one_name_leaves_the_next_asked() {
+    let zone_file = "example.test. IN MX 10 mail.example.test.\n\
+                     example.test. IN TXT \"v=spf1 mx -all\"\n";
+    for code in [2, 5] {
+        let zone = BTreeMap::from([(
+            ("example.test".to_owned(), Kind::Txt.code()),
+            vec![text("v=spf1 mx -all")],
+        )]);
+        let errors = BTreeMap::from([(("example.test".to_owned(), Kind::Mx.code()), code)]);
+        // Not joined: where the resolver is taken for silent, the second
+        // question never comes, and the stand-in would wait for it.
+        let (address, _) = resolver_erring(zone, errors, 2);
+        let observations = collected(
+            &json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+            address,
+        );
+        let results: Vec<&serde_json::Value> = observations[0]
+            .table
+            .as_ref()
+            .unwrap()
+            .rows
+            .iter()
+            .map(|row| &row[5])
+            .collect();
+        assert_eq!(results, ["no answer", "published"], "error {code}");
+    }
+}
 
 #[test]
 fn a_resolver_that_is_silent_is_asked_once_in_a_run_however_many_domains_there_are() {

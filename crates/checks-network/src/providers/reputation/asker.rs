@@ -64,7 +64,7 @@ impl Asker {
         }
         // An error may repeat the question, and with it a zone's key.
         let answer = dns::ask(self.resolver, &dns::reversed(address, Some(zone)), Kind::A)
-            .map_err(|error| error.replace(zone, &shown(zone)));
+            .map_err(|error| error.to_string().replace(zone, &shown(zone)));
         if answer.is_err() {
             self.silent.insert(zone.to_owned());
         }
@@ -72,7 +72,7 @@ impl Asker {
     }
 
     /// The records of `kind` at `name`; none where the name has none.
-    pub(super) fn records(&self, name: &str, kind: Kind) -> Result<Vec<String>, String> {
+    pub(super) fn records(&self, name: &str, kind: Kind) -> Result<Vec<String>, dns::Error> {
         match dns::ask(self.resolver, name, kind)? {
             Answer::Records(records) => Ok(records),
             Answer::NoSuchName => Ok(Vec::new()),
@@ -84,14 +84,14 @@ impl Asker {
     /// answer that cannot be used concerns this address alone: it is kept
     /// as why, and the reading goes on.
     pub(super) fn reverse(&self, address: IpAddr) -> Option<Reverse> {
-        let unread = |name: Option<String>, why: String| Reverse {
+        let unread = |name: Option<String>, why: &dns::Error| Reverse {
             name,
             confirmed: false,
-            unread: Some(why),
+            unread: Some(why.to_string()),
         };
         let name = match self.records(&dns::reversed(address, None), Kind::Ptr) {
             Ok(names) => names.into_iter().next(),
-            Err(why) => return Some(unread(None, why)),
+            Err(why) => return Some(unread(None, &why)),
         };
         let Some(name) = name.map(|name| name.trim_end_matches('.').to_lowercase()) else {
             return Some(Reverse::default());
@@ -112,7 +112,7 @@ impl Asker {
                 name: Some(name),
                 unread: None,
             },
-            Err(why) => unread(Some(name), why),
+            Err(why) => unread(Some(name), &why),
         })
     }
 }

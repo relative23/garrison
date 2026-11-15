@@ -213,7 +213,7 @@ fn asked(
         Ok(Answer::NoSuchName) => (Verdict::Missing, Vec::new()),
         Err(error) => {
             // An error for one name, such as SERVFAIL, is that name's.
-            *silent = error.is_empty() || error.contains("did not answer");
+            *silent = matches!(error, dns::Error::NoAnswer { .. });
             (Verdict::Unanswered, Vec::new())
         }
     }
