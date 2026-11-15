@@ -8,6 +8,12 @@ use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 /// The release of Garrison that runs in these tests.
 const RUNS: &str = "0.5.0";
 
+/// What `TAG` relies on: its pattern compiles.
+#[test]
+fn the_pattern_compiles() {
+    LazyLock::force(&TAG);
+}
+
 /// A release as GitHub serves it, from its beginning.
 fn entry(tag: &str) -> serde_json::Value {
     json!({

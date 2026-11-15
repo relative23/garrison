@@ -203,6 +203,15 @@ fn signatures_are_base64_hmac_sha256() {
     assert!(!signature_matches(KEY, b"{} ", &good));
 }
 
+/// What `mac` relies on: HMAC takes a key of any length, none and one
+/// longer than SHA-256's block of 64 octets among them.
+#[test]
+fn a_key_of_any_length_makes_a_mac() {
+    for length in [0, 1, 32, 63, 64, 65, 1000] {
+        assert!(Hmac::new_from_slice(&vec![7; length]).is_ok(), "{length}");
+    }
+}
+
 #[tokio::test]
 async fn a_body_may_use_exactly_its_size_limit() {
     let directory = tempfile::tempdir().unwrap();

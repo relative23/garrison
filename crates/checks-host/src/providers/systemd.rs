@@ -41,16 +41,21 @@ pub struct Systemd {
     units: Vec<Unit>,
 }
 
-static TIMESTAMP: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (UTC|[A-Z]{3,5})").expect("valid pattern")
-});
-static CALENDAR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"OnCalendar=([^;}]+)").expect("valid pattern"));
+/// One of this file's regular expressions. Each is a constant, and whether
+/// it compiles depends on nothing else, regex-lite's release being locked:
+/// `the_patterns_compile` compiles every one, so a build whose tests pass
+/// never comes to the `unreachable!`.
+fn pattern(text: &str) -> Regex {
+    Regex::new(text).unwrap_or_else(|_| unreachable!("the pattern {text} does not compile"))
+}
+
+static TIMESTAMP: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (UTC|[A-Z]{3,5})"));
+static CALENDAR: LazyLock<Regex> = LazyLock::new(|| pattern(r"OnCalendar=([^;}]+)"));
 static INTERVAL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"OnUnit(?:Active|Inactive)USec=([^;}]+)").expect("valid pattern"));
-static SPAN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(\d+(?:\.\d+)?)\s*(y|months?|w|d|h|min|ms|us|μs|s)\b").expect("valid pattern")
-});
+    LazyLock::new(|| pattern(r"OnUnit(?:Active|Inactive)USec=([^;}]+)"));
+static SPAN: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"(\d+(?:\.\d+)?)\s*(y|months?|w|d|h|min|ms|us|μs|s)\b"));
 
 /// systemd's `Thu 2026-10-29 03:00:00 UTC`; another zone or `n/a` is `None`.
 fn instant(value: &str) -> Option<time::Timestamp> {
@@ -414,6 +419,14 @@ impl Provider for Systemd {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What `pattern` relies on: every pattern of this file compiles.
+    #[test]
+    fn the_patterns_compile() {
+        for found in [&TIMESTAMP, &CALENDAR, &INTERVAL, &SPAN] {
+            LazyLock::force(found);
+        }
+    }
 
     fn properties(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs

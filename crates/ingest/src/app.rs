@@ -63,7 +63,12 @@ fn signature_matches(key: &[u8], body: &[u8], provided: &str) -> bool {
 }
 
 fn mac(key: &[u8], body: &[u8]) -> Hmac {
-    let mut mac = Hmac::new_from_slice(key).expect("HMAC accepts keys of any length");
+    // RFC 2104 defines HMAC for a key of any length, a longer one hashed
+    // first, and hmac's `new_from_slice` refuses only a key of the wrong
+    // length for a MAC that has a fixed one, never for HMAC:
+    // `a_key_of_any_length_makes_a_mac` holds that for the locked release.
+    let mut mac = Hmac::new_from_slice(key)
+        .unwrap_or_else(|_| unreachable!("HMAC takes a key of any length"));
     mac.update(body);
     mac
 }

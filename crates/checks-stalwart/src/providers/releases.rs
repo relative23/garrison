@@ -34,8 +34,13 @@ const STALE_AFTER: i64 = 3 * DAY;
 /// The newest releases that are read where pre-releases count.
 const LISTED: usize = 10;
 
-static TAG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#""tag_name"\s*:\s*"v?([^"\\]{1,60})""#).expect("valid pattern"));
+/// A constant pattern, and whether it compiles depends on nothing else,
+/// regex-lite's release being locked: `the_pattern_compiles` compiles it, so
+/// a build whose tests pass never comes to the `unreachable!`.
+static TAG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#""tag_name"\s*:\s*"v?([^"\\]{1,60})""#)
+        .unwrap_or_else(|_| unreachable!("the pattern of a release's tag does not compile"))
+});
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Product {
