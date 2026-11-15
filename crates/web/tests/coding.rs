@@ -14,10 +14,14 @@ use garrison_core::config::Database;
 use serde_json::{Value, json};
 use support::{setup, write_status};
 
+/// An observation checked at a time that cannot be read: the answer then
+/// gives it no age, which counts the seconds since that time, so that two
+/// answers of one snapshot are the same bytes in whichever second each is
+/// made.
 fn observation(index: usize) -> Value {
     json!({
         "id": format!("o{index}"), "provider": "p", "title": "t", "modules": ["dashboard"],
-        "evidence": "process", "state": "ok", "checkedAt": "2000-01-01T00:00:00+00:00",
+        "evidence": "process", "state": "ok", "checkedAt": "not a time",
         "source": "s", "kind": "details", "scope": "", "fields": [], "table": null,
         "findings": [], "value": {}, "maxAge": 60,
     })
