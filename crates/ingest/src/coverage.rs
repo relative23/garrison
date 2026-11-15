@@ -36,6 +36,12 @@ fn meta(db: &Connection, key: &str) -> Result<Option<i64>> {
     Ok(recording::number(db, key)?)
 }
 
+/// A time the receiver keeps about itself; one that is no time, in a
+/// damaged history, cannot be read.
+fn moment(db: &Connection, key: &str) -> Result<Option<i64>> {
+    Ok(recording::time_of(db, key)?)
+}
+
 /// Where a size limit made the history begin.
 fn trimmed(db: &Connection) -> Result<Option<Trimmed>> {
     Ok(recording::trimmed(db)?.map(|(until, reason)| Trimmed {
@@ -67,7 +73,7 @@ pub fn read(db: Option<&Connection>, now: i64) -> Result<Coverage> {
         });
     };
     let total: i64 = db.query_row("SELECT count(*) FROM events", [], |row| row.get(0))?;
-    let heartbeat = meta(db, HEARTBEAT_AT)?;
+    let heartbeat = moment(db, HEARTBEAT_AT)?;
     let gaps = recording::gaps(db, LISTED_GAPS)?
         .into_iter()
         .map(|recording::Gap { start, end, reason }| Gap { start, end, reason })

@@ -125,3 +125,23 @@ fn only_the_twenty_newest_gaps_are_listed_and_all_are_counted() {
     assert_eq!((coverage.gap_count, coverage.gaps.len()), (25, 20));
     assert_eq!((coverage.gaps[0].start, coverage.gaps[19].start), (240, 50));
 }
+
+/// A heartbeat at a time no clock gives, in a damaged or hand-edited
+/// history, says neither that the receiver runs nor that it stopped: what
+/// the history covers is not known, as for a heartbeat that is no number.
+#[test]
+fn a_heartbeat_at_no_time_leaves_the_coverage_unknown() {
+    for beat in [i64::MIN, i64::MAX] {
+        let directory = tempfile::tempdir().unwrap();
+        store(directory.path(), 1000);
+        let writer = Connection::open(directory.path().join("events.sqlite")).unwrap();
+        recording::set(&writer, HEARTBEAT_AT, beat).unwrap();
+        let db = reader(directory.path());
+        let covered = read(Some(&db), 1000);
+        assert!(
+            matches!(&covered, Err(QueryError::Unreadable(said)) if said
+                == "A number the event receiver keeps about the history cannot be read"),
+            "{beat}: {covered:?}"
+        );
+    }
+}
