@@ -36,6 +36,21 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
       - run: cargo test --workspace --locked
+      # The tests ask stand-ins for restic and borg; this one asks a real
+      # restic, pinned by its checksum as the tools of the lint job are.
+      - name: Install restic 0.18.1
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://github.com/restic/restic/releases/download/v0.18.1/restic_0.18.1_linux_amd64.bz2
+          sha256sum -c - <<'SUMS'
+          680838f19d67151adba227e1570cdd8af12c19cf1735783ed1ba928bc41f363d  restic_0.18.1_linux_amd64.bz2
+          SUMS
+          mkdir -p bin
+          bunzip2 -c restic_0.18.1_linux_amd64.bz2 > bin/restic
+          chmod 755 bin/restic
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: backup-check against the real restic
+        run: cargo test -p garrison --test backup_check --locked -- --ignored
       - name: Layering, file sizes and runnable scripts
         run: cargo xtask check
       - name: Licenses, advisories and sources

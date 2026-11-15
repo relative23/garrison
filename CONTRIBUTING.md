@@ -113,6 +113,7 @@ cargo check --manifest-path fuzz/Cargo.toml --locked --bins
 cargo clippy --workspace --all-targets --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo test --workspace --locked
+cargo test -p garrison --test backup_check --locked -- --ignored   # a real restic, 0.18.1 in CI
 cargo xtask check                              # layering, file sizes and runnable scripts
 cargo deny --locked check                      # licenses, advisories, sources
 cargo machete                                  # no crate declares a dependency it does not use
@@ -182,7 +183,8 @@ or a rollback leaves behind. A test names the behavior it proves, such as
   signed batch whose rows and answers `fixtures/golden.json` records.
   `backup_check.rs` runs the command with stand-ins for restic and borg;
   with restic installed, `cargo test -p garrison --test backup_check --
-  --ignored` asks the real one.
+  --ignored` asks the real one, as CI does with restic 0.18.1, pinned by its
+  checksum.
 - **Contract tests** (`crates/*/tests/contract.rs`, or `tests/contract/`
   where they are several files) check every assumption about Stalwart against
   the real release. Anything Garrison expects from Stalwart needs one.
