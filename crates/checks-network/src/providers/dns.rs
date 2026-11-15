@@ -160,6 +160,9 @@ pub struct Dns {
     max_domains: usize,
     /// Where the tests serve an MTA-STS policy; otherwise it is the domain's own address.
     policy_url: Option<String>,
+    /// The authorities a policy's server is checked against: the system's,
+    /// unless a test gives its own.
+    roots: Option<crate::fetch::Roots>,
 }
 
 impl Dns {
@@ -169,7 +172,16 @@ impl Dns {
             resolver: resolver_option(raw, "dns")?,
             max_domains: max_domains(&options)?,
             policy_url: None,
+            roots: None,
         })
+    }
+
+    /// For tests: trust these roots for a policy's server.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_roots(mut self, roots: rustls::RootCertStore) -> Self {
+        self.roots = Some(std::sync::Arc::new(roots));
+        self
     }
 
     fn resolver(&self) -> Option<SocketAddr> {
@@ -270,6 +282,7 @@ impl Dns {
                 &name,
                 &mx_hosts(&records),
                 self.policy_url.as_deref(),
+                self.roots.as_ref(),
             );
             rows.push(row);
             finding
@@ -366,6 +379,8 @@ impl Provider for Dns {
 
 #[cfg(test)]
 pub(crate) mod domains_tests;
+#[cfg(test)]
+mod sts_tests;
 #[cfg(test)]
 pub(crate) mod tests;
 #[cfg(test)]

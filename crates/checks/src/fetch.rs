@@ -23,7 +23,9 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use flate2::read::GzDecoder;
-use rustls::pki_types::ServerName;
+use garrison_core::time::Timestamp;
+use rustls::pki_types::{ServerName, UnixTime};
+use rustls::time_provider::{DefaultTimeProvider, TimeProvider};
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 
 use crate::timed::Timed;
@@ -62,6 +64,34 @@ pub fn roots() -> Roots {
     let mut roots = RootCertStore::empty();
     roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
     Arc::new(roots)
+}
+
+/// The time a check judges a server's certificate at: its run's, so that
+/// one run judges every certificate at one time, and a test can set it.
+#[derive(Debug)]
+struct At(UnixTime);
+
+impl TimeProvider for At {
+    fn current_time(&self) -> Option<UnixTime> {
+        Some(self.0)
+    }
+}
+
+/// A TLS client that trusts `roots` and judges a server's certificate at
+/// `at`, a check's run time, or by the clock where it has none.
+pub fn client_config(roots: &Roots, at: Option<Timestamp>) -> Result<ClientConfig, String> {
+    let time: Arc<dyn TimeProvider> = match at {
+        Some(at) => Arc::new(At(UnixTime::since_unix_epoch(Duration::from_secs(
+            u64::try_from(at.as_second()).unwrap_or(0),
+        )))),
+        None => Arc::new(DefaultTimeProvider),
+    };
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    Ok(ClientConfig::builder_with_details(provider, time)
+        .with_safe_default_protocol_versions()
+        .map_err(|error| error.to_string())?
+        .with_root_certificates(roots.clone())
+        .with_no_client_auth())
 }
 
 /// `scheme://host[:port]` of a URL.
@@ -169,15 +199,21 @@ pub fn secure_stream_until(
     roots: &Arc<RootCertStore>,
     until: Instant,
 ) -> Result<StreamOwned<ClientConnection, Timed>, String> {
+    secure_stream_at(host, port, roots, until, None)
+}
+
+/// The same, with the certificate judged at `at` where it is given.
+fn secure_stream_at(
+    host: &str,
+    port: u16,
+    roots: &Arc<RootCertStore>,
+    until: Instant,
+    at: Option<Timestamp>,
+) -> Result<StreamOwned<ClientConnection, Timed>, String> {
     let stream = connect(host, port, until)?;
     let name =
         ServerName::try_from(host.to_owned()).map_err(|_| format!("{host} is no host name"))?;
-    let config =
-        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-            .with_safe_default_protocol_versions()
-            .map_err(|error| error.to_string())?
-            .with_root_certificates(roots.clone())
-            .with_no_client_auth();
+    let config = client_config(roots, at)?;
     let connection =
         ClientConnection::new(Arc::new(config), name).map_err(|error| error.to_string())?;
     Ok(StreamOwned::new(connection, stream))
@@ -293,6 +329,18 @@ pub fn get(url: &str, roots: &Arc<RootCertStore>) -> Result<Answer, String> {
     )
 }
 
+/// `GET url`, with the server's certificate judged at `at`, the time of a
+/// check's run.
+pub fn get_at(url: &str, roots: &Arc<RootCertStore>, at: Timestamp) -> Result<Answer, String> {
+    let request = Request {
+        method: "GET",
+        url,
+        headers: &[],
+        body: &[],
+    };
+    send_at(&request, roots, Instant::now() + WITHIN, Some(at))
+}
+
 pub fn send(request: &Request<'_>, roots: &Arc<RootCertStore>) -> Result<Answer, String> {
     send_until(request, roots, Instant::now() + WITHIN)
 }
@@ -303,10 +351,21 @@ pub fn send_until(
     roots: &Arc<RootCertStore>,
     until: Instant,
 ) -> Result<Answer, String> {
+    send_at(request, roots, until, None)
+}
+
+/// The request done by `until`, with a server's certificate judged at `at`
+/// where it is given, else by the clock.
+fn send_at(
+    request: &Request<'_>,
+    roots: &Arc<RootCertStore>,
+    until: Instant,
+    at: Option<Timestamp>,
+) -> Result<Answer, String> {
     let url = request.url;
     let (secure, host, port, path) = split(url)?;
     let data = if secure {
-        let mut tls = secure_stream_until(&host, port, roots, until)?;
+        let mut tls = secure_stream_at(&host, port, roots, until, at)?;
         exchange(&mut tls, &host, &path, request).map_err(|error| tls_error(&error))?
     } else {
         let mut stream = connect(&host, port, until)?;

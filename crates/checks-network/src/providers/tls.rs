@@ -17,14 +17,14 @@ use garrison_core::observations::{
     Column, Evidence, Field, Format, Observation, Required, State, Table,
 };
 use garrison_core::time::{self, Timestamp};
-use rustls::pki_types::{ServerName, UnixTime};
-use rustls::time_provider::TimeProvider;
-use rustls::{ClientConfig, ClientConnection, RootCertStore};
+use rustls::pki_types::ServerName;
+use rustls::{ClientConnection, RootCertStore};
 use serde_json::{Value, json};
 
 use super::certificate::not_after;
 use super::dns::max_domains;
 use crate::context::{Collected, Context, Provider, Report};
+use crate::fetch;
 use crate::options::{Checked, Options, fail};
 use crate::timed::Timed;
 
@@ -137,17 +137,6 @@ fn connect(address: &str, port: u16, until: Instant) -> Result<Timed, Failure> {
     Err(last)
 }
 
-/// The time a handshake judges the certificate by: the run's, so that one
-/// run judges each certificate at one time, and a test can set it.
-#[derive(Debug)]
-struct At(UnixTime);
-
-impl TimeProvider for At {
-    fn current_time(&self) -> Option<UnixTime> {
-        Some(self.0)
-    }
-}
-
 /// One handshake: STARTTLS if asked, SNI `host`, chain and name validated
 /// at `now`; all of it within `PROBE`.
 pub fn probe(
@@ -159,15 +148,8 @@ pub fn probe(
     now: Timestamp,
 ) -> Result<Probed, Failure> {
     let name = ServerName::try_from(host.to_owned()).map_err(|_| Failure("invalid host name"))?;
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let at = UnixTime::since_unix_epoch(Duration::from_secs(
-        u64::try_from(now.as_second()).unwrap_or(0),
-    ));
-    let config = ClientConfig::builder_with_details(provider, Arc::new(At(at)))
-        .with_safe_default_protocol_versions()
-        .map_err(|_| Failure("TLS error"))?
-        .with_root_certificates(roots.clone())
-        .with_no_client_auth();
+    // The chain is judged at the run's time, as every check judges.
+    let config = fetch::client_config(roots, Some(now)).map_err(|_| Failure("TLS error"))?;
     let mut connection =
         ClientConnection::new(Arc::new(config), name).map_err(|_| Failure("TLS error"))?;
     let mut stream = connect(address, port, Instant::now() + PROBE)?;

@@ -175,8 +175,15 @@ fn a_server_that_sends_a_byte_now_and_then_does_not_hold_a_request_beyond_its_ti
 /// closes the connection without the notice TLS ends with; its port, and the
 /// authority its certificate comes from.
 fn closes_without_notice(answer: &'static [u8]) -> (u16, Roots) {
+    closes_without_notice_with(&garrison_testing::tls::certificates(), answer)
+}
+
+/// The same with the certificates given.
+fn closes_without_notice_with(
+    certificates: &garrison_testing::tls::Certificates,
+    answer: &'static [u8],
+) -> (u16, Roots) {
     use rustls::{RootCertStore, ServerConfig, ServerConnection, StreamOwned};
-    let certificates = garrison_testing::tls::certificates();
     let mut roots = RootCertStore::empty();
     roots.add(certificates.ca.clone()).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -250,4 +257,30 @@ fn an_answer_cut_short_without_notice_is_no_answer() {
             "{error}"
         );
     }
+}
+
+/// A check judges a server's certificate at its run's time: one that ends
+/// after the run is valid then, and one that ended before it is not,
+/// whatever this host's clock says.
+#[test]
+fn a_certificate_is_judged_at_the_time_of_the_run_it_is_asked_for() {
+    // Valid until 2026-11-13 00:00 UTC.
+    let certificates = garrison_testing::tls::certificates_until(2026, 11, 13);
+    let answer: &'static [u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+    let at = |text: &str| garrison_core::time::parse(text).unwrap();
+    let (port, roots) = closes_without_notice_with(&certificates, answer);
+    let read = get_at(
+        &format!("https://localhost:{port}/"),
+        &roots,
+        at("2026-11-12T23:59:00Z"),
+    );
+    assert_eq!(read.map(|answer| answer.body), Ok("ok".to_owned()));
+    let (port, roots) = closes_without_notice_with(&certificates, answer);
+    let error = get_at(
+        &format!("https://localhost:{port}/"),
+        &roots,
+        at("2026-11-13T00:01:00Z"),
+    )
+    .unwrap_err();
+    assert!(error.contains("not valid for this name"), "{error}");
 }

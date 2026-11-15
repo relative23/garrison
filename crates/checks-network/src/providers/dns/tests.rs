@@ -210,13 +210,13 @@ fn the_records_are_asked_with_numbers_at_random() {
     assert!(!guessable(&numbers), "{numbers:?}");
 }
 
-fn text(value: &str) -> Vec<u8> {
+pub(super) fn text(value: &str) -> Vec<u8> {
     let mut data = vec![u8::try_from(value.len()).unwrap()];
     data.extend_from_slice(value.as_bytes());
     data
 }
 
-fn host(prefix: &[u8], name: &str) -> Vec<u8> {
+pub(super) fn host(prefix: &[u8], name: &str) -> Vec<u8> {
     let mut data = prefix.to_vec();
     for label in name.split('.') {
         data.push(u8::try_from(label.len()).unwrap());

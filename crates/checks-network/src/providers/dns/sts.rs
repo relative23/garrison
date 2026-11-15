@@ -73,15 +73,26 @@ pub(super) fn names(policy: &Policy, host: &str) -> bool {
 }
 
 /// The policy at `url`, from the status database where it was fetched within
-/// the hour.
-pub(super) fn policy(context: &Context<'_>, domain: &str, url: &str) -> Result<Policy, String> {
+/// the hour. Its server's certificate is judged at the run's time, against
+/// `roots` or else the system's authorities.
+pub(super) fn policy(
+    context: &Context<'_>,
+    domain: &str,
+    url: &str,
+    roots: Option<&fetch::Roots>,
+) -> Result<Policy, String> {
     let key = format!("dns.sts.{domain}");
     let fetched = cached(
         context,
         &key,
         |_, _| EVERY,
         |_| Fetched {
-            outcome: fetch::get(url, &fetch::roots()).and_then(|answer| {
+            outcome: fetch::get_at(
+                url,
+                &roots.cloned().unwrap_or_else(fetch::roots),
+                context.now,
+            )
+            .and_then(|answer| {
                 if answer.status == 200 {
                     parse(&answer.body)
                 } else {
@@ -145,15 +156,17 @@ pub(super) fn judged(
 }
 
 /// The table's row for the policy of `domain` and, where it stops senders, a
-/// finding. `url` is where the tests serve a policy.
+/// finding. `url` is where the tests serve a policy, with `roots` that
+/// trust its server.
 pub(super) fn checked(
     context: &Context<'_>,
     domain: &str,
     hosts: &[String],
     url: Option<&str>,
+    roots: Option<&fetch::Roots>,
 ) -> (Vec<serde_json::Value>, Option<String>) {
     let own = format!("https://mta-sts.{domain}/.well-known/mta-sts.txt");
-    let read = policy(context, domain, url.unwrap_or(&own));
+    let read = policy(context, domain, url.unwrap_or(&own), roots);
     let (stated, result, finding) = judged(domain, hosts, &read);
     let row = vec![
         json!(format!("mta-sts.{domain}")),
