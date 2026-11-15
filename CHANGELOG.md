@@ -453,7 +453,10 @@ Notable changes for operators and users. The format follows
   history for current. They now say that what the receiver recorded about
   itself cannot be read. On the pages of the history such a heartbeat
   called the receiver running or failed the request with a panic; they now
-  say that what the history covers is not known.
+  say that what the history covers is not known. `garrison doctor` said
+  that a newest event recorded at such a time arrived a negative number of
+  minutes ago, or that there had been none for billions of hours; it now
+  says that the newest event is recorded at no time.
 - **A maintenance job recorded at a time that is none no longer holds back
   every action.** A job in the broker's audit at a time no clock gives, in
   a database that was edited by hand or damaged, made every action wait for

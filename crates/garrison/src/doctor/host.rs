@@ -212,6 +212,13 @@ fn events(config: &Config) -> Finding {
                 .flatten()
         });
     match newest {
+        // A damaged or hand-edited history: no age, neither recent nor old.
+        Some(seconds) if time::Timestamp::from_second(seconds).is_err() => {
+            Finding::unknown(format!(
+                "when the last Stalwart event arrived: the newest event is recorded at \
+                 {seconds}, which is no time"
+            ))
+        }
         #[allow(clippy::cast_precision_loss)]
         Some(seconds) => {
             let hours = (time::unix(time::now()) - seconds as f64) / 3600.0;
@@ -322,6 +329,35 @@ mod tests {
                 )
             );
         }
+    }
+
+    /// A damaged or hand-edited event history may record its newest event
+    /// at a time that is none: that is no arrival minutes or hours ago.
+    #[test]
+    fn an_event_recorded_at_no_time_gives_no_age() {
+        let found = [i64::MIN, i64::MAX].map(|when| {
+            let directory = tempfile::tempdir().unwrap();
+            let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+            let path = config.database(Database::Events);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let db = rusqlite::Connection::open(&path).unwrap();
+            db.execute_batch("CREATE TABLE events(received_at INTEGER NOT NULL)")
+                .unwrap();
+            db.execute("INSERT INTO events VALUES(?)", [when]).unwrap();
+            drop(db);
+            let found = events(&config);
+            (found.level, found.what)
+        });
+        assert_eq!(
+            found,
+            [i64::MIN, i64::MAX].map(|when| (
+                Level::Unknown,
+                format!(
+                    "when the last Stalwart event arrived: the newest event is recorded at \
+                     {when}, which is no time"
+                )
+            ))
+        );
     }
 
     #[test]
