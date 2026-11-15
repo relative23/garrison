@@ -17,6 +17,17 @@ Notable changes for operators and users. The format follows
 
 ### Added
 
+- **Stalwart can count and block each client under its own address.**
+  Behind nginx, Stalwart sees every client at nginx's address: on
+  Garrison's host that is 127.0.0.1, which Stalwart neither limits nor
+  blocks, so password guesses at its sign-in page went unlimited; elsewhere
+  one address for all, which one client's 100 mistyped passwords block for
+  everyone. The installation guide now shows how to forward the client's
+  address: a `map` and an `X-Forwarded-For` line in nginx, Stalwart's
+  "Client IP source" setting, its listeners kept out of reach, and an end
+  for a block. Garrison names the user's address when it exchanges a
+  sign-in code, but not one of loopback, which Stalwart answers with 400.
+  See [installation](docs/operator/installation.md#client-addresses-for-stalwarts-limits).
 - **`garrison restore --from DIR` puts back a backup.** What `garrison
   backup` wrote had no way back but by hand. The command checks the backup
   before anything stops, keeps the state as it is in
@@ -204,10 +215,13 @@ Notable changes for operators and users. The format follows
   lasts, people signing in from a network that has not tried within the
   minute are likely to be turned away; people already signed in stay signed
   in, and a minute after the flood ends sign-in works again. Stalwart's own
-  limit is lower: it takes 100 unauthenticated requests a minute from one
-  address and counts all of Garrison's as one, so 100 failed sign-ins in a
-  minute still stop every sign-in, at Stalwart's own page too, until that
-  minute is over; people already signed in are not affected
+  limits count by the address Stalwart sees: where it runs on Garrison's
+  host it sees Garrison at 127.0.0.1 and limits none of it; where it sees
+  Garrison under another address, as in a container behind a published
+  port, it takes 100 unauthenticated requests a minute from that address
+  and counts all of Garrison's as one, so 100 failed sign-ins in a minute
+  still stop every sign-in, at Stalwart's own page too, until that minute is
+  over; people already signed in are not affected
   ([security model](docs/architecture/security.md#known-limits)).
 - **Each IPv4 client keeps its own sign-in budget where nginx listens on one
   socket for both.** With `listen [::]:443 ipv6only=off` nginx names an IPv4

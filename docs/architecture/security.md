@@ -82,31 +82,32 @@ brokers never repeat a job; pending jobs become "uncertain".
   it lasts. Networks already counted keep their own budget here, signed-in
   users stay signed in, the table holds no more than 4096 networks, and a
   minute after the flood ends everyone can sign in again.
-- Stalwart's own limits are lower and count Garrison as one client
-  (measured on Stalwart 1.1.0 with its defaults). By default Stalwart takes
-  the address from the connection (`clientIpSource` is `peer`), which for
-  everything Garrison asks is 127.0.0.1, as it is for everything nginx
-  forwards to Stalwart. It answers no more than 100 unauthenticated requests
-  a minute from one address (`rateLimitAnonymous`), code exchanges among
-  them, and then 429 for up to a minute. So 100 failed callbacks within a
-  minute, which Garrison's budget lets ten networks send, make Stalwart
-  refuse every code exchange, and its own sign-in page, until its minute is
-  over: nobody can sign in. A request with a valid token or key counts
-  against the 1000 a minute of its account instead
-  (`rateLimitAuthenticated`), so the broker's check of a signed-in user's
-  rights is not refused for that. Each such check makes three requests with
-  the broker's one key, though, which all users share: beyond about 330
-  checks a minute in all (an open page asks once a minute, an open
-  Maintenance page eight times) every check gets 503 until the minute is
-  over, and users stay signed in.
-- Stalwart blocks an address after 100 failed password sign-ins within a
-  day, with its defaults for good (`authBanRate`, `authBanPeriod`). Where
-  nginx forwards to Stalwart and Stalwart takes the address from the
-  connection, that is 127.0.0.1 for everyone: 100 mistyped passwords a day at
-  Stalwart's sign-in page, Garrison's sign-ins among them, make Stalwart
-  answer neither nginx nor Garrison until an administrator removes the
-  entry from an address that is not blocked (`x:BlockedIp`, then the action
-  `ReloadBlockedIps`).
+- Stalwart limits requests and blocks addresses on its own, by the client
+  address it sees, which by default is the connection's (`clientIpSource`
+  is `peer`; measured on Stalwart 1.1.0 with its defaults). Where it runs on
+  this host, natively or in the host network, it sees Garrison and nginx at
+  127.0.0.1, which it neither limits nor blocks: Garrison is never refused
+  for Stalwart's limits, but neither are password guesses that nginx
+  forwards to Stalwart's own sign-in page, however many. Where it sees them
+  under one other address, as in a container behind a published port or
+  behind a proxy on another host, everything they send shares that
+  address's limits: 100 unauthenticated requests a minute
+  (`rateLimitAnonymous`; code exchanges and Stalwart's sign-in page among
+  them), after which nobody can sign in until the minute is over; 1000 a
+  minute for each account or key (`rateLimitAuthenticated`), of which each
+  check of a user's rights takes three with the broker's one key, so that
+  beyond about 330 checks a minute (an open page asks once a minute, an open
+  Maintenance page eight times) users get 503 until the minute is over and
+  the broker's journal names the limit; and after 100 failed password
+  sign-ins within a day a block of that address, with no end by default
+  (`authBanRate`, `authBanPeriod`), after which Stalwart answers neither
+  nginx nor Garrison until an administrator removes it. Told to take the
+  client's address from X-Forwarded-For, Stalwart counts and blocks each
+  client under its own address in either case
+  ([installation](../operator/installation.md#client-addresses-for-stalwarts-limits));
+  a request without the header, such as Garrison's own, counts under the
+  connection's address, and one whose header names a loopback address is
+  refused (400), so Garrison names no such user.
 - Profiles are server-wide; the event history of all domains is visible to
   anyone with the Event history, Deliveries, Sessions or Attacks & bans
   module.

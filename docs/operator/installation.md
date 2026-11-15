@@ -234,6 +234,58 @@ at the server level of every server block that proxies to Stalwart, its mail
 host and the Stalwart WebUI's host. The installer writes that file; it answers
 `/metrics/` with 404.
 
+### Client addresses for Stalwart's limits
+
+Stalwart limits sign-ins and, after 100 failed passwords in a day, blocks
+an address, both by the address a request comes from. Behind nginx that is
+nginx's: where nginx and Stalwart share this host, 127.0.0.1, which
+Stalwart neither limits nor blocks, so password guesses at its sign-in page
+go unlimited; where Stalwart sees nginx under another address, as with
+nginx on another host or Stalwart in a container behind a published port,
+one address that every client shares, so one client's guesses lock out
+everyone. A failed sign-in at Stalwart's page shows in Garrison's event
+history with the address Stalwart counted it under.
+
+To have Stalwart count and block each client under its own address:
+
+1. In nginx's `http` block, for example as
+   `/etc/nginx/conf.d/stalwart-forwarded-for.conf`:
+
+   ```nginx
+   # Stalwart refuses (400) a request that names a loopback address,
+   # so a client on this host itself is not named.
+   map $remote_addr $stalwart_forwarded_for {
+       ~^(127\.|::1$|::ffff:127\.)  "";
+       default                     $proxy_add_x_forwarded_for;
+   }
+   ```
+
+   and in every location that proxies to Stalwart:
+
+   ```nginx
+   proxy_set_header X-Forwarded-For $stalwart_forwarded_for;
+   ```
+
+   nginx passes a `proxy_set_header` of the server level only into a
+   location that sets none of its own, and Stalwart's locations set `Host`,
+   so the line belongs in each of them; Garrison's include does not set it.
+2. In the Stalwart WebUI, open Settings (the sliders at the foot of the
+   menu), then Network → HTTP → General. Under Proxy, set "Client IP
+   source" to "X-Forwarded-For header", keep "Trusted proxy hops" at 1 and
+   save. Stalwart takes the change once you run Management → Actions →
+   Server settings (under Reload).
+3. Let nothing but nginx and Garrison reach Stalwart's HTTP listeners (keep
+   them on 127.0.0.1, or behind a firewall): a client that reaches one
+   directly names any address it likes and so meets no limit at all.
+4. Give a block an end: Settings → Security → Settings, "Authentication
+   failure ban", "Duration". Without one, a blocked address stays blocked
+   until it is removed under Settings → Security → Blocked IPs, followed by
+   Management → Actions → Blocked IPs list.
+
+Garrison names the user's address when it exchanges a sign-in code. Its
+other requests carry a token or its key and count under its own address,
+which Stalwart on this host neither limits nor blocks.
+
 Open `https://<public_origin>/admin/` and sign in with your Stalwart
 account. Its menu ends with "Switch to Stalwart WebUI".
 
