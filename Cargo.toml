@@ -51,6 +51,9 @@ listenfd = "1.0.2"
 log = { version = "0.4.34", features = ["std"] }
 # Checks release signatures for `garrison upgrade`; verification only, no dependencies.
 minisign-verify = "0.3.0"
+# The broker's peer credentials (SO_PEERCRED): its type holds the kernel's
+# struct as it is, a PID of 0 too, which rustix's cannot. The socket feature only.
+nix = { version = "0.31.3", default-features = false, features = ["socket"] }
 # Test certificates are made at run time; no key material is stored. Tests only.
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
 rusqlite ={ version = "0.41.1", features = ["backup", "bundled", "hooks"] }

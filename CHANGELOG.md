@@ -911,6 +911,16 @@ Notable changes for operators and users. The format follows
   (Stalwart's rate limit, HTTP 429)", "Stalwart refused the collector's key
   for its rate limit (HTTP 429)" and "Stalwart refused the check for its
   rate limit (HTTP 429)"; an outage keeps its words.
+- **The broker admits an allowed user from another PID namespace.** The
+  broker read its peer's credentials into a type whose PID is never 0,
+  while the kernel gives 0 for a peer whose PID the broker's PID namespace
+  cannot see, as with the broker or the web service in a container of its
+  own, or a unit with `PrivatePIDs=`: reading such a peer was undefined
+  behaviour, and it was refused as "an unexpected user" although
+  `broker.allowed_peers` named its user. The broker now reads the peer's
+  user alone, with a type that takes any PID, and admits an allowed one
+  wherever it runs. No unit of Garrison's gives a service a PID namespace
+  of its own, so an installation as the guide makes it did not meet this.
 - **An answer that arrived counts, also where the server ends TLS without
   its closing notice.** Many servers just close the connection. Garrison
   then threw away what it had read: a notification that ntfy or a webhook

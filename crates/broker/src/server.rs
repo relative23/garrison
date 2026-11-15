@@ -20,6 +20,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use nix::sys::socket::getsockopt;
+use nix::sys::socket::sockopt::PeerCredentials;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -65,10 +67,13 @@ fn failure(error: &BrokerError) -> Value {
 }
 
 /// Whether the user at the other end of `stream`, as the kernel names it, is
-/// one of `allowed`.
+/// one of `allowed`. The UID is the boundary: the kernel names the PID of a
+/// peer that the broker's PID namespace cannot see as 0, which rustix's
+/// `UCred` cannot hold (its PID is never 0), so the credentials are read
+/// into nix's, which takes the kernel's struct as it is.
 fn peer_allowed(stream: &UnixStream, allowed: &BTreeSet<u32>) -> bool {
-    rustix::net::sockopt::socket_peercred(stream)
-        .is_ok_and(|credentials| allowed.contains(&credentials.uid.as_raw()))
+    getsockopt(stream, PeerCredentials)
+        .is_ok_and(|credentials| allowed.contains(&credentials.uid()))
 }
 
 /// Serve one connection whose peer was admitted: answer one request.
