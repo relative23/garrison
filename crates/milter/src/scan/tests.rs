@@ -222,6 +222,53 @@ fn an_old_office_file_with_a_vba_project_is_found() {
     assert_eq!(macros(&message("notes.txt", &text)), Outcome::Clean);
 }
 
+/// A compound file's directory finds a name in any case (MS-CFB 2.6.4: both
+/// names in upper case, by Unicode's simple case folding, which for these
+/// letters is ASCII's), so a project kept as `_vba_project` is one.
+#[test]
+fn a_vba_project_is_found_under_its_name_in_any_case() {
+    for name in [
+        "_vba_project",
+        "_Vba_Project",
+        "_vBA_pROJECT",
+        "_vba_project_cur",
+        "_Vba_Project_Cur",
+    ] {
+        let with = compound(&["WordDocument", "Macros", "VBA", name, "dir", "PROJECT"]);
+        assert_eq!(
+            macros(&message("report.doc", &with)),
+            Outcome::Macros(Found::Compound),
+            "{name}"
+        );
+    }
+    // Names in lower case that only come near it are none: cut short, with
+    // another mark between the words, or with a Cyrillic е, which no case
+    // makes an E.
+    for near in [
+        "_vba_projec",
+        "vba_project",
+        "_vba-project",
+        "_vba_proj\u{435}ct",
+    ] {
+        let without = compound(&["worddocument", "macros", "vba", near, "dir"]);
+        assert_eq!(
+            macros(&message("report.doc", &without)),
+            Outcome::Clean,
+            "{near}"
+        );
+    }
+    // Nor is the name in another case without a compound file around it,
+    // or in the 8-bit text Word keeps in Latin letters.
+    let text: Vec<u8> = "_vba_project"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    assert_eq!(macros(&message("notes.txt", &text)), Outcome::Clean);
+    let mut letter = compound(&["WordDocument", "1Table"]);
+    letter.extend_from_slice(b"Where is _vba_project kept, and _VBA_PROJECT_CUR?");
+    assert_eq!(macros(&message("letter.doc", &letter)), Outcome::Clean);
+}
+
 #[test]
 fn a_document_inside_archives_is_found_as_deep_as_the_scan_goes() {
     let inner = document();

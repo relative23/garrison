@@ -6,8 +6,11 @@ use super::Found;
 
 /// A compound file's first bytes.
 pub(super) const OLE: &[u8] = &[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
-/// `_VBA_PROJECT` as a compound file's directory writes it: UTF-16LE.
-const VBA_STORAGE: &[u8] = b"_\0V\0B\0A\0_\0P\0R\0O\0J\0E\0C\0T\0";
+/// `_VBA_PROJECT` as a compound file's directory writes it, UTF-16LE, in
+/// lower case. The directory finds a name in any case (MS-CFB 2.6.4: both
+/// in upper case, by Unicode's simple case folding, which for these letters
+/// is ASCII's), so the project is there in any case of it.
+const VBA_STORAGE: &[u8] = b"_\0v\0b\0a\0_\0p\0r\0o\0j\0e\0c\0t\0";
 pub(super) const ZIP_ENTRY: &[u8] = b"PK\x03\x04";
 /// An entry of the directory at an archive's end, which is what Office reads.
 pub(super) const ZIP_LISTED: &[u8] = b"PK\x01\x02";
@@ -131,7 +134,7 @@ fn active_mime(data: &[u8]) -> bool {
 
 /// What `data` shows without unpacking anything.
 pub(super) fn plain(data: &[u8]) -> Option<Found> {
-    if contains(data, OLE) && contains(data, VBA_STORAGE) {
+    if contains(data, OLE) && position_lowercase(data, VBA_STORAGE).is_some() {
         return Some(Found::Compound);
     }
     if names_macros(data) {

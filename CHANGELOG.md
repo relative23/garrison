@@ -223,6 +223,12 @@ Notable changes for operators and users. The format follows
   that header called the file stored, or one byte long, and the directory
   said deflated. The filter now tries every file as deflate, whatever the
   header before it says.
+- **The macro filter finds a VBA project named in lower case.** An old Word
+  or Excel file (`.doc`, `.xls`) keeps its macros under the name
+  `_VBA_PROJECT`, and its directory finds a name in any case, as the
+  format's specification and Windows do. The filter looked for the name in
+  capitals only, so a file that wrote it `_vba_project` passed as clean. It
+  now finds it in any case.
 - **`garrison doctor` judges the collector by its last finished run.** It
   called the last collection run successful whenever systemd said so of the
   unit, and systemd says "success" also of a unit that has never run. Doctor

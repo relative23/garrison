@@ -8,7 +8,8 @@
 //! these is searched for what a document with macros cannot be without.
 //!
 //! - An old Word or Excel file (`.doc`, `.xls`) is a compound file, and its
-//!   macros live in a storage whose directory names `_VBA_PROJECT`.
+//!   macros live in a storage whose directory names `_VBA_PROJECT`, in any
+//!   case: the directory finds its names so.
 //! - A new one (`.docm`, `.xlsm`, `.pptm`, also when it is named `.docx`) is
 //!   a zip archive whose macros are the file `vbaProject.bin`; the names of
 //!   an archive's files are never compressed. By the format's specification
