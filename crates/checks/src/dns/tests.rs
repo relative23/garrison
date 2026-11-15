@@ -191,6 +191,39 @@ fn a_name_longer_than_dns_takes_is_no_dns_name_and_not_sent() {
     assert!(resolver.recv_from(&mut [0; 512]).is_err(), "it was sent");
 }
 
+/// A name in an answer has the bounds of one in a question: one longer than
+/// 253 octets as written is no name a resolver can give, so the answer that
+/// holds it is malformed, whichever record carries it, and nothing of it is
+/// handed on to be asked again.
+#[test]
+fn an_answer_that_names_more_than_dns_takes_is_malformed() {
+    let named = |kind: Kind, name: &str| {
+        let mut data = match kind {
+            Kind::Mx => vec![0, 10],
+            Kind::Srv => vec![0, 0, 0, 1, 0x01, 0xbb],
+            _ => Vec::new(),
+        };
+        data.extend(wire(name));
+        asked(kind, FINE, &[(kind.code(), data)])
+    };
+    let longest = name_of(253);
+    assert_eq!(
+        named(Kind::Ptr, &longest),
+        Ok(Some(Answer::Records(vec![longest.clone()])))
+    );
+    assert!(is_name(&longest));
+    for octets in [254, 255] {
+        let long = name_of(octets);
+        for kind in [Kind::Ptr, Kind::Cname, Kind::Mx, Kind::Srv] {
+            assert_eq!(
+                named(kind, &long),
+                Err("the resolver's answer is malformed".to_owned()),
+                "{kind:?}, {octets} octets"
+            );
+        }
+    }
+}
+
 #[test]
 fn an_answer_cut_off_over_udp_is_asked_for_again_over_tcp() {
     // One port for both, as a resolver has it. A port that is free for UDP

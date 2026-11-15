@@ -122,6 +122,8 @@ const HEADER: usize = 12;
 /// The most octets a name may take in a message, the length of each label
 /// and the zero at its end among them (RFC 1035, 2.3.4): 253 as written.
 const MOST_NAME: usize = 255;
+/// The same as written: without the first label's length and the zero.
+const MOST_WRITTEN: usize = MOST_NAME - 2;
 
 /// The question as it goes out: one name, one type, recursion wanted;
 /// `None` for a name DNS cannot carry.
@@ -156,7 +158,9 @@ pub fn no_name(name: &str) -> String {
     format!("{name} is no DNS name")
 }
 
-/// The name that starts at `at`, and where the record goes on after it.
+/// The name that starts at `at`, and where the record goes on after it;
+/// `None` for one that no resolver can give, as no question can carry it:
+/// longer than 253 octets as written, or pointing back too often.
 fn name_at(message: &[u8], at: usize) -> Option<(String, usize)> {
     let mut name = String::new();
     let (mut position, mut after, mut pointers) = (at, None, 0);
@@ -191,7 +195,7 @@ fn name_at(message: &[u8], at: usize) -> Option<(String, usize)> {
             }
             _ => return None,
         }
-        if name.len() > 255 {
+        if name.len() > MOST_WRITTEN {
             return None;
         }
     }

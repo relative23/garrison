@@ -538,7 +538,10 @@ Notable changes for operators and users. The format follows
   client now refuses such a name as no DNS name; the `dns` check says so of
   the record, and a needed one is a warning, since no server can publish
   it; the `reputation` check leaves the host out, asks the others and says
-  so.
+  so. An answer that names one is malformed, as no resolver's can be: the
+  client read names of up to 255 octets as written from an answer, so a
+  reverse name of 254 or 255 octets was taken, and then refused as a
+  question.
 - **A DNS answer counts only for the question it repeats.** The `dns` and
   `reputation` checks numbered their questions in order, from the clock or
   counting from one, and took any answer with that number: whoever could
