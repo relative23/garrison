@@ -72,6 +72,52 @@ for refused in "stop acceptance-check.service" "restart garrison-web.service"; d
 done
 check "garrison-web.service ran on through the refused restart" \
     'test "$(systemctl show -p MainPID --value garrison-web.service)" = "$(cat /root/web-pid)"'
+# The socket's group lets the collector and the receiver connect; the broker
+# answers only the web service's user, and closes the others' connections
+# unanswered. A user outside the group cannot connect at all.
+asked='{"op": "catalog", "token": "acceptance-token-0123456789abcdef"}'
+check "the broker answers no other user of the group garrison, and says so" "
+    test -z \"\$(printf '%s\n' '$asked' |
+        timeout 10 runuser -u garrison-collector -- /usr/local/bin/acceptance-connect /run/garrison/broker.sock 2>/dev/null)\" &&
+    journalctl -u garrison-broker.service --no-pager | grep -q 'Rejected a broker connection from an unexpected user'"
+check "a user outside the group garrison cannot reach the broker" "
+    printf '%s\n' '$asked' |
+        timeout 10 runuser -u nobody -- /usr/local/bin/acceptance-connect /run/garrison/broker.sock 2>&1 |
+        grep -q 'Permission denied'"
+
+step "Making room in a full audit, as operations.md says"
+# The audit as it stands an hour later, filled up: the jobs so far have
+# settled, and records of a finished check make up the 1000.
+inside_input 'cat > /root/fill-audit.sql' <<'SQL'
+UPDATE jobs SET created_at = created_at - 3600, started_at = started_at - 3600,
+                finished_at = finished_at - 3600;
+WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1000)
+INSERT INTO jobs(id, action_id, actor, actor_email, request_id, status, created_at,
+                 started_at, finished_at, message, may_still_run)
+SELECT lower(hex(randomblob(16))), 'run_check', 'acceptance', 'acceptance@example.test',
+       lower(hex(randomblob(16))), 'succeeded', strftime('%s', 'now') - 3600,
+       strftime('%s', 'now') - 3600, strftime('%s', 'now') - 3600, 'Filled for the test', 0
+FROM n LIMIT (SELECT 1000 - count(*) FROM jobs);
+SQL
+inside 'systemctl stop garrison-broker.socket garrison-broker.service &&
+    runuser -u garrison-broker -- sqlite3 /var/lib/garrison/broker/jobs.sqlite < /root/fill-audit.sql &&
+    systemctl start garrison-broker.socket'
+submit='printf "%s\n" "{\"op\": \"submit\", \"token\": \"acceptance-token-0123456789abcdef\", \"action\": \"run_check\", \"requestId\": \"$(cat /proc/sys/kernel/random/uuid)\", \"confirmation\": \"RUN CHECK\"}" |
+    timeout 10 runuser -u garrison -- /usr/local/bin/acceptance-connect /run/garrison/broker.sock'
+check "an action is refused while the audit holds 1000 records" "$submit | grep -q 'Audit capacity reached'"
+inside 'systemctl stop garrison-broker.socket garrison-broker.service &&
+    mkdir -p /root/old-audit &&
+    for file in /var/lib/garrison/broker/jobs.sqlite /var/lib/garrison/broker/jobs.sqlite-wal /var/lib/garrison/broker/jobs.sqlite-shm; do
+        if [ -e "$file" ]; then mv "$file" /root/old-audit/; fi
+    done &&
+    systemctl start garrison-broker.socket'
+inside "$submit | sed -n 's/.*\"id\":\"\\([0-9a-f]\\{32\\}\\)\".*/\\1/p' > /root/job-id"
+check "with the audit moved away, the action runs and a new audit holds it" '
+    printf "%s\n" "{\"op\": \"job\", \"token\": \"acceptance-token-0123456789abcdef\", \"id\": \"$(cat /root/job-id)\"}" |
+        timeout 10 runuser -u garrison -- /usr/local/bin/acceptance-connect /run/garrison/broker.sock |
+        grep -q "\"status\":\"succeeded\""'
+check "the moved audit keeps its records" \
+    'test "$(sqlite3 /root/old-audit/jobs.sqlite "SELECT count(*) FROM jobs")" -ge 1000'
 
 step "Choosing modules"
 inside '/opt/garrison/current/bin/garrison --config /etc/garrison/garrison.toml modules --set dns_tls --adopt --yes'
