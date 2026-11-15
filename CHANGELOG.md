@@ -357,7 +357,9 @@ Notable changes for operators and users. The format follows
   `garrison doctor` checked that file, and `garrison uninstall --purge` left
   a policy kept elsewhere. The installer and doctor now take the policy
   from where the setting names it, and a purge removes it there with the
-  lock and the backups `garrison access` keeps beside it.
+  lock and the backups `garrison access` keeps beside it. Both act only on
+  a file, as the broker reads only one: a folder or a link the setting
+  names stays as it is, and `check-config` refuses it.
 - **`garrison access check` shows what the broker grants.** It listed the
   modules and actions of a user's profiles, also those the installation
   does not offer, and showed a user the broker refuses, because none of

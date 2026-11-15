@@ -85,7 +85,8 @@ fn plan(root: &Path, purge: bool, module: bool, policy: &Path) -> Vec<Item> {
 }
 
 /// The policy at `policy` and what `garrison access` keeps beside it: its
-/// lock and its backups.
+/// lock and its backups. Files only: the broker reads nothing else, and a
+/// folder or a link of such a name is not Garrison's.
 fn policy_files(policy: &Path) -> Vec<PathBuf> {
     let (Some(folder), Some(name)) = (policy.parent(), policy.file_name()) else {
         return Vec::new();
@@ -102,6 +103,7 @@ fn policy_files(policy: &Path) -> Vec<PathBuf> {
         .into_iter()
         .flatten()
         .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
         .filter(|entry| ours(&entry.file_name().to_string_lossy()))
         .map(|entry| entry.path())
         .collect();
@@ -403,5 +405,21 @@ mod tests {
         // Without a purge it stays, as the configuration does.
         let kept = paths(&plan(root, false, false, elsewhere), root);
         assert!(!kept.iter().any(|path| path.starts_with("srv")), "{kept:?}");
+    }
+
+    /// A purge takes only files: a folder or a link that `broker.policy`
+    /// names, or that bears the name of its lock or of a backup, is not the
+    /// policy's and stays with all it holds.
+    #[test]
+    fn a_purge_takes_only_the_files_of_a_policy_kept_elsewhere() {
+        let directory = host();
+        let root = directory.path();
+        let srv = root.join("srv");
+        fs::create_dir_all(srv.join("data/mail")).unwrap();
+        fs::write(srv.join("data/mail/inbox"), "mail").unwrap();
+        fs::create_dir_all(srv.join("data.20261030T132151.bak")).unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", srv.join("data.lock")).unwrap();
+        let gone = paths(&plan(root, true, false, Path::new("/srv/data")), root);
+        assert!(!gone.iter().any(|path| path.starts_with("srv")), "{gone:?}");
     }
 }

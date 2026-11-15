@@ -166,16 +166,28 @@ pub(super) fn install_system_files(release: &Path) -> Step {
 
 /// The access policy belongs to root and only the broker's group may read it.
 pub(super) fn protect_policy() -> Step {
-    let policy = super::policy();
-    if !policy.exists() {
+    protect(&super::policy())
+}
+
+/// Only a regular file reached without a link, which is all the broker reads:
+/// a link, a folder or a device that `broker.policy` names is left as it is,
+/// and check-config refuses it then. Owner and mode are set on the file that
+/// was opened, so that nothing put in its place meanwhile is changed.
+fn protect(policy: &Path) -> Step {
+    use rustix::fs::{Mode, OFlags};
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let Ok(file) = rustix::fs::open(policy, flags, Mode::empty()).map(fs::File::from) else {
+        return Ok(());
+    };
+    if !io(file.metadata(), policy)?.is_file() {
         return Ok(());
     }
     let group = crate::access::group_id("garrison-broker").map(rustix::fs::Gid::from_raw);
-    rustix::fs::chown(&policy, Some(rustix::fs::Uid::ROOT), group)
+    rustix::fs::fchown(&file, Some(rustix::fs::Uid::ROOT), group)
         .map_err(|error| format!("{}: {error}", policy.display()))?;
     io(
-        fs::set_permissions(&policy, fs::Permissions::from_mode(0o640)),
-        &policy,
+        file.set_permissions(fs::Permissions::from_mode(0o640)),
+        policy,
     )
 }
 
@@ -238,5 +250,26 @@ mod tests {
                 target.display()
             )
         );
+    }
+
+    /// Only a regular file that `broker.policy` names, reached without a
+    /// link, is made the broker's: that is all the broker reads. A link, a
+    /// folder or nothing at all there is left as it is.
+    #[test]
+    fn only_a_policy_that_is_a_file_of_its_own_is_made_private() {
+        let directory = tempfile::tempdir().unwrap();
+        let elsewhere = directory.path().join("passwd");
+        fs::write(&elsewhere, "root:x:0:0::/root:/bin/sh\n").unwrap();
+        fs::set_permissions(&elsewhere, fs::Permissions::from_mode(0o644)).unwrap();
+        let link = directory.path().join("access.json");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        let folder = directory.path().join("policies");
+        fs::create_dir(&folder).unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        for named in [&link, &folder, &directory.path().join("missing.json")] {
+            assert_eq!(protect(named), Ok(()), "{}", named.display());
+        }
+        let mode = |path: &Path| fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!((mode(&elsewhere), mode(&folder)), (0o644, 0o755));
     }
 }
