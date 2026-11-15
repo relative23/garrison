@@ -355,6 +355,55 @@ fn another_tool_or_a_place_that_cannot_be_written_ends_the_command() {
     );
 }
 
+/// The report the last run wrote is read as the collector reads it: no link
+/// is followed, nothing but a regular file is opened, and no more than a
+/// report's size is read. What is not such a file keeps no check, and the
+/// run writes its report in its place.
+#[test]
+fn the_last_report_is_read_only_from_a_file_of_its_own() {
+    let tools = Tools::new();
+    let report = tools.report("restic");
+    let to = report.to_str().unwrap();
+    let checked = tools.run(&["restic", "--verify", "--report", to], None);
+    assert_eq!(checked.status.code(), Some(0), "{}", text(&checked.stderr));
+    let elsewhere = tools.directory.path().join("elsewhere.json");
+    std::fs::rename(&report, &elsewhere).unwrap();
+    let mut large = read(&elsewhere);
+    large["problem"] = json!("p".repeat(256 * 1024));
+    let place = |what: &str| match what {
+        "link" => std::os::unix::fs::symlink(&elsewhere, &report).unwrap(),
+        "pipe" => rustix::fs::mknodat(
+            rustix::fs::CWD,
+            &report,
+            rustix::fs::FileType::Fifo,
+            rustix::fs::Mode::from_raw_mode(0o644),
+            0,
+        )
+        .unwrap(),
+        _ => std::fs::write(&report, large.to_string()).unwrap(),
+    };
+    for what in ["link", "pipe", "a file larger than a report"] {
+        place(what);
+        let listed = tools.run(&["restic", "--report", to], None);
+        assert_eq!(listed.status.code(), Some(0), "{what}");
+        assert_eq!(
+            text(&listed.stderr),
+            format!(
+                "The last report, {to}, cannot be read: it must be a file, not a link, of at \
+                 most 256 KiB of valid JSON. Its last integrity check and test restore are \
+                 not kept.\n"
+            ),
+            "{what}"
+        );
+        let written = std::fs::symlink_metadata(&report).unwrap();
+        assert!(written.file_type().is_file(), "{what}");
+        assert_eq!(read(&report)["verify"], Value::Null, "{what}");
+        std::fs::remove_file(&report).unwrap();
+    }
+    // The file the link named is as it was.
+    assert_eq!(read(&elsewhere)["verify"]["ok"], true);
+}
+
 /// A repository of the real restic with two snapshots of a small directory.
 #[test]
 #[ignore = "needs restic on the PATH"]

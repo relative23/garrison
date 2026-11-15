@@ -288,7 +288,10 @@ Notable changes for operators and users. The format follows
   The check now reads it as the `receipt` check reads its file: no link is
   followed, only a plain file of at most 256 KiB of valid JSON that is one
   object, judged by the owner and mode of the file that was read. Anything
-  else makes it Unknown, also a `path` that names a link.
+  else makes it Unknown, also a `path` that names a link. `garrison
+  backup-check` reads the report it wrote last the same way, where it had
+  read it through a link, whole and from a pipe that kept it waiting: from
+  anything but such a file it keeps no last check or restore and says so.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year

@@ -15,11 +15,10 @@ use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_core::{json, time};
 
-use crate::backups::{Report as Backup, Run, Tool};
+use crate::backups::{MAX_REPORT, Report as Backup, Run, Tool};
 use crate::context::{Collected, Context, Provider, Report};
 use crate::options::{Checked, Options, fail};
 
-const MAX_REPORT: usize = 256 * 1024;
 const HOUR: i64 = 3600;
 const DAY: i64 = 86_400;
 

@@ -16,10 +16,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use garrison_collector::backups::{
-    Report, Run, Snapshots, Tool, borg_archives, borg_size, named, restic_size, restic_snapshots,
+    MAX_REPORT, Report, Run, Snapshots, Tool, borg_archives, borg_size, named, restic_size,
+    restic_snapshots,
 };
-use garrison_core::files::atomic_write;
-use garrison_core::time;
+use garrison_core::files::{atomic_write, read_json};
+use garrison_core::{json, time};
 
 use crate::{complain, say};
 
@@ -298,6 +299,24 @@ impl Repository {
     }
 }
 
+/// The report the last run wrote, read as the collector reads it: no link
+/// followed, nothing but a regular file opened, no more than a report's size
+/// read. `--report` may name a place others can write to.
+fn last_report(path: &Path) -> Option<Report> {
+    // Only to say nothing where there is none yet.
+    fs::symlink_metadata(path).ok()?;
+    let report = read_json(path, MAX_REPORT).and_then(|value| json::object(value).ok());
+    if report.is_none() {
+        complain(&format!(
+            "The last report, {}, cannot be read: it must be a file, not a link, of at most {} \
+             KiB of valid JSON. Its last integrity check and test restore are not kept.",
+            path.display(),
+            MAX_REPORT / 1024
+        ));
+    }
+    report
+}
+
 pub(crate) fn run_check(asked: &Asked) -> u8 {
     let Some(tool) = Tool::named(&asked.tool) else {
         complain("The backup tool is restic or borg.");
@@ -308,9 +327,7 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
         .clone()
         .unwrap_or_else(|| Path::new(REPORTS).join(format!("{}.json", tool.name())));
     // What the last run wrote stays, where this one does not run that part.
-    let before: Option<Report> = fs::read(&path)
-        .ok()
-        .and_then(|data| serde_json::from_slice(&data).ok());
+    let before = last_report(&path);
     let variable = if tool == Tool::Restic {
         "RESTIC_REPOSITORY"
     } else {

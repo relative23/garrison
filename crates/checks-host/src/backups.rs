@@ -58,6 +58,10 @@ pub struct Run {
     pub detail: String,
 }
 
+/// A report is small: neither the command nor the provider reads a larger
+/// file as one.
+pub const MAX_REPORT: usize = 256 * 1024;
+
 /// The report of one repository. A part that was not run this time keeps
 /// what the run before wrote.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
