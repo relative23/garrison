@@ -17,7 +17,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { chromium } from "playwright";
 
-import { startHttp2 } from "./http2.mjs";
+import { failingRequests } from "./failures.mjs";
+import { firstPaint } from "./themes.mjs";
 
 const options = Object.fromEntries(
   process.argv
@@ -132,6 +133,22 @@ async function accessible(name) {
   }
   await page.setViewportSize(DESKTOP);
 }
+
+/** What the steps in the other files (themes.mjs, failures.mjs) share with these. */
+const shared = {
+  browser,
+  context,
+  origin,
+  DESKTOP,
+  /** The step that follows: its name heads what fails in it. */
+  at: (name) => {
+    step = name;
+  },
+  expect,
+  watch,
+  unavailable,
+  failing,
+};
 
 try {
   step = "signed out";
@@ -252,23 +269,7 @@ try {
   if (!found) await page.keyboard.press("Escape");
   await page.setViewportSize(DESKTOP);
 
-  step = "first paint";
-  // A page as the build drew it, before any of its code runs: the system's theme.
-  for (const [name, path, signedIn] of [
-    ["sign-in", "/admin/", false],
-    ["services", "/admin/services", true],
-  ]) {
-    for (const theme of ["light", "dark"]) {
-      const drawn = await browser.newContext({ viewport: DESKTOP, colorScheme: theme });
-      if (signedIn) await drawn.addCookies(await context.cookies());
-      const first = await drawn.newPage();
-      await first.route("**/admin/assets/*.js", (route) => route.abort());
-      await first.goto(`${origin}${path}`);
-      const scheme = await first.evaluate(() => getComputedStyle(document.documentElement).colorScheme);
-      expect(scheme === theme, `the drawn ${name} page starts in the system's ${theme} theme, not ${scheme}`);
-      await drawn.close();
-    }
-  }
+  await firstPaint(shared);
 
   step = "settings";
   await page.goto(`${origin}/admin/preferences`);
@@ -327,116 +328,7 @@ try {
   expect((await submitted).status() === 202, "a confirmed action is accepted");
   expect((await dialog.count()) === 0 && (await focused(run)), "the started dialog closes on the button that opened it");
 
-  // A context of its own with a clock the steps move on, signed in as the
-  // flows' user.
-  step = "a status refresh that fails";
-  const timed = await browser.newContext({ viewport: DESKTOP });
-  await timed.addCookies(await context.cookies());
-  await timed.clock.install();
-  const later = await timed.newPage();
-  watch(later);
-  try {
-    await later.goto(`${origin}/admin/dashboard`);
-    await later.waitForLoadState("networkidle");
-    const tiles = later.locator("section[aria-labelledby=health-title] a");
-    const shown = await tiles.count();
-    failing.add("503 /api/status");
-    await later.route("**/api/status", unavailable);
-    // The status is read again after a minute, and that fails: the tiles stay,
-    // under a notice that says so and why.
-    await later.clock.fastForward("01:01");
-    await later.getByText("The status could not be refreshed.").waitFor();
-    expect(await later.getByText("Authorization is temporarily unavailable").isVisible(), "the notice says why the refresh failed");
-    expect(shown > 0 && (await tiles.count()) === shown, "the tiles of the last status stay");
-    // Kept longer than their checks may be old, they no longer pass for current.
-    await later.clock.fastForward("10:00");
-    await later
-      .getByText(/· \d+ stale/)
-      .first()
-      .waitFor();
-    await later.unroute("**/api/status");
-    failing.clear();
-
-    step = "a search that fails";
-    await later.goto(`${origin}/admin/logs`);
-    await later.waitForLoadState("networkidle");
-    const rows = later.locator("main tbody tr");
-    expect((await rows.count()) > 0, "the event history lists events");
-    failing.add("500 /api/events");
-    await later.route("**/api/events?**", (route) =>
-      new URL(route.request().url()).searchParams.get("search") === "unreadable"
-        ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "The history could not be read" }) })
-        : route.continue(),
-    );
-    await later.getByRole("searchbox").fill("unreadable");
-    await later.getByRole("button", { name: "Search", exact: true }).click();
-    await later.getByText("The history could not be read").waitFor();
-    expect((await rows.count()) === 0, "no events of the list before stand under the search that failed");
-    await later.unroute("**/api/events?**");
-    failing.clear();
-
-    step = "a job whose status cannot be read for a while";
-    const second = catalog.actions[1];
-    await later.goto(`${origin}/admin/actions`);
-    await later.waitForLoadState("networkidle");
-    await later.getByRole("button", { name: "Run…" }).nth(1).click();
-    await later.getByLabel(`Type ${second.confirmation} to confirm.`).fill(second.confirmation);
-    const accepted = later.waitForResponse((response) => response.url().endsWith("/api/actions") && response.request().method() === "POST");
-    await later.getByRole("button", { name: "Start", exact: true }).click();
-    const { job } = await (await accepted).json();
-    failing.add(`503 /api/actions/jobs/${job.id}`);
-    await later.route(`**/api/actions/jobs/${job.id}`, unavailable, { times: 1 });
-    // The first look fails and is said; the next comes later and finds the job done.
-    await later.clock.fastForward("00:03");
-    await later.getByText(`The status of job ${job.id.slice(0, 8)} could not be read`).waitFor();
-    await later.clock.fastForward("00:06");
-    await later.getByText(/^Job [0-9a-f]{8}: Succeeded/).waitFor();
-    expect(
-      (await later.getByText("could not be read; it will be asked for again").count()) === 0,
-      "a look that succeeded ends the notice of the one that failed",
-    );
-    failing.clear();
-  } finally {
-    await timed.close();
-  }
-
-  // nginx serves Garrison over HTTP/2, which carries a status and no status
-  // text: what a failure says must come from the answer's body, or be said
-  // without one.
-  step = "errors over HTTP/2";
-  let own = () => null;
-  const proxy = await startHttp2(origin, 18443, (path) => own(path));
-  const secure = await browser.newContext({ viewport: DESKTOP, ignoreHTTPSErrors: true });
-  const cookie = (await context.cookies()).find((each) => each.name === "__Host-garrison_session");
-  await secure.addCookies([
-    { name: cookie.name, value: cookie.value, url: proxy.origin, secure: true, httpOnly: true, sameSite: cookie.sameSite },
-  ]);
-  const overHttp2 = await secure.newPage();
-  watch(overHttp2, proxy.origin);
-  try {
-    await overHttp2.goto(`${proxy.origin}/admin/dashboard`);
-    await overHttp2.waitForLoadState("networkidle");
-    expect((await overHttp2.locator("h1").first().innerText()).trim() === "Dashboard", "the dashboard is served over HTTP/2");
-    // nginx's own page for a Garrison that does not answer: nothing to read.
-    failing.add("502 /api/status");
-    own = (path) =>
-      path === "/api/status" ? { status: 502, type: "text/html", body: "<html><body><h1>502 Bad Gateway</h1></body></html>" } : null;
-    await overHttp2.reload();
-    await overHttp2.getByText("The server answered with status 502 and gave no reason.").waitFor();
-    // An answer that carries a reason has it shown.
-    failing.add("503 /api/status");
-    own = (path) =>
-      path === "/api/status"
-        ? { status: 503, type: "application/json", body: JSON.stringify({ detail: "Authorization is temporarily unavailable" }) }
-        : null;
-    await overHttp2.reload();
-    await overHttp2.getByText("Authorization is temporarily unavailable").waitFor();
-  } finally {
-    own = () => null;
-    failing.clear();
-    await secure.close();
-    proxy.close();
-  }
+  await failingRequests(shared, catalog);
 
   step = "a profile that grants the dashboard alone";
   const narrow = await browser.newContext({ viewport: DESKTOP });
