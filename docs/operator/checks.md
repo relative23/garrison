@@ -26,17 +26,17 @@ observation the checks report is in [observation ids](observations.md).
 | `host` | `disk_path`, `modules` | Memory, load, disk, uptime |
 | `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path`, `firewall_units`, `modules` | What the host needs from its operator; see below |
 | `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; an alias, such as `sshd.service`, shows the unit it names. Timers show their schedule and next run. For one-shot jobs see below |
-| `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `max_domains` (20), `modules` | Certificate validity per endpoint; see below |
+| `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `max_domains` (20, at most 100), `modules` | Certificate validity per endpoint; see below |
 | `mail-flow` | `checks` (default: all of `spam`, `milter`, `authentication`, `tls`) | A week of the recorded events in numbers; see below |
 | `stalwart` | `milter_host`, `milter_port`, `max_accounts` | Spam settings, classifier, milter, queue, mailbox storage, running version |
 | `prometheus` | `path` | Native counters and gauges for the dashboard |
-| `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
+| `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
 | `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning |
 | `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30), `verify_days` (0: not expected), `restore_days` (0), `path`, `modules` | What the backup tool reported of its repository; see below |
 | `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
 | `version-command` | `component`, `command`, `pattern`, `modules` | Installed version from a command; it runs in the collector's sandbox, so a program that compiles code at run time (a JIT) fails there |
-| `reputation` | `hosts` (default: the mail hosts Stalwart names), `max_domains` (20), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
+| `reputation` | `hosts` (default: the mail hosts Stalwart names), `max_domains` (20, at most 100), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
 | `senders` | `min_recipients` (50), `factor` (5), `burst` (100), `bounces` (10), `modules` | The sender addresses that send unusually much; see below |
 | `releases` | `products` (`garrison`, `stalwart`; default both) | Whether a newer release exists; see below |
 | `sign-in` | `modules` | Whether Stalwart's sign-in page loads under the issuer's name, with its scripts and style sheets; see below |
@@ -223,9 +223,12 @@ check asks the resolver for them and compares:
   mail hosts, is a warning: senders that honour it stop delivering.
 
 The answers are those of this resolver at this moment; another resolver may
-still hold older ones. The check takes the first `max_domains` of Stalwart's
-domains; where Stalwart has more, the card "DNS records" is Unknown and says
-how many it has.
+still hold older ones. The check takes the first `max_domains` of the domains
+Stalwart lists, 100 at the most: each run asks every record of each of them
+again, and each is a card of its own. Where Stalwart has more, the card "DNS
+records" is Unknown and says how many it has; it sends no notification. With
+more than 100 domains it stays Unknown, since Garrison does not check the
+records of the domains after the first 100.
 
 ## `reputation`
 

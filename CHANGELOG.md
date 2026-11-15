@@ -335,7 +335,9 @@ Notable changes for operators and users. The format follows
 - **The DNS check says when it leaves domains out.** It checks the first
   `max_domains` (20) of Stalwart's domains and left the others out without
   a word. Where Stalwart has more, the card "DNS records" is now Unknown
-  and says how many it has.
+  and says how many it has. `max_domains` takes at most 100, since every
+  run asks all the records of each domain again; with more domains than
+  that, the card stays Unknown.
 - **The TLS and reputation checks take as many domains as they are told.**
   Without `endpoints` or `hosts` they took the mail hosts of the first 20 of
   Stalwart's domains, whatever the DNS check's `max_domains` said, and said
