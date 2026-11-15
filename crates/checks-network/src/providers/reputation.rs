@@ -11,7 +11,6 @@
 
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{
@@ -22,13 +21,15 @@ use serde_json::json;
 
 use super::dns::{mail_hosts, max_domains, resolver_option, system_resolver};
 use crate::context::{Collected, Context, Provider, Report};
-use crate::dns::{self, Answer, Kind};
+use crate::dns::{self, Kind};
 use crate::kept::{Kept, cached};
 use crate::options::{Checked, Options, fail};
 
+mod asker;
 mod verdict;
 
-use verdict::{Said, said};
+use asker::Asker;
+use verdict::Said;
 
 const EVERY: i64 = 6 * 3600;
 const AGAIN: i64 = 3600;
@@ -116,43 +117,6 @@ fn names(raw: &toml::Table, key: &str, default: &[&str]) -> Checked<Vec<String>>
     }
 }
 
-/// The lists are asked for this long at most: the collector's run has a
-/// limit of its own, and a list that is down answers nothing for seconds.
-const PATIENCE: Duration = Duration::from_secs(30);
-
-/// Asks one resolver.
-struct Asker {
-    resolver: SocketAddr,
-    /// Lists that gave an error instead of an answer; they are not asked again.
-    silent: BTreeSet<String>,
-    until: Instant,
-}
-
-impl Asker {
-    /// What `zone` says of `address`.
-    fn list(&mut self, zone: &str, address: IpAddr) -> Said {
-        if self.silent.contains(zone) {
-            return Said::Unanswered("the list did not answer before".to_owned());
-        }
-        if Instant::now() > self.until {
-            return Said::Unanswered("not asked: the lists took too long".to_owned());
-        }
-        let answer = dns::ask(self.resolver, &dns::reversed(address, Some(zone)), Kind::A);
-        if answer.is_err() {
-            self.silent.insert(zone.to_owned());
-        }
-        said(zone, answer)
-    }
-
-    /// The records of `kind` at `name`; none where the name has none.
-    fn records(&self, name: &str, kind: Kind) -> Result<Vec<String>, String> {
-        match dns::ask(self.resolver, name, kind)? {
-            Answer::Records(records) => Ok(records),
-            Answer::NoSuchName => Ok(Vec::new()),
-        }
-    }
-}
-
 impl Reputation {
     pub fn new(raw: &toml::Table) -> Checked<Self> {
         let options = Options::new(
@@ -191,11 +155,7 @@ impl Reputation {
         if hosts.is_empty() {
             return Err("Stalwart names no mail host for its domains".to_owned());
         }
-        let mut asker = Asker {
-            resolver,
-            silent: BTreeSet::new(),
-            until: Instant::now() + PATIENCE,
-        };
+        let mut asker = Asker::new(resolver);
         let mut addresses = Vec::new();
         for host in &hosts {
             for kind in [Kind::A, Kind::Aaaa] {
