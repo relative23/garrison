@@ -84,6 +84,20 @@ const STOP: [&str; 8] = [
 ];
 pub(super) use garrison_core::systemd::SYSTEMCTL;
 
+/// The access policy where the configuration names it, as the broker reads
+/// it; the default place where the configuration does not load, which the
+/// release's check of it then refuses.
+pub(super) fn policy() -> PathBuf {
+    policy_in(Path::new(CONFIG))
+}
+
+fn policy_in(config: &Path) -> PathBuf {
+    garrison_core::config::load(&config.join("garrison.toml")).map_or_else(
+        |_| config.join("access-policy.json"),
+        |loaded| loaded.broker.policy,
+    )
+}
+
 /// The extracted release this binary belongs to: `<release>/bin/garrison`.
 fn here() -> Step<PathBuf> {
     let binary = std::env::current_exe().map_err(|error| error.to_string())?;
@@ -333,8 +347,7 @@ fn install() -> Step {
     let current = base.join("current");
     let old = fs::canonicalize(&current).ok();
     let earlier = fs::canonicalize(base.join("previous")).ok();
-    let configured = Path::new(CONFIG).join("garrison.toml").exists()
-        && Path::new(CONFIG).join("access-policy.json").exists();
+    let configured = Path::new(CONFIG).join("garrison.toml").exists() && policy().exists();
     // Room for the release and, before an upgrade, the backup of the state.
     let mut needs = vec![(base, size(&here))];
     if old.is_some() && configured {
@@ -435,5 +448,23 @@ pub(crate) fn run_installer(rollback_requested: bool, with_state: bool) -> u8 {
             crate::complain(&error);
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_policy_is_where_the_configuration_names_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path();
+        // No configuration, or one that does not load: the default place.
+        assert_eq!(policy_in(config), config.join("access-policy.json"));
+        fs::write(config.join("garrison.toml"), "schema = 1\n[nonsense]\n").unwrap();
+        assert_eq!(policy_in(config), config.join("access-policy.json"));
+        let named = garrison_testing::config_text(config, "http://127.0.0.1:9");
+        fs::write(config.join("garrison.toml"), named).unwrap();
+        assert_eq!(policy_in(config), config.join("policy.json"));
     }
 }

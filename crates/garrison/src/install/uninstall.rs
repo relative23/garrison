@@ -46,8 +46,9 @@ impl Item {
     }
 }
 
-/// What goes, below `root` (`/` outside tests), in the order of removal.
-fn plan(root: &Path, purge: bool, module: bool) -> Vec<Item> {
+/// What goes, below `root` (`/` outside tests), in the order of removal;
+/// `policy` is the access policy as the configuration names it.
+fn plan(root: &Path, purge: bool, module: bool, policy: &Path) -> Vec<Item> {
     let at = |path: &str| root.join(path.trim_start_matches('/'));
     let mut items = vec![Item::Units];
     for unit in UNITS {
@@ -66,6 +67,11 @@ fn plan(root: &Path, purge: bool, module: bool) -> Vec<Item> {
     items.push(Item::Path(at(BASE)));
     if purge {
         items.push(Item::Path(at(CONFIG)));
+        // A policy the configuration keeps elsewhere goes as well.
+        if !policy.starts_with(CONFIG) {
+            let policy = root.join(policy.strip_prefix("/").unwrap_or(policy));
+            items.extend(policy_files(&policy).into_iter().map(Item::Path));
+        }
         items.push(Item::Path(at("/var/lib/garrison")));
         items.extend(installer_backups(&at(BACKUPS)).into_iter().map(Item::Path));
         items.push(Item::Users);
@@ -76,6 +82,31 @@ fn plan(root: &Path, purge: bool, module: bool) -> Vec<Item> {
         _ => true,
     });
     items
+}
+
+/// The policy at `policy` and what `garrison access` keeps beside it: its
+/// lock and its backups.
+fn policy_files(policy: &Path) -> Vec<PathBuf> {
+    let (Some(folder), Some(name)) = (policy.parent(), policy.file_name()) else {
+        return Vec::new();
+    };
+    let name = name.to_string_lossy();
+    // `garrison access` writes `.bak` exactly; other cases are no backups of it.
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    let ours = |entry: &str| {
+        entry == name
+            || entry == format!("{name}.lock")
+            || (entry.starts_with(&format!("{name}.")) && entry.ends_with(".bak"))
+    };
+    let mut found: Vec<PathBuf> = fs::read_dir(folder)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| ours(&entry.file_name().to_string_lossy()))
+        .map(|entry| entry.path())
+        .collect();
+    found.sort();
+    found
 }
 
 fn snippets(root: &Path) -> Vec<PathBuf> {
@@ -189,7 +220,7 @@ fn uninstall(purge: bool, dry_run: bool) -> Step {
     preflight()?;
     let _held = lock(Path::new(LOCK))?;
     let root = Path::new("/");
-    let items = plan(root, purge, module_loaded());
+    let items = plan(root, purge, module_loaded(), &super::policy());
     super::milter::forgotten(Path::new(CONFIG))?;
     nginx_stays_valid(&snippets(root))?;
     if dry_run {
@@ -234,6 +265,8 @@ pub(crate) fn run_uninstall(purge: bool, dry_run: bool) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const DEFAULT_POLICY: &str = "/etc/garrison/access-policy.json";
 
     fn host() -> tempfile::TempDir {
         let directory = tempfile::tempdir().unwrap();
@@ -289,7 +322,7 @@ mod tests {
     fn by_default_the_program_goes_and_the_data_stays() {
         let directory = host();
         let root = directory.path();
-        let items = plan(root, false, true);
+        let items = plan(root, false, true, Path::new(DEFAULT_POLICY));
         assert_eq!(items[0], Item::Units);
         assert!(items.contains(&Item::Module));
         assert!(!items.contains(&Item::Users));
@@ -312,7 +345,7 @@ mod tests {
         let root = directory.path();
         fs::remove_file(root.join("usr/bin/garrison")).unwrap();
         fs::write(root.join("usr/bin/garrison"), "another program").unwrap();
-        let paths = paths(&plan(root, true, false), root);
+        let paths = paths(&plan(root, true, false, Path::new(DEFAULT_POLICY)), root);
         assert!(!paths.contains(&"usr/bin/garrison".to_owned()), "{paths:?}");
     }
 
@@ -320,7 +353,7 @@ mod tests {
     fn a_purge_also_takes_data_users_and_the_installers_backups_only() {
         let directory = host();
         let root = directory.path();
-        let items = plan(root, true, false);
+        let items = plan(root, true, false, Path::new(DEFAULT_POLICY));
         assert!(!items.contains(&Item::Module));
         assert!(items.contains(&Item::Users));
         let paths = paths(&items, root);
@@ -338,5 +371,37 @@ mod tests {
                 .iter()
                 .any(|path| path.ends_with("latest") || path.ends_with("other.conf"))
         );
+    }
+
+    /// A policy kept elsewhere goes with its lock and its backups, and
+    /// nothing else of its folder.
+    #[test]
+    fn a_purge_takes_a_policy_where_the_configuration_names_it() {
+        let directory = host();
+        let root = directory.path();
+        fs::create_dir_all(root.join("srv/garrison")).unwrap();
+        for file in [
+            "access.json",
+            "access.json.lock",
+            "access.json.20261030T132151.bak",
+            "access.json.orig",
+            "other.json",
+        ] {
+            fs::write(root.join("srv/garrison").join(file), "").unwrap();
+        }
+        let elsewhere = Path::new("/srv/garrison/access.json");
+        let gone = paths(&plan(root, true, false, elsewhere), root);
+        let policies: Vec<&String> = gone.iter().filter(|path| path.starts_with("srv")).collect();
+        assert_eq!(
+            policies,
+            [
+                "srv/garrison/access.json",
+                "srv/garrison/access.json.20261030T132151.bak",
+                "srv/garrison/access.json.lock",
+            ]
+        );
+        // Without a purge it stays, as the configuration does.
+        let kept = paths(&plan(root, false, false, elsewhere), root);
+        assert!(!kept.iter().any(|path| path.starts_with("srv")), "{kept:?}");
     }
 }

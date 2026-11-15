@@ -45,7 +45,7 @@ either.
 | `collector.history_days` | 90 | Metric history retention: every minute of the last eight days, ten-minute values before them. With every check that is about 21 MiB for eight days and 48 MiB for 90. Counted from the collector's own run time: a pause of more than ten minutes or a clock that jumps ahead is not counted, so the history keeps that much longer until the collector has run at the new time for a day. |
 | `collector.native_key`, `broker.native_key` | `credential:collector-native-key`, `credential:broker-native-key` | The two read-only API keys; `stalwart setup` writes them. |
 | `collector.metrics_credential` | none | User name and password for Stalwart's Prometheus exporter; the example configuration names `credential:metrics-credential`, which `stalwart setup` writes. |
-| `broker.policy` | `/etc/garrison/access-policy.json` | Access policy, see [access.md](access.md). |
+| `broker.policy` | `/etc/garrison/access-policy.json` | Access policy, see [access.md](access.md). The broker reads it there, the installer starts Garrison once it is there and keeps it root's and readable only for the broker's group, `garrison doctor` checks it there, and `garrison uninstall --purge` removes it with its backups. |
 | `broker.allowed_peers` | `["garrison"]` | System users allowed to use the broker socket. |
 | `broker.socket` | `/run/garrison/broker.sock` | The broker's Unix socket. Keep the default: `garrison-broker.socket` listens there whatever this says. |
 

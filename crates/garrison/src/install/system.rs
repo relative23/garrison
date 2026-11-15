@@ -6,7 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use super::files::{Step, announce, io, must, place, relabel, run};
-use super::{CONFIG, SYSTEMCTL, UNITS, cli, command};
+use super::{SYSTEMCTL, UNITS, cli, command};
 
 fn nginx_files() -> Vec<(String, Vec<u8>)> {
     let mut found: Vec<(String, Vec<u8>)> = fs::read_dir("/etc/nginx/snippets")
@@ -138,7 +138,7 @@ pub(super) fn install_system_files(release: &Path) -> Step {
 
 /// The access policy belongs to root and only the broker's group may read it.
 pub(super) fn protect_policy() -> Step {
-    let policy = Path::new(CONFIG).join("access-policy.json");
+    let policy = super::policy();
     if !policy.exists() {
         return Ok(());
     }

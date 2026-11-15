@@ -328,6 +328,15 @@ Notable changes for operators and users. The format follows
   `check-config`, and with it the installer, now refuse both and give the
   name to use; `garrison doctor` reports them, and `notify-test` sends
   nothing on a channel whose secret the collector would not have.
+- **Another `broker.policy` is followed everywhere.** The broker and
+  `garrison access` used the policy the setting names, but the installer
+  counted an installation as configured only with
+  `/etc/garrison/access-policy.json`, so with a policy elsewhere it never
+  started the services, and it set the owner and mode of that file alone;
+  `garrison doctor` checked that file, and `garrison uninstall --purge` left
+  a policy kept elsewhere. The installer and doctor now take the policy
+  from where the setting names it, and a purge removes it there with the
+  lock and the backups `garrison access` keeps beside it.
 - **`garrison access check` shows what the broker grants.** It listed the
   modules and actions of a user's profiles, also those the installation
   does not offer, and showed a user the broker refuses, because none of

@@ -172,11 +172,8 @@ fn private(path: &Path, what: &str, group_read: bool) -> Finding {
 }
 
 fn files(config: &Config) -> Vec<Finding> {
-    let mut findings = vec![private(
-        Path::new("/etc/garrison/access-policy.json"),
-        "the access policy",
-        true,
-    )];
+    // Where the broker reads it.
+    let mut findings = vec![private(&config.broker.policy, "the access policy", true)];
     for name in CREDENTIALS {
         findings.push(private(
             &config.credentials_directory.join(name),
@@ -381,6 +378,22 @@ mod tests {
         for silent in [None, Some("")] {
             assert_eq!(last_result(silent).unwrap().level, Level::Unknown);
         }
+    }
+
+    /// The access policy is looked at where the configuration names it,
+    /// which is where the broker reads it.
+    #[test]
+    fn the_policy_is_judged_where_the_configuration_names_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        let policy = &files(&config)[0];
+        assert_eq!(
+            policy.what,
+            format!(
+                "the access policy is missing: {}",
+                config.broker.policy.display()
+            )
+        );
     }
 
     #[test]
