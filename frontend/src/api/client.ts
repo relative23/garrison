@@ -71,10 +71,13 @@ function withQuery(path: string, query?: Query): string {
 
 async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
   const write = init.method && init.method !== "GET";
+  // In the modes of the page's preloads (prerender.mjs), so that a first
+  // request takes the answer already on its way. No cache mode of its own:
+  // every answer says Cache-Control: no-store, and Firefox hands a preloaded
+  // answer only to a fetch in the default mode.
   const response = await fetch(API + path, {
     ...init,
     credentials: "same-origin",
-    cache: "no-store",
     signal: signal ?? null,
     headers: {
       Accept: "application/json",

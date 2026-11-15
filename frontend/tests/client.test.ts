@@ -17,6 +17,21 @@ describe("API client", () => {
     expect(write?.body).toEqual({ theme: "dark", hiddenModules: [], showSwitch: true });
   });
 
+  // A page the build drew preloads its first answers (prerender.mjs) with
+  // crossorigin="anonymous". A browser hands such an answer only to a fetch
+  // in the same credentials mode, and Firefox only to one in the default cache
+  // mode; with cache: "no-store" it asks the server again.
+  it("reads as the page's preloads ask, so that their answers are taken", async () => {
+    const server = serve({ "GET status": { body: {} }, "GET session": { body: { session: null } } });
+    await api.session();
+    await api.status();
+    for (const call of server.calls) {
+      expect(call.credentials).toBe("same-origin");
+      expect(call.cache ?? "default").toBe("default");
+    }
+    expect(server.calls).toHaveLength(2);
+  });
+
   it("leaves unset filters out of the query", async () => {
     const server = serve({ "GET events": { body: { items: [], next: null } } });
     await api.events({ search: "", category: "auth", type: undefined, before: null, limit: 50 });

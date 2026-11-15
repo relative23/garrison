@@ -86,6 +86,10 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A page opened in Firefox asks for its data once.** Each page starts
+  its first requests while its code loads. The interface then asked for the
+  same answers in a way Firefox does not answer from requests already on
+  their way, so Firefox sent each of them a second time; Chrome took them.
 - **The menu on a phone keeps the keyboard's place.** Escape now closes
   it, and closed by Escape or by its button it leaves the focus on the
   button that opened it; a page chosen in it takes the focus to that
