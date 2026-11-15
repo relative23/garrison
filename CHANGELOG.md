@@ -923,6 +923,12 @@ Notable changes for operators and users. The format follows
   says that Stalwart did not answer, that it is busy, or that access could
   not be checked, and when to try again; a code Stalwart refused and a user
   the policy refuses keep their words.
+- **The sign-in page asks for an administrator only where access may be
+  why.** It put "Ask your administrator if you need access." after every
+  reason, also where Stalwart did not answer or was busy, access could not
+  be checked just then, too many sign-ins came from one network or from
+  many, or the sign-in did not start from the page. The sentence now
+  follows a failed sign-in alone.
 - **The broker admits an allowed user from another PID namespace.** The
   broker read its peer's credentials into a type whose PID is never 0,
   while the kernel gives 0 for a peer whose PID the broker's PID namespace

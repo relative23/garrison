@@ -4,14 +4,17 @@ import { Notice } from "./Status";
 import { Button } from "./ui/button";
 
 // Shown when there is no valid session. Sign-in always happens at Stalwart.
+// The page sends someone to an administrator only where their access may be
+// why: not after an outage, a rate limit, rights that could not be checked
+// just then, or a sign-in that did not start here.
 const MESSAGES = {
-  "1": "signIn.error.failed",
-  busy: "signIn.error.busy",
-  "cross-site": "signIn.error.crossSite",
-  limited: "signIn.error.limited",
-  rate: "signIn.error.rate",
-  unavailable: "signIn.error.unavailable",
-  unchecked: "signIn.error.unchecked",
+  "1": { text: "signIn.error.failed", access: true },
+  busy: { text: "signIn.error.busy", access: false },
+  "cross-site": { text: "signIn.error.crossSite", access: false },
+  limited: { text: "signIn.error.limited", access: false },
+  rate: { text: "signIn.error.rate", access: false },
+  unavailable: { text: "signIn.error.unavailable", access: false },
+  unchecked: { text: "signIn.error.unchecked", access: false },
 } as const;
 
 function message(error: string) {
@@ -27,15 +30,17 @@ export function SignIn({ expired = false }: { expired?: boolean }) {
   const { t } = useTranslation();
   // The build draws this page without a browser, and so without an error.
   const error = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("login_error");
+  const shown = error ? message(error) : null;
   return (
     <Centered>
       <div className="grid w-full max-w-md justify-items-center gap-5 rounded-2xl bg-card p-8 text-center text-card-foreground shadow-tile">
         <BrandLarge />
         <p className="text-sm text-muted-foreground">{t("signIn.intro")}</p>
         {expired && <Notice live>{t("signIn.expired")}</Notice>}
-        {error && (
+        {shown && (
           <Notice tone="error">
-            {t(message(error))} {t("signIn.askAdministrator")}
+            {t(shown.text)}
+            {shown.access && <> {t("signIn.askAdministrator")}</>}
           </Notice>
         )}
         <Button asChild>

@@ -71,6 +71,26 @@ describe("sign-in", () => {
     expect(screen.queryByText(/script/)).toBeNull();
   });
 
+  it("asks for an administrator after a failed sign-in, where access may be why", async () => {
+    serve({ "GET session": { body: { session: null } } });
+    openApp("/admin/?login_error=1");
+    expect(await screen.findByText(/may not have Garrison access, .* Ask your administrator if you need access\.$/)).toBeTruthy();
+  });
+
+  it.each([
+    ["unavailable", /Stalwart did not answer/],
+    ["limited", /Stalwart is busy/],
+    ["unchecked", /Your access could not be checked just now/],
+    ["rate", /Too many sign-ins from your network/],
+    ["busy", /Too many sign-ins from many networks/],
+    ["cross-site", /Sign-in must start from this page/],
+  ])("asks for no administrator where access is not why (%s)", async (reason, words) => {
+    serve({ "GET session": { body: { session: null } } });
+    openApp(`/admin/?login_error=${reason}`);
+    expect(await screen.findByText(words)).toBeTruthy();
+    expect(screen.queryByText(/administrator/)).toBeNull();
+  });
+
   it("offers a retry when the session cannot be loaded", async () => {
     const server = serve({ "GET session": { status: 503, body: { detail: "Stalwart is not reachable" } } });
     openApp();
