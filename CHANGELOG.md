@@ -542,6 +542,15 @@ Notable changes for operators and users. The format follows
   client read names of up to 255 octets as written from an answer, so a
   reverse name of 254 or 255 octets was taken, and then refused as a
   question.
+- **One address's unusable answer no longer ends the reputation reading.**
+  A malformed answer, or an error of the resolver, for one address's
+  reverse name or for whether that name leads back to it ended the whole
+  reading: both cards said "Nothing could be asked: …", and no list was
+  asked about any address. Such an answer now counts for that address
+  alone: the Reverse names card names the address and why, and is Partial
+  where it would be OK, or Unknown where no address could be read; the
+  other addresses and every list are asked as before, and the reading is
+  asked again after an hour.
 - **A DNS answer counts only for the question it repeats.** The `dns` and
   `reputation` checks numbered their questions in order, from the clock or
   counting from one, and took any answer with that number: whoever could

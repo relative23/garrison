@@ -78,4 +78,52 @@ impl Asker {
             Answer::NoSuchName => Ok(Vec::new()),
         }
     }
+
+    /// The reverse name of `address` and whether it leads back there; `None`
+    /// where the run's time was up before it could be followed back. An
+    /// answer that cannot be used concerns this address alone: it is kept
+    /// as why, and the reading goes on.
+    pub(super) fn reverse(&self, address: IpAddr) -> Option<Reverse> {
+        let unread = |name: Option<String>, why: String| Reverse {
+            name,
+            confirmed: false,
+            unread: Some(why),
+        };
+        let name = match self.records(&dns::reversed(address, None), Kind::Ptr) {
+            Ok(names) => names.into_iter().next(),
+            Err(why) => return Some(unread(None, why)),
+        };
+        let Some(name) = name.map(|name| name.trim_end_matches('.').to_lowercase()) else {
+            return Some(Reverse::default());
+        };
+        if self.over() {
+            return None;
+        }
+        let back = if address.is_ipv4() {
+            Kind::A
+        } else {
+            Kind::Aaaa
+        };
+        Some(match self.records(&name, back) {
+            Ok(found) => Reverse {
+                confirmed: found
+                    .iter()
+                    .any(|found| found.parse::<IpAddr>() == Ok(address)),
+                name: Some(name),
+                unread: None,
+            },
+            Err(why) => unread(Some(name), why),
+        })
+    }
+}
+
+/// What [`Asker::reverse`] found of an address.
+#[derive(Debug, Default)]
+pub(super) struct Reverse {
+    /// The address's reverse name, if it has one.
+    pub(super) name: Option<String>,
+    /// Whether that name leads back to the address.
+    pub(super) confirmed: bool,
+    /// Why the name, or where it leads, could not be read.
+    pub(super) unread: Option<String>,
 }

@@ -290,7 +290,12 @@ that is longer than DNS takes, 253 octets: it has no address to ask about.
 - **Reverse names.** Each address should have a reverse name that leads back
   to it and is one of the mail hosts, the name the server greets with. One
   that is missing, leads elsewhere or is the hosting provider's default is a
-  warning.
+  warning. Where the resolver's answer for an address's reverse name, or for
+  where that name leads, cannot be used, as a malformed answer or an error
+  of the resolver, the card names the address and why, and is Partial where
+  it would be OK, or Unknown where no address could be read; the other
+  addresses and every list are asked as before, and the reading is asked
+  again after an hour.
 
 The lists learn the addresses they are asked about, through this host's
 resolver. Each list has terms of use of its own; remove from `lists` what you

@@ -96,27 +96,44 @@ impl Reputation {
     ) -> Result<Observation, crate::context::ProviderError> {
         let mut rows = Vec::new();
         let mut findings = Vec::new();
+        // Addresses whose reverse name could not be read: the card is not in
+        // order for them, nor does it say that they are wrong.
+        let mut unread = Vec::new();
         for address in &read.addresses {
-            let result = match &address.pointer {
-                None => {
+            let result = match (&address.pointer, &address.unread) {
+                (None, Some(why)) => {
+                    unread.push(format!(
+                        "The reverse name of {} could not be read: {why}.",
+                        address.address
+                    ));
+                    format!("not read: {why}")
+                }
+                (Some(name), Some(why)) => {
+                    unread.push(format!(
+                        "{} names {name}; whether that leads back to it could not be read: {why}.",
+                        address.address
+                    ));
+                    format!("not followed back: {why}")
+                }
+                (None, None) => {
                     findings.push(format!("{} has no reverse name.", address.address));
                     "no reverse name".to_owned()
                 }
-                Some(name) if !address.confirmed => {
+                (Some(name), None) if !address.confirmed => {
                     findings.push(format!(
                         "{} names {name}, which does not lead back to it.",
                         address.address
                     ));
                     "does not lead back".to_owned()
                 }
-                Some(name) if !read.hosts.contains(name) => {
+                (Some(name), None) if !read.hosts.contains(name) => {
                     findings.push(format!(
                         "{} names {name}, which is none of the mail hosts.",
                         address.address
                     ));
                     "not a mail host's name".to_owned()
                 }
-                Some(_) => "fits".to_owned(),
+                (Some(_), None) => "fits".to_owned(),
             };
             rows.push(vec![
                 json!(address.address),
@@ -125,10 +142,11 @@ impl Reputation {
                 json!(result),
             ]);
         }
-        let partial = read.cut.is_some() || !read.left_out.is_empty();
-        let state = match (unknown, findings.is_empty(), read.addresses.is_empty()) {
-            (Some(_), _, _) | (None, _, true) => State::Unknown,
-            (None, false, false) => State::Warning,
+        let partial = read.cut.is_some() || !read.left_out.is_empty() || !unread.is_empty();
+        let none_read = read.addresses.len() == unread.len();
+        let state = match (unknown, findings.is_empty(), none_read) {
+            (Some(_), _, _) | (None, true, true) => State::Unknown,
+            (None, false, _) => State::Warning,
             (None, true, false) if partial => State::Partial,
             (None, true, false) => State::Ok,
         };
@@ -136,7 +154,7 @@ impl Reputation {
             (Some(unknown), _) => vec![unknown.clone()],
             (None, true) if read.cut.is_some() => Vec::new(),
             (None, true) => vec!["The mail hosts have no address.".to_owned()],
-            (None, false) => findings,
+            (None, false) => findings.into_iter().chain(unread).collect(),
         };
         Ok(self
             .observation(context, "reverse", "Reverse names", state)?

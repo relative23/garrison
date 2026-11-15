@@ -41,7 +41,7 @@ pub(super) fn listed(zone: &mut Zone, address: &str, list: &str, code: [u8; 4]) 
 }
 
 pub(super) const V4: &str = "203.0.113.5";
-const V6: &str = "2001:db8::5";
+pub(super) const V6: &str = "2001:db8::5";
 
 /// A mail host with both kinds of address, each with its reverse name.
 pub(super) fn mail_host() -> Zone {
@@ -61,7 +61,11 @@ pub(super) fn provider(resolver: SocketAddr, more: &str) -> Reputation {
 }
 
 /// The two observations `later` seconds after the tests' clock.
-fn observed(provider: &Reputation, memory: &Remembered, later: i64) -> (Observation, Observation) {
+pub(super) fn observed(
+    provider: &Reputation,
+    memory: &Remembered,
+    later: i64,
+) -> (Observation, Observation) {
     let directory = tempfile::tempdir().unwrap();
     let config = config(directory.path());
     let runner = Canned(String::new());

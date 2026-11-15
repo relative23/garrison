@@ -55,6 +55,10 @@ struct Asked {
     pointer: Option<String>,
     /// Whether that name leads back to the address.
     confirmed: bool,
+    /// Why the reverse name, or where it leads, could not be read: an
+    /// answer the check cannot use counts for this address alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unread: Option<String>,
     lists: Vec<(String, Said)>,
 }
 
@@ -88,6 +92,12 @@ impl Read {
         self.addresses
             .iter()
             .any(|asked| asked.lists.iter().any(|(_, said)| *said == unasked))
+    }
+
+    /// Whether an address's reverse name could not be read: the reverse
+    /// names card cannot be in order then.
+    fn reverse_unread(&self) -> bool {
+        self.addresses.iter().any(|asked| asked.unread.is_some())
     }
 
     /// Whether it names a zone with a key, as an earlier release kept it.
@@ -298,26 +308,10 @@ impl Reputation {
                         cut = true;
                         break 'hosts;
                     }
-                    let pointer = asker
-                        .records(&dns::reversed(address, None), Kind::Ptr)?
-                        .into_iter()
-                        .next()
-                        .map(|name| name.trim_end_matches('.').to_lowercase());
-                    let back = if address.is_ipv4() {
-                        Kind::A
-                    } else {
-                        Kind::Aaaa
-                    };
-                    let confirmed = match &pointer {
-                        Some(_) if asker.over() => {
-                            cut = true;
-                            break 'hosts;
-                        }
-                        Some(name) => asker
-                            .records(name, back)?
-                            .iter()
-                            .any(|found| found.parse::<IpAddr>() == Ok(address)),
-                        None => false,
+                    // Also where the time is up between its two questions.
+                    let Some(reverse) = asker.reverse(address) else {
+                        cut = true;
+                        break 'hosts;
                     };
                     let lists = if address.is_ipv4() {
                         &self.lists
@@ -328,8 +322,9 @@ impl Reputation {
                     addresses.push(Asked {
                         host: host.clone(),
                         address: text,
-                        pointer,
-                        confirmed,
+                        pointer: reverse.name,
+                        confirmed: reverse.confirmed,
+                        unread: reverse.unread,
                         lists,
                     });
                 }
@@ -353,7 +348,7 @@ impl Reputation {
     }
 
     /// The last reading, or a new one where that is due: after six hours,
-    /// after an hour where not everything could be asked, and at once for
+    /// after an hour where not everything could be asked or read, and at once for
     /// one that an earlier release kept with a zone's key, and for one that
     /// had no key for the Data Query Service where this run has one, or
     /// another reason to have none.
@@ -362,7 +357,11 @@ impl Reputation {
         let wait = |_, read: &Read| {
             if read.names_a_key() || (read.keyless.is_some() && read.keyless != missing) {
                 0
-            } else if read.problem.is_some() || read.cut.is_some() || read.lists_unasked() {
+            } else if read.problem.is_some()
+                || read.cut.is_some()
+                || read.lists_unasked()
+                || read.reverse_unread()
+            {
                 AGAIN
             } else {
                 EVERY
@@ -420,6 +419,8 @@ impl Provider for Reputation {
     }
 }
 
+#[cfg(test)]
+mod answers_tests;
 #[cfg(test)]
 mod dqs_tests;
 #[cfg(test)]
