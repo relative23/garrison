@@ -248,10 +248,13 @@ impl JobStore {
         )
     }
 
-    /// When the newest job (of one action, or of any) was created. A job at
-    /// a second no clock gives, as a damaged or hand-edited audit may hold,
-    /// was created at no time, so it is not the newest: it holds no action
-    /// back, and the job before it still does.
+    /// When the newest job (of one action, or of any) was created: the one
+    /// recorded last, which after the clock went back is dated before those
+    /// recorded while it was ahead. Rows are numbered in the order they were
+    /// inserted, and no job's row is replaced. A job at a second no clock
+    /// gives, as a damaged or hand-edited audit may hold, was created at no
+    /// time, so it is not the newest: it holds no action back, and the job
+    /// before it still does.
     pub fn latest_created(&self, action_id: Option<&str>) -> rusqlite::Result<Option<i64>> {
         let (first, last) = (
             time::Timestamp::MIN.as_second(),
@@ -259,17 +262,19 @@ impl JobStore {
         );
         match action_id {
             None => self.db.query_row(
-                "SELECT max(created_at) FROM jobs WHERE created_at BETWEEN ?1 AND ?2",
+                "SELECT created_at FROM jobs WHERE created_at BETWEEN ?1 AND ?2 \
+                 ORDER BY rowid DESC LIMIT 1",
                 [first, last],
                 |row| row.get(0),
             ),
             Some(action) => self.db.query_row(
-                "SELECT max(created_at) FROM jobs WHERE action_id=?1 \
-                 AND created_at BETWEEN ?2 AND ?3",
+                "SELECT created_at FROM jobs WHERE action_id=?1 \
+                 AND created_at BETWEEN ?2 AND ?3 ORDER BY rowid DESC LIMIT 1",
                 params![action, first, last],
                 |row| row.get(0),
             ),
         }
+        .optional()
     }
 
     pub fn count(&self) -> rusqlite::Result<i64> {

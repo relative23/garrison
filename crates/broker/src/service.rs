@@ -340,12 +340,16 @@ impl Broker {
             store.update(&job.id, &settled)?;
         }
         let at = now();
+        // A job dated ahead of the clock, as after the clock went back, was
+        // not created seconds ago; when it was is not known: it waits for
+        // nothing, where it held every action back until the clock was there.
+        let within = |latest: i64, wait: i64| (0..wait).contains(&(at - latest));
         let latest = store.latest_created(None)?;
-        if latest.is_some_and(|latest| at - latest < SETTLE_SECONDS) {
+        if latest.is_some_and(|latest| within(latest, SETTLE_SECONDS)) {
             return Err(refuse(429, "Allow the previous operation to settle first"));
         }
         let latest = store.latest_created(Some(&action.id))?;
-        if latest.is_some_and(|latest| at - latest < i64::from(action.cooldown_seconds)) {
+        if latest.is_some_and(|latest| within(latest, i64::from(action.cooldown_seconds))) {
             return Err(refuse(429, "This action is still in its cooldown period"));
         }
         if store.count()? >= MAX_JOBS {

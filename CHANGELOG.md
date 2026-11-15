@@ -488,6 +488,15 @@ Notable changes for operators and users. The format follows
   it to settle for as long as its record stayed, or failed the request with
   an internal error. Such a job now holds no action back, the newest job at
   a time still does, and the Maintenance page shows its time as Unknown.
+- **A maintenance job dated ahead of the clock no longer holds back every
+  action.** After the clock went back, or once a clock that ran ahead was
+  put right, the broker's audit holds jobs dated ahead of the clock, and
+  every action was refused with "Allow the previous operation to settle
+  first", or for its cooldown, until the clock had reached such a job and
+  that time had passed: after a clock put back by a day, for a day. When
+  such a job ran is not known, so it now holds no action back; the job
+  begun last counts, so one begun since at the clock's time holds its 30
+  seconds and its action's cooldown as before.
 - **A `systemd` entry may name an alias.** systemd answers for an alias,
   such as `sshd.service` where the unit is `ssh.service`, under the name of
   the unit it stands for, and the check looked for the answer under the

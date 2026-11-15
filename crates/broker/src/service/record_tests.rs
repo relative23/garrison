@@ -205,6 +205,50 @@ fn no_action_is_held_back_by_a_job_at(when: i64, others: usize) {
     );
 }
 
+/// After the clock went back, or once a clock that ran ahead was put right,
+/// the audit holds jobs dated ahead of the clock, at times a clock gives.
+/// When such a job was is not known, so it holds no action back, neither
+/// for the settle time nor for its action's cooldown: it held every action
+/// back until the clock reached it plus that time. A job recorded since, at
+/// the clock's time, holds back as any does, although one recorded before
+/// it is dated later.
+#[test]
+fn a_job_recorded_ahead_of_the_clock_holds_no_action_back() {
+    for ahead in [MINUTE / 2, 3600, 365 * 86_400] {
+        for action in ["run_backup", "run_monitor"] {
+            let setup = make(false);
+            let store = setup.broker.store();
+            store.insert(&old_job("1", action, -ahead)).unwrap();
+            drop(store);
+            let answer = submit_monitor(&setup, REQUEST);
+            assert!(answer.is_ok(), "{action} {ahead} s ahead: {answer:?}");
+        }
+    }
+    for (action, age, reason) in [
+        (
+            "run_backup",
+            MINUTE / 2 - 5,
+            "Allow the previous operation to settle first",
+        ),
+        (
+            "run_monitor",
+            MINUTE,
+            "This action is still in its cooldown period",
+        ),
+    ] {
+        let setup = make(false);
+        let store = setup.broker.store();
+        store.insert(&old_job("1", "run_monitor", -3600)).unwrap();
+        store.insert(&old_job("2", action, age)).unwrap();
+        drop(store);
+        assert_eq!(
+            submit_monitor(&setup, REQUEST).unwrap_err().message,
+            reason,
+            "{action}"
+        );
+    }
+}
+
 /// The newest of all jobs, which the settle time waits for.
 #[test]
 fn a_job_recorded_at_the_least_integer_holds_no_action_back() {

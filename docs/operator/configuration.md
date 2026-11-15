@@ -338,6 +338,11 @@ timeout_seconds = 3600            # how long the broker waits for the result
 operator = false                  # true: included in the default "operator" profile
 ```
 
+An action is not started again within its `cooldown_seconds`, and no action
+within 30 seconds of any other job, counted from when each job began. A job
+dated ahead of this host's clock, as after the clock went back, holds nothing
+back.
+
 After changing actions, write the polkit rule again (or run the installer
 again, which does the same):
 
