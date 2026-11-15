@@ -234,6 +234,32 @@ at the server level of every server block that proxies to Stalwart, its mail
 host and the Stalwart WebUI's host. The installer writes that file; it answers
 `/metrics/` with 404.
 
+Open `https://<public_origin>/admin/` and sign in with your Stalwart
+account. Its menu ends with "Switch to Stalwart WebUI".
+
+For the way back, add a "Switch to Garrison WebUI" row to the Stalwart WebUI:
+include the generated file inside the location that serves it, in Stalwart's
+server block, for example
+
+```nginx
+location ^~ /admin/ {
+    proxy_pass http://127.0.0.1:8080;   # as in your existing Stalwart location
+    include /etc/nginx/snippets/garrison-stalwart-switch*.conf;
+}
+```
+
+Both switch rows stay hidden until a user turns them on in Garrison's
+settings; the row in the Stalwart WebUI then shows while that user is signed
+in to Garrison. It needs both host names under one registered domain, such
+as `garrison.example.org` and `mail.example.org`: only then does the browser
+send Garrison's session cookie with the row's question to Garrison. With two
+different domains the row does not appear.
+
+The installer writes that file with a hash of the script and reloads nginx when
+it changes. The `*` keeps nginx valid when Garrison is not installed; the
+row then simply does not appear. Nothing else in the Stalwart WebUI changes, and
+if a Stalwart release changes its menu layout, the row is not shown.
+
 ### Client addresses for Stalwart's limits
 
 Stalwart limits sign-ins and, after 100 failed passwords in a day, blocks
@@ -285,32 +311,6 @@ To have Stalwart count and block each client under its own address:
 Garrison names the user's address when it exchanges a sign-in code. Its
 other requests carry a token or its key and count under its own address,
 which Stalwart on this host neither limits nor blocks.
-
-Open `https://<public_origin>/admin/` and sign in with your Stalwart
-account. Its menu ends with "Switch to Stalwart WebUI".
-
-For the way back, add a "Switch to Garrison WebUI" row to the Stalwart WebUI:
-include the generated file inside the location that serves it, in Stalwart's
-server block, for example
-
-```nginx
-location ^~ /admin/ {
-    proxy_pass http://127.0.0.1:8080;   # as in your existing Stalwart location
-    include /etc/nginx/snippets/garrison-stalwart-switch*.conf;
-}
-```
-
-Both switch rows stay hidden until a user turns them on in Garrison's
-settings; the row in the Stalwart WebUI then shows while that user is signed
-in to Garrison. It needs both host names under one registered domain, such
-as `garrison.example.org` and `mail.example.org`: only then does the browser
-send Garrison's session cookie with the row's question to Garrison. With two
-different domains the row does not appear.
-
-The installer writes that file with a hash of the script and reloads nginx when
-it changes. The `*` keeps nginx valid when Garrison is not installed; the
-row then simply does not appear. Nothing else in the Stalwart WebUI changes, and
-if a Stalwart release changes its menu layout, the row is not shown.
 
 ## 7. Check the installation
 
