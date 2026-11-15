@@ -134,7 +134,8 @@ fn sign_in_again(reason: &str) -> Response {
 /// Why the token exchange failed, for the journal.
 fn kind(error: &Error) -> &'static str {
     match error {
-        Error::Unavailable(_) | Error::Limited(_) => "Stalwart unavailable",
+        Error::Unavailable(_) => "Stalwart unavailable",
+        Error::Limited(_) => "Stalwart's rate limit, HTTP 429",
         Error::Denied(_) | Error::InvalidToken(_) => "denied",
         Error::Misconfigured(_) => "Garrison's own setup",
     }
@@ -282,5 +283,15 @@ mod tests {
         );
         assert_eq!(kind(&Error::Denied("no".into())), "denied");
         assert_eq!(kind(&Error::InvalidToken("old".into())), "denied");
+    }
+
+    /// Stalwart's 429 is its rate limit, which passes once Stalwart's minute
+    /// is over: the journal names it, not an outage.
+    #[test]
+    fn the_journal_names_stalwarts_rate_limit() {
+        assert_eq!(
+            kind(&Error::Limited("Stalwart answered HTTP 429".into())),
+            "Stalwart's rate limit, HTTP 429"
+        );
     }
 }

@@ -843,6 +843,14 @@ Notable changes for operators and users. The format follows
   rate limit", with whether Stalwart refused the broker's key or the user's
   token, at once and then at most once a minute with how many more it
   refused, so that a flood of checks does not fill the journal.
+- **Stalwart's rate limit is named wherever it shows.** Where Stalwart
+  answered 429, the web service's journal said "Sign-in rejected at token
+  exchange (Stalwart unavailable)", the Management API card "Not readable:
+  Stalwart unavailable." and a job whose start met the limit "Stalwart did
+  not answer", though Stalwart had answered. They now say "token exchange
+  (Stalwart's rate limit, HTTP 429)", "Stalwart refused the collector's key
+  for its rate limit (HTTP 429)" and "Stalwart refused the check for its
+  rate limit (HTTP 429)"; an outage keeps its words.
 - **An answer that arrived counts, also where the server ends TLS without
   its closing notice.** Many servers just close the connection. Garrison
   then threw away what it had read: a notification that ntfy or a webhook

@@ -197,11 +197,16 @@ fn a_result_the_audit_did_not_take_is_recorded_once_it_takes_records_again() {
 
 #[test]
 fn a_job_that_does_not_start_says_which_check_of_its_rights_failed() {
-    let cases: [(Result<Grant, Error>, &str); 4] = [
+    let cases: [(Result<Grant, Error>, &str); 5] = [
         (
             Err(Error::Unavailable("timeout".into())),
             "Authorization could not be checked before execution: Stalwart did not answer. \
              Nothing was run.",
+        ),
+        (
+            Err(Error::Limited("the broker's key".into())),
+            "Authorization could not be checked before execution: Stalwart refused the check \
+             for its rate limit (HTTP 429). Nothing was run.",
         ),
         (
             Err(Error::InvalidToken("expired".into())),

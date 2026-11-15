@@ -76,6 +76,8 @@ const CHANGED: &str = "Authorization changed before execution; nothing was run."
 const SIGNED_OUT: &str = "The sign-in ended before execution; nothing was run.";
 const UNCHECKED: &str = "Authorization could not be checked before execution: Stalwart did not \
                          answer. Nothing was run.";
+const LIMITED: &str = "Authorization could not be checked before execution: Stalwart refused the \
+                       check for its rate limit (HTTP 429). Nothing was run.";
 const NOT_SET_UP: &str = "Access rights could not be checked before execution: Garrison is not \
                           set up to check them, and the broker's journal says why. Nothing was \
                           run.";
@@ -426,7 +428,7 @@ impl Broker {
                     "Rights for job {identifier} could not be checked: Stalwart refused {whose} \
                      for its rate limit (HTTP 429)"
                 );
-                Some(UNCHECKED)
+                Some(LIMITED)
             }
             Err(Error::Misconfigured(reason)) => {
                 log::error!("Access rights cannot be checked: {reason}");

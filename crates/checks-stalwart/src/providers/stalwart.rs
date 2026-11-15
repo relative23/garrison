@@ -353,7 +353,10 @@ impl Provider for Stalwart {
             Ok(answers) => Answers::read(answers),
             Err(error) => {
                 let kind = match error {
-                    Error::Unavailable(_) | Error::Limited(_) => "Stalwart unavailable",
+                    Error::Unavailable(_) => "Stalwart unavailable",
+                    Error::Limited(_) => {
+                        "Stalwart refused the collector's key for its rate limit (HTTP 429)"
+                    }
                     Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
                         "access denied"
                     }
@@ -401,6 +404,8 @@ impl Provider for Stalwart {
     }
 }
 
+#[cfg(test)]
+mod limit_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
