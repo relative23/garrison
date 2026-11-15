@@ -91,4 +91,6 @@ pub fn build(tables: &[toml::Table]) -> Checked<Vec<Box<dyn Provider>>> {
 }
 
 #[cfg(test)]
+mod ids_tests;
+#[cfg(test)]
 mod tests;

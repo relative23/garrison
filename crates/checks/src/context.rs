@@ -195,10 +195,11 @@ pub trait Provider {
     fn name(&self) -> &'static str;
 
     /// The ids of the observations this provider reports, as far as its
-    /// configuration alone decides them. An id two providers report can be
-    /// stored for one of them only, so the configuration check refuses such
-    /// a pair before anything runs. A provider with ids that depend on what
-    /// it finds, a domain or a test, names those it always reports.
+    /// configuration alone decides them, also those it reports only where
+    /// it finds something to say. An id two providers report can be stored
+    /// for one of them only, so the configuration check refuses such a pair
+    /// before anything runs. An id named after what it finds, a domain or a
+    /// test, cannot be named beforehand and is left out.
     fn ids(&self) -> Vec<String> {
         Vec::new()
     }

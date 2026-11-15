@@ -188,11 +188,20 @@ impl Provider for Flow {
         "mail-flow"
     }
 
+    /// The card of each configured check, and the list by domain that the
+    /// spam and authentication checks show where the week had any: only
+    /// there, but under an id their check alone decides.
     fn ids(&self) -> Vec<String> {
-        self.checks
-            .iter()
-            .map(|check| format!("flow.{check}"))
-            .collect()
+        let mut ids = Vec::new();
+        for check in &self.checks {
+            ids.push(format!("flow.{check}"));
+            match check.as_str() {
+                "spam" => ids.push("flow.spam-domains".to_owned()),
+                "authentication" => ids.push("flow.failing-senders".to_owned()),
+                _ => {}
+            }
+        }
+        ids
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
