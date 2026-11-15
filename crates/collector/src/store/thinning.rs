@@ -10,9 +10,9 @@
 //! how far it got: after an upgrade the history is thinned within some 80
 //! runs, and no single run takes long. Days without samples, as while the
 //! collector was stopped, are passed over. The mark is never later than the
-//! minute a run cleans up by (clock.rs): one that a clock running ahead left
-//! there comes back to it, or the samples written once the clock is right
-//! would never be thinned.
+//! minute a run cleans up by (clock.rs): from one that a clock running ahead
+//! left there, the thinning takes up again at the oldest sample, or the
+//! samples written once the clock is right would never be thinned.
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -50,8 +50,12 @@ fn mark(db: &Connection, at: i64) -> rusqlite::Result<()> {
 
 /// Where a run begins: the step of the oldest sample from where the last run
 /// stopped on, or before the first run of the oldest sample of all. A mark
-/// later than `newest`, the step of the minute the run cleans up by, comes
-/// back to it.
+/// later than `newest`, the step of the minute the run cleans up by, was
+/// left by a clock that ran ahead, in this release or in one before it that
+/// thinned by each run's own time. What the runs wrote since the clock came
+/// back lies before such a mark and is not thinned yet, so the thinning takes
+/// up again from the oldest sample of all: thinning a thinned step again
+/// changes nothing.
 fn start(transaction: &Transaction<'_>, newest: i64) -> rusqlite::Result<Option<i64>> {
     let kept: Option<String> = transaction
         .query_row("SELECT value FROM memory WHERE key = ?", [KEPT], |row| {
@@ -59,15 +63,16 @@ fn start(transaction: &Transaction<'_>, newest: i64) -> rusqlite::Result<Option<
         })
         .optional()?;
     let kept: Option<i64> = kept.and_then(|text| text.parse().ok());
-    if kept.is_some_and(|at| at > newest) {
-        mark(transaction, newest)?;
-    }
-    let from = kept.map_or(i64::MIN, |at| at.min(newest));
+    let from = kept.filter(|at| *at <= newest).unwrap_or(i64::MIN);
     let oldest: Option<i64> =
         transaction.query_row("SELECT min(ts) FROM samples WHERE ts >= ?", [from], |row| {
             row.get(0)
         })?;
-    Ok(oldest.map(|at| at - at.rem_euclid(STEP)))
+    let oldest = oldest.map(|at| at - at.rem_euclid(STEP));
+    if kept.is_some_and(|at| at > newest) {
+        mark(transaction, oldest.unwrap_or(newest))?;
+    }
+    Ok(oldest)
 }
 
 /// Thins up to one day of samples, from where the last run stopped, and never

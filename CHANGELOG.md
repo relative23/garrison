@@ -299,8 +299,8 @@ Notable changes for operators and users. The format follows
   when such a stretch begins and ends. No pattern of pauses, a host that is
   off every night included, stops the clean-up: it lags by the pauses not
   yet counted. Where a clock that ran ahead had carried the thinning past
-  the present, it takes up again from the clock's time, so the minutes
-  written since are thinned as well.
+  the present, it takes up again from the oldest sample, so the minutes
+  written since, by this release or an earlier one, are thinned as well.
 - **A `systemd` entry may name an alias.** systemd answers for an alias,
   such as `sshd.service` where the unit is `ssh.service`, under the name of
   the unit it stands for, and the check looked for the answer under the

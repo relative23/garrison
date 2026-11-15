@@ -223,6 +223,37 @@ fn a_mark_ahead_of_the_clock_comes_back_to_it() {
     assert_eq!(thinned.iter().filter(|row| row.0 == "sent").count(), 144);
 }
 
+/// An earlier release thinned by each run's own time, so a clock that ran
+/// ahead carried its mark past the present, and it went on writing minutes
+/// once the clock was right. Those lie before the mark when this release
+/// first runs, at the present: the thinning takes up again from the oldest
+/// sample, and they are thinned like any other.
+#[test]
+fn a_mark_ahead_of_the_present_is_taken_up_again_from_the_oldest_sample() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = StatusStore::open(&directory.path().join("status.sqlite"), 90).unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO memory VALUES(?, ?)",
+            params![KEPT, (END + 400 * DAY).to_string()],
+        )
+        .unwrap();
+    minutes(&store.db, 12);
+    // The first run thins the oldest day already.
+    run(&mut store, END);
+    assert_eq!(kept(&store), Some((END - 11 * DAY).to_string()));
+    assert_eq!(thin_all(&mut store, END), 3);
+    let thinned = rows(&store.db, END - 12 * DAY, END - 8 * DAY);
+    assert!(thinned.iter().all(|row| row.1 % STEP == 0));
+    assert_eq!(
+        thinned.iter().filter(|row| row.0 == "sent").count(),
+        4 * 144 - 6
+    );
+    let fine = rows(&store.db, END - 8 * DAY, END);
+    assert_eq!(fine.iter().filter(|row| row.0 == "sent").count(), 8 * 1440);
+}
+
 /// Days without samples, as while the collector was stopped, take no run of
 /// their own.
 #[test]
