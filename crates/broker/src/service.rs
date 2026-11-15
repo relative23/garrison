@@ -14,6 +14,7 @@ use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
+use std::time::Instant;
 
 use crate::protocol::{BrokerError, Catalog, Submitted, refuse};
 use crate::runner::{Outcome, Runner};
@@ -23,9 +24,11 @@ use garrison_core::config::Action;
 use garrison_core::constant_time;
 
 mod ids;
+mod limited;
 
 pub use ids::is_job_id;
 use ids::{is_request_id, job_id};
+use limited::Limited;
 
 /// Seconds after any job before the next one may start.
 const SETTLE_SECONDS: i64 = 30;
@@ -89,6 +92,8 @@ pub struct Broker {
     store: Mutex<JobStore>,
     /// What the audit did not take, oldest first. Lock the store before it.
     owed: Mutex<Vec<Owed>>,
+    /// When the journal last named Stalwart's rate limit.
+    limited: Mutex<Limited>,
     runner: Box<dyn Runner>,
     worker: Worker,
 }
@@ -115,6 +120,7 @@ impl Broker {
             actions,
             store: Mutex::new(store),
             owed: Mutex::new(Vec::new()),
+            limited: Mutex::new(Limited::default()),
             runner,
             worker,
         })
@@ -162,6 +168,10 @@ impl Broker {
             .map_err(|error| match error {
                 Error::InvalidToken(_) => refuse(401, "Sign-in required again"),
                 Error::Unavailable(_) => refuse(503, "Authorization is temporarily unavailable"),
+                Error::Limited(whose) => {
+                    self.limited(&whose);
+                    refuse(503, "Authorization is temporarily unavailable")
+                }
                 Error::Denied(reason) => {
                     log::info!("Garrison access denied: {reason}");
                     refuse(403, "Garrison access is not authorized")
@@ -176,6 +186,19 @@ impl Broker {
                     )
                 }
             })
+    }
+
+    /// Say that Stalwart's rate limit refused a check of `whose` budget, at
+    /// most once a minute.
+    fn limited(&self, whose: &str) {
+        let line = self
+            .limited
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .refused(whose, Instant::now());
+        if let Some(line) = line {
+            log::warn!("{line}");
+        }
     }
 
     pub fn catalog(&self, token: &str) -> Result<Catalog, BrokerError> {
@@ -398,6 +421,13 @@ impl Broker {
                 log::warn!("Rights for job {identifier} could not be checked: {reason}");
                 Some(UNCHECKED)
             }
+            Err(Error::Limited(whose)) => {
+                log::warn!(
+                    "Rights for job {identifier} could not be checked: Stalwart refused {whose} \
+                     for its rate limit (HTTP 429)"
+                );
+                Some(UNCHECKED)
+            }
             Err(Error::Misconfigured(reason)) => {
                 log::error!("Access rights cannot be checked: {reason}");
                 Some(NOT_SET_UP)
@@ -447,6 +477,8 @@ impl Broker {
 mod concurrency_tests;
 #[cfg(test)]
 mod failure_tests;
+#[cfg(test)]
+mod limit_tests;
 #[cfg(test)]
 mod record_tests;
 #[cfg(test)]

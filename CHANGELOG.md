@@ -736,6 +736,13 @@ Notable changes for operators and users. The format follows
   is now answered as unavailable (503): sessions stay, the page says that
   rights cannot be checked, and the journal names the cause as an error.
   Only what the policy says of a user is a refusal.
+- **The broker's journal names Stalwart's rate limit.** Where Stalwart
+  refused a check of a user's rights for its limit (HTTP 429), users saw
+  "Authorization is temporarily unavailable" and no journal said why. The
+  broker now writes "Stalwart refused a check of a user's rights for its
+  rate limit", with whether Stalwart refused the broker's key or the user's
+  token, at once and then at most once a minute with how many more it
+  refused, so that a flood of checks does not fill the journal.
 - **An answer that arrived counts, also where the server ends TLS without
   its closing notice.** Many servers just close the connection. Garrison
   then threw away what it had read: a notification that ntfy or a webhook

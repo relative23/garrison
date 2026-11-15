@@ -134,7 +134,7 @@ fn sign_in_again(reason: &str) -> Response {
 /// Why the token exchange failed, for the journal.
 fn kind(error: &Error) -> &'static str {
     match error {
-        Error::Unavailable(_) => "Stalwart unavailable",
+        Error::Unavailable(_) | Error::Limited(_) => "Stalwart unavailable",
         Error::Denied(_) | Error::InvalidToken(_) => "denied",
         Error::Misconfigured(_) => "Garrison's own setup",
     }

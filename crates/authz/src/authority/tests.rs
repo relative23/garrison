@@ -107,6 +107,24 @@ fn failures_keep_their_meaning() {
     assert!(matches!(authority.policy(), Err(Error::Misconfigured(_))));
 }
 
+/// Stalwart's rate limit, named by whose budget met it: the user's token at
+/// UserInfo, the broker's key at the management API.
+#[test]
+fn stalwarts_rate_limit_is_named_by_whose_budget_met_it() {
+    let identity = respond(&json!({"sub": "1", "email": "ann@example.test"}));
+    let (authority, server, _directory) =
+        authority(vec![answer(429, ""), identity, answer(429, "")]);
+    assert_eq!(
+        authority.authorize(TOKEN),
+        Err(Error::Limited("the user's token".into()))
+    );
+    assert_eq!(
+        authority.authorize(TOKEN),
+        Err(Error::Limited("the broker's key".into()))
+    );
+    server.requests();
+}
+
 /// What `authorize` says where Garrison's own setup is broken in `broken`.
 fn with_broken_setup(responses: Vec<String>, broken: impl Fn(&Config)) -> Error {
     let (authority, server, directory) = authority(responses);

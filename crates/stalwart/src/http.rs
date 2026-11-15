@@ -43,7 +43,8 @@ pub struct Response {
     pub body: Vec<u8>,
 }
 
-/// One request; `send` returns 4xx answers and fails on 5xx, 408, 429 and I/O errors.
+/// One request; `send` returns 4xx answers but 429, which is Stalwart's rate
+/// limit, and fails on 5xx, 408 and I/O errors.
 #[derive(Debug)]
 pub struct Request<'a> {
     url: &'a str,
@@ -93,7 +94,10 @@ impl<'a> Request<'a> {
         let limit = self.limit;
         let mut answer = self.call().map_err(|_| unavailable())?;
         let status = answer.status().as_u16();
-        if status >= 500 || status == 408 || status == 429 {
+        if status == 429 {
+            return Err(Error::Limited("Stalwart answered HTTP 429".into()));
+        }
+        if status >= 500 || status == 408 {
             return Err(Error::Unavailable(format!(
                 "Stalwart answered HTTP {status}"
             )));

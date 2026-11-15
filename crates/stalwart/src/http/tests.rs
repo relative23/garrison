@@ -3,6 +3,8 @@ use std::time::Duration;
 use super::*;
 use garrison_testing::http::{answer, serve};
 
+/// Stalwart's rate limit is no fault of Stalwart's: it is told apart, so
+/// that the broker's journal can name it.
 #[test]
 fn client_errors_are_answers_and_server_errors_are_unavailable() {
     let server = serve(vec![
@@ -21,7 +23,7 @@ fn client_errors_are_answers_and_server_errors_are_unavailable() {
     );
     assert_eq!(
         Request::get(&server.url).send(),
-        Err(Error::Unavailable("Stalwart answered HTTP 429".into()))
+        Err(Error::Limited("Stalwart answered HTTP 429".into()))
     );
     server.requests();
 }

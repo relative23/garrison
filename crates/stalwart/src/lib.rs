@@ -21,6 +21,11 @@ pub enum Error {
     /// and may be retried.
     #[error("{0}")]
     Unavailable(String),
+    /// Stalwart refused the request for its rate limit (HTTP 429), with whose
+    /// budget it was where the caller can tell. This grants nothing and may
+    /// be retried once Stalwart's window is over.
+    #[error("{0}")]
+    Limited(String),
     /// The access token is malformed, expired or revoked: the user must sign in again.
     #[error("{0}")]
     InvalidToken(String),

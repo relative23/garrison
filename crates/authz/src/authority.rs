@@ -118,7 +118,10 @@ impl Authority {
     }
 
     fn evaluate(&self, token: &str) -> Result<Grant, Error> {
-        let identity = self.provider.userinfo(token, None)?;
+        let identity = self
+            .provider
+            .userinfo(token, None)
+            .map_err(|error| spent(error, "the user's token"))?;
         let policy = self.policy()?;
         let account_id = policy.account_for(&identity.subject)?;
         // The broker asks with its own key. What Stalwart refuses or answers
@@ -129,7 +132,7 @@ impl Authority {
                 Error::Denied(reason) => Error::Misconfigured(format!(
                     "the account's rights could not be read from Stalwart: {reason}"
                 )),
-                other => other,
+                other => spent(other, "the broker's key"),
             })?;
         let offered = self.offered(policy.capabilities(
             &identity.subject,
@@ -144,6 +147,16 @@ impl Authority {
             profiles: offered.profiles,
             checked_at: time::now_isoformat(),
         })
+    }
+}
+
+/// `error` where it is Stalwart's rate limit as that of `whose` budget.
+/// Stalwart counts each token and key apart and says nothing of which it
+/// refused, so the request that met the limit tells.
+fn spent(error: Error, whose: &str) -> Error {
+    match error {
+        Error::Limited(_) => Error::Limited(whose.to_owned()),
+        other => other,
     }
 }
 

@@ -442,7 +442,7 @@ impl Provider for Stalwart {
             Ok(answers) => Answers::read(answers),
             Err(error) => {
                 let kind = match error {
-                    Error::Unavailable(_) => "Stalwart unavailable",
+                    Error::Unavailable(_) | Error::Limited(_) => "Stalwart unavailable",
                     Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
                         "access denied"
                     }
