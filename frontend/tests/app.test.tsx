@@ -264,7 +264,21 @@ describe("sign-out", () => {
     serve({ ...signedIn(), "POST logout": { status: 500, body: { detail: "Internal error" } } });
     openApp("/admin/account");
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
-    expect(await screen.findByText(/this browser is still signed in/)).toBeTruthy();
+    // The server answered, so the connection is not why.
+    expect(await screen.findByText("Sign-out did not complete, so this browser is still signed in. Try again.")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Account" })).toBeTruthy();
+  });
+
+  it("names the connection only where sign-out got no answer", async () => {
+    serve({
+      ...signedIn(),
+      "POST logout": () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    openApp("/admin/account");
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    expect(await screen.findByText(/this browser is still signed in\. Check the connection and try again\./)).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Account" })).toBeTruthy();
   });
 

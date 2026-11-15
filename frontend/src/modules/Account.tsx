@@ -2,7 +2,7 @@
 import { LogOut } from "lucide-react";
 import { useState } from "react";
 
-import type { SessionInfo } from "../api/client";
+import { ApiError, type SessionInfo } from "../api/client";
 import { Fields } from "../components/ObservationCard";
 import { Notice } from "../components/Status";
 import { Button } from "../components/ui/button";
@@ -11,12 +11,16 @@ import { Trans, useTranslation } from "../i18n";
 import { useApp } from "../lib/context";
 import { dateTime } from "../lib/format";
 
+/** Why a sign-out left the session: the server answered with an error, or
+ * no answer came. Only the second is the connection's. */
+type SignOutFailure = "answered" | "unanswered";
+
 export function Account({ onLogout }: { onLogout: () => Promise<void> }) {
   const { session } = useApp();
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<SignOutFailure | null>(null);
   const signOut = () => {
-    setFailed(false);
-    onLogout().catch(() => setFailed(true));
+    setFailed(null);
+    onLogout().catch((reason: unknown) => setFailed(reason instanceof ApiError ? "answered" : "unanswered"));
   };
   return <AccountCard session={session} onSignOut={signOut} failed={failed} />;
 }
@@ -27,11 +31,11 @@ export function Account({ onLogout }: { onLogout: () => Promise<void> }) {
 export function AccountCard({
   session,
   onSignOut,
-  failed = false,
+  failed = null,
 }: {
   session: SessionInfo | null;
   onSignOut?: () => void;
-  failed?: boolean;
+  failed?: SignOutFailure | null;
 }) {
   const { t } = useTranslation();
   const blank = "\u00a0";
@@ -52,7 +56,7 @@ export function AccountCard({
         <p className="text-sm text-muted-foreground">
           <Trans i18nKey="account.access" components={{ code: <code className="rounded bg-muted px-1 py-0.5" /> }} />
         </p>
-        {failed && <Notice tone="error">{t("account.signOutFailed")}</Notice>}
+        {failed && <Notice tone="error">{t(failed === "answered" ? "account.signOutFailed" : "account.signOutUnanswered")}</Notice>}
       </CardContent>
       <CardFooter>
         <Button variant="outline" onClick={onSignOut}>

@@ -929,6 +929,11 @@ Notable changes for operators and users. The format follows
   be checked just then, too many sign-ins came from one network or from
   many, or the sign-in did not start from the page. The sentence now
   follows a failed sign-in alone.
+- **A failed sign-out names the connection only where no answer came.**
+  The account page said "Check the connection and try again." also where
+  the web service had answered, such as that the session could not be ended
+  there. It now says "Try again." where an answer came, and names the
+  connection where none did.
 - **The broker admits an allowed user from another PID namespace.** The
   broker read its peer's credentials into a type whose PID is never 0,
   while the kernel gives 0 for a peer whose PID the broker's PID namespace

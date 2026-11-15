@@ -6,7 +6,8 @@
     "profiles": "Profiles",
     "sessionEnds": "Session ends",
     "signOut": "Sign out",
-    "signOutFailed": "Sign-out did not complete, so this browser is still signed in. Check the connection and try again.",
+    "signOutFailed": "Sign-out did not complete, so this browser is still signed in. Try again.",
+    "signOutUnanswered": "Sign-out did not complete, so this browser is still signed in. Check the connection and try again.",
     "title": "Signed in",
     "version": "Garrison version"
   },
