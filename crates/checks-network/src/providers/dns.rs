@@ -114,12 +114,15 @@ struct Tally {
     unanswered: usize,
     /// The records not asked, as the run's time for its checks was over.
     unasked: usize,
+    /// What is said of the records whose name is no DNS name.
+    nameless: Vec<String>,
 }
 
 /// The state of a domain and what to say of it: the records that are not as
 /// Stalwart names them, those that were not asked, then what the MTA-STS
 /// policy leaves open. What was asked counts; what was not keeps the domain
-/// from being in order.
+/// from being in order. A record whose name is no DNS name can never be
+/// published, so a needed one is not as Stalwart names it.
 fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>) {
     let (mut state, mut findings) = if tally.records == 0 {
         (
@@ -149,6 +152,7 @@ fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>) {
     } else {
         (State::Ok, Vec::new())
     };
+    findings.extend(tally.nameless.iter().cloned());
     if tally.unasked > 0 && tally.unasked == tally.records {
         findings.push(format!("Not asked: {RUN_OVER}."));
     } else if tally.unasked > 0 {
@@ -188,12 +192,16 @@ fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>) {
 /// that was silent once is not asked again in this run, for this domain or
 /// the next: each question would wait out its time, and the run has only so
 /// long. Once the run's time for its checks is over, nothing more is asked.
+/// A name that is no DNS name is never asked: that needs no resolver.
 fn asked(
     context: &Context<'_>,
     resolver: SocketAddr,
     record: &Expected,
     silent: &mut bool,
 ) -> (Verdict, Vec<String>) {
+    if !dns::is_name(&record.name) {
+        return (Verdict::NoName, Vec::new());
+    }
     if *silent {
         return (Verdict::Unanswered, Vec::new());
     }
@@ -311,6 +319,14 @@ impl Dns {
                 Verdict::Unasked => {
                     tally.unasked += 1;
                     false
+                }
+                Verdict::NoName => {
+                    tally.nameless.push(format!(
+                        "{}, so its {} record was not asked.",
+                        dns::no_name(&record.name),
+                        record.kind.name()
+                    ));
+                    needed
                 }
                 Verdict::Published => false,
             };

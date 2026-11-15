@@ -275,6 +275,12 @@ impl Reputation {
         // Once the run's time is up, the reading keeps what it has.
         let mut cut = false;
         'hosts: for host in &hosts {
+            // Stalwart may name a host that DNS cannot ask, which no option
+            // refuses: it has no address to ask about, and the others do.
+            if !dns::is_name(host) {
+                left_out.push(format!("{}, so it was not asked.", dns::no_name(host)));
+                continue;
+            }
             for kind in [Kind::A, Kind::Aaaa] {
                 if asker.over() {
                     cut = true;

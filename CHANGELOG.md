@@ -493,6 +493,17 @@ Notable changes for operators and users. The format follows
   reading said of it "no verdict: … is no DNS name". `garrison check-config`,
   and with it the installer before an upgrade, now refuses it and names the
   entry and why.
+- **A name longer than DNS takes is not asked, and the checks say so.** The
+  DNS client refused a label longer than 63 octets, but sent a name longer
+  than DNS takes, 253 octets as written, which resolvers answer with an
+  error (unbound) or as a name that does not exist (dnsmasq). So the `dns`
+  check called such a record of Stalwart's, as a long domain's DKIM record,
+  "no answer" or "missing", and a mail host of Stalwart's that long left the
+  `reputation` check without its addresses, or without any reading. The
+  client now refuses such a name as no DNS name; the `dns` check says so of
+  the record, and a needed one is a warning, since no server can publish
+  it; the `reputation` check leaves the host out, asks the others and says
+  so.
 - **A DNS answer counts only for the question it repeats.** The `dns` and
   `reputation` checks numbered their questions in order, from the clock or
   counting from one, and took any answer with that number: whoever could

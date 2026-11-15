@@ -151,6 +151,46 @@ fn names_and_resolvers() {
     assert_eq!(Kind::named("NS"), None);
 }
 
+/// A name of `octets` octets as it is written, of labels of 50 octets and
+/// fewer, in the reserved domain `test`.
+fn name_of(octets: usize) -> String {
+    let mut name = String::new();
+    while name.len() + 51 + 5 < octets {
+        name.push_str(&"a".repeat(50));
+        name.push('.');
+    }
+    name.push_str(&"b".repeat(octets - name.len() - 5));
+    name.push_str(".test");
+    assert_eq!(name.len(), octets);
+    name
+}
+
+/// A question carries a name in at most 255 octets, its labels' lengths and
+/// the zero at its end among them (RFC 1035, 2.3.4): 253 as it is written.
+/// A longer one is no DNS name, and no resolver is asked it.
+#[test]
+fn a_name_longer_than_dns_takes_is_no_dns_name_and_not_sent() {
+    let longest = name_of(253);
+    let asked = question(1, &longest, Kind::A).unwrap();
+    assert_eq!(asked.len(), 12 + 255 + 4);
+    assert_eq!(question(1, &format!("{longest}."), Kind::A), Some(asked));
+    let long = name_of(254);
+    assert_eq!(question(1, &long, Kind::A), None);
+    assert!(is_name(&longest) && !is_name(&long));
+    assert!(!is_name("") && !is_name("a..b") && !is_name(&"a".repeat(64)));
+    // A resolver that would answer it is not asked.
+    let resolver = UdpSocket::bind("127.0.0.1:0").unwrap();
+    resolver
+        .set_read_timeout(Some(Duration::from_millis(300)))
+        .unwrap();
+    let server = resolver.local_addr().unwrap();
+    assert_eq!(
+        ask(server, &long, Kind::A),
+        Err(format!("{long} is no DNS name"))
+    );
+    assert!(resolver.recv_from(&mut [0; 512]).is_err(), "it was sent");
+}
+
 #[test]
 fn an_answer_cut_off_over_udp_is_asked_for_again_over_tcp() {
     // One port for both, as a resolver has it. A port that is free for UDP

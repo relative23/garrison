@@ -394,6 +394,55 @@ fn a_resolver_that_does_not_answer_and_a_stalwart_that_gives_no_domains_are_unkn
     assert!(denied.observations[0].findings[0].contains("garrison stalwart setup"));
 }
 
+/// Stalwart may name a record at a name longer than DNS takes, as a long
+/// domain's DKIM record: no resolver can be asked it and no server can
+/// publish it, so the card says so, and a needed one is not as Stalwart
+/// names it.
+#[test]
+fn a_record_whose_name_is_no_dns_name_is_named_and_not_asked() {
+    // 254 octets as written: labels of 50 before the DKIM record's own.
+    let mut dkim = String::new();
+    while dkim.len() + 51 + 24 < 254 {
+        dkim.push_str(&"a".repeat(50));
+        dkim.push('.');
+    }
+    dkim.push_str(&"s".repeat(254 - 24 - dkim.len()));
+    dkim.push_str("._domainkey.example.test");
+    assert_eq!(dkim.len(), 254);
+    let zone = format!(
+        "example.test. IN MX 10 mail.example.test.\n\
+         {dkim}. IN TXT \"v=DKIM1; k=ed25519; p=AAAAkey\"\n"
+    );
+    let published: BTreeMap<(String, u16), Vec<Vec<u8>>> = [(
+        ("example.test".to_owned(), 15),
+        vec![host(&[0, 10], "mail.example.test")],
+    )]
+    .into_iter()
+    .collect();
+    let (address, handle) = resolver(published, None, 1);
+    let observations = collected(
+        &json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone}]),
+        address,
+    );
+    assert_eq!(handle.join().unwrap().len(), 1);
+    let domain = &observations[0];
+    let rows = &domain.table.as_ref().unwrap().rows;
+    assert_eq!(
+        (rows[1][0].as_str(), rows[1][5].as_str()),
+        (Some(dkim.as_str()), Some("no DNS name"))
+    );
+    assert_eq!(
+        (domain.state, domain.findings.clone()),
+        (
+            State::Warning,
+            vec![
+                format!("Not as Stalwart names them: TXT {dkim}."),
+                format!("{dkim} is no DNS name, so its TXT record was not asked."),
+            ]
+        )
+    );
+}
+
 #[test]
 fn options_are_checked() {
     assert_eq!(

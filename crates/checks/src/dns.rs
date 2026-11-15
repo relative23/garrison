@@ -117,7 +117,14 @@ pub fn resolvers(text: &str) -> Vec<IpAddr> {
         .collect()
 }
 
-/// The question as it goes out: one name, one type, recursion wanted.
+/// The octets a question's header takes before the name.
+const HEADER: usize = 12;
+/// The most octets a name may take in a message, the length of each label
+/// and the zero at its end among them (RFC 1035, 2.3.4): 253 as written.
+const MOST_NAME: usize = 255;
+
+/// The question as it goes out: one name, one type, recursion wanted;
+/// `None` for a name DNS cannot carry.
 fn question(id: u16, name: &str, kind: Kind) -> Option<Vec<u8>> {
     let mut message = Vec::with_capacity(32 + name.len());
     message.extend_from_slice(&id.to_be_bytes());
@@ -130,9 +137,23 @@ fn question(id: u16, name: &str, kind: Kind) -> Option<Vec<u8>> {
         message.extend_from_slice(label.as_bytes());
     }
     message.push(0);
+    if message.len() - HEADER > MOST_NAME {
+        return None;
+    }
     message.extend_from_slice(&kind.code().to_be_bytes());
     message.extend_from_slice(&[0, 1]);
-    (message.len() <= 512).then_some(message)
+    Some(message)
+}
+
+/// Whether DNS can ask `name`: labels of 1 to 63 octets, 253 octets in all
+/// as written. A check that names what it cannot ask asks this first.
+pub fn is_name(name: &str) -> bool {
+    question(0, name, Kind::A).is_some()
+}
+
+/// What the client says of a name that DNS cannot ask, as [`ask`] does.
+pub fn no_name(name: &str) -> String {
+    format!("{name} is no DNS name")
 }
 
 /// The name that starts at `at`, and where the record goes on after it.
@@ -340,7 +361,7 @@ pub fn ask(server: SocketAddr, name: &str, kind: Kind) -> Result<Answer, String>
     getrandom::fill(&mut number)
         .map_err(|_| "this host gave no random number for the question".to_owned())?;
     let id = u16::from_be_bytes(number);
-    let question = question(id, name, kind).ok_or_else(|| format!("{name} is no DNS name"))?;
+    let question = question(id, name, kind).ok_or_else(|| no_name(name))?;
     let unreachable = |error: io::Error| format!("the resolver {server} did not answer: {error}");
     let answer = over_udp(server, &question).map_err(unreachable)?;
     if let Some(answer) = read(&answer, id, kind)? {

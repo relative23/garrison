@@ -110,6 +110,9 @@ pub(super) enum Verdict {
     Unanswered,
     /// The resolver was not asked: the run's time for its checks was over.
     Unasked,
+    /// Its name is longer than DNS takes: no resolver can be asked it, and
+    /// no server can publish it.
+    NoName,
 }
 
 impl Verdict {
@@ -120,6 +123,7 @@ impl Verdict {
             Verdict::Missing => "missing",
             Verdict::Unanswered => "no answer",
             Verdict::Unasked => "not asked",
+            Verdict::NoName => "no DNS name",
         }
     }
 }

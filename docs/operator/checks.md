@@ -225,6 +225,9 @@ check asks the resolver for them and compares:
   read from `https://mta-sts.<domain>/.well-known/mta-sts.txt`, once an hour.
   A policy that cannot be read, or that does not name one of the domain's
   mail hosts, is a warning: senders that honour it stop delivering.
+- A record whose name is longer than DNS takes, 253 octets as written, as a
+  long domain's DKIM or TLSA record may be, says "no DNS name" and is not
+  asked: no server can publish it, so a needed one is a warning.
 
 The answers are those of this resolver at this moment; another resolver may
 still hold older ones. A resolver that does not answer once is not asked again
@@ -247,7 +250,8 @@ names in the MX records of its domains, of the first `max_domains` of them;
 the cards say when Stalwart has more. It asks about eight mail hosts and
 twelve addresses at the most, and asks the lists for 30 seconds in all.
 Where there are more, or a list was left unasked, the cards say so, and are
-Partial where they would be OK.
+Partial where they would be OK. So they are for a mail host Stalwart names
+that is longer than DNS takes, 253 octets: it has no address to ask about.
 
 - **Blocklists.** A listing is Failed and names the address and the list.
   IPv4 addresses are asked of `lists` (default `zen.spamhaus.org`,
