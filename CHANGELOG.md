@@ -6,6 +6,15 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- A secret that `garrison.toml` names by its path, such as `token =
+  "/etc/garrison/ntfy.token"`, or by a credential name other than the one
+  its unit loads, is refused by `garrison check-config` now, and with it
+  the upgrade, before anything stops. Move the file to
+  `/etc/garrison/credentials/<name>` (root, mode 0600) and write
+  `credential:<name>`; check-config names the setting and the name.
+
 ### Added
 
 - **`garrison restore --from DIR` puts back a backup.** What `garrison
@@ -23,7 +32,7 @@ Notable changes for operators and users. The format follows
   own.** Every user of the host may read `garrison.toml`, and some addresses
   are the secret themselves: an ntfy topic that takes no token, a webhook
   that carries its key in its address. `ntfy_url` and `webhook_url` now also
-  take `credential:NAME` or an absolute path, read as the tokens are; the
+  take `credential:NAME`, read as the tokens are; the
   collector and the watch load `ntfy-url` and `notify-webhook-url`, and the
   installer keeps an empty file for each. Such an address never shows on the
   Alerts page, in the journal or in `garrison notify-test`, and the status
@@ -307,15 +316,18 @@ Notable changes for operators and users. The format follows
   yet counted. Where a clock that ran ahead had carried the thinning past
   the present, it takes up again from the oldest sample, so the minutes
   written since, by this release or an earlier one, are thinned as well.
-- **A secret under a name its unit does not load is refused.** systemd
-  hands a service only the credentials its unit loads, each under one name,
-  such as `credential:collector-native-key`. A setting that named another
-  passed `garrison check-config`, though the service never got that file,
-  and `garrison notify-test`, which reads the credentials directory as root,
-  even sent with it. `check-config`, and with it the installer, now refuse
-  such a name and give the one to use; `garrison doctor` reports it, and
-  `notify-test` sends nothing on a channel whose secret the collector would
-  not have.
+- **A secret under a name its unit does not load, or named by its path, is
+  refused.** systemd hands a service only the credentials its unit loads,
+  each under one name, such as `credential:collector-native-key`. A setting
+  that named another passed `garrison check-config`, though the service
+  never got that file, and `garrison notify-test`, which reads the
+  credentials directory as root, even sent with it. A secret named by its
+  path the service reads itself, as its own user and in its sandbox:
+  `notify-test` and `garrison doctor`, which read it as root, called a file
+  usable that the collector could not read, and the other way round.
+  `check-config`, and with it the installer, now refuse both and give the
+  name to use; `garrison doctor` reports them, and `notify-test` sends
+  nothing on a channel whose secret the collector would not have.
 - **`garrison access check` shows what the broker grants.** It listed the
   modules and actions of a user's profiles, also those the installation
   does not offer, and showed a user the broker refuses, because none of

@@ -3,8 +3,10 @@
 //! into the service's credentials directory under the name the unit gives
 //! it, and no other: a `credential:` of another name is never there, while
 //! the operator commands, which read the configured directory as root,
-//! would find it. So check-config refuses it, and doctor and notify-test
-//! judge no channel by it.
+//! would find it. A secret named by its path the service reads itself, as
+//! its own user and in its unit's sandbox, which no command running as root
+//! can judge for it. So check-config refuses both, and doctor and
+//! notify-test judge no channel by them.
 
 use garrison_core::config::{Config, Endpoint};
 use garrison_core::credentials::SecretSource;
@@ -53,27 +55,36 @@ fn source<'a>(config: &'a Config, setting: &str) -> Option<&'a SecretSource> {
 pub(crate) fn unloaded(config: &Config) -> Vec<Unloaded> {
     let mut found = Vec::new();
     for (setting, readers, name) in units::SECRETS {
-        let Some(SecretSource::Credential(given)) = source(config, setting) else {
-            continue;
-        };
-        if given == name {
-            continue;
-        }
         let (readers, load) = match readers {
             [one] => ((*one).to_owned(), "loads"),
             more => (more.join(" and "), "load"),
         };
-        found.push(Unloaded {
-            setting,
-            what: format!(
-                "{setting} is credential:{given}, but {readers} {load} this secret only as \
-                 credential:{name}"
+        let (what, fix) = match source(config, setting) {
+            Some(SecretSource::Credential(given)) if given != name => (
+                format!(
+                    "{setting} is credential:{given}, but {readers} {load} this secret only as \
+                     credential:{name}"
+                ),
+                format!(
+                    "Write {setting} = \"credential:{name}\" and keep the secret in {}/{name}.",
+                    units::CREDENTIALS
+                ),
             ),
-            fix: format!(
-                "Write {setting} = \"credential:{name}\" and keep the secret in {}/{name}.",
-                units::CREDENTIALS
+            Some(SecretSource::File(path)) => (
+                format!(
+                    "{setting} names the file {}, which the service would read itself, as its \
+                     own user; {readers} {load} this secret for it only as credential:{name}",
+                    path.display()
+                ),
+                format!(
+                    "Move the file to {}/{name} (root, mode 0600) and write {setting} = \
+                     \"credential:{name}\".",
+                    units::CREDENTIALS
+                ),
             ),
-        });
+            _ => continue,
+        };
+        found.push(Unloaded { setting, what, fix });
     }
     found
 }
@@ -129,5 +140,38 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["ingest.signature_key", "notifications.ntfy_url"]
         );
+    }
+
+    #[test]
+    fn a_path_is_refused_with_the_name_its_units_load() {
+        let mut config = from_text(EXAMPLE).unwrap();
+        config.notifications.webhook_url = Some(Endpoint::File(SecretSource::File(
+            "/etc/garrison/webhook-url".into(),
+        )));
+        config.collector.native_key = SecretSource::File("/var/lib/key".into());
+        assert_eq!(
+            unloaded(&config)
+                .iter()
+                .map(Unloaded::line)
+                .collect::<Vec<_>>(),
+            [
+                "collector.native_key names the file /var/lib/key, which the service would \
+                 read itself, as its own user; garrison-collect.service loads this secret for \
+                 it only as credential:collector-native-key. Move the file to \
+                 /etc/garrison/credentials/collector-native-key (root, mode 0600) and write \
+                 collector.native_key = \"credential:collector-native-key\".",
+                "notifications.webhook_url names the file /etc/garrison/webhook-url, which the \
+                 service would read itself, as its own user; garrison-collect.service and \
+                 garrison-watch.service load this secret for it only as \
+                 credential:notify-webhook-url. Move the file to \
+                 /etc/garrison/credentials/notify-webhook-url (root, mode 0600) and write \
+                 notifications.webhook_url = \"credential:notify-webhook-url\".",
+            ]
+        );
+        // An address written as such is no file at all.
+        config.notifications.webhook_url =
+            Some(Endpoint::Written("https://hooks.example.org/a".into()));
+        config.collector.native_key = SecretSource::Credential("collector-native-key".into());
+        assert_eq!(unloaded(&config), []);
     }
 }

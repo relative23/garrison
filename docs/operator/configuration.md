@@ -9,7 +9,9 @@ Secrets never appear in this file. A value `credential:NAME` refers to
 `/etc/garrison/credentials/NAME`, which systemd hands to the service
 with `LoadCredential=`. Each unit loads every secret under one name, the
 default each setting below shows, and hands its service no other:
-`check-config` refuses another name, and `garrison doctor` reports it.
+`check-config` refuses another name, and also a path, which the service
+would have to read itself, as its own user; `garrison doctor` reports
+either.
 
 ## Top level
 
@@ -101,9 +103,9 @@ only a monitor on another machine notices that.
 
 | Key | Meaning |
 |---|---|
-| `ntfy_url` | An ntfy topic's address, `https://host/topic`, or the file it is kept in: `credential:ntfy-url` or an absolute path ([an address that is a secret](#an-address-that-is-a-secret)). |
+| `ntfy_url` | An ntfy topic's address, `https://host/topic`, or the file it is kept in, `credential:ntfy-url` ([an address that is a secret](#an-address-that-is-a-secret)). |
 | `token` | Where the topic's access token is read from; default `credential:ntfy-token`. |
-| `webhook_url` | An `https://` address every message is posted to as JSON, or the file it is kept in: `credential:notify-webhook-url` or an absolute path. |
+| `webhook_url` | An `https://` address every message is posted to as JSON, or the file it is kept in, `credential:notify-webhook-url`. |
 | `webhook_token` | Where a token for it is read from, sent as `Authorization: Bearer`; default `credential:notify-webhook-token`. |
 | `mail_to`, `mail_from`, `mail_host` | The recipient, the sender and the mail server's host name. All three, or none. |
 | `mail_user` | The account that signs in; default: the sender's address. |

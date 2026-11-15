@@ -181,6 +181,49 @@ fn a_credential_name_the_unit_does_not_load_is_refused() {
     assert!(!text(&test.stderr).contains("collector.native_key"));
 }
 
+/// A secret named by its path the service would read itself, as its own
+/// user, which a command running as root cannot judge for it: notify-test
+/// and doctor would call a file usable that the collector cannot read.
+#[test]
+fn a_secret_named_by_its_path_is_refused() {
+    let directory = prepared();
+    let path = directory.path().join("garrison.toml");
+    let token = directory.path().join("ntfy-token");
+    garrison_testing::write_private(&token, b"tk_0123456789abcdefghij");
+    let config = std::fs::read_to_string(&path).unwrap()
+        + &format!(
+            "\n[notifications]\nntfy_url = \"https://127.0.0.1:9/topic\"\ntoken = \"{}\"\n",
+            token.display()
+        );
+    std::fs::write(&path, config).unwrap();
+    let refused = run(directory.path(), &["check-config"]);
+    assert_eq!(refused.status.code(), Some(2), "{}", text(&refused.stderr));
+    assert!(
+        text(&refused.stderr).contains(&format!(
+            "Configuration not usable: notifications.token names the file {}, which the \
+             service would read itself, as its own user; garrison-collect.service and \
+             garrison-watch.service load this secret for it only as credential:ntfy-token. \
+             Move the file to /etc/garrison/credentials/ntfy-token (root, mode 0600) and write \
+             notifications.token = \"credential:ntfy-token\".\n",
+            token.display()
+        )),
+        "{}",
+        text(&refused.stderr)
+    );
+    let test = run(directory.path(), &["notify-test"]);
+    assert_eq!(
+        (test.status.code(), text(&test.stdout)),
+        (Some(2), String::new()),
+        "{}",
+        text(&test.stderr)
+    );
+    assert!(
+        text(&test.stderr).starts_with("Not tested: notifications.token names the file "),
+        "{}",
+        text(&test.stderr)
+    );
+}
+
 #[test]
 fn check_config_refuses_two_providers_that_report_one_observation() {
     let directory = prepared();
