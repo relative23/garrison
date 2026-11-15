@@ -131,6 +131,39 @@ async fn summaries_state_every_field_in_details_and_lists() {
     );
 }
 
+/// A stored event that cannot be read is the history's fault, not the
+/// request's: the request was in order.
+#[tokio::test]
+async fn an_event_the_history_cannot_read_is_an_internal_error() {
+    let mut setup = setup();
+    record_a_session_and_its_delivery(&setup);
+    rusqlite::Connection::open(setup.config.database(Database::Events))
+        .unwrap()
+        .execute("UPDATE events SET fields = 'not json' WHERE seq = 7", [])
+        .unwrap();
+    setup.client.sign_in("code-admin").await;
+    for path in [
+        "events",
+        "deliveries",
+        "deliveries/7",
+        "sessions",
+        "sessions/9",
+    ] {
+        let answer = setup.client.get(&api(path)).await;
+        assert_eq!(
+            (answer.status, answer.json()["detail"].as_str()),
+            (StatusCode::INTERNAL_SERVER_ERROR, Some("Internal error")),
+            "{path}"
+        );
+    }
+    // A cursor the query cannot read is still the request's.
+    let answer = setup.client.get(&api("deliveries?before=12:")).await;
+    assert_eq!(
+        (answer.status, answer.json()["detail"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("Invalid query"))
+    );
+}
+
 #[tokio::test]
 async fn coverage_states_where_the_history_begins_and_what_is_missing_inside() {
     let mut setup = setup();

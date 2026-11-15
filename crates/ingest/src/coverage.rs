@@ -23,7 +23,9 @@ const LISTED_GAPS: u32 = 20;
 impl From<recording::Error> for QueryError {
     fn from(error: recording::Error) -> Self {
         match error {
-            recording::Error::Invalid => QueryError::Invalid,
+            recording::Error::Invalid => QueryError::Unreadable(
+                "A number the event receiver keeps about the history cannot be read".to_owned(),
+            ),
             recording::Error::Sqlite(error) => QueryError::Sqlite(error),
         }
     }

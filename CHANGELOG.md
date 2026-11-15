@@ -212,6 +212,11 @@ Notable changes for operators and users. The format follows
   and gives its turn to the next, and a further query waits up to two
   seconds for a turn. It is refused only when eight are waiting already, or
   when no turn came within those two seconds.
+- **An event the history cannot read is no longer the request's fault.** A
+  stored event whose fields could not be read made Event history,
+  Deliveries and Sessions answer 400 "Invalid query", as if the filter were
+  wrong. They now answer "Internal error", and the web service's journal
+  names the event under the request's reference.
 - **The macro filter no longer passes what it could not scan as clean.** A
   message larger than `max_message_mib`, an archive that unpacks to more than
   the filter unpacks (16 MiB a file, 64 MiB together), and a zip archive

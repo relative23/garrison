@@ -174,7 +174,9 @@ fn failure(error: QueryError) -> ApiError {
         error @ QueryError::Sqlite(_) if error.is_interrupted() => {
             ApiError::new(503, "The query took too long; narrow the filter")
         }
-        error @ QueryError::Sqlite(_) => ApiError::internal(&error),
+        // What the history holds and cannot be read is the service's fault;
+        // the journal names it under the answer's reference.
+        error @ (QueryError::Unreadable(_) | QueryError::Sqlite(_)) => ApiError::internal(&error),
     }
 }
 
@@ -448,6 +450,7 @@ mod tests {
             failure(QueryError::Invalid),
             failure(sqlite(rusqlite::ffi::SQLITE_INTERRUPT)),
             failure(sqlite(rusqlite::ffi::SQLITE_CORRUPT)),
+            failure(QueryError::Unreadable("Event 2 cannot be read".to_owned())),
         ];
         let answers: Vec<(u16, &str)> = answers
             .iter()
@@ -458,6 +461,7 @@ mod tests {
             [
                 (400, "Invalid query"),
                 (503, "The query took too long; narrow the filter"),
+                (500, "Internal error"),
                 (500, "Internal error"),
             ]
         );

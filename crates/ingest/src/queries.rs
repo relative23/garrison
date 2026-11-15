@@ -39,9 +39,13 @@ pub fn labels(event_type: &str) -> Option<&'static Labels> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum QueryError {
-    /// A cursor or stored value that cannot be read; the request is refused.
+    /// A cursor that cannot be read; the request is refused.
     #[error("Invalid query")]
     Invalid,
+    /// Something the history holds that cannot be read: its fault, not the
+    /// request's, which was in order.
+    #[error("{0}")]
+    Unreadable(String),
     #[error("{0}")]
     Sqlite(#[from] rusqlite::Error),
 }
@@ -83,16 +87,22 @@ impl Default for Filter {
 
 const EVENT_COLUMNS: &str = "seq,event_id,created_at,type,category,span_id,queue_id,fields";
 
-fn fields(text: &str) -> Result<Map<String, Value>> {
-    serde_json::from_str(text).map_err(|_| QueryError::Invalid)
+/// The fields of the event numbered `seq`, as the receiver stored them.
+fn fields(seq: i64, text: &str) -> Result<Map<String, Value>> {
+    serde_json::from_str(text).map_err(|_| {
+        QueryError::Unreadable(format!(
+            "Event {seq} of the event history has fields that are not a JSON object"
+        ))
+    })
 }
 
 fn event_item(row: &Row<'_>) -> Result<EventItem> {
+    let seq = row.get(0)?;
     let event_type: String = row.get(3)?;
     let label =
         labels(&event_type).map_or_else(|| event_type.clone(), |labels| labels.label.clone());
     Ok(EventItem {
-        seq: row.get(0)?,
+        seq,
         id: row.get(1)?,
         created_at: row.get(2)?,
         event_type,
@@ -100,7 +110,7 @@ fn event_item(row: &Row<'_>) -> Result<EventItem> {
         category: row.get(4)?,
         span_id: row.get(5)?,
         queue_id: row.get(6)?,
-        fields: fields(&row.get::<_, String>(7)?)?,
+        fields: fields(seq, &row.get::<_, String>(7)?)?,
     })
 }
 
@@ -192,7 +202,10 @@ fn events_for(db: &Connection, column: Group, value: &str) -> Result<Vec<(Event,
     let mut rows = statement.query(rusqlite::params![value, limit_plus_one(MAX_SUMMARY_EVENTS)])?;
     let mut events = Vec::new();
     while let Some(row) = rows.next()? {
-        let pair = (row.get::<_, String>(3)?, fields(&row.get::<_, String>(7)?)?);
+        let pair = (
+            row.get::<_, String>(3)?,
+            fields(row.get(0)?, &row.get::<_, String>(7)?)?,
+        );
         events.push((pair, event_item(row)?));
     }
     Ok(events)
@@ -436,6 +449,8 @@ pub fn session_detail(db: &Connection, span_id: &str) -> Result<Option<Detail<Se
 mod budget_tests;
 #[cfg(test)]
 mod refused_tests;
+#[cfg(test)]
+mod stored_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
