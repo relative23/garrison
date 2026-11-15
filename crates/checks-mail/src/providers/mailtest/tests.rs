@@ -10,7 +10,7 @@ use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 /// session with the reply given for it and returns what it was sent. A reply
 /// that begins with `at RCPT: ` is given to the recipient instead, so that
 /// the session never comes to its message.
-fn server<const SESSIONS: usize>(
+pub(super) fn server<const SESSIONS: usize>(
     replies: [&'static str; SESSIONS],
 ) -> (u16, thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -61,7 +61,7 @@ fn server<const SESSIONS: usize>(
     (port, handle)
 }
 
-fn provider(port: u16) -> MailTest {
+pub(super) fn provider(port: u16) -> MailTest {
     MailTest::new(&table(&format!(
         "type = \"mail-test\"\nrecipient = \"garrison-test@example.test\"\nport = {port}"
     )))
@@ -97,7 +97,7 @@ fn collected(
     provider.collect(&context).unwrap().observations.remove(0)
 }
 
-fn results(observation: &Observation) -> Vec<&str> {
+pub(super) fn results(observation: &Observation) -> Vec<&str> {
     observation
         .table
         .as_ref()

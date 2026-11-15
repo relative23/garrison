@@ -21,7 +21,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Column, Evidence, Format, Observation, Required, State, Table};
@@ -33,16 +33,23 @@ use serde_json::json;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::kept::cached;
 use crate::options::{Checked, Options, fail};
+use crate::timed::Timed;
 use message::{Envelope, Test};
 
 mod message;
 
+/// One step of a session waits this long at most: the connection, one reply.
 const TIMEOUT: Duration = Duration::from_secs(10);
+/// A session has this long in all, so that a server that sends a line now
+/// and then cannot hold the run.
+const SESSION: Duration = Duration::from_secs(20);
 const MEMORY: &str = "mailtest";
 /// How long Stalwart may take to file an accepted message.
 const VERDICT_WITHIN: i64 = 900;
 /// A test that did not happen is tried again after this long.
 const AGAIN: i64 = 3600;
+/// Why a test was not sent.
+const RUN_OVER: &str = "the collection run's time was used up";
 
 /// How the server answered one test, as the status database keeps it.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -59,6 +66,10 @@ struct Sent {
     /// tests; where this is missing, that time counts.
     #[serde(default)]
     at: Option<i64>,
+    /// Whether it was not sent because the run's time was up: it is due in
+    /// the next run.
+    #[serde(default)]
+    cut: bool,
 }
 
 impl Sent {
@@ -88,6 +99,8 @@ pub struct MailTest {
     every: i64,
     /// Whether the test document for a macro filter is sent too.
     macros: bool,
+    /// How long one session may take in all.
+    session: Duration,
 }
 
 /// One reply of the server: its code and its last line.
@@ -163,33 +176,40 @@ impl MailTest {
             port: u16::try_from(options.integer("port", 25, 1, 65535)?).unwrap_or(25),
             every: options.integer("every_hours", 24, 1, 168)? * 3600,
             macros: options.flag("macro_document", false)?,
+            session: SESSION,
         })
     }
 
-    /// One session that hands `test` to the server.
+    /// For tests: give each session this long in all.
+    #[cfg(test)]
+    #[must_use]
+    pub fn within(mut self, session: Duration) -> Self {
+        self.session = session;
+        self
+    }
+
+    /// One session that hands `test` to the server, all of it within the
+    /// session's time.
     fn send(&self, context: &Context<'_>, test: Test) -> Sent {
         let failed = |reply: String| Sent {
             reply,
             ..Sent::default()
         };
+        let until = Instant::now() + self.session;
         let connected = (self.host.as_str(), self.port)
             .to_socket_addrs()
             .ok()
             .and_then(|mut addresses| addresses.next())
             .ok_or_else(|| "no address".to_owned())
             .and_then(|address| {
-                TcpStream::connect_timeout(&address, TIMEOUT).map_err(|error| error.to_string())
+                TcpStream::connect_timeout(&address, TIMEOUT.min(self.session))
+                    .map_err(|error| error.to_string())
             });
         let stream = match connected {
             Ok(stream) => stream,
             Err(error) => return failed(format!("no session: {error}")),
         };
-        let _ = stream.set_read_timeout(Some(TIMEOUT));
-        let _ = stream.set_write_timeout(Some(TIMEOUT));
-        let Ok(mut writer) = stream.try_clone() else {
-            return failed("no session".to_owned());
-        };
-        let mut reader = BufReader::new(stream);
+        let mut reader = BufReader::new(Timed::new(stream, until, TIMEOUT));
         let origin = &context.deployment.public_origin;
         let name = origin
             .split_once("://")
@@ -216,7 +236,7 @@ impl MailTest {
         let mut last = Sent::default();
         for (index, (command, expected)) in steps.iter().enumerate() {
             if let Some(command) = command
-                && writer.write_all(command.as_bytes()).is_err()
+                && reader.get_mut().write_all(command.as_bytes()).is_err()
             {
                 return failed("the server closed the session".to_owned());
             }
@@ -228,6 +248,7 @@ impl MailTest {
                         code,
                         at_data: index == 5,
                         at: None,
+                        cut: false,
                     };
                     if code != *expected {
                         break;
@@ -236,7 +257,7 @@ impl MailTest {
                 Err(error) => return failed(error),
             }
         }
-        let _ = writer.write_all(b"QUIT\r\n");
+        let _ = reader.get_mut().write_all(b"QUIT\r\n");
         last
     }
 
@@ -302,14 +323,19 @@ impl MailTest {
     }
 
     /// When a test of results kept at `kept` is sent again: after its hours
-    /// if it happened, sooner if it did not.
+    /// if it happened, sooner if it did not, and in the next run if the run
+    /// had no time for it.
     fn due(&self, kept: i64, sent: &Sent) -> i64 {
+        let at = sent.at.unwrap_or(kept);
+        if sent.cut {
+            return at;
+        }
         let wait = if sent.happened() {
             self.every
         } else {
             AGAIN.min(self.every)
         };
-        sent.at.unwrap_or(kept).saturating_add(wait)
+        at.saturating_add(wait)
     }
 
     /// For how long results kept at `kept` are used: until the first test is
@@ -344,9 +370,21 @@ impl MailTest {
                     ..sent.clone()
                 })
             });
-            stays.unwrap_or_else(|| Sent {
-                at: Some(now),
-                ..self.send(context, test)
+            stays.unwrap_or_else(|| {
+                // Once the run's time is up, a test that is due waits.
+                let sent = if context.deadline.expired() {
+                    Sent {
+                        reply: format!("not sent: {RUN_OVER}"),
+                        cut: true,
+                        ..Sent::default()
+                    }
+                } else {
+                    self.send(context, test)
+                };
+                Sent {
+                    at: Some(now),
+                    ..sent
+                }
             })
         };
         Tests {
@@ -448,3 +486,5 @@ impl Provider for MailTest {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod time_tests;
