@@ -263,8 +263,10 @@ Partial where they would be OK.
   check asks another (`resolver`). A zone of Spamhaus' Data Query Service,
   such as `KEY.zen.dq.spamhaus.net`, is read by Spamhaus' own codes too: a
   key that is disabled or used against its terms gives no verdict, never a
-  listing. Such a zone's name holds the key, which then stands in
-  `garrison.toml`, which every user of the host may read, and on the card.
+  listing. Such a zone's name holds the key: the check asks the zone as
+  written, but names it without its key, `….zen.dq.spamhaus.net`, on the
+  card, in its findings and in what the status database keeps. The key still
+  stands in `garrison.toml`, which every user of the host may read.
 - **Reverse names.** Each address should have a reverse name that leads back
   to it and is one of the mail hosts, the name the server greets with. One
   that is missing, leads elsewhere or is the hosting provider's default is a

@@ -35,7 +35,7 @@ pub(super) fn pointer(zone: &mut Zone, address: &str, name: &str) {
 }
 
 /// The answer of a list for an address.
-fn listed(zone: &mut Zone, address: &str, list: &str, code: [u8; 4]) {
+pub(super) fn listed(zone: &mut Zone, address: &str, list: &str, code: [u8; 4]) {
     let name = dns::reversed(address.parse().unwrap(), Some(list));
     zone.insert((name, Kind::A.code()), vec![code.to_vec()]);
 }

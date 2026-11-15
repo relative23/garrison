@@ -8,7 +8,7 @@ use serde_json::json;
 
 use super::asker::SLOW;
 use super::verdict::Said;
-use super::{Read, Reputation};
+use super::{Read, Reputation, shown};
 use crate::context::{Context, Provider};
 
 impl Reputation {
@@ -25,6 +25,7 @@ impl Reputation {
         let mut verdicts = 0;
         for address in &read.addresses {
             for (list, said) in &address.lists {
+                let list = shown(list);
                 let result = match said {
                     Said::Listed(code) => {
                         listed.push(format!("{} is listed on {list} ({code}).", address.address));

@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
+use super::shown;
 use super::verdict::{Said, said};
 use crate::context::Deadline;
 use crate::dns::{self, Answer, Kind};
@@ -61,7 +62,9 @@ impl Asker {
         if Instant::now() > self.until {
             return Said::Unanswered(format!("not asked: {SLOW}"));
         }
-        let answer = dns::ask(self.resolver, &dns::reversed(address, Some(zone)), Kind::A);
+        // An error may repeat the question, and with it a zone's key.
+        let answer = dns::ask(self.resolver, &dns::reversed(address, Some(zone)), Kind::A)
+            .map_err(|error| error.replace(zone, &shown(zone)));
         if answer.is_err() {
             self.silent.insert(zone.to_owned());
         }

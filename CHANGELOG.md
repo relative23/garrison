@@ -344,7 +344,10 @@ Notable changes for operators and users. The format follows
   resolver, or too many questions. The zones of Spamhaus' Data Query
   Service, under `dq.spamhaus.net`, were not taken for Spamhaus', so a key
   it reports as disabled counted as a listing; they are now read by
-  Spamhaus' own codes as well.
+  Spamhaus' own codes as well. Such a zone holds the subscriber's key as
+  its first label, which showed on the card and stood in the status
+  database: it is now named without it, `….zen.dq.spamhaus.net`, and a
+  reading kept with the key is asked again in the first run.
 - **A DNS answer counts only for the question it repeats.** The `dns` and
   `reputation` checks numbered their questions in order, from the clock or
   counting from one, and took any answer with that number: whoever could

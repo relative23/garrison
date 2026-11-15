@@ -83,6 +83,26 @@ impl Read {
             .iter()
             .any(|asked| asked.lists.iter().any(|(_, said)| *said == unasked))
     }
+
+    /// Whether it names a zone with a key, as an earlier release kept it.
+    fn names_a_key(&self) -> bool {
+        self.addresses
+            .iter()
+            .any(|asked| asked.lists.iter().any(|(zone, _)| shown(zone) != *zone))
+    }
+}
+
+/// A list's zone as the cards and the status database name it. A zone of
+/// Spamhaus' Data Query Service, `KEY.zen.dq.spamhaus.net`, holds the
+/// subscriber's key as its first label, a secret: it is named
+/// `….zen.dq.spamhaus.net`, and only the question asks it as configured.
+pub(super) fn shown(zone: &str) -> String {
+    zone.strip_suffix(".dq.spamhaus.net")
+        .and_then(|before| before.split_once('.'))
+        .map_or_else(
+            || zone.to_owned(),
+            |(_, list)| format!("….{list}.dq.spamhaus.net"),
+        )
 }
 
 #[derive(Debug)]
@@ -243,7 +263,7 @@ impl Reputation {
                     };
                     let lists = lists
                         .iter()
-                        .map(|zone| (zone.clone(), asker.list(zone, address)))
+                        .map(|zone| (shown(zone), asker.list(zone, address)))
                         .collect();
                     addresses.push(Asked {
                         host: host.clone(),
@@ -272,10 +292,13 @@ impl Reputation {
     }
 
     /// The last reading, or a new one where that is due: after six hours,
-    /// and after an hour where not everything could be asked.
+    /// after an hour where not everything could be asked, and at once for
+    /// one that an earlier release kept with a zone's key.
     fn known(&self, context: &Context<'_>) -> Kept<Read> {
         let wait = |_, read: &Read| {
-            if read.problem.is_some() || read.cut.is_some() || read.lists_unasked() {
+            if read.names_a_key() {
+                0
+            } else if read.problem.is_some() || read.cut.is_some() || read.lists_unasked() {
                 AGAIN
             } else {
                 EVERY
@@ -333,6 +356,8 @@ impl Provider for Reputation {
     }
 }
 
+#[cfg(test)]
+mod dqs_tests;
 #[cfg(test)]
 mod limits_tests;
 #[cfg(test)]
