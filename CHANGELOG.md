@@ -365,6 +365,13 @@ Notable changes for operators and users. The format follows
   reads it as root, while the broker could not read it and nobody could
   sign in; `check-config`, and with it the installer, now refuses it with
   the setting that hides it, and `garrison doctor` names it.
+- **`garrison doctor` names what makes each file.** For a missing access
+  policy it said to run `garrison stalwart setup` or the installer, neither
+  of which makes one; it now names `garrison access init`, and `garrison
+  stalwart setup` for a missing credential. For a credential with the wrong
+  owner or mode it named the installer, which leaves credentials as they
+  are; it now gives the `chown` and `chmod`. A link or a folder in a file's
+  place is called so, with what makes the file once it is removed.
 - **`garrison access check` shows what the broker grants.** It listed the
   modules and actions of a user's profiles, also those the installation
   does not offer, and showed a user the broker refuses, because none of
