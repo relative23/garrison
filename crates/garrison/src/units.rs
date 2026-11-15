@@ -42,6 +42,36 @@ pub(crate) const NOTIFICATION_FILES: [&str; 5] = [
 ];
 /// Where `garrison-broker.socket` listens; systemd hands it to the broker.
 pub(crate) const BROKER_PATH: &str = "/run/garrison/broker.sock";
+/// Each setting that names a secret, the units whose services read it, and
+/// the one name those units load it as (`LoadCredential=`): systemd hands a
+/// service no other.
+pub(crate) const SECRETS: [(&str, &[&str], &str); 9] = [
+    ("ingest.signature_key", &[INGEST], "webhook-signature-key"),
+    ("collector.native_key", &[COLLECT], "collector-native-key"),
+    (
+        "collector.metrics_credential",
+        &[COLLECT],
+        "metrics-credential",
+    ),
+    ("broker.native_key", &[BROKER], "broker-native-key"),
+    ("notifications.token", &[COLLECT, WATCH], "ntfy-token"),
+    (
+        "notifications.webhook_token",
+        &[COLLECT, WATCH],
+        "notify-webhook-token",
+    ),
+    (
+        "notifications.mail_password",
+        &[COLLECT, WATCH],
+        "notify-mail-password",
+    ),
+    ("notifications.ntfy_url", &[COLLECT, WATCH], "ntfy-url"),
+    (
+        "notifications.webhook_url",
+        &[COLLECT, WATCH],
+        "notify-webhook-url",
+    ),
+];
 
 #[cfg(test)]
 mod tests {
@@ -134,6 +164,21 @@ mod tests {
             subsets.iter().all(|(unit, _)| *unit != COLLECT),
             "{subsets:?}"
         );
+    }
+
+    /// Every credential a unit loads is the secret of one setting, and each
+    /// setting's units load it under the name the list gives.
+    #[test]
+    fn each_secret_is_loaded_by_its_units_under_its_name() {
+        let loaded: std::collections::BTreeSet<(&str, &str)> = values("LoadCredential=")
+            .into_iter()
+            .map(|(unit, credential)| (unit, credential.split_once(':').unwrap().0))
+            .collect();
+        let listed: std::collections::BTreeSet<(&str, &str)> = SECRETS
+            .iter()
+            .flat_map(|(_, units, name)| units.iter().map(|unit| (*unit, *name)))
+            .collect();
+        assert_eq!(listed, loaded);
     }
 
     /// The installer keeps a file for every notification credential the

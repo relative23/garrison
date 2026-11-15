@@ -118,6 +118,20 @@ fn summary(findings: &[Finding]) -> String {
     }
 }
 
+/// The secrets the units would not hand to their services, and whether the
+/// notification channels' are all handed to the collector.
+fn secrets(config: &Config) -> (Vec<Finding>, bool) {
+    let unloaded = crate::loaded::unloaded(config);
+    let channels = !unloaded
+        .iter()
+        .any(|secret| secret.setting.starts_with("notifications."));
+    let findings = unloaded
+        .into_iter()
+        .map(|secret| Finding::fail(secret.what, secret.fix))
+        .collect();
+    (findings, channels)
+}
+
 /// `1 problem`, `2 problems`.
 fn counted(number: usize, one: &str, more: &str) -> String {
     format!("{number} {}", if number == 1 { one } else { more })
@@ -131,7 +145,13 @@ pub(crate) fn run(config: &Config) -> u8 {
     let mut findings = origins(config);
     findings.extend(host::checks(config));
     findings.extend(milter::checks(config, &config.credentials_directory));
-    findings.extend(notify::checks(config, &crate::credentials(config)));
+    let (unloaded, channels) = secrets(config);
+    findings.extend(unloaded);
+    // A channel whose secret the collector would not have is not judged by
+    // what root reads.
+    if channels {
+        findings.extend(notify::checks(config, &crate::credentials(config)));
+    }
     findings.extend(public::checks(config));
     for finding in &findings {
         say(&finding.line());
@@ -143,6 +163,28 @@ pub(crate) fn run(config: &Config) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_secret_the_units_do_not_hand_over_fails_and_no_channel_is_judged_by_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        assert!(matches!(secrets(&config), (found, true) if found.is_empty()));
+        config.broker.native_key =
+            garrison_core::credentials::SecretSource::Credential("key".into());
+        let (found, channels) = secrets(&config);
+        assert!(channels);
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].line(),
+            "FAIL  broker.native_key is credential:key, but garrison-broker.service loads this \
+             secret only as credential:broker-native-key\n      Write broker.native_key = \
+             \"credential:broker-native-key\" and keep the secret in \
+             /etc/garrison/credentials/broker-native-key."
+        );
+        config.notifications.token =
+            garrison_core::credentials::SecretSource::Credential("token".into());
+        assert!(matches!(secrets(&config), (found, false) if found.len() == 2));
+    }
 
     #[test]
     fn every_finding_says_how_it_stands_and_what_to_do() {

@@ -307,6 +307,15 @@ Notable changes for operators and users. The format follows
   yet counted. Where a clock that ran ahead had carried the thinning past
   the present, it takes up again from the oldest sample, so the minutes
   written since, by this release or an earlier one, are thinned as well.
+- **A secret under a name its unit does not load is refused.** systemd
+  hands a service only the credentials its unit loads, each under one name,
+  such as `credential:collector-native-key`. A setting that named another
+  passed `garrison check-config`, though the service never got that file,
+  and `garrison notify-test`, which reads the credentials directory as root,
+  even sent with it. `check-config`, and with it the installer, now refuse
+  such a name and give the one to use; `garrison doctor` reports it, and
+  `notify-test` sends nothing on a channel whose secret the collector would
+  not have.
 - **`garrison access check` shows what the broker grants.** It listed the
   modules and actions of a user's profiles, also those the installation
   does not offer, and showed a user the broker refuses, because none of

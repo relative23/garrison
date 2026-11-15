@@ -130,6 +130,57 @@ fn check_config_reports_providers_actions_and_the_policy() {
     assert!(!text(&unusable.stdout).contains("Access policy"));
 }
 
+/// systemd hands a service only the credentials its unit loads, under the
+/// names it loads them as: another name is never there. check-config
+/// refuses it; notify-test, which reads the configured directory as root,
+/// sends nothing on a channel the collector could not use.
+#[test]
+fn a_credential_name_the_unit_does_not_load_is_refused() {
+    let directory = prepared();
+    let path = directory.path().join("garrison.toml");
+    let config = std::fs::read_to_string(&path).unwrap().replacen(
+        "[collector]\n",
+        "[collector]\nnative_key = \"credential:my-key\"\n",
+        1,
+    ) + "\n[notifications]\nntfy_url = \"https://127.0.0.1:9/topic\"\n\
+         token = \"credential:my-token\"\n";
+    std::fs::write(&path, config).unwrap();
+    // The file is there, in the directory the operator commands read.
+    garrison_testing::write_private(
+        &directory.path().join("credentials/my-token"),
+        b"tk_0123456789abcdefghij",
+    );
+    let refused = run(directory.path(), &["check-config"]);
+    assert_eq!(refused.status.code(), Some(2), "{}", text(&refused.stderr));
+    let said = text(&refused.stderr);
+    for line in [
+        "Configuration not usable: collector.native_key is credential:my-key, but \
+         garrison-collect.service loads this secret only as credential:collector-native-key. \
+         Write collector.native_key = \"credential:collector-native-key\" and keep the \
+         secret in /etc/garrison/credentials/collector-native-key.\n",
+        "Configuration not usable: notifications.token is credential:my-token, but \
+         garrison-collect.service and garrison-watch.service load this secret only as \
+         credential:ntfy-token. Write notifications.token = \"credential:ntfy-token\" and \
+         keep the secret in /etc/garrison/credentials/ntfy-token.\n",
+    ] {
+        assert!(said.contains(line), "{said}");
+    }
+    assert_eq!(text(&refused.stdout), "");
+    let test = run(directory.path(), &["notify-test"]);
+    assert_eq!(
+        (test.status.code(), text(&test.stdout)),
+        (Some(2), String::new()),
+        "{}",
+        text(&test.stderr)
+    );
+    assert!(
+        text(&test.stderr).contains("notifications.token is credential:my-token, but "),
+        "{}",
+        text(&test.stderr)
+    );
+    assert!(!text(&test.stderr).contains("collector.native_key"));
+}
+
 #[test]
 fn check_config_refuses_two_providers_that_report_one_observation() {
     let directory = prepared();

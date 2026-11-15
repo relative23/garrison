@@ -7,7 +7,9 @@ with `garrison check-config`, then restart the affected services
 
 Secrets never appear in this file. A value `credential:NAME` refers to
 `/etc/garrison/credentials/NAME`, which systemd hands to the service
-with `LoadCredential=`.
+with `LoadCredential=`. Each unit loads every secret under one name, the
+default each setting below shows, and hands its service no other:
+`check-config` refuses another name, and `garrison doctor` reports it.
 
 ## Top level
 
@@ -197,7 +199,8 @@ ntfy_url = "credential:ntfy-url"
 ```
 
 Use the names `ntfy-url` and `notify-webhook-url`: the units load only
-those, and the installer keeps an empty file for each. The address in the
+those, `check-config` refuses another, and the installer keeps an empty file
+for each. The address in the
 file is held to the same rules as one written here; an empty file or one
 that holds no such address is that channel's error. Such an address never
 shows: the Alerts page, the journal and `garrison notify-test` name its

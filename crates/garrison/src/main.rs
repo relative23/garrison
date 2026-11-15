@@ -11,6 +11,7 @@ mod config_file;
 mod detect;
 mod doctor;
 mod install;
+mod loaded;
 mod nginx;
 mod ops;
 mod selection;
@@ -248,6 +249,17 @@ pub(crate) fn placeholder(origin: &str) -> bool {
 /// work before a check depends on them.
 fn notify_test(config: &Config) -> u8 {
     use garrison_collector::notify::{Channels, Secrets, test};
+    // Root reads what the collector's unit would not hand to the collector.
+    let unloaded: Vec<loaded::Unloaded> = loaded::unloaded(config)
+        .into_iter()
+        .filter(|secret| secret.setting.starts_with("notifications."))
+        .collect();
+    if !unloaded.is_empty() {
+        for secret in &unloaded {
+            complain(&format!("Not tested: {}", secret.line()));
+        }
+        return 2;
+    }
     let credentials = credentials(config);
     let secrets = Secrets::read(&credentials, &config.notifications);
     let channels = Channels::of(config, secrets).located(&credentials);
@@ -277,6 +289,13 @@ fn notify_test(config: &Config) -> u8 {
 fn check_config(config: &Config) -> u8 {
     if let Err(error) = garrison_collector::build(&config.collector.providers) {
         complain(&format!("Configuration not usable: {error}"));
+        return 2;
+    }
+    let unloaded = loaded::unloaded(config);
+    if !unloaded.is_empty() {
+        for secret in &unloaded {
+            complain(&format!("Configuration not usable: {}", secret.line()));
+        }
         return 2;
     }
     say(&format!(
