@@ -174,6 +174,30 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
+    /// The writer of the database commits: a query that waits for it holds
+    /// its turn only for as long as its request is there.
+    #[tokio::test]
+    async fn a_query_that_waits_for_the_writer_gives_its_turn_away_when_its_request_is_gone() {
+        let (_directory, path) = database();
+        let writer = Connection::open(&path).unwrap();
+        writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let queries = Arc::new(Queries::new(1, 1, LONG, LONG));
+        let first = tokio::spawn({
+            let (queries, path) = (Arc::clone(&queries), path.clone());
+            async move { queries.run(path, "missing", one).await }
+        });
+        turns_left(&queries, 0).await;
+        first.abort();
+        // The reader waited up to two seconds for the lock before.
+        let freed = timeout(Duration::from_millis(1000), turns_left(&queries, 1)).await;
+        writer.execute_batch("COMMIT").unwrap();
+        assert!(
+            freed.is_ok(),
+            "the turn was not given away while the writer held its lock"
+        );
+        assert_eq!(status(&queries.run(path, "missing", one).await), Ok(1));
+    }
+
     #[tokio::test]
     async fn a_query_waits_for_its_turn_and_overload_is_refused() {
         let (_directory, path) = database();

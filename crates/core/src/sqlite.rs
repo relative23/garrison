@@ -141,6 +141,12 @@ impl Deref for Reader {
     }
 }
 
+/// How long a reader waits for the writer's lock each time it meets it.
+const FOR_THE_WRITER: Duration = Duration::from_secs(2);
+/// How long a reader whose request may go away sleeps between two tries
+/// for the writer's lock, and so how soon it sees that it has gone.
+const RETRY: Duration = Duration::from_millis(10);
+
 /// Open a read-only snapshot whose queries stop after `budget`, or `None` when
 /// the database does not exist yet.
 ///
@@ -151,7 +157,8 @@ pub fn reading(path: &Path, budget: Duration) -> Result<Option<Reader>, SqliteEr
 }
 
 /// [`reading`], whose queries also stop as soon as `gone` is set: a query
-/// whose request has gone away need not run out its budget.
+/// whose request has gone away need not run out its budget, nor wait for
+/// the writer's commit. The file is opened as [`open_untrusted`] opens it.
 pub fn reading_until(
     path: &Path,
     budget: Duration,
@@ -161,7 +168,23 @@ pub fn reading_until(
         return Ok(None);
     }
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    let mut db = open_untrusted(path, flags)?;
+    let mut db = connect_untrusted(path, flags)?;
+    // While the writer commits, the reader waits for its lock as any other
+    // does, tried again every few milliseconds, but not once its request
+    // has gone: a wait for the lock checks no progress handler.
+    let waiting = Arc::clone(&gone);
+    let mut since = Instant::now();
+    db.busy_handler(Some(move |tries: i32| {
+        if tries == 0 {
+            since = Instant::now();
+        }
+        if waiting.load(Ordering::Relaxed) || since.elapsed() >= FOR_THE_WRITER {
+            return false;
+        }
+        std::thread::sleep(RETRY);
+        true
+    }))?;
+    harden(&db)?;
     db.pragma_update(None, "query_only", "ON")?;
     let deadline = Instant::now() + budget;
     db.progress_handler(
@@ -194,11 +217,20 @@ pub fn out_of_time(error: &rusqlite::Error) -> bool {
 /// resolved first: it is the operator's (a state directory may live on another
 /// disk), while only the file itself is the writing user's to replace.
 pub fn open_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, SqliteError> {
-    let path = with_resolved_directory(path)?;
-    let db = Connection::open_with_flags(path, flags | OpenFlags::SQLITE_OPEN_NOFOLLOW)?;
-    db.busy_timeout(Duration::from_secs(2))?;
+    let db = connect_untrusted(path, flags)?;
+    db.busy_timeout(FOR_THE_WRITER)?;
     harden(&db)?;
     Ok(db)
+}
+
+/// The connection [`open_untrusted`] begins with, before it waits for a
+/// writer or reads anything.
+fn connect_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, SqliteError> {
+    let path = with_resolved_directory(path)?;
+    Ok(Connection::open_with_flags(
+        path,
+        flags | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?)
 }
 
 /// `path` with its directory resolved to the real one; the file name is kept.

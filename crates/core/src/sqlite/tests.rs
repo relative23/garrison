@@ -237,6 +237,53 @@ fn reader_queries_stop_once_their_request_is_gone() {
     assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(true));
 }
 
+/// While the writer holds its lock, a new reader waits for it, up to two
+/// seconds. Once the request it reads for has gone, it waits no more.
+#[test]
+fn a_reader_that_waits_for_the_writer_stops_once_its_request_is_gone() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("items.sqlite");
+    let writer = open_writer(&path, MIGRATIONS, Sharing::WithReaders, 0o600).unwrap();
+    writer
+        .execute("INSERT INTO item (name) VALUES ('a')", [])
+        .unwrap();
+    // A writer in the middle of its commit: no reader may begin.
+    writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let read_while_locked = |gone: Arc<AtomicBool>| {
+        let path = path.clone();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let count =
+                reading_until(&path, Duration::from_secs(3600), gone).and_then(|reader| {
+                    let reader = reader.unwrap();
+                    Ok(reader
+                        .query_row("SELECT count(*) FROM item", [], |row| row.get::<_, i64>(0))?)
+                });
+            sender
+                .send(count.map_err(|error| error.to_string()))
+                .unwrap();
+        });
+        receiver
+    };
+    let gone = Arc::new(AtomicBool::new(false));
+    let waiting = read_while_locked(Arc::clone(&gone));
+    assert_eq!(
+        waiting.recv_timeout(Duration::from_millis(300)),
+        Err(mpsc::RecvTimeoutError::Timeout),
+        "the reader waits for the lock"
+    );
+    gone.store(true, Ordering::Relaxed);
+    let gave_up = waiting
+        .recv_timeout(Duration::from_millis(500))
+        .expect("the reader stops waiting once its request is gone");
+    assert!(gave_up.is_err(), "{gave_up:?}");
+    // One whose request stays waits on and reads once the writer is done.
+    let staying = read_while_locked(Arc::new(AtomicBool::new(false)));
+    thread::sleep(Duration::from_millis(300));
+    writer.execute_batch("COMMIT").unwrap();
+    assert_eq!(staying.recv_timeout(Duration::from_secs(5)), Ok(Ok(1)));
+}
+
 #[test]
 fn schema_statements_are_read_as_sqlite_reads_them() {
     for (sql, kind) in [

@@ -208,8 +208,9 @@ Notable changes for operators and users. The format follows
   a third at once, and a query kept its turn until it ended even when the
   browser had given up its request for a newer filter: three quick steps
   through the categories of the Event history while a search was set showed
-  that error instead of the list. A query whose request goes away now stops
-  and gives its turn to the next, and a further query waits up to two
+  that error instead of the list. A query whose request goes away now stops,
+  also while it waits for the receiver's or the collector's commit, and
+  gives its turn to the next, and a further query waits up to two
   seconds for a turn. It is refused only when eight are waiting already, or
   when no turn came within those two seconds.
 - **An event the history cannot read is no longer the request's fault.** A

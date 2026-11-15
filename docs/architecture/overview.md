@@ -98,7 +98,8 @@ at most two seconds (a longer one is answered 503, which asks for a narrower
 filter or a shorter period). A further query waits up to two seconds for its
 turn, and at most eight wait; any other is answered 429 at once. A query
 whose request goes away, as when the browser moves on to another filter,
-stops at its next step and gives its turn to the next.
+stops at its next step, or while it waits for the writer's commit, and
+gives its turn to the next.
 
 **Status.** Every minute the collector runs all configured providers. Each
 returns observations (what, when, how, scope, findings) and metric samples.
