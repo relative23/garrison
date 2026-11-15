@@ -17,9 +17,9 @@ use crate::units;
 
 const SERVICES: [&str; 5] = units::RUNNING;
 /// No event for this long on a mail server usually means no webhook.
-const QUIET_HOURS: f64 = 24.0;
-/// A snapshot dated further ahead than this was written before the clock
-/// went back, so its age is not known.
+const QUIET: i64 = 24 * 3600;
+/// A snapshot or an event dated further ahead than this was written before
+/// the clock went back, so its age is not known; within it, its age is none.
 const AHEAD: i64 = 300;
 
 fn output(program: &str, arguments: &[&str]) -> Option<String> {
@@ -200,17 +200,21 @@ fn selinux() -> Option<Finding> {
 
 fn events(config: &Config) -> Finding {
     let path = config.database(Database::Events);
+    // The event stored last: after the clock went back, one received since
+    // is dated before those it dated ahead.
     let newest = sqlite::reading(&path, Duration::from_secs(5))
         .ok()
         .flatten()
         .and_then(|reader| {
             reader
-                .query_row("SELECT max(received_at) FROM events", [], |row| {
-                    row.get::<_, Option<i64>>(0)
-                })
+                .query_row(
+                    "SELECT received_at FROM events ORDER BY rowid DESC LIMIT 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
                 .ok()
-                .flatten()
         });
+    let now = time::now().as_second();
     match newest {
         // A damaged or hand-edited history: no age, neither recent nor old.
         Some(seconds) if time::Timestamp::from_second(seconds).is_err() => {
@@ -219,21 +223,23 @@ fn events(config: &Config) -> Finding {
                  {seconds}, which is no time"
             ))
         }
-        #[allow(clippy::cast_precision_loss)]
-        Some(seconds) => {
-            let hours = (time::unix(time::now()) - seconds as f64) / 3600.0;
-            if hours <= QUIET_HOURS {
-                Finding::ok(format!(
-                    "the last Stalwart event arrived {} minutes ago",
-                    (hours * 60.0).round()
-                ))
-            } else {
-                Finding::warn(
-                    format!("no Stalwart event for {} hours", hours.round()),
-                    "Check the webhook in the Stalwart WebUI, or run `garrison stalwart setup` again.",
-                )
-            }
+        // As for the newest snapshot: it arrived before the clock went back.
+        Some(at) if at - now > AHEAD => Finding::warn(
+            format!(
+                "the last Stalwart event is recorded {} minutes ahead of this host's clock, so \
+                 when it arrived is not known",
+                (at - now) / 60
+            ),
+            "The clock went back after it arrived; `timedatectl` shows whether it is \
+             synchronized.",
+        ),
+        Some(at) if now - at <= QUIET => {
+            Finding::ok(format!("the last Stalwart event arrived {}", ago(now - at)))
         }
+        Some(at) => Finding::warn(
+            format!("no Stalwart event for {} hours", (now - at) / 3600),
+            "Check the webhook in the Stalwart WebUI, or run `garrison stalwart setup` again.",
+        ),
         None => Finding::warn(
             "no Stalwart event recorded yet",
             "Stalwart sends events through the webhook that `garrison stalwart setup` creates.",
@@ -357,6 +363,66 @@ mod tests {
                      {when}, which is no time"
                 )
             ))
+        );
+    }
+
+    /// An event recorded ahead of this host's clock, as after the clock went
+    /// back, arrived before then: how long ago is not known, and no age below
+    /// zero is given; a few minutes ahead are the clock's own corrections. The
+    /// event that arrived last counts, also where one before it is dated later.
+    #[test]
+    fn an_event_recorded_ahead_of_the_clock_gives_no_age_below_zero() {
+        let line = |received: &[i64]| {
+            let directory = tempfile::tempdir().unwrap();
+            let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+            let path = config.database(Database::Events);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let db = rusqlite::Connection::open(&path).unwrap();
+            db.execute_batch(
+                "CREATE TABLE events(seq INTEGER PRIMARY KEY, received_at INTEGER NOT NULL)",
+            )
+            .unwrap();
+            for at in received {
+                db.execute("INSERT INTO events(received_at) VALUES(?)", [at])
+                    .unwrap();
+            }
+            drop(db);
+            events(&config)
+        };
+        let now = time::now().as_second();
+        let ahead = line(&[now + 3630]);
+        assert_eq!(
+            (ahead.level, ahead.what.as_str()),
+            (
+                Level::Warn,
+                "the last Stalwart event is recorded 60 minutes ahead of this host's clock, so \
+                 when it arrived is not known"
+            )
+        );
+        assert!(
+            ahead
+                .line()
+                .contains("The clock went back after it arrived"),
+            "{}",
+            ahead.line()
+        );
+        for (received, said) in [
+            (
+                vec![now + 120],
+                "the last Stalwart event arrived 0 minutes ago",
+            ),
+            (
+                vec![now + 3630, now - 615],
+                "the last Stalwart event arrived 10 minutes ago",
+            ),
+        ] {
+            let found = line(&received);
+            assert_eq!((found.level, found.what.as_str()), (Level::Ok, said));
+        }
+        let quiet = line(&[now - 30 * 3600]);
+        assert_eq!(
+            (quiet.level, quiet.what.as_str()),
+            (Level::Warn, "no Stalwart event for 30 hours")
         );
     }
 

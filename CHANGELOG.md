@@ -488,6 +488,14 @@ Notable changes for operators and users. The format follows
   it to settle for as long as its record stayed, or failed the request with
   an internal error. Such a job now holds no action back, the newest job at
   a time still does, and the Maintenance page shows its time as Unknown.
+- **`garrison doctor` gives the last Stalwart event no age below zero.** It
+  said that an event recorded ahead of this host's clock, as after the
+  clock went back, arrived a negative number of minutes ago. As of the
+  newest status snapshot, it now warns that such an event is recorded so
+  many minutes ahead and that when it arrived is not known, and calls one
+  a few minutes ahead just arrived. It takes the event stored last, so one
+  received since at the clock's time counts again, and no longer reads the
+  whole history to find it.
 - **A maintenance job dated ahead of the clock no longer holds back every
   action.** After the clock went back, or once a clock that ran ahead was
   put right, the broker's audit holds jobs dated ahead of the clock, and
