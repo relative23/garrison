@@ -105,6 +105,9 @@ Notable changes for operators and users. The format follows
   sent data without an end of line filled the collector's memory until
   systemd ended it, and the run with it. A line is now read up to 2 KiB,
   and such a reply is "the server's reply is too long".
+- **On a phone, the menu takes the keyboard as it opens.** The menu stayed
+  hidden while it slid in, so a Tab pressed in that moment passed it by.
+  It is now shown as it opens, and hidden only once it has slid out.
 - **A tab follows what changes beside it.** The page that says the session
   has ended stayed so after a sign-in in another tab, a sign-out reached the
   other tabs only with their next request, and a change of a user's rights

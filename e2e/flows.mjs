@@ -207,6 +207,27 @@ try {
   await page.locator("header").getByRole("link", { name: "Account" }).focus();
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => !document.activeElement?.closest("aside")), "the closed menu takes no focus");
+  // Opened, the menu takes the focus at once, while it slides in: a key
+  // pressed straight away does not pass it by. The focus is tried the moment
+  // the page has written the change, as the slide begins.
+  const reached = await page.evaluate(
+    () =>
+      new Promise((done) => {
+        const toggle = [...document.querySelectorAll("header button")].find((button) => button.getAttribute("aria-label") === "Open menu");
+        const first = document.querySelector("aside nav a");
+        if (!toggle || !first) return done(false);
+        new MutationObserver((_, observer) => {
+          if (toggle.getAttribute("aria-expanded") !== "true") return;
+          observer.disconnect();
+          first.focus();
+          done(document.activeElement === first);
+        }).observe(toggle, { attributes: true, attributeFilter: ["aria-expanded"] });
+        toggle.click();
+      }),
+  );
+  expect(reached, "the menu takes the focus as soon as it opens");
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await menu.waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "Open menu" }).click();
   await menu.getByRole("link", { name: "Services", exact: true }).click();
   await page.waitForURL(`${origin}/admin/services`);
