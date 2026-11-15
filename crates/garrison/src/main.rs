@@ -13,6 +13,7 @@ mod doctor;
 mod install;
 mod loaded;
 mod nginx;
+mod notify_test;
 mod ops;
 mod selection;
 mod setup;
@@ -245,47 +246,6 @@ pub(crate) fn placeholder(origin: &str) -> bool {
     .any(under)
 }
 
-/// One message on every configured channel, so that an operator sees them
-/// work before a check depends on them.
-fn notify_test(config: &Config) -> u8 {
-    use garrison_collector::notify::{Channels, Secrets, test};
-    // Root reads what the collector's unit would not hand to the collector.
-    let unloaded: Vec<loaded::Unloaded> = loaded::unloaded(config)
-        .into_iter()
-        .filter(|secret| secret.setting.starts_with("notifications."))
-        .collect();
-    if !unloaded.is_empty() {
-        for secret in &unloaded {
-            complain(&format!("Not tested: {}", secret.line()));
-        }
-        return 2;
-    }
-    let credentials = credentials(config);
-    let secrets = Secrets::read(&credentials, &config.notifications);
-    let channels = Channels::of(config, secrets).located(&credentials);
-    if channels.is_empty() {
-        complain(
-            "No channel is configured: set ntfy_url, webhook_url or the mail settings under \
-             [notifications] in garrison.toml.",
-        );
-        return 2;
-    }
-    let mut failed = false;
-    for (channel, outcome) in test(&channels, garrison_core::time::now()) {
-        match outcome {
-            Ok(()) => say(&format!("{channel}: the test message is out.")),
-            Err(error) => {
-                failed = true;
-                complain(&format!(
-                    "{channel}: the test message did not go out: {error}. Check its address and \
-                     its secret in /etc/garrison/credentials."
-                ));
-            }
-        }
-    }
-    u8::from(failed)
-}
-
 fn check_config(config: &Config, path: &Path) -> u8 {
     if let Err(error) = garrison_collector::build(&config.collector.providers) {
         complain(&format!("Configuration not usable: {error}"));
@@ -401,7 +361,7 @@ fn dispatch(task: Task, config: &Config, path: &Path) -> u8 {
         Task::Stalwart { command } => setup::run(config, &command),
         Task::Backup { to } => ops::backup(config, &to),
         Task::Doctor => doctor::run(config),
-        Task::NotifyTest => notify_test(config),
+        Task::NotifyTest => notify_test::run(config),
         Task::SelfCheck { state, receipt } => {
             ops::self_check(config, state.as_deref(), receipt.as_deref())
         }
