@@ -276,6 +276,9 @@ Partial where they would be OK.
   not set. A zone written with its key still works, named without it,
   `….zen.dq.spamhaus.net`, on the card, in its findings and in what the
   status database keeps, and check-config and `garrison doctor` warn of it.
+  Earlier releases kept the key in the status database; the first
+  collection run after an upgrade from one removes every copy of it there
+  and rebuilds the file, which the collector's journal says.
   `garrison check-config` refuses a name DNS can never ask, and says which:
   one with a label of more than 63 octets, or one longer than 253 octets as
   it is asked, which is with the reversed address before a list's zone, so

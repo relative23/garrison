@@ -33,8 +33,13 @@ Notable changes for operators and users. The format follows
   and asks a zone written without it, such as `zen.dq.spamhaus.net`, with
   it; the key goes into the question and nowhere else. The collector's unit
   loads the file, and the installer keeps an empty one, which means none:
-  such a zone is then not asked, and the card says why. See
-  [checks](docs/operator/checks.md#reputation).
+  such a zone is then not asked, and the card says why. Earlier releases
+  kept the key with the zone's name in the status database, which the group
+  `garrison` reads, and SQLite leaves what it frees in place: the first
+  collection run of this release names such a zone without its key in every
+  row and rebuilds the file, so that no copy of the key is left in it
+  (measured: half a second for 90 days of history), and the collector's
+  journal says so. See [checks](docs/operator/checks.md#reputation).
 - **Stalwart can count and block each client under its own address.**
   Behind nginx, Stalwart sees every client at nginx's address: on
   Garrison's host that is 127.0.0.1, which Stalwart neither limits nor

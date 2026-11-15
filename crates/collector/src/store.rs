@@ -11,6 +11,7 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::Instant;
 
 use garrison_core::config::Database;
 use garrison_core::sqlite::{self, Migration, SqliteError};
@@ -21,6 +22,7 @@ use crate::snapshot::Snapshot;
 
 mod clock;
 mod history;
+mod residue;
 mod thinning;
 
 pub use history::{History, HistoryError, PERIODS, history};
@@ -76,7 +78,22 @@ pub struct StatusStore {
 
 impl StatusStore {
     pub fn open(path: &Path, history_days: u32) -> Result<Self, SqliteError> {
-        let db = sqlite::open_database(path, &MIGRATIONS, Database::Status)?;
+        let mut db = sqlite::open_database(path, &MIGRATIONS, Database::Status)?;
+        let began = Instant::now();
+        match residue::clear(&mut db, path) {
+            Ok(Some(rows)) => log::info!(
+                "The status database held a key of Spamhaus' Data Query Service that an earlier \
+                 release kept: {rows} rows named it, now without it, and the file was rebuilt in \
+                 {} ms",
+                began.elapsed().as_millis()
+            ),
+            Ok(None) => {}
+            // A full disk must not cost the run; the next one tries again.
+            Err(error) => log::warn!(
+                "The status database could not be cleared of a key of Spamhaus' Data Query \
+                 Service that an earlier release kept: {error}; the next run tries again"
+            ),
+        }
         Ok(StatusStore { db, history_days })
     }
 
@@ -238,5 +255,7 @@ pub fn latest_snapshot(db: &Connection) -> Result<Option<Snapshot>, SnapshotErro
     Ok(text.as_deref().map(serde_json::from_str).transpose()?)
 }
 
+#[cfg(test)]
+mod residue_tests;
 #[cfg(test)]
 mod tests;
