@@ -70,6 +70,15 @@ Stalwart or the broker is unavailable or Garrison's own setup cannot decide
 ([failure behavior](security.md#failure-behavior)). A request for a module
 the grant does not name gets 403 and keeps the session as well.
 
+The interface asks for the status once a minute and reads the session again
+right after each answer; the web service answers that read from the grant it
+cached for the status, so a change of rights reaches the menu within a
+refresh without another question to the broker, and so to Stalwart. A
+refused request reads the session again at once. The tabs of one browser
+share the session cookie: a tab that signs in, signs out or saves its
+settings tells the others on a `BroadcastChannel`, without any data, and
+they read the session again.
+
 **Actions.** Web checks Origin, CSRF and the grant; the broker checks the grant
 again, the confirmation phrase, idempotency (UUID4 request ID), concurrency and
 cooldown, records the job, re-checks the grant when the job starts, and runs

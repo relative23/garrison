@@ -71,15 +71,21 @@ describe("API client", () => {
     expect(signedOut).toHaveBeenCalledTimes(1);
   });
 
-  it("does not sign out on other refusals", async () => {
-    serve({ "GET actions": { status: 403, body: { detail: "Not permitted" } } });
+  it("does not sign out on other refusals, and says when a read is refused", async () => {
+    serve({
+      "GET actions": { status: 403, body: { detail: "Not permitted" } },
+      "GET session": { status: 403, body: { detail: "Garrison access is not authorized" } },
+    });
     const signedOut = vi.fn();
     const refused = vi.fn();
     configure({ csrf: "", onUnauthorized: signedOut, onRefused: refused });
     await expect(api.actions()).rejects.toMatchObject({ status: 403, message: "Not permitted" });
     expect(signedOut).not.toHaveBeenCalled();
-    // A read needs no token: its refusal says nothing about the session's.
-    expect(refused).not.toHaveBeenCalled();
+    // The user's rights may have changed since the session was read.
+    expect(refused).toHaveBeenCalledTimes(1);
+    // The session's own refusal is not followed by the same question again.
+    await expect(api.session()).rejects.toMatchObject({ status: 403 });
+    expect(refused).toHaveBeenCalledTimes(1);
   });
 
   it("says when a write is refused, whose token may be another session's", async () => {

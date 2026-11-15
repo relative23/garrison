@@ -1,10 +1,17 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 
+import type { Preferences } from "../src/api/client";
 import { metrics, session, status } from "./support/fixtures";
 import { openApp } from "./support/render";
 import { serve, type Call } from "./support/server";
 
-const echo = (call: Call) => ({ body: call.body });
+/** The settings the stand-in server keeps, as the web service does: the
+ * session read after a save holds what was saved. */
+let kept = session().preferences;
+const echo = (call: Call) => {
+  kept = call.body as Preferences;
+  return { body: call.body };
+};
 
 /** A save that the server answers only when the test lets it. */
 function held() {
@@ -18,8 +25,9 @@ const menu = () => within(screen.getByRole("navigation", { name: "Garrison" }));
 const dark = () => document.documentElement.classList.contains("dark");
 
 function signedIn(preferences = session().preferences) {
+  kept = preferences;
   return {
-    "GET session": { body: { session: session({ preferences }) } },
+    "GET session": () => ({ body: { session: session({ preferences: kept }) } }),
     "GET status": { body: status([]) },
     "GET metrics": { body: metrics() },
   };

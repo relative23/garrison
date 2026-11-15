@@ -1,7 +1,7 @@
 // Session bootstrap, theme and routing.
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { api, configure, type SessionInfo, type SessionState } from "./api/client";
+import { api, configure, type Preferences, type SessionInfo, type SessionState } from "./api/client";
 import { Layout } from "./components/Layout";
 import { Shell, type ShellKind } from "./components/Shell";
 import { Centered, SignIn } from "./components/SignIn";
@@ -11,36 +11,82 @@ import { useTranslation } from "./i18n";
 import { AppContext, type AppState } from "./lib/context";
 import { redirect, useRoute } from "./lib/router";
 import { useCurrentStatus } from "./lib/staleness";
+import { announce, listen } from "./lib/tabs";
 import { applyTheme, useSystemDark } from "./lib/theme";
 import { useResource } from "./lib/useResource";
 import { ChunkView, isPage, moduleText, PAGE_VIEWS, PAGES, VIEWS } from "./modules/registry";
 
-function SignedIn({ initial, onSignedOut }: { initial: SessionInfo; onSignedOut: () => void }) {
+/** A signed-in page's session as it was read, and how that read stands. */
+interface Reads {
+  current: SessionInfo;
+  /** Whether `current` answers the read asked last, not one asked before it. */
+  latest: boolean;
+  /** Whether the read asked last failed; `current` is then the one before. */
+  failed: boolean;
+  /** Ask the server for the session again. */
+  again: () => void;
+}
+
+/** Preferences this tab saved, and whether the read of the session that
+ * follows the save is on its way. */
+interface Saved {
+  preferences: Preferences;
+  asked: boolean;
+}
+
+function SignedIn({ reads, onEnded }: { reads: Reads; onEnded: (csrf: string) => void }) {
   const { t } = useTranslation();
-  const [session, setSession] = useState(initial);
+  const { current, latest, failed, again } = reads;
   const route = useRoute();
   const status = useCurrentStatus(useResource((signal) => api.status(signal), [], 60));
   const system = useSystemDark();
 
+  // What this tab saved shows at once and stands until a read of the session
+  // asked after the save has answered: a read asked before it may still
+  // arrive, and would bring back what the save replaced.
+  const [saved, setSaved] = useState<Saved | null>(null);
+  if (saved && !saved.asked && !latest) setSaved({ ...saved, asked: true });
+  if (saved?.asked && latest && !failed) setSaved(null);
+  const session = useMemo(() => (saved ? { ...current, preferences: saved.preferences } : current), [current, saved]);
+
   // Again when the system changes its own, which "system" follows.
   useEffect(() => applyTheme(session.preferences.theme, system), [session.preferences.theme, system]);
   useEffect(() => {
-    // The server ends the session at expiresAt; show the sign-in page then.
+    // The server ends the session at expiresAt; say so then.
     const remaining = session.expiresAt * 1000 - Date.now();
-    const timer = setTimeout(onSignedOut, Math.max(0, remaining));
+    const timer = setTimeout(() => onEnded(session.csrf), Math.max(0, remaining));
     return () => clearTimeout(timer);
-  }, [session.expiresAt, onSignedOut]);
+  }, [session.expiresAt, session.csrf, onEnded]);
+
+  // Each refresh of the status had the user's rights checked a moment ago.
+  // The session read right after it is answered from that same check, which
+  // the web service keeps for five seconds, and asks the broker nothing
+  // more: so a change of rights reaches the menu with the next refresh.
+  const refreshed = status.receivedAt;
+  const answered = useRef(refreshed);
+  useEffect(() => {
+    if (refreshed === null || refreshed === answered.current) return;
+    // The first answer came with the session that was just read.
+    if (answered.current !== null) again();
+    answered.current = refreshed;
+  }, [refreshed, again]);
 
   const [saving, setSaving] = useState(false);
-  const updatePreferences = useCallback(async (preferences: SessionInfo["preferences"]) => {
-    setSaving(true);
-    try {
-      const saved = await api.savePreferences(preferences);
-      setSession((current) => ({ ...current, preferences: saved }));
-    } finally {
-      setSaving(false);
-    }
-  }, []);
+  const updatePreferences = useCallback(
+    async (preferences: Preferences) => {
+      setSaving(true);
+      try {
+        const stored = await api.savePreferences(preferences);
+        setSaved({ preferences: stored, asked: false });
+        again();
+        // The other tabs read the session again and take the change.
+        announce();
+      } finally {
+        setSaving(false);
+      }
+    },
+    [again],
+  );
   const state: AppState = useMemo(() => ({ session, status, saving, updatePreferences }), [session, status, saving, updatePreferences]);
 
   const granted = session.modules.find((module) => module.id === route.view);
@@ -49,11 +95,13 @@ function SignedIn({ initial, onSignedOut }: { initial: SessionInfo; onSignedOut:
     if (!granted && !isPage(route.view) && session.modules[0]) redirect(session.modules[0].id);
   }, [granted, route.view, session.modules]);
 
-  // The sign-in page appears only after the server ended the session: when
-  // the request fails, the browser is still signed in.
+  // The page that says so appears only after the server ended the session:
+  // when the request fails, the browser is still signed in. The other tabs
+  // say so at once.
   const logout = async () => {
     await api.logout();
-    onSignedOut();
+    announce();
+    onEnded(session.csrf);
   };
 
   const view = granted ? VIEWS[granted.id] : undefined;
@@ -86,40 +134,73 @@ function SignedIn({ initial, onSignedOut }: { initial: SessionInfo; onSignedOut:
 export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionState }) {
   const { t } = useTranslation();
   const route = useRoute();
-  const [ended, setEnded] = useState(false);
-  const signOut = useCallback(() => setEnded(true), []);
   const session = useResource((signal) => api.session(signal), [], 0, initial);
-  const signedIn = session.data?.session;
-  const readAgain = session.reload;
+  const again = session.reload;
+  const signedIn = session.data?.session ?? null;
+  // The session that ended in this tab, by its CSRF token, and whether this
+  // tab has shown a session at all.
+  const [ended, setEnded] = useState<string | null>(null);
+  const current = signedIn && signedIn.csrf !== ended ? signedIn : null;
+  const [hadSession, setHadSession] = useState(current !== null);
+  if (current && !hadSession) setHadSession(true);
+
+  // A session ends here when the server answers 401, when its time is up and
+  // at a sign-out. The session is read again at once: another tab may have
+  // signed in since, which this one then takes.
+  const end = useCallback(
+    (csrf: string) => {
+      setEnded(csrf);
+      again();
+    },
+    [again],
+  );
 
   // Before the views' first requests, which run as effects after this one. A
-  // refused write reads the session again.
+  // refused request reads the session again.
   useLayoutEffect(() => {
-    if (signedIn) configure({ csrf: signedIn.csrf, onUnauthorized: signOut, onRefused: readAgain });
-  }, [signedIn, signOut, readAgain]);
+    if (current) configure({ csrf: current.csrf, onUnauthorized: () => end(current.csrf), onRefused: again });
+  }, [current, end, again]);
 
   // The browser's cookie is the same in every tab: a sign-in or sign-out in
   // another one changes the session this tab works with, its token and maybe
-  // its account. The session is read again whenever this tab is shown.
+  // its account. The session is read again whenever this tab is shown, and
+  // whenever another tab says that it signed in or out or saved its settings.
   useEffect(() => {
     const shown = () => {
-      if (document.visibilityState === "visible") readAgain();
+      if (document.visibilityState === "visible") again();
     };
     document.addEventListener("visibilitychange", shown);
     return () => document.removeEventListener("visibilitychange", shown);
-  }, [readAgain]);
+  }, [again]);
+  useEffect(() => listen(again), [again]);
+  // A page that starts with a session says so: another tab may be the one
+  // that says the session has ended.
+  const told = useRef(false);
+  useEffect(() => {
+    if (!current || told.current) return;
+    told.current = true;
+    announce();
+  }, [current]);
 
   // Without a session the page follows the system, as the server sent it.
   // While the session is on its way the page keeps the theme the server sent
-  // it in, which is the one its user chose (routes/files.rs).
+  // it in, the one its user chose (routes/files.rs), and so does a page whose
+  // session has ended.
   const system = useSystemDark();
-  const signedOut = session.data !== null && !signedIn;
+  const signedOut = session.data !== null && !current && !hadSession;
   useEffect(() => {
     if (signedOut) applyTheme("system", system);
   }, [signedOut, system]);
 
   let content;
-  if (ended) content = <SignIn expired />;
+  // Another session, with its own token, gets a page of its own; the same
+  // session read again keeps the page and takes what changed in it.
+  if (current) {
+    const reads = { current, latest: !session.loading, failed: session.error !== null, again };
+    content = <SignedIn key={current.csrf} reads={reads} onEnded={end} />;
+  }
+  // The session this tab showed has ended, here or in another tab.
+  else if (hadSession) content = <SignIn expired />;
   // A session read again that fails leaves the page as it is.
   else if (session.error && !session.data)
     content = (
@@ -135,9 +216,6 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
         <Loading label={t("app.loading")} />
       </Centered>
     );
-  else if (!signedIn) content = <SignIn />;
-  // Another session, with its own token, gets a page of its own; the same
-  // session read again keeps the page as it is.
-  else content = <SignedIn key={signedIn.csrf} initial={signedIn} onSignedOut={signOut} />;
+  else content = <SignIn />;
   return content;
 }

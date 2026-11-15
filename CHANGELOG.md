@@ -86,6 +86,18 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A tab follows what changes beside it.** The page that says the session
+  has ended stayed so after a sign-in in another tab, a sign-out reached the
+  other tabs only with their next request, and a change of a user's rights
+  reached the menu only with a reload. A tab that signs in, signs out or
+  saves its settings now tells the browser's other tabs, which read the
+  session again at once: the page that said the session had ended shows the
+  new session's page, a sign-out ends every tab's page, and a theme saved in
+  one tab is taken by the others. A change of rights reaches the menu with
+  the next refresh of the status, within a minute, or at once when a
+  request is refused, and a page the profile no longer grants leads to one
+  it grants. The session read that brings it costs Stalwart nothing: the
+  web service answers it from the check of that refresh.
 - **A page starts in the theme chosen in the settings.** A theme chosen
   against the system's, light where the system asks for dark or dark where
   it asks for light, was taken only once a page had its session, so every
@@ -329,7 +341,7 @@ Notable changes for operators and users. The format follows
   saved was refused with "Origin or CSRF validation failed". A tab now reads
   the session again whenever it is shown and when a change it saves is
   refused: for another session it shows that session's account and rights,
-  and after a sign-out elsewhere the sign-in page.
+  and after a sign-out elsewhere the page that says the session has ended.
 - **Settings are saved one at a time.** Two quick clicks of the header's
   theme button sent two saves at once: the first answer took the look back
   to the first click's theme while the second was under way, and the server

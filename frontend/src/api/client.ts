@@ -50,8 +50,9 @@ let onUnauthorized: () => void = () => undefined;
 let onRefused: () => void = () => undefined;
 
 /** The CSRF token comes from /api/session; every write sends it back.
- * `onRefused` hears of a write the server refused (403): its token or rights
- * may belong to a session that a sign-in in another tab has replaced. */
+ * `onRefused` hears of a request the server refused (403): its token may
+ * belong to a session that a sign-in in another tab has replaced, or the
+ * user's rights may have changed. */
 export function configure(options: { csrf: string; onUnauthorized: () => void; onRefused: () => void }): void {
   csrfToken = options.csrf;
   onUnauthorized = options.onUnauthorized;
@@ -99,7 +100,8 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
     // empty notice.
     if (!detail) detail = i18n.t("common.answeredStatus", { status: response.status });
     if (response.status === 401) onUnauthorized();
-    if (response.status === 403 && write) onRefused();
+    // Not for the session's own question: it would ask again, and again.
+    if (response.status === 403 && path !== "session") onRefused();
     throw new ApiError(response.status, detail, response.headers.get("x-request-id"));
   }
   return (await response.json()) as T;
