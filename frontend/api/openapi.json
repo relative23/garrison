@@ -1685,7 +1685,8 @@
                   "$ref": "#/components/schemas/ActionsResponse"
                 }
               }
-            }
+            },
+            "description": "The actions the user may start, and the recent jobs."
           },
           "401": {
             "$ref": "#/components/responses/SignInRequired"
@@ -1728,7 +1729,8 @@
                   "$ref": "#/components/schemas/SubmitResponse"
                 }
               }
-            }
+            },
+            "description": "The broker took the job, which runs on its own; `replayed` says that the request ID was taken before and nothing new started."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -1786,7 +1788,8 @@
                   "$ref": "#/components/schemas/Job"
                 }
               }
-            }
+            },
+            "description": "The job as the broker recorded it."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -1838,7 +1841,8 @@
                   "$ref": "#/components/schemas/Attacks"
                 }
               }
-            }
+            },
+            "description": "The failed sign-ins, bans and handshake errors of the period."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -1879,7 +1883,8 @@
                   "$ref": "#/components/schemas/Coverage"
                 }
               }
-            }
+            },
+            "description": "What the event history covers, and whether the receiver runs."
           },
           "401": {
             "$ref": "#/components/responses/SignInRequired"
@@ -1979,7 +1984,8 @@
                   "$ref": "#/components/schemas/DeliveriesPage"
                 }
               }
-            }
+            },
+            "description": "A page of deliveries and the cursor of the next older page."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -2031,7 +2037,8 @@
                   "$ref": "#/components/schemas/DeliveryDetail"
                 }
               }
-            }
+            },
+            "description": "The message's summary and its recorded events."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -2086,7 +2093,8 @@
                   "$ref": "#/components/schemas/Destinations"
                 }
               }
-            }
+            },
+            "description": "The deliveries of the period by destination and cause, and the messages that wait."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -2212,7 +2220,8 @@
                   "$ref": "#/components/schemas/EventsPage"
                 }
               }
-            }
+            },
+            "description": "A page of events and the cursor of the next older page."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -2253,7 +2262,8 @@
                   "$ref": "#/components/schemas/LogoutResponse"
                 }
               }
-            }
+            },
+            "description": "The session has ended here, and the answer removes its cookie."
           },
           "403": {
             "$ref": "#/components/responses/Refused"
@@ -2320,7 +2330,8 @@
                   "$ref": "#/components/schemas/MetricsResponse"
                 }
               }
-            }
+            },
+            "description": "The metric history of the period."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -2371,7 +2382,8 @@
                   "$ref": "#/components/schemas/Preferences"
                 }
               }
-            }
+            },
+            "description": "The preferences as they were saved."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -2412,7 +2424,8 @@
                   "$ref": "#/components/schemas/SessionState"
                 }
               }
-            }
+            },
+            "description": "The signed-in user, or `session: null` without a valid session."
           },
           "403": {
             "$ref": "#/components/responses/Refused"
@@ -2509,7 +2522,8 @@
                   "$ref": "#/components/schemas/SessionsPage"
                 }
               }
-            }
+            },
+            "description": "A page of SMTP sessions and the cursor of the next older page."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -2561,7 +2575,8 @@
                   "$ref": "#/components/schemas/SessionDetail"
                 }
               }
-            }
+            },
+            "description": "The session's summary and its recorded events."
           },
           "400": {
             "$ref": "#/components/responses/Invalid"
@@ -2605,7 +2620,8 @@
                   "$ref": "#/components/schemas/StatusResponse"
                 }
               }
-            }
+            },
+            "description": "The latest snapshot with the observations of the user's modules; `available` is false before the first collection run."
           },
           "401": {
             "$ref": "#/components/responses/SignInRequired"
@@ -2640,7 +2656,8 @@
                   "$ref": "#/components/schemas/SwitchInfo"
                 }
               }
-            }
+            },
+            "description": "Whether the signed-in user turned the switch rows on; `false` without a session."
           },
           "500": {
             "$ref": "#/components/responses/Internal"

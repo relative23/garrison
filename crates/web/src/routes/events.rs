@@ -184,7 +184,11 @@ fn failure(error: QueryError) -> ApiError {
     path = "/api/coverage",
     operation_id = "getCoverage",
     responses(
-        (status = 200, body = Coverage),
+        (
+            status = 200,
+            description = "What the event history covers, and whether the receiver runs.",
+            body = Coverage
+        ),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),
         (status = 500, response = Internal),
@@ -220,7 +224,11 @@ async fn coverage(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Js
     operation_id = "listEvents",
     params(EventsQuery),
     responses(
-        (status = 200, body = EventsPage),
+        (
+            status = 200,
+            description = "A page of events and the cursor of the next older page.",
+            body = EventsPage
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),
@@ -276,7 +284,11 @@ fn grouped_filter(uri: &Uri) -> ApiResult<Filter> {
     operation_id = "listDeliveries",
     params(GroupQuery),
     responses(
-        (status = 200, body = DeliveriesPage),
+        (
+            status = 200,
+            description = "A page of deliveries and the cursor of the next older page.",
+            body = DeliveriesPage
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),
@@ -319,7 +331,11 @@ fn identifier(path: Result<Path<String>, PathRejection>) -> ApiResult<String> {
     operation_id = "getDelivery",
     params(("queue_id" = String, Path, pattern = "^[0-9]{1,20}$")),
     responses(
-        (status = 200, body = DeliveryDetail),
+        (
+            status = 200,
+            description = "The message's summary and its recorded events.",
+            body = DeliveryDetail
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),
@@ -352,7 +368,11 @@ async fn delivery(
     operation_id = "listSmtpSessions",
     params(GroupQuery),
     responses(
-        (status = 200, body = SessionsPage),
+        (
+            status = 200,
+            description = "A page of SMTP sessions and the cursor of the next older page.",
+            body = SessionsPage
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),
@@ -382,7 +402,11 @@ async fn sessions(
     operation_id = "getSmtpSession",
     params(("span_id" = String, Path, pattern = "^[0-9]{1,20}$")),
     responses(
-        (status = 200, body = SessionDetail),
+        (
+            status = 200,
+            description = "The session's summary and its recorded events.",
+            body = SessionDetail
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),

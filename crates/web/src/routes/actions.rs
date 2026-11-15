@@ -50,7 +50,11 @@ fn call<T: serde::de::DeserializeOwned>(app: &App, request: &Request) -> ApiResu
     path = "/api/actions",
     operation_id = "listActions",
     responses(
-        (status = 200, body = ActionsResponse),
+        (
+            status = 200,
+            description = "The actions the user may start, and the recent jobs.",
+            body = ActionsResponse
+        ),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),
         (status = 500, response = Internal),
@@ -80,7 +84,11 @@ async fn catalog(
     operation_id = "getJob",
     params(("job_id" = String, Path, pattern = "^[0-9a-f]{32}$")),
     responses(
-        (status = 200, body = Job),
+        (
+            status = 200,
+            description = "The job as the broker recorded it.",
+            body = Job
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),
@@ -119,7 +127,12 @@ async fn job(
     operation_id = "submitAction",
     request_body = SubmitRequest,
     responses(
-        (status = 202, body = SubmitResponse),
+        (
+            status = 202,
+            description = "The broker took the job, which runs on its own; `replayed` says that \
+                           the request ID was taken before and nothing new started.",
+            body = SubmitResponse
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),

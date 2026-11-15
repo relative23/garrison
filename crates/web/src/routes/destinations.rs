@@ -132,7 +132,12 @@ impl From<found::Destinations> for Destinations {
     operation_id = "getDestinations",
     params(PeriodQuery),
     responses(
-        (status = 200, body = Destinations),
+        (
+            status = 200,
+            description = "The deliveries of the period by destination and cause, and the messages \
+                           that wait.",
+            body = Destinations
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),

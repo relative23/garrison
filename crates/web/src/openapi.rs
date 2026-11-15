@@ -122,3 +122,39 @@ pub fn text() -> String {
     text.push('\n');
     text
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    /// Whether a response object says what it means: OpenAPI 3.1 requires
+    /// its `description`. A reference stands for a shared response, which
+    /// carries its own.
+    fn described(response: &Value) -> bool {
+        response.get("$ref").is_some()
+            || response["description"]
+                .as_str()
+                .is_some_and(|text| !text.trim().is_empty())
+    }
+
+    #[test]
+    fn every_answer_of_the_document_says_what_it_means() {
+        let document = super::document();
+        let mut missing = Vec::new();
+        for (path, operations) in document["paths"].as_object().unwrap() {
+            for (method, operation) in operations.as_object().unwrap() {
+                for (status, response) in operation["responses"].as_object().unwrap() {
+                    if !described(response) {
+                        missing.push(format!("{method} {path} {status}"));
+                    }
+                }
+            }
+        }
+        for (name, response) in document["components"]["responses"].as_object().unwrap() {
+            if response.get("$ref").is_some() || !described(response) {
+                missing.push(format!("components/responses/{name}"));
+            }
+        }
+        assert_eq!(missing, Vec::<String>::new());
+    }
+}

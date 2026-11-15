@@ -213,7 +213,11 @@ fn stated(summary: found::Attacks) -> ApiResult<Attacks> {
     operation_id = "getAttacks",
     params(PeriodQuery),
     responses(
-        (status = 200, body = Attacks),
+        (
+            status = 200,
+            description = "The failed sign-ins, bans and handshake errors of the period.",
+            body = Attacks
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),

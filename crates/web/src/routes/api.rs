@@ -86,7 +86,11 @@ pub fn body<T: serde::de::DeserializeOwned>(visitor: &Visitor, data: &[u8]) -> A
     path = "/api/session",
     operation_id = "getSession",
     responses(
-        (status = 200, body = SessionState),
+        (
+            status = 200,
+            description = "The signed-in user, or `session: null` without a valid session.",
+            body = SessionState
+        ),
         (status = 403, response = Refused),
         (status = 500, response = Internal),
         (status = 502, response = BadAnswer),
@@ -154,7 +158,11 @@ async fn session(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Jso
     path = "/api/logout",
     operation_id = "logout",
     responses(
-        (status = 200, body = LogoutResponse),
+        (
+            status = 200,
+            description = "The session has ended here, and the answer removes its cookie.",
+            body = LogoutResponse
+        ),
         (status = 403, response = Refused),
         (status = 500, response = Internal),
         (status = 503, response = Unavailable),
@@ -183,7 +191,11 @@ async fn logout(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Resp
     operation_id = "savePreferences",
     request_body = Preferences,
     responses(
-        (status = 200, body = Preferences),
+        (
+            status = 200,
+            description = "The preferences as they were saved.",
+            body = Preferences
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),
@@ -218,7 +230,12 @@ async fn save_preferences(
     path = "/api/switch",
     operation_id = "getSwitch",
     responses(
-        (status = 200, body = SwitchInfo),
+        (
+            status = 200,
+            description = "Whether the signed-in user turned the switch rows on; `false` without a \
+                           session.",
+            body = SwitchInfo
+        ),
         (status = 500, response = Internal),
     ),
 )]
@@ -275,7 +292,12 @@ pub fn age(observation: &observations::Observation, now: time::Timestamp) -> Opt
     path = "/api/status",
     operation_id = "getStatus",
     responses(
-        (status = 200, body = StatusResponse),
+        (
+            status = 200,
+            description = "The latest snapshot with the observations of the user's modules; \
+                           `available` is false before the first collection run.",
+            body = StatusResponse
+        ),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),
         (status = 500, response = Internal),
@@ -359,7 +381,11 @@ pub struct MetricsQuery {
     operation_id = "getMetrics",
     params(MetricsQuery),
     responses(
-        (status = 200, body = MetricsResponse),
+        (
+            status = 200,
+            description = "The metric history of the period.",
+            body = MetricsResponse
+        ),
         (status = 400, response = Invalid),
         (status = 401, response = SignInRequired),
         (status = 403, response = Refused),

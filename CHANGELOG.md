@@ -121,6 +121,9 @@ Notable changes for operators and users. The format follows
   other refusal, and a stranger gets 401 first. The OpenAPI document,
   `frontend/api/openapi.json`, names for every route the status codes it
   can answer, and the web tests fail on one that a route does not declare.
+  Each answer in it now also says what it means, as OpenAPI 3.1 requires
+  of every answer: the successful ones said nothing, so a strict reader of
+  the document refused it.
 - **Rotating the API keys no longer interrupts the checks of users'
   rights.** `garrison stalwart setup --rotate` removed the broker's old key
   in Stalwart as soon as it had written the new one, while the running

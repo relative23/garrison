@@ -915,6 +915,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The actions the user may start, and the recent jobs. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -943,6 +944,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description The broker took the job, which runs on its own; `replayed` says that the request ID was taken before and nothing new started. */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -973,6 +975,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The job as the broker recorded it. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1001,6 +1004,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The failed sign-ins, bans and handshake errors of the period. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1027,6 +1031,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description What the event history covers, and whether the receiver runs. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1057,6 +1062,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description A page of deliveries and the cursor of the next older page. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1085,6 +1091,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The message's summary and its recorded events. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1114,6 +1121,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The deliveries of the period by destination and cause, and the messages that wait. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1148,6 +1156,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description A page of events and the cursor of the next older page. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1174,6 +1183,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The session has ended here, and the answer removes its cookie. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1200,6 +1210,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The metric history of the period. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1230,6 +1241,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description The preferences as they were saved. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1256,6 +1268,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The signed-in user, or `session: null` without a valid session. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1285,6 +1298,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description A page of SMTP sessions and the cursor of the next older page. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1313,6 +1327,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The session's summary and its recorded events. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1340,6 +1355,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The latest snapshot with the observations of the user's modules; `available` is false before the first collection run. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1364,6 +1380,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Whether the signed-in user turned the switch rows on; `false` without a session. */
             200: {
                 headers: {
                     [name: string]: unknown;
