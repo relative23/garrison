@@ -5,16 +5,19 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
+use std::time::Duration;
 
 use garrison_core::observations::{Observation, State};
 use garrison_core::time;
 use garrison_testing::http::{json as answer_json, serve};
+use garrison_testing::silent::Silent;
 use rustls::{RootCertStore, ServerConfig, ServerConnection, StreamOwned};
 use serde_json::json;
 
-use super::stand_in::{host, resolver, text};
+use super::stand_in::{host, resolver, resolver_after, text};
 use super::*;
-use crate::testing::{Canned, config, table};
+use crate::context::Deadline;
+use crate::testing::{Canned, Remembered, config, table};
 
 /// A server on `localhost` with a certificate valid until 2026-11-13 00:00
 /// UTC that answers one request with an MTA-STS policy naming the mail
@@ -111,4 +114,84 @@ fn the_policy_servers_certificate_is_judged_at_the_runs_time() {
         "{:?}",
         after.findings
     );
+}
+
+/// The run's time ends after a domain's `_mta-sts` record was answered: its
+/// policy is not fetched in that run, and the card says so.
+#[test]
+fn a_policy_the_runs_time_does_not_reach_is_not_fetched() {
+    // Each answer comes 1.2 s after its question; the run's time for its
+    // checks ends between the second question and its answer.
+    let zone: BTreeMap<(String, u16), Vec<Vec<u8>>> = [
+        (
+            ("example.test", 15),
+            vec![host(&[0, 10], "mail.example.test")],
+        ),
+        (("_mta-sts.example.test", 16), vec![text("v=STSv1; id=1")]),
+    ]
+    .into_iter()
+    .map(|((name, kind), records)| ((name.to_owned(), kind), records))
+    .collect();
+    let (address, handle) = resolver_after(zone, None, 2, Duration::from_millis(1200));
+    let policy_server = Silent::new();
+    let zone_file = "example.test. IN MX 10 mail.example.test.\n\
+                     _mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n";
+    let stalwart = serve(vec![answer_json(
+        &json!({"methodResponses": [["x:Domain/get",
+        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
+    )]);
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = config(directory.path());
+    config.deployment.stalwart_url.clone_from(&stalwart.url);
+    let runner = Canned(String::new());
+    let context = Context {
+        native_key: Some("key".into()),
+        deadline: Deadline::within(Duration::from_secs(2)),
+        ..crate::testing::context(&config, &runner)
+    };
+    let provider = Dns {
+        policy_url: Some(format!("{}/.well-known/mta-sts.txt", policy_server.url)),
+        ..Dns::new(&table(&format!("type = \"dns\"\nresolver = \"{address}\""))).unwrap()
+    };
+    let domain = provider.collect(&context).unwrap().observations.remove(0);
+    stalwart.requests();
+    handle.join().unwrap();
+    assert_eq!(policy_server.finish(), 0, "the policy was not fetched");
+    assert_eq!(policy_result(&domain), json!("not asked"));
+    assert_eq!(domain.state, State::Partial, "{:?}", domain.findings);
+    assert_eq!(
+        domain.findings,
+        ["Its MTA-STS policy was not fetched: the collection run's time was used up."]
+    );
+}
+
+/// A policy the run had no time for is fetched in the next run, however
+/// recently the one before was kept.
+#[test]
+fn a_policy_not_fetched_for_the_runs_time_is_fetched_in_the_next_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = config(directory.path());
+    let runner = Canned(String::new());
+    let memory = Remembered::default();
+    let silent = Silent::new();
+    let over = Context {
+        deadline: Deadline::within(Duration::ZERO),
+        memory: &memory,
+        ..crate::testing::context(&config, &runner)
+    };
+    let url = format!("{}/.well-known/mta-sts.txt", silent.url);
+    assert_eq!(sts::policy(&over, "example.test", &url, None), None);
+    assert_eq!(silent.finish(), 0, "nothing was fetched");
+    let served = serve(vec![garrison_testing::http::answer(
+        200,
+        "version: STSv1\nmode: enforce\nmx: mail.example.test\nmax_age: 86400\n",
+    )]);
+    let next = Context {
+        memory: &memory,
+        ..crate::testing::context(&config, &runner)
+    };
+    let url = format!("{}/.well-known/mta-sts.txt", served.url);
+    let read = sts::policy(&next, "example.test", &url, None);
+    served.requests();
+    assert_eq!(read.unwrap().unwrap().mode, "enforce");
 }

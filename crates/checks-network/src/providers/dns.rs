@@ -120,7 +120,7 @@ struct Tally {
 /// Stalwart names them, those that were not asked, then what the MTA-STS
 /// policy leaves open. What was asked counts; what was not keeps the domain
 /// from being in order.
-fn summed(tally: &Tally, policy: Option<String>) -> (State, Vec<String>) {
+fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>) {
     let (mut state, mut findings) = if tally.records == 0 {
         (
             State::Unknown,
@@ -166,11 +166,20 @@ fn summed(tally: &Tally, policy: Option<String>) -> (State, Vec<String>) {
                 .to_owned(),
         );
     }
-    if let Some(finding) = policy {
-        if state == State::Ok {
-            state = State::Warning;
+    match policy {
+        sts::Outcome::Fits => {}
+        sts::Outcome::Finding(finding) => {
+            if state == State::Ok {
+                state = State::Warning;
+            }
+            findings.push(finding);
         }
-        findings.push(finding);
+        sts::Outcome::Unasked => {
+            if state == State::Ok {
+                state = State::Partial;
+            }
+            findings.push(format!("Its MTA-STS policy was not fetched: {RUN_OVER}."));
+        }
     }
     (state, findings)
 }
@@ -327,7 +336,7 @@ impl Dns {
                 && row[4].as_str().is_some_and(|found| !found.is_empty())
         });
         let policy = published.then(|| {
-            let (row, finding) = sts::checked(
+            let (row, outcome) = sts::checked(
                 context,
                 &name,
                 &mx_hosts(&records),
@@ -335,9 +344,9 @@ impl Dns {
                 self.roots.as_ref(),
             );
             rows.push(row);
-            finding
+            outcome
         });
-        let (state, findings) = summed(&tally, policy.flatten());
+        let (state, findings) = summed(&tally, policy.unwrap_or(sts::Outcome::Fits));
         let text = |label: &str| Column {
             label: label.to_owned(),
             format: Format::Text,

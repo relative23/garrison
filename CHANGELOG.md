@@ -100,7 +100,8 @@ Notable changes for operators and users. The format follows
   reputation reading cut short is asked again after an hour, and a test
   message the run had no time for is sent in the next run. The DNS records
   of a domain, which already stopped asking, said that the resolver gave no
-  answer for the records left; they now say "not asked" too.
+  answer for the records left; they now say "not asked" too, and a domain's
+  MTA-STS policy, which was still fetched then, is fetched in the next run.
 - **A mail server that sends a line without end no longer stops the
   collector.** The test messages and the mail notifications read each line
   of a reply whole before they looked at its length, so a listener that
