@@ -115,14 +115,21 @@ impl Flow {
                     ]
                 })
                 .collect();
-            let by_domain = self
+            // Without the domains it is about, the card is not in order; the
+            // mail is counted under "unknown".
+            let unread = read.domains_unread.as_ref();
+            let mut by_domain = self
                 .observation(
                     context,
                     read,
                     "spam-domains",
                     "Spam and ham by domain",
                     ModuleId::Spam,
-                    State::Ok,
+                    if unread.is_some() {
+                        State::Unknown
+                    } else {
+                        State::Ok
+                    },
                 )?
                 .with_scope("The same seven days by the domain of the mailbox the mail went to.")
                 .with_table(Table {
@@ -134,6 +141,9 @@ impl Flow {
                     ],
                     rows,
                 });
+            by_domain.findings.extend(
+                unread.map(|why| format!("The domains of the mailboxes are not known: {why}.")),
+            );
             report.observations.push(by_domain);
         }
         Ok(())

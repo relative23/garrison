@@ -9,9 +9,9 @@ use crate::testing::{Canned, Receiver, Remembered, assert_dated, config, now, ta
 
 /// One event: its type, how many seconds before the tests' clock, its span
 /// and its fields.
-type Event = (&'static str, i64, Option<&'static str>, Value);
+pub(super) type Event = (&'static str, i64, Option<&'static str>, Value);
 
-fn event(kind: &'static str, ago: i64, fields: Value) -> Event {
+pub(super) fn event(kind: &'static str, ago: i64, fields: Value) -> Event {
     (kind, ago, None, fields)
 }
 
@@ -35,23 +35,7 @@ fn observed_from(
     later: i64,
 ) -> Vec<Observation> {
     let directory = tempfile::tempdir().unwrap();
-    let mut config = config(directory.path());
-    let path = config.database(garrison_core::config::Database::Events);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let db = Connection::open(&path).unwrap();
-    db.execute_batch(
-        "CREATE TABLE events(seq INTEGER PRIMARY KEY, created_at INTEGER, type TEXT, span_id TEXT, fields TEXT)",
-    )
-    .unwrap();
-    for (kind, ago, span, fields) in events {
-        db.execute(
-            "INSERT INTO events(created_at,type,span_id,fields) VALUES(?,?,?,?)",
-            (now().as_second() - ago, kind, span, fields.to_string()),
-        )
-        .unwrap();
-    }
-    receiver.record(&db, now().as_second() + later);
-    drop(db);
+    let mut config = history(directory.path(), receiver, events, later);
     let stalwart = accounts.map(|accounts| {
         serve(vec![answer_json(&json!({
             "methodResponses": [["x:Account/get", {"list": accounts}, "0"]]
@@ -75,7 +59,35 @@ fn observed_from(
     observations
 }
 
-fn of<'a>(observations: &'a [Observation], id: &str) -> &'a Observation {
+/// The configuration of a test in `directory`, whose event history holds
+/// `events` and what `receiver` recorded about itself `later` seconds after
+/// the tests' clock.
+pub(super) fn history(
+    directory: &std::path::Path,
+    receiver: &Receiver,
+    events: &[Event],
+    later: i64,
+) -> garrison_core::config::Config {
+    let config = config(directory);
+    let path = config.database(garrison_core::config::Database::Events);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch(
+        "CREATE TABLE events(seq INTEGER PRIMARY KEY, created_at INTEGER, type TEXT, span_id TEXT, fields TEXT)",
+    )
+    .unwrap();
+    for (kind, ago, span, fields) in events {
+        db.execute(
+            "INSERT INTO events(created_at,type,span_id,fields) VALUES(?,?,?,?)",
+            (now().as_second() - ago, kind, span, fields.to_string()),
+        )
+        .unwrap();
+    }
+    receiver.record(&db, now().as_second() + later);
+    config
+}
+
+pub(super) fn of<'a>(observations: &'a [Observation], id: &str) -> &'a Observation {
     observations
         .iter()
         .find(|observation| observation.id == id)
@@ -87,7 +99,7 @@ fn of<'a>(observations: &'a [Observation], id: &str) -> &'a Observation {
         })
 }
 
-fn rows(observation: &Observation) -> Vec<String> {
+pub(super) fn rows(observation: &Observation) -> Vec<String> {
     let table = observation.table.as_ref().unwrap();
     table
         .rows

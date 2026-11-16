@@ -19,6 +19,7 @@ use std::time::Duration;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Observation, Required, State};
 use garrison_core::sqlite::reading;
+use garrison_stalwart::Error;
 use garrison_stalwart::ids::decode_native_id;
 use garrison_stalwart::jmap::JmapClient;
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,11 @@ struct Read {
     /// Why the history does not hold the whole week, where it does not.
     #[serde(default)]
     uncovered: Option<String>,
+    /// Why the domains of the mailboxes are not known, where Stalwart did not
+    /// give the collector's key its accounts: the mail is counted under
+    /// "unknown" then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    domains_unread: Option<String>,
 }
 
 #[derive(Debug)]
@@ -60,6 +66,24 @@ struct Account {
     id: String,
     #[serde(default)]
     email_address: Option<String>,
+}
+
+/// Why Stalwart did not give the collector's key its accounts, by what went
+/// wrong: it did not answer, or refused the key for its rate limit, which
+/// both pass by themselves; or it refused the key, which the setup mends.
+fn unread(error: &Error) -> String {
+    match error {
+        Error::Unavailable(_) => "Stalwart did not answer the collector's request for its accounts",
+        Error::Limited(_) => {
+            "Stalwart refused the collector's key for its rate limit (HTTP 429), so its accounts \
+             could not be read"
+        }
+        Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
+            "Stalwart did not give its accounts to the collector's API key; run `garrison \
+             stalwart setup` again to let it read them"
+        }
+    }
+    .to_owned()
 }
 
 type Made = Result<Observation, ProviderError>;
@@ -91,24 +115,25 @@ impl Flow {
     }
 
     /// The domain of each account's address, by the account's number. Without
-    /// an answer from Stalwart the domains stay unknown; the counts do not.
-    fn accounts(context: &Context<'_>) -> HashMap<i64, String> {
+    /// an answer from Stalwart the domains stay unknown, and the error says
+    /// why; the counts do not need them. Without a key none is asked for.
+    fn accounts(context: &Context<'_>) -> Result<HashMap<i64, String>, String> {
         let Some(key) = context.native_key.as_deref() else {
-            return HashMap::new();
+            return Ok(HashMap::new());
         };
         let client = JmapClient::new(&context.deployment.stalwart_url, key)
             .with_timeout(Duration::from_secs(8));
         let accounts = client
             .get::<Account>("Account", None, &["id", "emailAddress"])
-            .unwrap_or_default();
-        accounts
+            .map_err(|error| unread(&error))?;
+        Ok(accounts
             .iter()
             .filter_map(|account| {
                 let number = i64::try_from(decode_native_id(&account.id)?).ok()?;
                 let (_, domain) = account.email_address.as_deref()?.rsplit_once('@')?;
                 Some((number, domain.to_lowercase()))
             })
-            .collect()
+            .collect())
     }
 
     /// The last reading, or a new one where that is due: every ten minutes.
@@ -124,18 +149,25 @@ impl Flow {
             ..Read::default()
         };
         match reading(&context.events_database, Duration::from_secs(2)) {
-            Ok(Some(db)) => match read::week(&db, now, &Self::accounts(context)) {
-                Ok(week) => Read {
-                    uncovered: history::uncovered(
-                        &db,
-                        week.days.first().copied().unwrap_or(now - DAYS * DAY),
-                        now,
-                    ),
-                    week,
-                    problem: None,
-                },
-                Err(error) => problem(format!("the event history could not be read: {error}")),
-            },
+            Ok(Some(db)) => {
+                let (accounts, domains_unread) = match Self::accounts(context) {
+                    Ok(accounts) => (accounts, None),
+                    Err(why) => (HashMap::new(), Some(why)),
+                };
+                match read::week(&db, now, &accounts) {
+                    Ok(week) => Read {
+                        uncovered: history::uncovered(
+                            &db,
+                            week.days.first().copied().unwrap_or(now - DAYS * DAY),
+                            now,
+                        ),
+                        week,
+                        problem: None,
+                        domains_unread,
+                    },
+                    Err(error) => problem(format!("the event history could not be read: {error}")),
+                }
+            }
             Ok(None) => problem("no events are recorded yet".to_owned()),
             Err(error) => problem(format!("the event history could not be opened: {error}")),
         }
@@ -233,5 +265,7 @@ impl Provider for Flow {
     }
 }
 
+#[cfg(test)]
+mod accounts_tests;
 #[cfg(test)]
 mod tests;

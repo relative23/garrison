@@ -915,17 +915,20 @@ Notable changes for operators and users. The format follows
   (Stalwart's rate limit, HTTP 429)", "Stalwart refused the collector's key
   for its rate limit (HTTP 429)" and "Stalwart refused the check for its
   rate limit (HTTP 429)"; an outage keeps its words.
-- **The checks that read Stalwart's domains say why they could not.** The
-  DNS records card said to run `garrison stalwart setup` again whenever
-  Stalwart's domains could not be read, also where Stalwart did not answer
-  or refused the collector's key for its rate limit, and the Blocklists,
-  Reverse names and TLS certificates cards said that Stalwart did not give
-  its domains, or its listeners, whatever had happened. Each now says that
-  Stalwart did not answer the collector's request, that it refused the
-  collector's key for its rate limit (HTTP 429), both of which pass by
-  themselves, or that it did not give the key its domains or listeners,
-  with the advice to run `garrison stalwart setup` again, which the
-  Blocklists and Reverse names cards now give as well.
+- **The checks that read Stalwart's domains or accounts say why they could
+  not.** The DNS records card said to run `garrison stalwart setup` again
+  whenever Stalwart's domains could not be read, also where Stalwart did
+  not answer or refused the collector's key for its rate limit, and the
+  Blocklists, Reverse names and TLS certificates cards said that Stalwart
+  did not give its domains, or its listeners, whatever had happened. The
+  Spam and ham by domain card counted all mail under "unknown" where
+  Stalwart did not give its accounts, without a word, and was in order.
+  Each now says that Stalwart did not answer the collector's request, that
+  it refused the collector's key for its rate limit (HTTP 429), both of
+  which pass by themselves, or that it did not give the key its domains,
+  listeners or accounts, with the advice to run `garrison stalwart setup`
+  again, which the Blocklists, Reverse names and Spam and ham by domain
+  cards now give as well; that card is Unknown then.
 - **The sign-in page says when Stalwart did not answer or was busy.** Where
   Stalwart did not answer a sign-in's code exchange, or turned it away for
   its rate limit, or the user's rights could not be checked just then, the

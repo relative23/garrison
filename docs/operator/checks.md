@@ -4,11 +4,12 @@ What Garrison shows on its pages comes from checks. The configuration calls
 them providers: each `[[providers]]` entry in `/etc/garrison/garrison.toml`
 is one check, and `type` names it. The collector runs them every minute. A
 source that is missing or unreadable shows as Unknown; it never stops the
-other checks. The checks that read Stalwart's domains or listeners with the
-collector's API key (`dns`, `tls`, `reputation`) say why where they could
-not: Stalwart did not answer, or refused the key for its rate limit (HTTP
-429), both of which pass by themselves, or did not give the key what the
-check reads, which `garrison stalwart setup` mends.
+other checks. The checks that read Stalwart's domains, listeners or
+accounts with the collector's API key (`dns`, `tls`, `reputation`,
+`mail-flow`) say why where they could not: Stalwart did not answer, or
+refused the key for its rate limit (HTTP 429), both of which pass by
+themselves, or did not give the key what the check reads, which
+`garrison stalwart setup` mends.
 
 Every card says when its source was asked ("Checked ..."). Most checks ask in
 every run, and their cards are marked stale when the last run is more than
@@ -147,7 +148,9 @@ minutes. They count; none of them is a verdict, except where it says so.
 
 - `spam`: ham and spam by day, with the training runs of the classifier, on
   the Spam filter page; and the same by the domain of the mailbox the mail
-  went to.
+  went to, which Stalwart's accounts name. Where Stalwart did not give them
+  to the collector's key, that mail is counted under "unknown", and the
+  card by domain is Unknown and says why.
 - `milter`: what Stalwart's milters said of the mail they were shown (a
   virus scanner's, Garrison's own macro filter), by day, on the Antivirus
   page. A milter that could not be reached since yesterday is a warning. A

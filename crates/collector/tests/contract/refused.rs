@@ -1,12 +1,15 @@
 //! A key Stalwart does not let read what a check reads, and a key it does
-//! not know, are refusals: the checks that read Stalwart's domains and
-//! listeners give the setup's advice for them, and not the words for a
-//! Stalwart that did not answer or met its rate limit.
+//! not know, are refusals: the checks that read Stalwart's domains,
+//! listeners and accounts give the setup's advice for them, and not the
+//! words for a Stalwart that did not answer or met its rate limit.
+
+use std::time::Duration;
 
 use garrison_collector::providers::{Dns, Reputation, Tls};
 use garrison_core::observations::State;
+use garrison_stalwart::jmap::JmapClient;
 use garrison_testing::lab::{Lab, random_hex, unique};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::{collect, deployment, one_at_a_time};
 
@@ -34,6 +37,17 @@ fn a_key_stalwart_refuses_gets_the_setups_advice() {
     let narrow = key["secret"].as_str().unwrap().to_owned();
     let deployment = deployment(&lab);
     for (secret, which) in [(narrow, "a narrow key"), (random_hex(24), "an unknown key")] {
+        // The client takes each for a refusal, for every kind of object the
+        // checks read with the collector's key; the mail flow's accounts
+        // among them, whose card needs an event history to show it.
+        let client = JmapClient::new(&lab.url, &secret).with_timeout(Duration::from_secs(15));
+        for kind in ["Domain", "NetworkListener", "Account"] {
+            let read = client.get::<Value>(kind, None, &["id"]);
+            assert!(
+                matches!(read, Err(garrison_stalwart::Error::Denied(_))),
+                "{which}, {kind}: {read:?}"
+            );
+        }
         let dns = Dns::new(
             &"type = \"dns\"\nresolver = \"127.0.0.1:9\""
                 .parse()
