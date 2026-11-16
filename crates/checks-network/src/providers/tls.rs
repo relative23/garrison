@@ -22,7 +22,7 @@ use rustls::{CertificateError, ClientConnection, RootCertStore};
 use serde_json::{Value, json};
 
 use super::certificate::not_after;
-use super::dns::max_domains;
+use super::domains::max_domains;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::fetch;
 use crate::options::{Checked, Options, fail};

@@ -17,7 +17,8 @@ use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Field, Format};
 use serde::{Deserialize, Serialize};
 
-use super::dns::{SETUP, mail_hosts, max_domains, resolver_option, system_resolver};
+use super::dns::{mail_hosts, resolver_option, system_resolver};
+use super::domains::{SETUP, max_domains};
 use crate::context::{Collected, Context, Provider, Report};
 use crate::dns::{self, Kind};
 use crate::kept::{Kept, cached};

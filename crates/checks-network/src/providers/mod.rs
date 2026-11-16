@@ -2,6 +2,7 @@
 
 mod certificate;
 mod dns;
+mod domains;
 mod reputation;
 pub mod tls;
 

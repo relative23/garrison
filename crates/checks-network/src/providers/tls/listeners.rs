@@ -18,7 +18,8 @@ use serde_json::Value;
 
 use super::Endpoint;
 use crate::context::Context;
-use crate::providers::dns::{mail_hosts, not_given};
+use crate::providers::dns::mail_hosts;
+use crate::providers::domains::not_given;
 
 /// So many endpoints are probed at the most.
 const MOST: usize = 24;
