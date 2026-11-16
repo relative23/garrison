@@ -14,7 +14,6 @@ use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
-use std::time::Instant;
 
 use crate::protocol::{BrokerError, Catalog, Submitted, refuse};
 use crate::runner::{Outcome, Runner};
@@ -25,6 +24,7 @@ use garrison_core::constant_time;
 
 mod ids;
 mod limited;
+mod refusal;
 
 pub use ids::is_job_id;
 use ids::{is_request_id, job_id};
@@ -162,45 +162,6 @@ impl Broker {
 
     fn action(&self, id: &str) -> Option<&Action> {
         self.actions.iter().find(|action| action.id == id)
-    }
-
-    pub fn authorize(&self, token: &str) -> Result<Grant, BrokerError> {
-        self.authority
-            .authorize(token)
-            .map_err(|error| match error {
-                Error::InvalidToken(_) => refuse(401, "Sign-in required again"),
-                Error::Unavailable(_) => refuse(503, "Authorization is temporarily unavailable"),
-                Error::Limited(whose) => {
-                    self.limited(&whose);
-                    refuse(503, "Authorization is temporarily unavailable")
-                }
-                Error::Denied(reason) => {
-                    log::info!("Garrison access denied: {reason}");
-                    refuse(403, "Garrison access is not authorized")
-                }
-                // No refusal: a 403 would end the session of everyone who
-                // is signed in, for a typo in the policy.
-                Error::Misconfigured(reason) => {
-                    log::error!("Access rights cannot be checked: {reason}");
-                    refuse(
-                        503,
-                        "Garrison is not set up to check access rights; the broker's journal says why",
-                    )
-                }
-            })
-    }
-
-    /// Say that Stalwart's rate limit refused a check of `whose` budget, at
-    /// most once a minute.
-    fn limited(&self, whose: &str) {
-        let line = self
-            .limited
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .refused(whose, Instant::now());
-        if let Some(line) = line {
-            log::warn!("{line}");
-        }
     }
 
     pub fn catalog(&self, token: &str) -> Result<Catalog, BrokerError> {
