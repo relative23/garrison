@@ -164,9 +164,19 @@ fn a_broken_setup_is_no_refusal_of_the_user() {
         matches!(&rotated, Error::Misconfigured(reason) if reason.contains("key was rejected")),
         "{rotated:?}"
     );
-    // An answer of Stalwart's that cannot be used.
+    // An answer of Stalwart's that this release does not read, as after an
+    // upgrade of Stalwart: no refusal either, and named by the request it
+    // answered.
     let changed = with_broken_setup(vec![userinfo, answer(200, "<html>")], |_| {});
-    assert!(matches!(changed, Error::Misconfigured(_)), "{changed:?}");
+    assert_eq!(
+        changed,
+        Error::Unreadable("the management API: Malformed native API response".into())
+    );
+    let unread = with_broken_setup(vec![answer(200, "{}")], |_| {});
+    assert_eq!(
+        unread,
+        Error::Unreadable("UserInfo: The provider returned no stable subject".into())
+    );
     // Someone who has no profile is refused, and that is no setup problem.
     let (authority, server, _directory) = authority(native("e", &["authenticate"]));
     assert!(matches!(authority.authorize(TOKEN), Err(Error::Denied(_))));

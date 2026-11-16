@@ -9,7 +9,7 @@ use crate::testing::{Canned, config, context, table};
 
 /// The Management API card of a run against a Stalwart that answers the
 /// check's one request with `response`.
-fn api(response: String) -> Observation {
+pub(super) fn api(response: String) -> Observation {
     let directory = tempfile::tempdir().unwrap();
     let server = serve(vec![response]);
     let mut config = config(directory.path());

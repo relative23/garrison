@@ -23,9 +23,10 @@ use crate::providers::domains::not_given;
 
 /// So many endpoints are probed at the most.
 const MOST: usize = 24;
-/// What to do where Stalwart refused the collector's key its listeners or
-/// its domains: named endpoints need neither.
-const FIX: &str = "run `garrison stalwart setup` again to let it read them, or name `endpoints`";
+/// What else mends it where Stalwart refused the collector's key its
+/// listeners or its domains, or answered in a form this release does not
+/// read: named endpoints need neither.
+const BESIDES: &str = ", or name `endpoints`";
 
 /// What to probe, and what to say of what is not.
 pub(super) struct Found {
@@ -103,8 +104,8 @@ pub(super) fn endpoints(context: &Context<'_>, most: usize) -> Result<Found, Str
             None,
             &["protocol", "bind", "useTls", "implicitTls"],
         )
-        .map_err(|error| not_given(&error, "listeners", FIX))?;
-    let (hosts, rest) = mail_hosts(context, most, FIX)?;
+        .map_err(|error| not_given(&error, "listeners", BESIDES))?;
+    let (hosts, rest) = mail_hosts(context, most, BESIDES)?;
     let mut endpoints = derived(&listeners, &hosts);
     if endpoints.is_empty() {
         return Err("Stalwart names no mail host with a listener that speaks TLS".to_owned());

@@ -953,6 +953,23 @@ Notable changes for operators and users. The format follows
   listeners or accounts, with the advice to run `garrison stalwart setup`
   again, which the Blocklists, Reverse names and Spam and ham by domain
   cards now give as well; that card is Unknown then.
+- **An answer of Stalwart's that Garrison cannot read is no refusal.** An
+  answer in a form this release does not read, as a Stalwart release it
+  does not support yet may give after an upgrade (no JSON, an object it
+  does not know, more than it reads, or without what was asked), was taken
+  for a refusal: the broker answered a user 403 for such an answer to
+  UserInfo, which ended that user's session, and the cards and `garrison
+  access` gave the advice to run `garrison stalwart setup` again, which
+  cannot mend it. Such an answer now grants nothing and refuses nobody:
+  the broker answers 503 "Authorization is temporarily unavailable" and its
+  journal names the answer as an error, a job whose start meets one runs
+  nothing and says so, and the sign-in page says that access could not be
+  checked, with "token exchange (an answer this release does not read)" in
+  the web service's journal. The DNS records, TLS certificates, Blocklists,
+  Reverse names, Spam and ham by domain, Management API and metrics
+  exporter cards, `garrison access` and `garrison stalwart setup` name the
+  answer and point to the supported Stalwart releases in the README; the
+  TLS certificates card also to naming `endpoints`.
 - **The sign-in page says when Stalwart did not answer or was busy.** Where
   Stalwart did not answer a sign-in's code exchange, or turned it away for
   its rate limit, or the user's rights could not be checked just then, the

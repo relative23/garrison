@@ -26,14 +26,17 @@ pub(super) fn left_out(domains: usize, most: usize) -> String {
 
 /// What to do where Stalwart refused the collector's key: the setup gives
 /// the key the permissions the checks need.
-pub(super) const SETUP: &str = "run `garrison stalwart setup` again to let it read them";
+const SETUP: &str = "run `garrison stalwart setup` again to let it read them";
 
 /// Why Stalwart did not give the collector's key its `what`, by what went
 /// wrong: it did not answer, or refused the key for its rate limit, which
-/// both pass by themselves; or it refused the key, or answered what the
-/// check cannot use, for which `fix` says what to do.
-pub(super) fn not_given(error: &garrison_stalwart::Error, what: &str, fix: &str) -> String {
-    use garrison_stalwart::Error;
+/// both pass by themselves; it refused the key, which the setup mends; or
+/// it answered in a form this release does not read, which no setup mends,
+/// so the words name the answer and where the supported releases are
+/// named. `besides` is what else mends the last two, after a comma, such as
+/// naming the endpoints for the certificate check.
+pub(super) fn not_given(error: &garrison_stalwart::Error, what: &str, besides: &str) -> String {
+    use garrison_stalwart::{Error, SUPPORTED};
     match error {
         Error::Unavailable(_) => {
             format!("Stalwart did not answer the collector's request for its {what}")
@@ -43,8 +46,12 @@ pub(super) fn not_given(error: &garrison_stalwart::Error, what: &str, fix: &str)
              could not be read"
         ),
         Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
-            format!("Stalwart did not give its {what} to the collector's API key; {fix}")
+            format!("Stalwart did not give its {what} to the collector's API key; {SETUP}{besides}")
         }
+        Error::Unreadable(why) => format!(
+            "Stalwart answered the collector's request for its {what} in a form this release of \
+             Garrison does not read ({why}); {SUPPORTED}{besides}"
+        ),
     }
 }
 

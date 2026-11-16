@@ -142,7 +142,9 @@ async fn a_sign_in_whose_rights_cannot_be_checked_says_so() {
 
 /// The sign-in page says why: a code Stalwart refused is a failed sign-in,
 /// while Stalwart that did not answer, or turned the exchange away for its
-/// rate limit, passes, so the page says that and when to try again.
+/// rate limit, passes, so the page says that and when to try again; an
+/// exchange answered in a form this release does not read refuses nobody,
+/// and the page says that access could not be checked.
 #[tokio::test]
 async fn a_code_stalwart_refuses_or_cannot_exchange_gets_no_session() {
     let mut setup = setup();
@@ -150,6 +152,7 @@ async fn a_code_stalwart_refuses_or_cannot_exchange_gets_no_session() {
         ("code-expired", "1"),
         ("code-outage", "unavailable"),
         ("code-limited", "limited"),
+        ("code-unreadable", "unchecked"),
     ] {
         let login = setup.client.get("/auth/login").await;
         let location = url::Url::parse(login.header("location")).unwrap();

@@ -1,8 +1,9 @@
 //! Where Stalwart did not give the collector's key its accounts, the mail
 //! filed by domain is counted under "unknown", and the card by domain says
 //! why, each kind of failure in words of its own: Stalwart did not answer,
-//! refused the key for its rate limit, or refused the key, which the setup
-//! mends.
+//! refused the key for its rate limit, refused the key, which the setup
+//! mends, or answered in a form this release does not read, which names the
+//! answer and the supported Stalwart releases.
 
 use garrison_testing::http::{answer, json as answer_json, serve};
 use serde_json::json;
@@ -51,13 +52,29 @@ fn the_card_by_domain_says_why_the_domains_of_the_mailboxes_are_not_known() {
                    accounts could not be read";
     let refused = "Stalwart did not give its accounts to the collector's API key; run `garrison \
                    stalwart setup` again to let it read them";
+    let unread = |why: &str| {
+        format!(
+            "Stalwart answered the collector's request for its accounts in a form this release \
+             of Garrison does not read ({why}); see the supported Stalwart releases in the README"
+        )
+    };
     let cases = [
-        ("closed", None, unanswered),
-        ("503", Some(answer(503, "")), unanswered),
-        ("serverFail", method("serverFail"), unanswered),
-        ("429", Some(answer(429, "")), limited),
-        ("403", Some(answer(403, "")), refused),
-        ("forbidden", method("forbidden"), refused),
+        ("closed", None, unanswered.to_owned()),
+        ("503", Some(answer(503, "")), unanswered.to_owned()),
+        ("serverFail", method("serverFail"), unanswered.to_owned()),
+        ("429", Some(answer(429, "")), limited.to_owned()),
+        ("403", Some(answer(403, "")), refused.to_owned()),
+        ("forbidden", method("forbidden"), refused.to_owned()),
+        (
+            "no JSON",
+            Some(answer(200, "<html>Welcome</html>")),
+            unread("Malformed native API response"),
+        ),
+        (
+            "400",
+            Some(answer(400, "")),
+            unread("Unexpected native API status 400"),
+        ),
     ];
     let found: Vec<(&str, State, Vec<String>, Vec<String>)> = cases
         .iter()

@@ -17,8 +17,8 @@ use base64::engine::general_purpose::STANDARD;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_core::sqlite::reading;
-use garrison_stalwart::Error;
 use garrison_stalwart::http::Request;
+use garrison_stalwart::{Error, SUPPORTED};
 use rusqlite::params;
 
 use crate::context::{Collected, Context, Provider, Report};
@@ -196,15 +196,20 @@ pub fn parse(text: &str) -> BTreeMap<String, f64> {
     values
 }
 
-/// Why the exporter's answer could not be read, by what went wrong.
+/// Why the exporter's answer could not be read, by what went wrong. A
+/// refusal of the scrape credential comes as a status, 401 or 403, which
+/// the card names, and not as one of these.
 fn unread(error: &Error) -> String {
     match error {
         Error::Unavailable(_) => "The exporter is unavailable.".to_owned(),
         Error::Limited(_) => {
             "Stalwart refused the collector's scrape for its rate limit (HTTP 429).".to_owned()
         }
+        Error::Unreadable(why) => {
+            format!("The exporter's answer could not be read: {why}; {SUPPORTED}.")
+        }
         Error::Denied(why) | Error::InvalidToken(why) | Error::Misconfigured(why) => {
-            format!("The exporter's answer could not be read: {why}.")
+            format!("The exporter refused the collector's scrape: {why}.")
         }
     }
 }

@@ -199,6 +199,33 @@ fn check_shows_only_what_this_installation_offers() {
     server.requests();
 }
 
+/// An answer of Stalwart's that this release does not read is said as one,
+/// with where the supported releases are named, and not as a refusal.
+#[test]
+fn an_answer_this_release_does_not_read_is_said_as_one() {
+    // An account whose permissions are of a kind this release does not know.
+    let account = json!({"id": "b", "@type": "User", "roles": {"@type": "User"},
+                         "permissions": {"@type": "Whatever"}});
+    let server = serve(vec![respond("x:Account/get", &json!([account]))]);
+    let directory = against(&server.url);
+    garrison_testing::write_private(
+        &directory.path().join("policy.json"),
+        garrison_testing::policy_document().to_string().as_bytes(),
+    );
+    let check = run(directory.path(), &["access", "check", "1"]);
+    assert_eq!(
+        (check.status.code(), text(&check.stderr)),
+        (
+            Some(1),
+            "Stalwart answered in a form this release of Garrison does not read \
+             (x:Account/get returned an unsupported object); see the supported Stalwart \
+             releases in the README\n"
+                .to_owned()
+        )
+    );
+    server.requests();
+}
+
 #[test]
 fn a_role_is_bound_to_a_known_profile_once_stalwart_knows_it() {
     let server = serve(vec![respond("x:Role/get", &json!([{"id": "r2"}]))]);

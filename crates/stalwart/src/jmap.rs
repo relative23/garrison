@@ -132,13 +132,16 @@ impl JmapClient {
         match answer.status {
             200 => {}
             401 | 403 => return Err(Error::denied("The native API key was rejected")),
+            // Stalwart refuses a key with 401 or 403; another status, such
+            // as 400 for a request whose capability it does not know, is
+            // no refusal (measured on 1.1.0).
             status => {
-                return Err(Error::Denied(format!(
+                return Err(Error::Unreadable(format!(
                     "Unexpected native API status {status}"
                 )));
             }
         }
-        let malformed = || Error::denied("Malformed native API response");
+        let malformed = || Error::unreadable("Malformed native API response");
         let result = json::parse(&answer.body, limit).map_err(|_| malformed())?;
         let answers: Answers = json::object(result).map_err(|_| malformed())?;
         let mut results: Vec<Option<Object>> = Vec::new();
@@ -164,7 +167,7 @@ impl JmapClient {
             match (index, payload) {
                 (Some(index), Value::Object(payload)) => results[index] = Some(payload),
                 _ => {
-                    return Err(Error::denied(
+                    return Err(Error::unreadable(
                         "Native API answered with an unexpected method",
                     ));
                 }
@@ -183,6 +186,11 @@ impl JmapClient {
     /// Objects by ID (`None` for all), each read as a `T`. Missing IDs are an
     /// error, not a partial success, and so is an object `T` does not accept:
     /// a shape Garrison does not know must never be read as one it knows.
+    ///
+    /// An ID that Stalwart says is not there is its answer to the request,
+    /// [`Error::Denied`]; an answer without its list, without the objects
+    /// asked for, or with an object `T` does not accept is one this release
+    /// does not read.
     pub fn get<T: DeserializeOwned>(
         &self,
         kind: &str,
@@ -195,10 +203,13 @@ impl JmapClient {
             properties: Some(properties),
         };
         let result = self.call(&method, arguments)?;
-        let incomplete = || Error::Denied(format!("{method} returned incomplete data"));
-        let got: Got<Value> = json::object(Value::Object(result)).map_err(|_| incomplete())?;
+        let unread = |what: &str| Error::Unreadable(format!("{method} {what}"));
+        let got: Got<Value> = json::object(Value::Object(result))
+            .map_err(|_| unread("returned no list of objects"))?;
         if got.not_found.is_some_and(|missing| !missing.is_empty()) {
-            return Err(incomplete());
+            return Err(Error::Denied(format!(
+                "{method} found no object of an ID asked for"
+            )));
         }
         // Whatever is no object is no object of this kind either.
         let objects: Vec<Object> = got
@@ -216,14 +227,14 @@ impl JmapClient {
                 .collect();
             let requested: BTreeSet<Option<&str>> = ids.iter().copied().map(Some).collect();
             if returned != requested {
-                return Err(incomplete());
+                return Err(unread("did not return the objects asked for"));
             }
         }
         objects
             .into_iter()
             .map(|object| {
                 serde_json::from_value(Value::Object(object))
-                    .map_err(|_| Error::Denied(format!("{method} returned an unsupported object")))
+                    .map_err(|_| unread("returned an unsupported object"))
             })
             .collect()
     }

@@ -18,7 +18,7 @@ use garrison_core::observations::{Field, Format};
 use serde::{Deserialize, Serialize};
 
 use super::dns::{mail_hosts, resolver_option, system_resolver};
-use super::domains::{SETUP, max_domains};
+use super::domains::max_domains;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::dns::{self, Kind};
 use crate::kept::{Kept, cached};
@@ -286,7 +286,7 @@ impl Reputation {
             .or_else(system_resolver)
             .ok_or("this host names no resolver in /etc/resolv.conf")?;
         let (mut hosts, rest) = if self.hosts.is_empty() {
-            mail_hosts(context, self.max_domains, SETUP)?
+            mail_hosts(context, self.max_domains, "")?
         } else {
             (self.hosts.clone(), None)
         };

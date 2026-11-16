@@ -111,9 +111,9 @@ impl<'a> Request<'a> {
             .read_to_vec();
         match body {
             Ok(body) if body.len() <= limit => Ok(Response { status, body }),
-            Ok(_) | Err(ureq::Error::BodyExceedsLimit(_)) => {
-                Err(Error::denied("Stalwart response exceeds its size limit"))
-            }
+            Ok(_) | Err(ureq::Error::BodyExceedsLimit(_)) => Err(Error::unreadable(
+                "Stalwart response exceeds its size limit",
+            )),
             Err(_) => Err(unavailable()),
         }
     }

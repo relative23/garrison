@@ -19,9 +19,9 @@ use std::time::Duration;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Observation, Required, State};
 use garrison_core::sqlite::reading;
-use garrison_stalwart::Error;
 use garrison_stalwart::ids::decode_native_id;
 use garrison_stalwart::jmap::JmapClient;
+use garrison_stalwart::{Error, SUPPORTED};
 use serde::{Deserialize, Serialize};
 
 mod cards;
@@ -70,20 +70,26 @@ struct Account {
 
 /// Why Stalwart did not give the collector's key its accounts, by what went
 /// wrong: it did not answer, or refused the key for its rate limit, which
-/// both pass by themselves; or it refused the key, which the setup mends.
+/// both pass by themselves; it refused the key, which the setup mends; or
+/// it answered in a form this release does not read, which no setup mends.
 fn unread(error: &Error) -> String {
     match error {
-        Error::Unavailable(_) => "Stalwart did not answer the collector's request for its accounts",
-        Error::Limited(_) => {
-            "Stalwart refused the collector's key for its rate limit (HTTP 429), so its accounts \
-             could not be read"
+        Error::Unavailable(_) => {
+            "Stalwart did not answer the collector's request for its accounts".to_owned()
         }
+        Error::Limited(_) => "Stalwart refused the collector's key for its rate limit (HTTP 429), \
+                              so its accounts could not be read"
+            .to_owned(),
         Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
             "Stalwart did not give its accounts to the collector's API key; run `garrison \
              stalwart setup` again to let it read them"
+                .to_owned()
         }
+        Error::Unreadable(why) => format!(
+            "Stalwart answered the collector's request for its accounts in a form this release of \
+             Garrison does not read ({why}); {SUPPORTED}"
+        ),
     }
-    .to_owned()
 }
 
 type Made = Result<Observation, ProviderError>;

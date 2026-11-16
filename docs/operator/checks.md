@@ -8,8 +8,11 @@ other checks. The checks that read Stalwart's domains, listeners or
 accounts with the collector's API key (`dns`, `tls`, `reputation`,
 `mail-flow`) say why where they could not: Stalwart did not answer, or
 refused the key for its rate limit (HTTP 429), both of which pass by
-themselves, or did not give the key what the check reads, which
-`garrison stalwart setup` mends.
+themselves, did not give the key what the check reads, which
+`garrison stalwart setup` mends, or answered in a form this release does
+not read, as a Stalwart release Garrison does not support yet may: the
+card names the answer, and the README the supported releases. The
+`stalwart` and `prometheus` checks say the same of their own requests.
 
 Every card says when its source was asked ("Checked ..."). Most checks ask in
 every run, and their cards are marked stale when the last run is more than

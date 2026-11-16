@@ -134,7 +134,7 @@ impl Provider {
         if answer.status != 200 {
             return Err(Error::denied("The authorization code was not accepted"));
         }
-        let unusable = || Error::denied("The provider returned an unusable token");
+        let unusable = || Error::unreadable("The provider returned an unusable token");
         let value = json::parse(&answer.body, MAX_ANSWER).map_err(|_| unusable())?;
         let token = value.get("access_token").and_then(Value::as_str);
         let kind = value.get("token_type").and_then(Value::as_str);
@@ -167,7 +167,9 @@ impl Provider {
                 "The access token is no longer valid".into(),
             ));
         }
-        let no_subject = || Error::denied("The provider returned no stable subject");
+        // No refusal of the user: an answer whose subject cannot be read
+        // says nothing of who it is.
+        let no_subject = || Error::unreadable("The provider returned no stable subject");
         let claims = json::parse(&answer.body, MAX_ANSWER).map_err(|_| no_subject())?;
         let subject = claims
             .get("sub")

@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::tests::{REQUEST, Systemd};
 use super::*;
 
-const TOKEN: &str = "token-0123456789abcdef";
+pub(super) const TOKEN: &str = "token-0123456789abcdef";
 /// Stalwart's answer to a request beyond its limit.
 const LIMITED: &str =
     "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -43,7 +43,7 @@ static JOURNAL: Journal = Journal(Mutex::new(Vec::new()));
 static KEPT: Once = Once::new();
 
 /// From now on the journal's lines are kept for the tests.
-fn kept() {
+pub(super) fn kept() {
     KEPT.call_once(|| {
         log::set_logger(&JOURNAL).unwrap();
         log::set_max_level(log::LevelFilter::Info);
@@ -51,7 +51,7 @@ fn kept() {
 }
 
 /// The kept lines that begin with `start` and name `whose` budget.
-fn kept_lines(start: &str, whose: &str) -> Vec<String> {
+pub(super) fn kept_lines(start: &str, whose: &str) -> Vec<String> {
     JOURNAL
         .0
         .lock()
@@ -74,7 +74,7 @@ fn said(whose: &str) -> Vec<String> {
 
 /// A broker with Garrison's own authority, against a stand-in for
 /// Stalwart that answers `responses` in turn.
-fn broker(
+pub(super) fn broker(
     responses: Vec<String>,
 ) -> (
     Arc<Broker>,
@@ -150,7 +150,7 @@ fn the_brokers_key_beyond_stalwarts_limit_is_said_in_the_journal_once() {
 
 /// Stalwart's answers that grant subject 1, who holds the role `e` of the
 /// test policy's administrator profile, both actions.
-fn granted() -> Vec<String> {
+pub(super) fn granted() -> Vec<String> {
     let jmap = |method: &str, list: Value| {
         json(&serde_json::json!({
             "methodResponses": [[method, {"list": list, "notFound": []}, "0"]]

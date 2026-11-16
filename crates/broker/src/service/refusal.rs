@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use super::Broker;
 use crate::protocol::{BrokerError, refuse};
-use garrison_authz::{Error, Grant};
+use garrison_authz::{Error, Grant, SUPPORTED};
 
 impl Broker {
     pub fn authorize(&self, token: &str) -> Result<Grant, BrokerError> {
@@ -32,6 +32,13 @@ impl Broker {
                         "Garrison is not set up to check access rights; the broker's journal says why",
                     )
                 }
+                // No refusal either: Stalwart answered in a form this
+                // release does not read, as after an upgrade of Stalwart to
+                // a release Garrison does not support yet.
+                Error::Unreadable(reason) => {
+                    log::error!("Access rights cannot be checked: {}", unread(&reason));
+                    refuse(503, "Authorization is temporarily unavailable")
+                }
             })
     }
 
@@ -47,4 +54,13 @@ impl Broker {
             log::warn!("{line}");
         }
     }
+}
+
+/// What the journal says of an answer this release does not read, which
+/// `reason` names with the request it answered.
+pub(super) fn unread(reason: &str) -> String {
+    format!(
+        "Stalwart answered in a form this release of Garrison does not read ({reason}); \
+         {SUPPORTED}"
+    )
 }

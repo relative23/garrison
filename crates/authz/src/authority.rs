@@ -113,7 +113,11 @@ impl Authority {
             Error::Unavailable(_) => {
                 Error::Unavailable("Native authorization is temporarily unavailable".into())
             }
-            other => other,
+            error @ (Error::Limited(_)
+            | Error::InvalidToken(_)
+            | Error::Denied(_)
+            | Error::Unreadable(_)
+            | Error::Misconfigured(_)) => error,
         })
     }
 
@@ -121,18 +125,23 @@ impl Authority {
         let identity = self
             .provider
             .userinfo(token, None)
-            .map_err(|error| spent(error, "the user's token"))?;
+            .map_err(|error| asked(error, "the user's token", "UserInfo"))?;
         let policy = self.policy()?;
         let account_id = policy.account_for(&identity.subject)?;
-        // The broker asks with its own key. What Stalwart refuses or answers
-        // unusably here is about that key or that answer, never about the
-        // user, who is refused only by the policy.
+        // The broker asks with its own key. What Stalwart refuses here is
+        // about that key, never about the user, who is refused only by the
+        // policy; an answer this release does not read is that answer's.
         let rights =
             native_rights(&self.native_client()?, &account_id).map_err(|error| match error {
-                Error::Denied(reason) => Error::Misconfigured(format!(
-                    "the account's rights could not be read from Stalwart: {reason}"
-                )),
-                other => spent(other, "the broker's key"),
+                Error::Denied(reason) | Error::InvalidToken(reason) => Error::Misconfigured(
+                    format!("the account's rights could not be read from Stalwart: {reason}"),
+                ),
+                error @ (Error::Unavailable(_)
+                | Error::Limited(_)
+                | Error::Unreadable(_)
+                | Error::Misconfigured(_)) => {
+                    asked(error, "the broker's key", "the management API")
+                }
             })?;
         let offered = self.offered(policy.capabilities(
             &identity.subject,
@@ -150,13 +159,18 @@ impl Authority {
     }
 }
 
-/// `error` where it is Stalwart's rate limit as that of `whose` budget.
-/// Stalwart counts each token and key apart and says nothing of which it
-/// refused, so the request that met the limit tells.
-fn spent(error: Error, whose: &str) -> Error {
+/// `error` with what met it, where that tells something: Stalwart's rate
+/// limit as that of `whose` budget, since Stalwart counts each token and key
+/// apart and says nothing of which it refused; an answer this release does
+/// not read by the `request` it answered, which the journal names.
+fn asked(error: Error, whose: &str, request: &str) -> Error {
     match error {
         Error::Limited(_) => Error::Limited(whose.to_owned()),
-        other => other,
+        Error::Unreadable(reason) => Error::Unreadable(format!("{request}: {reason}")),
+        error @ (Error::Unavailable(_)
+        | Error::InvalidToken(_)
+        | Error::Denied(_)
+        | Error::Misconfigured(_)) => error,
     }
 }
 

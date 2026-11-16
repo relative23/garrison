@@ -42,8 +42,10 @@ fn calls_carry_the_key_and_answers_are_matched_by_tag() {
     assert!(request.contains(r#""using":["urn:ietf:params:jmap:core","urn:stalwart:jmap"]"#));
 }
 
+/// A refusal of the key is told apart from an answer this release does not
+/// read: another status than 401 or 403, no JSON, another method or tag.
 #[test]
-fn server_failures_are_unavailable_and_refusals_denied() {
+fn server_failures_are_unavailable_refusals_denied_and_the_rest_unread() {
     let server = serve(vec![
         respond(&json!({"methodResponses": [["error", {"type": "serverFail"}, "0"]]})),
         answer(401, ""),
@@ -70,18 +72,21 @@ fn server_failures_are_unavailable_and_refusals_denied() {
     );
     assert_eq!(
         call(),
-        Err(Error::denied("Unexpected native API status 404"))
+        Err(Error::unreadable("Unexpected native API status 404"))
     );
     for _ in 0..3 {
         assert_eq!(
             call(),
-            Err(Error::denied(
+            Err(Error::unreadable(
                 "Native API answered with an unexpected method"
             ))
         );
     }
     for _ in 0..3 {
-        assert_eq!(call(), Err(Error::denied("Malformed native API response")));
+        assert_eq!(
+            call(),
+            Err(Error::unreadable("Malformed native API response"))
+        );
     }
     assert_eq!(call(), Err(Error::denied("x:A/get was refused")));
     server.requests();
@@ -104,10 +109,19 @@ fn get_requires_every_requested_object() {
     let jmap = client(&server.url);
     let get = || jmap.get::<Object>("Role", Some(&["a", "b"]), &["id"]);
     assert_eq!(get().unwrap().len(), 2);
-    let incomplete = Err(Error::denied("x:Role/get returned incomplete data"));
-    for _ in 0..3 {
-        assert_eq!(get(), incomplete);
-    }
+    // Stalwart says that an ID is not there: its answer to the request. A
+    // list without an ID asked for, or with another, is no answer it reads.
+    let other = Err(Error::unreadable(
+        "x:Role/get did not return the objects asked for",
+    ));
+    assert_eq!(get(), other);
+    assert_eq!(
+        get(),
+        Err(Error::denied(
+            "x:Role/get found no object of an ID asked for"
+        ))
+    );
+    assert_eq!(get(), other);
     assert_eq!(jmap.get::<Object>("Role", None, &["id"]).unwrap().len(), 1);
     let request = server.requests().pop().unwrap();
     assert!(request.contains(r#"[["x:Role/get",{"ids":null,"properties":["id"]},"0"]]"#));
@@ -138,9 +152,23 @@ fn get_reads_objects_as_the_callers_type_or_not_at_all() {
         name: name.to_owned(),
     };
     assert_eq!(get(), Ok(vec![named("a", "first"), named("b", "second")]));
-    let unsupported = Err(Error::denied("x:Thing/get returned an unsupported object"));
+    let unsupported = Err(Error::unreadable(
+        "x:Thing/get returned an unsupported object",
+    ));
     assert_eq!(get(), unsupported);
     assert_eq!(get(), unsupported);
+    server.requests();
+}
+
+#[test]
+fn an_answer_without_a_list_is_none_this_release_reads() {
+    let server = serve(vec![respond(&json!({"methodResponses": [
+        ["x:Thing/get", {"total": 2}, "0"]
+    ]}))]);
+    assert_eq!(
+        client(&server.url).get::<Object>("Thing", None, &["id"]),
+        Err(Error::unreadable("x:Thing/get returned no list of objects"))
+    );
     server.requests();
 }
 

@@ -10,9 +10,9 @@ use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Kind, Observation, Required, State};
 use garrison_core::recording::{self, QUIET_AFTER};
 use garrison_core::sqlite::reading;
-use garrison_stalwart::Error;
 use garrison_stalwart::http::MAX_RESPONSE;
 use garrison_stalwart::jmap::{JmapClient, Object};
+use garrison_stalwart::{Error, SUPPORTED};
 use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use serde_json::{Map, json};
@@ -353,12 +353,17 @@ impl Provider for Stalwart {
             Ok(answers) => Answers::read(answers),
             Err(error) => {
                 let kind = match error {
-                    Error::Unavailable(_) => "Stalwart unavailable",
+                    Error::Unavailable(_) => "Stalwart unavailable".to_owned(),
                     Error::Limited(_) => {
                         "Stalwart refused the collector's key for its rate limit (HTTP 429)"
+                            .to_owned()
                     }
+                    Error::Unreadable(why) => format!(
+                        "Stalwart answered in a form this release of Garrison does not read \
+                         ({why}); {SUPPORTED}"
+                    ),
                     Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
-                        "access denied"
+                        "access denied".to_owned()
                     }
                 };
                 report
@@ -410,3 +415,5 @@ mod limit_tests;
 mod tests;
 #[cfg(test)]
 mod time_tests;
+#[cfg(test)]
+mod unread_tests;

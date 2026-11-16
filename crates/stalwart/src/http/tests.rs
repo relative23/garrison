@@ -37,12 +37,13 @@ fn redirects_are_not_followed() {
     server.requests();
 }
 
+/// An answer larger than the caller reads is none it reads, and no refusal.
 #[test]
-fn oversized_bodies_are_refused() {
+fn oversized_bodies_are_not_read() {
     let server = serve(vec![answer(200, "12345"), answer(200, "1234")]);
     assert_eq!(
         Request::get(&server.url).limit(4).send(),
-        Err(Error::Denied(
+        Err(Error::Unreadable(
             "Stalwart response exceeds its size limit".into()
         ))
     );

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use garrison_authz::policy::{Policy, Profile, is_profile_name, parse_policy};
-use garrison_authz::{Authority, Error};
+use garrison_authz::{Authority, Error, SUPPORTED};
 use garrison_core::config::Config;
 use garrison_core::files::atomic_write;
 use garrison_core::modules::ModuleId;
@@ -201,30 +201,44 @@ fn authority(config: &Config) -> Authority {
     Authority::new(config, credentials(config))
 }
 
+/// What the command says where it got no answer it can use, by its kind:
+/// an answer this release does not read with where the supported Stalwart
+/// releases are named, any other as the error says it.
+fn said(error: Error) -> String {
+    match error {
+        Error::Unreadable(why) => format!(
+            "Stalwart answered in a form this release of Garrison does not read ({why}); \
+             {SUPPORTED}"
+        ),
+        Error::Unavailable(why)
+        | Error::Limited(why)
+        | Error::InvalidToken(why)
+        | Error::Denied(why)
+        | Error::Misconfigured(why) => why,
+    }
+}
+
 fn load(config: &Config) -> Result<Policy, String> {
-    authority(config)
-        .policy()
-        .map_err(|error| error.to_string())
+    authority(config).policy().map_err(said)
 }
 
 fn native(config: &Config) -> Result<JmapClient, String> {
     Ok(authority(config)
         .native_client()
-        .map_err(|error| error.to_string())?
+        .map_err(said)?
         .with_timeout(std::time::Duration::from_secs(10)))
 }
 
 /// Roles that are default *administrator* roles and hold all admin rights.
 fn administrator_roles(config: &Config) -> Result<BTreeMap<String, String>, String> {
     let client = native(config)?;
-    let failed = |error: Error| error.to_string();
     let authentication: Authentication = client
         .get(
             "Authentication",
             Some(&["singleton"]),
             &AUTHENTICATION_PROPERTIES,
         )
-        .map_err(failed)?
+        .map_err(said)?
         .into_iter()
         .next()
         .ok_or("Stalwart returned no object")?;
@@ -238,7 +252,7 @@ fn administrator_roles(config: &Config) -> Result<BTreeMap<String, String>, Stri
     let (mut roles, mut descriptions) = (BTreeMap::new(), BTreeMap::new());
     for object in client
         .get::<Object>("Role", None, &properties)
-        .map_err(failed)?
+        .map_err(said)?
     {
         let description = object.get("description").and_then(Value::as_str);
         let description = description.map(str::to_owned);
@@ -258,7 +272,7 @@ fn administrator_roles(config: &Config) -> Result<BTreeMap<String, String>, Stri
             permissions: Permissions::Inherit {},
             member_tenant_id: None,
         };
-        let rights = evaluate(&account, &roles, &authentication).map_err(failed)?;
+        let rights = evaluate(&account, &roles, &authentication).map_err(said)?;
         if ADMIN_PERMISSIONS
             .iter()
             .all(|name| rights.permissions.contains(*name))
@@ -306,14 +320,12 @@ fn init(config: &Config, force: bool) -> Result<u8, String> {
 /// What the broker would grant `subject` now, as it decides it.
 fn check(config: &Config, subject: &str) -> Result<u8, String> {
     let policy = load(config)?;
-    let account = policy
-        .account_for(subject)
-        .map_err(|error| error.to_string())?;
-    let rights = native_rights(&native(config)?, &account).map_err(|error| error.to_string())?;
+    let account = policy.account_for(subject).map_err(said)?;
+    let rights = native_rights(&native(config)?, &account).map_err(said)?;
     let result = policy
         .capabilities(subject, &rights.permissions, &rights.roles)
         .and_then(|capabilities| authority(config).offered(capabilities))
-        .map_err(|error| error.to_string())?;
+        .map_err(said)?;
     let mut modules: Vec<&str> = result.modules.iter().map(|id| id.as_str()).collect();
     modules.sort_unstable();
     say(&pretty(&json!({
@@ -346,7 +358,7 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
             // The role must exist.
             native(config)?
                 .get::<Object>("Role", Some(&[role.as_str()]), &["id"])
-                .map_err(|error| error.to_string())?;
+                .map_err(said)?;
             policy.role_bindings.insert(role.clone(), profile.clone());
             save(config, &policy).map(|()| 0)
         }),

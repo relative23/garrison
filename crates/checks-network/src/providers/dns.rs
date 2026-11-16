@@ -14,7 +14,7 @@ use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Column, Evidence, Format, Observation, Required, State, Table};
 use serde_json::json;
 
-use super::domains::{Domain, SETUP, domains, left_out, max_domains, not_given};
+use super::domains::{Domain, domains, left_out, max_domains, not_given};
 use crate::context::{Collected, Context, Provider, Report};
 use crate::dns::{self, Answer, Kind};
 use crate::options::{Checked, Options, fail};
@@ -56,17 +56,17 @@ pub(super) fn resolver_option(raw: &toml::Table, provider: &str) -> Checked<Opti
 /// The hosts Stalwart names as the mail servers of its first `most` domains,
 /// the targets of the MX records in their zone files, and where it has more
 /// domains, the finding that says so; where they cannot be read, why, with
-/// `fix` for a key Stalwart refused.
+/// `besides` for what else mends it (see [`not_given`]).
 pub(super) fn mail_hosts(
     context: &Context<'_>,
     most: usize,
-    fix: &str,
+    besides: &str,
 ) -> Result<(Vec<String>, Option<String>), String> {
     let key = context
         .native_key
         .as_deref()
         .ok_or("the collector's API key could not be read")?;
-    let domains = domains(context, key).map_err(|error| not_given(&error, "domains", fix))?;
+    let domains = domains(context, key).map_err(|error| not_given(&error, "domains", besides))?;
     let mut hosts: Vec<String> = domains
         .iter()
         .take(most)
@@ -391,7 +391,7 @@ impl Provider for Dns {
         let domains = match domains(context, key) {
             Ok(domains) => domains,
             Err(error) => {
-                let finding = format!("{}.", not_given(&error, "domains", SETUP));
+                let finding = format!("{}.", not_given(&error, "domains", ""));
                 report.observations.push(self.unknown(context, &finding)?);
                 return Ok(report);
             }

@@ -81,6 +81,9 @@ const LIMITED: &str = "Authorization could not be checked before execution: Stal
 const NOT_SET_UP: &str = "Access rights could not be checked before execution: Garrison is not \
                           set up to check them, and the broker's journal says why. Nothing was \
                           run.";
+const UNREAD: &str = "Authorization could not be checked before execution: Stalwart answered in a \
+                      form this release of Garrison does not read, and the broker's journal \
+                      names the answer. Nothing was run.";
 
 const BROKER_FAILED: &str = "The broker failed while it handled the job; whether anything was \
                              run is not known. Consult the host journal.";
@@ -399,6 +402,13 @@ impl Broker {
                 log::error!("Access rights cannot be checked: {reason}");
                 Some(NOT_SET_UP)
             }
+            Err(Error::Unreadable(reason)) => {
+                log::error!(
+                    "Rights for job {identifier} could not be checked: {}",
+                    refusal::unread(&reason)
+                );
+                Some(UNREAD)
+            }
         };
         if let Some(message) = unconfirmed {
             self.fail(identifier, message);
@@ -452,3 +462,5 @@ mod record_tests;
 mod recovery_tests;
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+mod unread_tests;

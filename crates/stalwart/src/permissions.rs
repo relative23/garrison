@@ -7,7 +7,8 @@
 //! account shapes, so a changed upstream rule fails a test instead of silently
 //! granting access.
 //!
-//! Cycles, missing roles, tenant members and unrecognized shapes deny access.
+//! Cycles, missing roles, tenant members and unrecognized shapes grant
+//! nothing.
 
 use std::collections::{BTreeMap, BTreeSet};
 

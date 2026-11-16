@@ -47,14 +47,19 @@ the installation offers. It ends that user's session, as an invalid token
 does (401).
 
 Everything else grants nothing and refuses nobody, and is answered 503: a
-Stalwart or a broker that is temporarily unavailable, and a setup of
-Garrison's own that is broken. That is a policy that does not read, is not
-protected or names an action the configuration does not have; a broker key
-that is missing or that Stalwart no longer takes; and an answer about an
-account's rights that cannot be used. Signed-in users stay signed in and see
-that their rights cannot be checked, nobody new can sign in, and the
-broker's journal names the cause as an error. A typo in the policy so does
-not sign everyone out.
+Stalwart or a broker that is temporarily unavailable, a setup of Garrison's
+own that is broken, and an answer of Stalwart's in a form this release does
+not read. The setup is a policy that does not read, is not protected or
+names an action the configuration does not have; a broker key that is
+missing or that Stalwart no longer takes; and an answer about an account's
+rights that cannot be used. An answer this release does not read is one
+without JSON, with an object or a status it does not know, larger than it
+reads or without what was asked, as a Stalwart release Garrison does not
+support yet may give, to UserInfo or to the management API. Signed-in users
+stay signed in and see that their rights cannot be checked, nobody new can
+sign in, and the broker's journal names the cause as an error, the answer
+by the request it answered. A typo in the policy, or an upgrade of Stalwart,
+so does not sign everyone out.
 
 A configuration with unknown keys, modules or actions keeps the services
 from starting, and ambiguous broker answers count as no grant. Restarted

@@ -1,6 +1,7 @@
 //! Where the exporter's answer could not be read, the card says why, each
 //! kind of failure in words of its own: an outage, Stalwart's rate limit,
-//! and an answer larger than the collector reads.
+//! and an answer larger than the collector reads, which points to the
+//! supported Stalwart releases.
 
 use garrison_stalwart::http::MAX_RESPONSE;
 use garrison_testing::http::{answer, serve};
@@ -40,7 +41,7 @@ fn the_exporters_card_says_why_its_answer_could_not_be_read() {
             unknown("Stalwart refused the collector's scrape for its rate limit (HTTP 429)."),
             unknown(
                 "The exporter's answer could not be read: Stalwart response exceeds its size \
-                 limit."
+                 limit; see the supported Stalwart releases in the README."
             ),
         ]
     );

@@ -127,8 +127,10 @@ async fn login(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Respo
 /// Why a sign-in got no session, as the sign-in page explains it. Stalwart
 /// that did not answer the code exchange, or turned it away for its rate
 /// limit, and rights that could not be checked just then, all pass: the
-/// page says so and when to try again. Anything else, a code Stalwart
-/// refused or a user the policy refuses, is a failed sign-in.
+/// page says so and when to try again; an exchange answered in a form this
+/// release does not read refuses nobody either and is said as rights that
+/// could not be checked. Anything else, a code Stalwart refused or a user
+/// the policy refuses, is a failed sign-in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Ended {
     Failed,
@@ -153,6 +155,7 @@ impl Ended {
         match error {
             Error::Unavailable(_) => Ended::Unavailable,
             Error::Limited(_) => Ended::Limited,
+            Error::Unreadable(_) => Ended::Unchecked,
             Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => Ended::Failed,
         }
     }
@@ -171,6 +174,7 @@ fn kind(error: &Error) -> &'static str {
         Error::Unavailable(_) => "Stalwart unavailable",
         Error::Limited(_) => "Stalwart's rate limit, HTTP 429",
         Error::Denied(_) | Error::InvalidToken(_) => "denied",
+        Error::Unreadable(_) => "an answer this release does not read",
         Error::Misconfigured(_) => "Garrison's own setup",
     }
 }
@@ -324,10 +328,15 @@ mod tests {
         );
         assert_eq!(kind(&Error::Denied("no".into())), "denied");
         assert_eq!(kind(&Error::InvalidToken("old".into())), "denied");
+        assert_eq!(
+            kind(&Error::Unreadable("unusable token".into())),
+            "an answer this release does not read"
+        );
     }
 
     /// Only what passes by itself gets words of its own on the sign-in
-    /// page; a refused code and Garrison's own setup are a failed sign-in.
+    /// page; a refused code and Garrison's own setup are a failed sign-in,
+    /// and an answer this release does not read refuses nobody.
     #[test]
     fn the_sign_in_page_hears_of_an_outage_and_of_the_rate_limit() {
         let reason = |error: Error| Ended::exchanging(&error).reason();
@@ -336,6 +345,7 @@ mod tests {
         assert_eq!(reason(Error::Denied("invalid_grant".into())), "1");
         assert_eq!(reason(Error::InvalidToken("old".into())), "1");
         assert_eq!(reason(Error::Misconfigured("no key".into())), "1");
+        assert_eq!(reason(Error::Unreadable("unusable".into())), "unchecked");
     }
 
     /// Stalwart's 429 is its rate limit, which passes once Stalwart's minute

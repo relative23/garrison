@@ -31,6 +31,7 @@ use garrison_core::json;
 use garrison_ingest::policy::{FORBIDDEN_EVENTS, event_types};
 use garrison_stalwart::http::Request;
 use garrison_stalwart::jmap::{Answers, Calls, Get, Got, Problem};
+use garrison_stalwart::{Error, SUPPORTED};
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 
@@ -123,13 +124,20 @@ impl Admin {
             .timeout(Duration::from_secs(30))
             .limit(MAX_ANSWER)
             .send()
-            .map_err(|error| format!("{method}: {error}"))?;
+            .map_err(|error| match error {
+                Error::Unreadable(why) => unreadable(method, &why),
+                Error::Unavailable(why)
+                | Error::Limited(why)
+                | Error::InvalidToken(why)
+                | Error::Denied(why)
+                | Error::Misconfigured(why) => format!("{method}: {why}"),
+            })?;
         if answer.status != 200 {
             return Err(format!("{method}: HTTP {}", answer.status));
         }
-        let document =
-            json::parse(&answer.body, MAX_ANSWER).map_err(|error| format!("{method}: {error}"))?;
-        let malformed = || format!("{method}: malformed answer");
+        let document = json::parse(&answer.body, MAX_ANSWER)
+            .map_err(|error| unreadable(method, &error.to_string()))?;
+        let malformed = || unreadable(method, "malformed answer");
         let answers: Answers = json::object(document).map_err(|_| malformed())?;
         let first = answers.method_responses.into_iter().next();
         let (name, payload, _) = first.ok_or_else(malformed)?;
@@ -148,7 +156,7 @@ impl Admin {
         if let Some(refusal) = refused.first() {
             return Err(format!("{method}: {refusal}"));
         }
-        json::object(payload).map_err(|_| format!("{method}: unexpected answer"))
+        json::object(payload).map_err(|_| unreadable(method, "unexpected answer"))
     }
 
     /// A `/set` method whose answer says nothing setup needs.
@@ -165,6 +173,13 @@ impl Admin {
         let got: Got<T> = self.call(&format!("x:{kind}/get"), &all)?;
         Ok(got.list)
     }
+}
+
+/// What setup says of an answer of Stalwart's that this release does not
+/// read: the method, what was wrong with it, and where the supported
+/// Stalwart releases are named, since no run of setup mends it.
+fn unreadable(method: &str, what: &str) -> String {
+    format!("{method}: {what}, which this release of Garrison does not read; {SUPPORTED}")
 }
 
 fn write_secret(path: &Path, value: &str) -> Result<(), String> {
@@ -449,6 +464,8 @@ pub(crate) fn run(config: &Config, command: &Command) -> u8 {
     })
 }
 
+#[cfg(test)]
+mod call_tests;
 #[cfg(test)]
 mod tests {
     use super::*;

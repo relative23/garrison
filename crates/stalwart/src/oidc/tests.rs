@@ -105,10 +105,11 @@ fn bad_tokens_and_subjects_are_told_apart() {
             "The access token is no longer valid".into()
         ))
     );
+    // An answer whose subject cannot be read refuses nobody.
     for _ in 0..2 {
         assert_eq!(
             oidc.userinfo(TOKEN, None),
-            Err(Error::denied("The provider returned no stable subject"))
+            Err(Error::unreadable("The provider returned no stable subject"))
         );
     }
     assert_eq!(oidc.userinfo(TOKEN, None).unwrap().email.len(), 254);
@@ -144,7 +145,7 @@ fn code_exchange_accepts_only_bearer_tokens_with_a_lifetime() {
     for _ in 0..3 {
         assert_eq!(
             oidc.exchange_code(&exchange),
-            Err(Error::denied("The provider returned an unusable token"))
+            Err(Error::unreadable("The provider returned an unusable token"))
         );
     }
     assert_eq!(
