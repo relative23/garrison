@@ -99,6 +99,27 @@ pub const REQUIRED_PERMISSIONS: [&str; 10] = [
     "sysNetworkListenerGet",
 ];
 
+/// What mends a key Stalwart refused, as the other cards say it.
+const SETUP: &str = "run `garrison stalwart setup` again, which gives the collector's API key \
+                     the permissions it needs";
+
+/// Why Stalwart's answer gave the Management API card nothing, by its kind.
+fn unread(error: &Error) -> String {
+    match error {
+        Error::Unavailable(_) => "Stalwart unavailable".to_owned(),
+        Error::Limited(_) => {
+            "Stalwart refused the collector's key for its rate limit (HTTP 429)".to_owned()
+        }
+        Error::Unreadable(why) => format!(
+            "Stalwart answered in a form this release of Garrison does not read ({why}); \
+             {SUPPORTED}"
+        ),
+        Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
+            format!("access denied; {SETUP}")
+        }
+    }
+}
+
 /// The fields of a recorded `server.startup` event that are read.
 #[derive(Deserialize)]
 struct Startup {
@@ -352,23 +373,8 @@ impl Provider for Stalwart {
         let answers = match client.call_many(&calls(), MAX_RESPONSE) {
             Ok(answers) => Answers::read(answers.into_iter().map(Result::ok).collect()),
             Err(error) => {
-                let kind = match error {
-                    Error::Unavailable(_) => "Stalwart unavailable".to_owned(),
-                    Error::Limited(_) => {
-                        "Stalwart refused the collector's key for its rate limit (HTTP 429)"
-                            .to_owned()
-                    }
-                    Error::Unreadable(why) => format!(
-                        "Stalwart answered in a form this release of Garrison does not read \
-                         ({why}); {SUPPORTED}"
-                    ),
-                    Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
-                        "access denied".to_owned()
-                    }
-                };
-                report
-                    .observations
-                    .push(Self::unknown(context, format!("Not readable: {kind}."))?);
+                let finding = format!("Not readable: {}.", unread(&error));
+                report.observations.push(Self::unknown(context, finding)?);
                 return Ok(report);
             }
         };
