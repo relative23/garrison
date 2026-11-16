@@ -75,6 +75,11 @@ fn the_card_by_domain_says_why_the_domains_of_the_mailboxes_are_not_known() {
             Some(answer(400, "")),
             unread("Unexpected native API status 400"),
         ),
+        (
+            "unknownMethod",
+            method("unknownMethod"),
+            unread("x:Account/get answered the error unknownMethod"),
+        ),
     ];
     let found: Vec<(&str, State, Vec<String>, Vec<String>)> = cases
         .iter()

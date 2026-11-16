@@ -177,11 +177,11 @@ fn the_collector_calls_need_only_the_required_permissions() {
     let client = JmapClient::new(&lab.url, &secret).with_timeout(Duration::from_secs(15));
     let requests = calls();
     let answers = client.call_many(&requests, MAX_RESPONSE).unwrap();
-    // call_many yields None for a method Stalwart refused.
+    // call_many yields an error for a method Stalwart refused.
     let refused: Vec<&str> = requests
         .iter()
         .zip(&answers)
-        .filter(|(_, answer)| answer.is_none())
+        .filter(|(_, answer)| answer.is_err())
         .map(|((method, _), _)| *method)
         .collect();
     assert!(refused.is_empty(), "{refused:?}");
@@ -460,3 +460,4 @@ fn stalwart_takes_the_mail_tests_and_knows_the_spam_text_by_its_subject() {
 
 mod notification;
 mod refused;
+mod unread;

@@ -59,6 +59,29 @@ pub struct Problem {
     pub description: Option<String>,
 }
 
+impl Problem {
+    /// What this error of `method` means, where Stalwart did not fail on its
+    /// side: `forbidden` refuses the key (measured on 1.1.0 for a key without
+    /// the method's permission); any other, such as `unknownMethod` for a
+    /// method Stalwart does not know (measured), is no answer this release
+    /// reads. A type that is no plain name is not repeated.
+    fn meaning(&self, method: &str) -> Error {
+        let plain = |kind: &&str| {
+            (1..=64).contains(&kind.len())
+                && kind
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b":._-".contains(&byte))
+        };
+        match self.kind.as_deref().filter(plain) {
+            Some("forbidden") => Error::Denied(format!("{method} was refused")),
+            Some(kind) => Error::Unreadable(format!("{method} answered the error {kind}")),
+            None => Error::Unreadable(format!(
+                "{method} answered an error this release does not know"
+            )),
+        }
+    }
+}
+
 /// The arguments of a `/get` method: the IDs (`None` for all objects) and
 /// the properties to send (`None` for all of them).
 #[derive(Clone, Debug, Serialize)]
@@ -110,15 +133,18 @@ impl JmapClient {
         self
     }
 
-    /// Several methods in one request; a method that failed yields `None`.
+    /// Several methods in one request; for each, what it answered, or why it
+    /// gave nothing: Stalwart refused the key that method
+    /// ([`Error::Denied`]), or answered it with an error this release does
+    /// not expect, or not at all ([`Error::Unreadable`]).
     ///
-    /// Server-side failures are [`Error::Unavailable`], so callers can tell
-    /// "temporarily unknown" from "denied".
+    /// Server-side failures are [`Error::Unavailable`] for the whole request,
+    /// so callers can tell "temporarily unknown" from "denied".
     pub fn call_many<A: Serialize>(
         &self,
         calls: &[(&str, A)],
         limit: usize,
-    ) -> Result<Vec<Option<Object>>, Error> {
+    ) -> Result<Vec<Result<Object, Error>>, Error> {
         let request = Calls::new(calls.iter().map(|(method, arguments)| (*method, arguments)));
         let body = serde_json::to_string(&request)
             .map_err(|_| Error::denied("The native API request could not be written"))?;
@@ -144,9 +170,18 @@ impl JmapClient {
         let malformed = || Error::unreadable("Malformed native API response");
         let result = json::parse(&answer.body, limit).map_err(|_| malformed())?;
         let answers: Answers = json::object(result).map_err(|_| malformed())?;
-        let mut results: Vec<Option<Object>> = Vec::new();
-        results.resize_with(calls.len(), || None);
+        // A method Stalwart says nothing of was not answered.
+        let mut results: Vec<Result<Object, Error>> = calls
+            .iter()
+            .map(|(method, _)| Err(Error::Unreadable(format!("{method} was not answered"))))
+            .collect();
+        let unexpected = || Error::unreadable("Native API answered with an unexpected method");
         for (name, payload, tag) in answers.method_responses {
+            let index = tag
+                .parse::<usize>()
+                .ok()
+                .filter(|index| tag == index.to_string())
+                .filter(|index| *index < calls.len());
             if name == "error" && payload.is_object() {
                 let problem: Problem = json::object(payload).unwrap_or_default();
                 if matches!(
@@ -157,20 +192,13 @@ impl JmapClient {
                         "Stalwart could not complete the request".into(),
                     ));
                 }
+                let index = index.ok_or_else(unexpected)?;
+                results[index] = Err(problem.meaning(calls[index].0));
                 continue;
             }
-            let index = tag
-                .parse::<usize>()
-                .ok()
-                .filter(|index| tag == index.to_string())
-                .filter(|index| calls.get(*index).is_some_and(|(method, _)| name == *method));
-            match (index, payload) {
-                (Some(index), Value::Object(payload)) => results[index] = Some(payload),
-                _ => {
-                    return Err(Error::unreadable(
-                        "Native API answered with an unexpected method",
-                    ));
-                }
+            match (index.filter(|index| name == calls[*index].0), payload) {
+                (Some(index), Value::Object(payload)) => results[index] = Ok(payload),
+                _ => return Err(unexpected()),
             }
         }
         Ok(results)
@@ -179,8 +207,7 @@ impl JmapClient {
     pub fn call<A: Serialize>(&self, method: &str, arguments: A) -> Result<Object, Error> {
         self.call_many(&[(method, arguments)], MAX_RESPONSE)?
             .pop()
-            .flatten()
-            .ok_or_else(|| Error::Denied(format!("{method} was refused")))
+            .unwrap_or_else(|| Err(Error::Unreadable(format!("{method} was not answered"))))
     }
 
     /// Objects by ID (`None` for all), each read as a `T`. Missing IDs are an

@@ -18,7 +18,8 @@ use crate::testing::{Canned, config, table};
 /// What Stalwart answers a request it cannot or will not take: an outage, its
 /// rate limit, a key it refuses, or a method it refuses the key; and answers
 /// this release does not read: no JSON, a status it does not expect, more
-/// than it reads.
+/// than it reads, an error it does not expect for the method, such as one
+/// for a method it does not know, and no answer for the method.
 fn failures() -> Vec<(&'static str, Option<String>)> {
     let method = |kind: &str| {
         Some(answer_json(
@@ -38,6 +39,11 @@ fn failures() -> Vec<(&'static str, Option<String>)> {
         (
             "too large",
             Some(answer(200, &"x".repeat(MAX_RESPONSE + 1))),
+        ),
+        ("unknownMethod", method("unknownMethod")),
+        (
+            "no answer",
+            Some(answer_json(&json!({"methodResponses": []}))),
         ),
     ]
 }
@@ -62,6 +68,11 @@ fn said(framed: &str, what: &str, besides: &str) -> Vec<(&'static str, Vec<Strin
              README{besides}"
         )
     };
+    let method = if what == "listeners" {
+        "x:NetworkListener/get"
+    } else {
+        "x:Domain/get"
+    };
     let kinds = [
         unanswered.clone(),
         unanswered.clone(),
@@ -72,6 +83,8 @@ fn said(framed: &str, what: &str, besides: &str) -> Vec<(&'static str, Vec<Strin
         unread("Malformed native API response"),
         unread("Unexpected native API status 400"),
         unread("Stalwart response exceeds its size limit"),
+        unread(&format!("{method} answered the error unknownMethod")),
+        unread(&format!("{method} was not answered")),
     ];
     failures()
         .into_iter()

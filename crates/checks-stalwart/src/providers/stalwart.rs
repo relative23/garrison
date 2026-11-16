@@ -350,7 +350,7 @@ impl Provider for Stalwart {
         let client = JmapClient::new(&context.deployment.stalwart_url, key)
             .with_timeout(Duration::from_secs(8));
         let answers = match client.call_many(&calls(), MAX_RESPONSE) {
-            Ok(answers) => Answers::read(answers),
+            Ok(answers) => Answers::read(answers.into_iter().map(Result::ok).collect()),
             Err(error) => {
                 let kind = match error {
                     Error::Unavailable(_) => "Stalwart unavailable".to_owned(),

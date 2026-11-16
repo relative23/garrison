@@ -26,7 +26,7 @@ fn calls_carry_the_key_and_answers_are_matched_by_tag() {
         .unwrap();
     assert_eq!(results[0].as_ref().unwrap()["list"], json!([1]));
     assert_eq!(results[1].as_ref().unwrap()["list"], json!([]));
-    assert_eq!(results[2], None);
+    assert_eq!(results[2], Err(Error::denied("x:C/get was refused")));
     let request = server.requests().remove(0);
     assert!(request.starts_with("POST /jmap/ HTTP/1.1"), "{request}");
     assert!(
@@ -89,6 +89,50 @@ fn server_failures_are_unavailable_refusals_denied_and_the_rest_unread() {
         );
     }
     assert_eq!(call(), Err(Error::denied("x:A/get was refused")));
+    server.requests();
+}
+
+/// A method's error says why by its kind: `forbidden` refuses the key; any
+/// other, such as `unknownMethod` for a method Stalwart does not know, and
+/// no answer at all for the method, is no answer this release reads, and an
+/// error for no method asked spoils the whole answer.
+#[test]
+fn a_methods_error_is_told_by_its_kind() {
+    let error = |kind: &str, tag: &str| json!(["error", {"type": kind}, tag]);
+    let server = serve(vec![
+        respond(&json!({"methodResponses": [
+            error("forbidden", "0"), error("unknownMethod", "1"), error("invalidArguments", "2"),
+            error("no such\nkind", "3"),
+        ]})),
+        respond(&json!({"methodResponses": [error("forbidden", "7")]})),
+    ]);
+    let jmap = client(&server.url);
+    let calls: Vec<(&str, Value)> = ["x:A/get", "x:B/get", "x:C/get", "x:D/get", "x:E/get"]
+        .into_iter()
+        .map(|method| (method, json!({})))
+        .collect();
+    assert_eq!(
+        jmap.call_many(&calls, MAX_RESPONSE),
+        Ok(vec![
+            Err(Error::denied("x:A/get was refused")),
+            Err(Error::unreadable(
+                "x:B/get answered the error unknownMethod"
+            )),
+            Err(Error::unreadable(
+                "x:C/get answered the error invalidArguments"
+            )),
+            Err(Error::unreadable(
+                "x:D/get answered an error this release does not know"
+            )),
+            Err(Error::unreadable("x:E/get was not answered")),
+        ])
+    );
+    assert_eq!(
+        jmap.call_many(&calls[..1], MAX_RESPONSE),
+        Err(Error::unreadable(
+            "Native API answered with an unexpected method"
+        ))
+    );
     server.requests();
 }
 
