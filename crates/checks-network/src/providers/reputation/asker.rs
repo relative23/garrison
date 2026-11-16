@@ -18,6 +18,9 @@ pub(super) const RUN_OVER: &str = "the collection run's time was used up";
 pub(super) const SLOW: &str = "the lists took too long";
 /// Why an address's reverse name, or where it leads, was not asked.
 const BEFORE: &str = "the resolver did not answer such a question before";
+/// The root, as the DNS client writes a name without labels: a reverse
+/// name that is the root leads to no address.
+pub(super) const ROOT: &str = ".";
 
 /// The lists are asked for this long at most: the collector's run has a
 /// limit of its own, and a list that is down answers nothing for seconds.
@@ -122,9 +125,17 @@ impl Asker {
             Ok(names) => names.into_iter().next(),
             Err(why) => return Some(unread(None, why)),
         };
-        let Some(name) = name.map(|name| name.trim_end_matches('.').to_lowercase()) else {
+        let Some(name) = name else {
             return Some(Reverse::default());
         };
+        // Nothing is asked of where the root leads.
+        if name == ROOT {
+            return Some(Reverse {
+                name: Some(name),
+                ..Reverse::default()
+            });
+        }
+        let name = name.trim_end_matches('.').to_lowercase();
         if self.over() {
             return None;
         }

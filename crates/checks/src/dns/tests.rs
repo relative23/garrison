@@ -42,12 +42,16 @@ fn txt(pieces: &[&str]) -> Vec<u8> {
     data
 }
 
-fn asked(kind: Kind, flags: [u8; 2], records: &[(u16, Vec<u8>)]) -> Result<Option<Answer>, Error> {
+pub(super) fn asked(
+    kind: Kind,
+    flags: [u8; 2],
+    records: &[(u16, Vec<u8>)],
+) -> Result<Option<Answer>, Error> {
     let question = question(7, "example.test", kind).unwrap();
     read(&answer(&question, flags, records), 7, kind)
 }
 
-const FINE: [u8; 2] = [0x81, 0x80];
+pub(super) const FINE: [u8; 2] = [0x81, 0x80];
 
 #[test]
 fn records_are_read_as_a_zone_file_writes_them() {

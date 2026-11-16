@@ -11,7 +11,7 @@ use garrison_core::observations::State;
 
 use super::tests::{V4, V6, Zone, address, mail_host, observed, pointer, provider, rows};
 use super::*;
-use crate::providers::dns::stand_in::{resolver as stand_in, resolver_erring};
+use crate::providers::dns::stand_in::{resolver as stand_in, resolver_erring, resolver_until};
 use crate::testing::{Remembered, assert_dated, table};
 
 const MALFORMED: &str = "the resolver's answer is malformed";
@@ -244,5 +244,44 @@ fn where_no_reverse_name_can_be_read_the_card_is_unknown_and_the_lists_are_asked
             format!("{V6} names other.example.test, which does not lead back to it."),
             format!("The reverse name of {V4} could not be read: {MALFORMED}."),
         ]
+    );
+}
+
+/// A reverse name that is the root, which has no label, is named as the
+/// root: it leads nowhere, so where it leads is not asked, and it is no
+/// host's name.
+#[test]
+fn a_reverse_name_that_is_the_root_is_named_as_the_root() {
+    let v4 = dns::reversed(V4.parse().unwrap(), None);
+    let v6 = dns::reversed(V6.parse().unwrap(), None);
+    let mut zone = mail_host();
+    zone.insert((v4.clone(), Kind::Ptr.code()), vec![vec![0]]);
+    let (resolver, stopping) = resolver_until(zone, |_| false);
+    let lists = "lists = []\nlists_ipv6 = []";
+    let (_, reverse) = observed(&provider(resolver, lists), &Remembered::default(), 0);
+    // The IPv6 address's reverse name is followed back; the root is not.
+    assert_eq!(
+        stopping.questions(),
+        [
+            asked("mail.example.test", Kind::A),
+            asked(&v4, Kind::Ptr),
+            asked("mail.example.test", Kind::Aaaa),
+            asked(&v6, Kind::Ptr),
+            asked("mail.example.test", Kind::Aaaa),
+        ]
+    );
+    assert_eq!(
+        rows(&reverse),
+        [
+            format!("{V4} | mail.example.test | . | names the root"),
+            format!("{V6} | mail.example.test | mail.example.test | fits"),
+        ]
+    );
+    assert_eq!(
+        (reverse.state, reverse.findings.clone()),
+        (
+            State::Warning,
+            vec![format!("{V4} names the root (.), which is no host's name.")]
+        )
     );
 }

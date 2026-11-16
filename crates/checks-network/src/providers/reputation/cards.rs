@@ -6,7 +6,7 @@ use garrison_core::observations::{
 };
 use serde_json::json;
 
-use super::asker::SLOW;
+use super::asker::{ROOT, SLOW};
 use super::verdict::Said;
 use super::{Read, Reputation, shown};
 use crate::context::{Context, Provider};
@@ -121,6 +121,13 @@ impl Reputation {
                 (None, None) => {
                     findings.push(format!("{} has no reverse name.", address.address));
                     "no reverse name".to_owned()
+                }
+                (Some(name), None) if name == ROOT => {
+                    findings.push(format!(
+                        "{} names the root ({ROOT}), which is no host's name.",
+                        address.address
+                    ));
+                    "names the root".to_owned()
                 }
                 (Some(name), None) if !address.confirmed => {
                     findings.push(format!(

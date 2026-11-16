@@ -317,8 +317,8 @@ be, and the reading is asked again after an hour.
   237 octets at the most in `lists` and 189 in `lists_ipv6`.
 - **Reverse names.** Each address should have a reverse name that leads back
   to it and is one of the mail hosts, the name the server greets with. One
-  that is missing, leads elsewhere or is the hosting provider's default is a
-  warning. Where the resolver's answer for an address's reverse name, or for
+  that is missing, is the root (`.`), leads elsewhere or is the hosting
+  provider's default is a warning. Where the resolver's answer for an address's reverse name, or for
   where that name leads, cannot be used, as a malformed answer or an error
   of the resolver, the card names the address and why, and is Partial where
   it would be OK, or Unknown where no address could be read; the other

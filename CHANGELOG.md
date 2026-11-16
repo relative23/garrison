@@ -613,6 +613,15 @@ Notable changes for operators and users. The format follows
   unreported for at least an hour. What was asked now counts: the cards
   show it and say that not every address or list was asked, and why, and
   the reading is asked again after an hour.
+- **A name that is the root reads as `.`.** Where a resolver's answer named
+  the root, the name without labels, it read as no name at all: a reverse
+  name that is the root gave the Reverse names card "names ; whether that
+  leads back to it could not be read:  is no DNS name", and the DNS
+  records card showed a null MX as "0 " and an SRV record of a service
+  that is not offered as "0 0 0 ". Such a name now reads as `.`, as a zone
+  file writes it: the Reverse names card says that the address names the
+  root, which is no host's name, a warning, without asking where it
+  leads, and the DNS records card shows "0 ." and "0 0 0 .".
 - **A DNS answer counts only for the question it repeats.** The `dns` and
   `reputation` checks numbered their questions in order, from the clock or
   counting from one, and took any answer with that number: whoever could

@@ -482,6 +482,8 @@ impl Provider for Dns {
 #[cfg(test)]
 pub(crate) mod domains_tests;
 #[cfg(test)]
+mod root_tests;
+#[cfg(test)]
 pub(crate) mod stand_in;
 #[cfg(test)]
 mod sts_tests;

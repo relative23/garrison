@@ -248,6 +248,17 @@ fn name_at(message: &[u8], at: usize) -> Option<(String, usize)> {
     Some((name, after.unwrap_or(position)))
 }
 
+/// A name as a record's text holds it: without its final dot, and the root,
+/// which has no label, as `.`, the way a zone file writes it, so that it
+/// never reads as no name at all.
+fn written(name: String) -> String {
+    if name.is_empty() {
+        ".".to_owned()
+    } else {
+        name
+    }
+}
+
 fn number(message: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_be_bytes([
         *message.get(at)?,
@@ -267,11 +278,11 @@ fn data(message: &[u8], kind: Kind, start: usize, end: usize) -> Option<String> 
             let octets: [u8; 16] = bytes.try_into().ok()?;
             IpAddr::from(octets).to_string()
         }
-        Kind::Cname | Kind::Ptr => name_at(message, start)?.0,
+        Kind::Cname | Kind::Ptr => written(name_at(message, start)?.0),
         Kind::Mx => format!(
             "{} {}",
             number(message, start)?,
-            name_at(message, start + 2)?.0
+            written(name_at(message, start + 2)?.0)
         ),
         Kind::Txt => {
             // One record is a row of strings, each with its length; together
@@ -290,7 +301,7 @@ fn data(message: &[u8], kind: Kind, start: usize, end: usize) -> Option<String> 
             number(message, start)?,
             number(message, start + 2)?,
             number(message, start + 4)?,
-            name_at(message, start + 6)?.0
+            written(name_at(message, start + 6)?.0)
         ),
         Kind::Tlsa => {
             let [usage, selector, matching, digest @ ..] = bytes else {
@@ -420,5 +431,7 @@ pub fn ask(server: SocketAddr, name: &str, kind: Kind) -> Result<Answer, Error> 
     read(&answer, id, kind)?.ok_or(Error::CutOff)
 }
 
+#[cfg(test)]
+mod root_tests;
 #[cfg(test)]
 mod tests;
