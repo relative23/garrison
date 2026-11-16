@@ -17,6 +17,7 @@ use base64::engine::general_purpose::STANDARD;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_core::sqlite::reading;
+use garrison_stalwart::Error;
 use garrison_stalwart::http::Request;
 use rusqlite::params;
 
@@ -195,6 +196,19 @@ pub fn parse(text: &str) -> BTreeMap<String, f64> {
     values
 }
 
+/// Why the exporter's answer could not be read, by what went wrong.
+fn unread(error: &Error) -> String {
+    match error {
+        Error::Unavailable(_) => "The exporter is unavailable.".to_owned(),
+        Error::Limited(_) => {
+            "Stalwart refused the collector's scrape for its rate limit (HTTP 429).".to_owned()
+        }
+        Error::Denied(why) | Error::InvalidToken(why) | Error::Misconfigured(why) => {
+            format!("The exporter's answer could not be read: {why}.")
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Prometheus {
     path: String,
@@ -218,7 +232,7 @@ impl Prometheus {
             .header("Authorization", &token)
             .timeout(Duration::from_secs(8))
             .send()
-            .map_err(|_| "The exporter is unavailable.".to_owned())?;
+            .map_err(|error| unread(&error))?;
         if answer.status != 200 {
             return Err(format!("The exporter answered HTTP {}.", answer.status));
         }
@@ -273,6 +287,9 @@ impl Provider for Prometheus {
         Ok(report)
     }
 }
+
+#[cfg(test)]
+mod unread_tests;
 
 #[cfg(test)]
 mod tests {
