@@ -15,7 +15,6 @@
 //! Existing objects are matched by their description (the OAuth client by its
 //! client ID); foreign objects are not touched.
 
-use std::collections::BTreeMap;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -24,11 +23,9 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use clap::Subcommand;
 use garrison_collector::providers::stalwart::REQUIRED_PERMISSIONS as COLLECTOR_PERMISSIONS;
-use garrison_collector::run::ScrapeCredential;
 use garrison_core::config::Config;
-use garrison_core::files::{Privacy, atomic_write, read_private};
+use garrison_core::files::atomic_write;
 use garrison_core::json;
-use garrison_ingest::policy::{FORBIDDEN_EVENTS, event_types};
 use garrison_stalwart::http::Request;
 use garrison_stalwart::jmap::{Answers, Calls, Get, Got, Problem};
 use garrison_stalwart::{Error, SUPPORTED};
@@ -37,17 +34,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::say;
 use administrator::Source;
-use objects::{
-    Action, Enabled, EventsPolicy, Exporter, HttpAuth, Level, Metrics, OAuthClient, Refused,
-    Secret, Set, StoredClient, StoredMetrics, StoredWebHook, WebHook,
-};
+use exporter::ensure_metrics;
+use objects::{Action, Enabled, OAuthClient, Refused, Set, StoredClient};
 use restart::restart;
+use webhook::ensure_webhook;
 
 mod administrator;
+mod exporter;
 mod keys;
 mod milter;
 mod objects;
 mod restart;
+mod webhook;
 
 const BROKER_PERMISSIONS: [&str; 4] = [
     "authenticate",
@@ -55,8 +53,6 @@ const BROKER_PERMISSIONS: [&str; 4] = [
     "sysRoleGet",
     "sysAuthenticationGet",
 ];
-/// `WebHook` objects have no description; this header marks Garrison's own webhook.
-const MARKER: (&str, &str) = ("X-Garrison", "events");
 const LOOPBACK: [&str; 2] = ["127.0.0.1/32", "::1/128"];
 const MAX_ANSWER: usize = 4 * 1024 * 1024;
 
@@ -186,12 +182,6 @@ fn write_secret(path: &Path, value: &str) -> Result<(), String> {
     atomic_write(path, format!("{value}\n").as_bytes(), 0o600).map_err(|error| error.to_string())
 }
 
-/// Whether the file at `path` holds something: an empty one, as the
-/// installer keeps where setup wrote none, holds no credential.
-fn holds(path: &Path) -> bool {
-    std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0)
-}
-
 /// Register Garrison as an OAuth client of Stalwart.
 ///
 /// Sign-in uses a client ID URL. Stalwart accepts such IDs from any website
@@ -222,100 +212,6 @@ fn ensure_oauth_client(admin: &Admin, config: &Config) -> Result<String, String>
     wanted.client_id = Some(&client_id);
     admin.set("x:OAuthClient/set", &Set::create(wanted))?;
     Ok(format!("registered OAuth client {client_id}"))
-}
-
-fn ensure_webhook(
-    admin: &Admin,
-    config: &Config,
-    directory: &Path,
-    url: Option<&str>,
-    rotate: bool,
-) -> Result<String, String> {
-    let types = objects::webhook_events(event_types(), &FORBIDDEN_EVENTS)?;
-    let key_path = directory.join("webhook-signature-key");
-    // Stalwart keeps a batch the ingest refuses during the switch and sends it again.
-    if rotate || !key_path.exists() {
-        write_secret(&key_path, &random(48)?)?;
-    }
-    let key = read_private(&key_path, 16384, Privacy::Owned).map_err(|error| error.to_string())?;
-    let key = String::from_utf8_lossy(&key).trim().to_owned();
-    let url = url.map_or_else(
-        || format!("http://127.0.0.1:{}/webhook", config.ingest.port),
-        str::to_owned,
-    );
-    let webhook = WebHook {
-        url: &url,
-        events: Enabled::of(types.iter().copied()),
-        events_policy: EventsPolicy::Include,
-        level: Level::Trace,
-        timeout: 5000,
-        throttle: 1000,
-        discard_after: 3_600_000,
-        lossy: false,
-        signature_key: Secret::Value { secret: &key },
-        http_auth: HttpAuth::Unauthenticated,
-        http_headers: BTreeMap::from([MARKER]),
-        allow_invalid_certs: false,
-        enable: true,
-    };
-    let marked = |item: &StoredWebHook| {
-        let headers = item.http_headers.as_ref();
-        headers.and_then(|headers| headers.get(MARKER.0)?.as_str()) == Some(MARKER.1)
-    };
-    let existing = admin
-        .list::<StoredWebHook>("WebHook")?
-        .into_iter()
-        .find(marked);
-    let result = if let Some(item) = existing {
-        admin.set("x:WebHook/set", &Set::update(&item.id, webhook))?;
-        "updated webhook"
-    } else {
-        admin.set("x:WebHook/set", &Set::create(webhook))?;
-        "created webhook"
-    };
-    Ok(format!("{result} -> {url} ({} event types)", types.len()))
-}
-
-fn ensure_metrics(admin: &Admin, directory: &Path, rotate: bool) -> Result<String, String> {
-    let target = directory.join("metrics-credential");
-    let singleton = Get {
-        ids: Some(&["singleton"]),
-        properties: None,
-    };
-    let stored: Got<StoredMetrics> = admin.call("x:Metrics/get", &singleton)?;
-    let current = stored.list.into_iter().next().unwrap_or_default();
-    let current = current.prometheus.unwrap_or_default();
-    let enabled = current.kind.as_deref() == Some("Enabled");
-    let ours = enabled && current.auth_username.as_deref() == Some("garrison");
-    if enabled && !ours {
-        return Ok(
-            "Prometheus exporter is enabled by someone else; not changed \
-                   (configure metrics_credential manually)"
-                .into(),
-        );
-    }
-    if ours && holds(&target) && !rotate {
-        return Ok("Prometheus exporter already configured".into());
-    }
-    let secret = random(36)?;
-    let exporter = Exporter::Enabled {
-        auth_username: "garrison",
-        auth_secret: Secret::Value { secret: &secret },
-    };
-    let metrics = Metrics {
-        prometheus: exporter,
-    };
-    admin.set("x:Metrics/set", &Set::update("singleton", metrics))?;
-    let credential = ScrapeCredential {
-        username: "garrison".to_owned(),
-        secret,
-    };
-    let document = serde_json::to_string(&credential).map_err(|error| error.to_string())?;
-    atomic_write(&target, document.as_bytes(), 0o600).map_err(|error| error.to_string())?;
-    Ok(format!(
-        "enabled Prometheus exporter -> {}",
-        target.display()
-    ))
 }
 
 /// What the operator asked of `stalwart setup` besides the administrator.
@@ -466,21 +362,3 @@ pub(crate) fn run(config: &Config, command: &Command) -> u8 {
 
 #[cfg(test)]
 mod call_tests;
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The installer keeps an empty metrics credential where setup wrote
-    /// none; setup writes one there all the same, where the exporter is
-    /// Garrison's, instead of calling the exporter configured.
-    #[test]
-    fn an_empty_credential_file_holds_none() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("metrics-credential");
-        assert!(!holds(&path));
-        std::fs::write(&path, "").unwrap();
-        assert!(!holds(&path));
-        std::fs::write(&path, r#"{"username": "garrison", "secret": "s"}"#).unwrap();
-        assert!(holds(&path));
-    }
-}
