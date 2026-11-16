@@ -4,12 +4,19 @@
 //! stays in view.
 
 use rusqlite::Connection;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::read::DAY;
 use super::tests::{Event, event, observed, observed_from, of, rows};
 use super::*;
 use crate::testing::{Canned, Receiver, Remembered, config, table};
+
+/// Stalwart's accounts for the busy week's mailbox, so that its card by
+/// domain is about the history alone: without them the domains are not
+/// known, which keeps that card from being in order on its own.
+fn named() -> Value {
+    json!([{"id": "b", "emailAddress": "anna@example.test"}])
+}
 
 /// A week with mail on every day: ham, a milter that accepted, TLS both ways.
 fn busy_week() -> Vec<Event> {
@@ -32,7 +39,13 @@ fn a_receiver_that_stopped_reporting_leaves_no_summary_in_order() {
         quiet_for: DAY,
         ..Receiver::default()
     };
-    let observations = observed_from(&quiet, &busy_week(), None, &Remembered::default(), 0);
+    let observations = observed_from(
+        &quiet,
+        &busy_week(),
+        Some(&named()),
+        &Remembered::default(),
+        0,
+    );
     assert!(observations.len() >= 4, "{observations:?}");
     for observation in &observations {
         assert_eq!(observation.state, State::Unknown, "{}", observation.id);
@@ -49,7 +62,7 @@ fn a_receiver_that_stopped_reporting_leaves_no_summary_in_order() {
     // The numbers that were read stay in view.
     assert_eq!(rows(of(&observations, "flow.spam")).len(), 7);
     // A receiver that reports is taken at its word.
-    let current = observed(&busy_week(), None, &Remembered::default(), 0);
+    let current = observed(&busy_week(), Some(&named()), &Remembered::default(), 0);
     for observation in &current {
         assert_eq!(observation.state, State::Ok, "{}", observation.id);
         assert_eq!(
@@ -70,11 +83,24 @@ fn events_lost_within_the_week_leave_no_summary_in_order() {
         lost: windows.to_vec(),
     };
     let before = lost(&[(10 * DAY, 9 * DAY)]);
-    for observation in observed_from(&before, &busy_week(), None, &Remembered::default(), 0) {
+    let named = Some(named());
+    for observation in observed_from(
+        &before,
+        &busy_week(),
+        named.as_ref(),
+        &Remembered::default(),
+        0,
+    ) {
         assert_eq!(observation.state, State::Ok, "{}", observation.id);
     }
     let within = lost(&[(10 * DAY, 9 * DAY), (3 * DAY, 3 * DAY - 6 * 3600)]);
-    let observations = observed_from(&within, &busy_week(), None, &Remembered::default(), 0);
+    let observations = observed_from(
+        &within,
+        &busy_week(),
+        named.as_ref(),
+        &Remembered::default(),
+        0,
+    );
     for observation in &observations {
         assert_eq!(observation.state, State::Unknown, "{}", observation.id);
         assert_eq!(

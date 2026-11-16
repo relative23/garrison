@@ -131,3 +131,40 @@ fn why_the_domains_are_not_known_is_kept_with_the_reading() {
     );
     assert_eq!(kept.state, State::Unknown);
 }
+
+/// Without a key for Stalwart, as where its credential file is empty or
+/// missing, the accounts are not asked for: the mail is counted under
+/// "unknown", and the card by domain says that the domains are not known
+/// and what makes a key, Unknown as for any other reason. The cards that
+/// need no key are as they were.
+#[test]
+fn without_a_key_the_card_by_domain_says_what_makes_one() {
+    let events = [
+        event("message-ingest.ham", 60, json!({"accountId": 1})),
+        event("message-ingest.spam", 90, json!({"accountId": 1})),
+    ];
+    let directory = tempfile::tempdir().unwrap();
+    let config = history(directory.path(), &Receiver::default(), &events, 0);
+    let runner = Canned(String::new());
+    let context = crate::testing::context(&config, &runner);
+    assert_eq!(context.native_key, None);
+    let provider = Flow::new(&table("type = \"mail-flow\"")).unwrap();
+    let observations = provider.collect(&context).unwrap().observations;
+    let card = of(&observations, "flow.spam-domains");
+    assert_eq!(
+        (card.state, card.findings.clone(), rows(card)),
+        (
+            State::Unknown,
+            vec![
+                "The domains of the mailboxes are not known: the collector has no API key for \
+                 Stalwart; run `garrison stalwart setup`, which makes one."
+                    .to_owned()
+            ],
+            vec!["unknown | 1 | 1 | 50 %".to_owned()]
+        )
+    );
+    for id in ["flow.spam", "flow.authentication", "flow.tls"] {
+        let other = of(&observations, id);
+        assert_eq!((other.state, other.findings.len()), (State::Ok, 0), "{id}");
+    }
+}

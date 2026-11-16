@@ -48,8 +48,8 @@ struct Read {
     #[serde(default)]
     uncovered: Option<String>,
     /// Why the domains of the mailboxes are not known, where Stalwart did not
-    /// give the collector's key its accounts: the mail is counted under
-    /// "unknown" then.
+    /// give the collector's key its accounts or the collector has no key:
+    /// the mail is counted under "unknown" then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     domains_unread: Option<String>,
 }
@@ -122,10 +122,15 @@ impl Flow {
 
     /// The domain of each account's address, by the account's number. Without
     /// an answer from Stalwart the domains stay unknown, and the error says
-    /// why; the counts do not need them. Without a key none is asked for.
+    /// why; the counts do not need them. Without a key none is asked for,
+    /// and the error says what makes one.
     fn accounts(context: &Context<'_>) -> Result<HashMap<i64, String>, String> {
         let Some(key) = context.native_key.as_deref() else {
-            return Ok(HashMap::new());
+            return Err(
+                "the collector has no API key for Stalwart; run `garrison stalwart \
+                        setup`, which makes one"
+                    .to_owned(),
+            );
         };
         let client = JmapClient::new(&context.deployment.stalwart_url, key)
             .with_timeout(Duration::from_secs(8));

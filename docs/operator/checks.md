@@ -152,8 +152,9 @@ minutes. They count; none of them is a verdict, except where it says so.
 - `spam`: ham and spam by day, with the training runs of the classifier, on
   the Spam filter page; and the same by the domain of the mailbox the mail
   went to, which Stalwart's accounts name. Where Stalwart did not give them
-  to the collector's key, that mail is counted under "unknown", and the
-  card by domain is Unknown and says why.
+  to the collector's key, or the collector has no key for Stalwart, that
+  mail is counted under "unknown", and the card by domain is Unknown and
+  says why.
 - `milter`: what Stalwart's milters said of the mail they were shown (a
   virus scanner's, Garrison's own macro filter), by day, on the Antivirus
   page. A milter that could not be reached since yesterday is a warning. A
