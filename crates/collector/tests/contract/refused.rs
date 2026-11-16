@@ -1,11 +1,13 @@
 //! A key Stalwart does not let read what a check reads, and a key it does
 //! not know, are refusals: the checks that read Stalwart's domains,
 //! listeners and accounts give the setup's advice for them, and not the
-//! words for a Stalwart that did not answer or met its rate limit.
+//! words for a Stalwart that did not answer or met its rate limit, and so
+//! does the Management API card, naming the calls Stalwart refused.
 
 use std::time::Duration;
 
-use garrison_collector::providers::{Dns, Reputation, Tls};
+use garrison_collector::providers::stalwart::calls;
+use garrison_collector::providers::{Dns, Reputation, Stalwart, Tls};
 use garrison_core::observations::State;
 use garrison_stalwart::jmap::JmapClient;
 use garrison_testing::lab::{Lab, random_hex, unique};
@@ -77,6 +79,30 @@ fn a_key_stalwart_refuses_gets_the_setups_advice() {
                 card.id
             );
         }
+
+        // Stalwart refuses each of the check's calls to the narrow key, and
+        // the whole request to a key it does not know (401).
+        let stalwart = Stalwart::new(&"type = \"stalwart\"".parse().unwrap()).unwrap();
+        let report = collect(&stalwart, &deployment, Some(secret.clone()), None);
+        let api = report
+            .observations
+            .iter()
+            .find(|card| card.id == "stalwart.api")
+            .unwrap_or_else(|| panic!("{which}: {:?}", report.observations));
+        let methods: Vec<&str> = calls().iter().map(|(method, _)| *method).collect();
+        let refused = if which == "a narrow key" {
+            format!(" to {}", methods.join(", "))
+        } else {
+            String::new()
+        };
+        assert_eq!(
+            api.findings,
+            [format!(
+                "Not readable: access denied{refused}; run `garrison stalwart setup` again, which \
+                 gives the collector's API key the permissions it needs."
+            )],
+            "{which}"
+        );
 
         let tls = Tls::new(&"type = \"tls\"".parse().unwrap()).unwrap();
         let report = collect(&tls, &deployment, Some(secret), None);

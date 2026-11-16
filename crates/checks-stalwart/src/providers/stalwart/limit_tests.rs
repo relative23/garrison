@@ -7,9 +7,9 @@ use garrison_testing::http::{answer, serve};
 use super::*;
 use crate::testing::{Canned, config, context, table};
 
-/// The Management API card of a run against a Stalwart that answers the
-/// check's one request with `response`.
-pub(super) fn api(response: String) -> Observation {
+/// Every card of a run against a Stalwart that answers the check's one
+/// request with `response`.
+pub(super) fn cards(response: String) -> Vec<Observation> {
     let directory = tempfile::tempdir().unwrap();
     let server = serve(vec![response]);
     let mut config = config(directory.path());
@@ -22,8 +22,12 @@ pub(super) fn api(response: String) -> Observation {
     let provider = Stalwart::new(&table("type = \"stalwart\"")).unwrap();
     let report = provider.collect(&context).unwrap();
     server.requests();
-    report
-        .observations
+    report.observations
+}
+
+/// The Management API card of such a run.
+pub(super) fn api(response: String) -> Observation {
+    cards(response)
         .into_iter()
         .find(|observation| observation.id == "stalwart.api")
         .unwrap()

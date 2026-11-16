@@ -28,6 +28,27 @@
      "maxAge": 3600
     },
     {
+     "id": "stalwart.api",
+     "provider": "stalwart",
+     "title": "Management API",
+     "modules": [
+      "services"
+     ],
+     "evidence": "configuration",
+     "state": "unknown",
+     "checkedAt": "2026-10-29T12:00:00+00:00",
+     "source": "Stalwart management API",
+     "kind": "details",
+     "scope": "",
+     "fields": [],
+     "table": null,
+     "findings": [
+      "Not readable: access denied to x:SpamTrainingSample/query; run `garrison stalwart setup` again, which gives the collector's API key the permissions it needs."
+     ],
+     "value": {},
+     "maxAge": 300
+    },
+    {
      "id": "stalwart.spam",
      "provider": "stalwart",
      "title": "Native spam filter and classifier",

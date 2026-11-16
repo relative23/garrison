@@ -120,6 +120,44 @@ fn unread(error: &Error) -> String {
     }
 }
 
+/// What the Management API card says of the calls of the one request that
+/// gave nothing, in the order of [`calls`]: those Stalwart refused the
+/// collector's key, as it refuses every call of a key made before they were
+/// needed, with the setup's advice, and those it answered in a form this
+/// release does not read; nothing where every call answered.
+fn parts_unread(answers: &[Result<Object, Error>]) -> Vec<String> {
+    let (mut refused, mut unreadable, mut others) = (Vec::new(), Vec::new(), Vec::new());
+    for ((method, _), answer) in calls().iter().zip(answers) {
+        match answer {
+            Ok(_) => {}
+            Err(Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_)) => {
+                refused.push(*method);
+            }
+            Err(Error::Unreadable(why)) => unreadable.push(why.as_str()),
+            // These end the whole request, never one call of it.
+            Err(error @ (Error::Unavailable(_) | Error::Limited(_))) => {
+                others.push(format!("Not readable ({method}): {}.", unread(error)));
+            }
+        }
+    }
+    let mut findings = Vec::new();
+    if !refused.is_empty() {
+        findings.push(format!(
+            "Not readable: access denied to {}; {SETUP}.",
+            refused.join(", ")
+        ));
+    }
+    if !unreadable.is_empty() {
+        findings.push(format!(
+            "Not readable: Stalwart answered in a form this release of Garrison does not read \
+             ({}); {SUPPORTED}.",
+            unreadable.join(", ")
+        ));
+    }
+    findings.extend(others);
+    findings
+}
+
 /// The fields of a recorded `server.startup` event that are read.
 #[derive(Deserialize)]
 struct Startup {
@@ -206,7 +244,7 @@ impl Stalwart {
         })?)
     }
 
-    fn unknown(context: &Context<'_>, finding: String) -> Result<Observation, ProviderError> {
+    fn unknown(context: &Context<'_>, findings: Vec<String>) -> Result<Observation, ProviderError> {
         Ok(Self::observation(
             context,
             "stalwart.api",
@@ -216,7 +254,7 @@ impl Stalwart {
             State::Unknown,
             "Stalwart management API",
         )?
-        .with_findings(vec![finding]))
+        .with_findings(findings))
     }
 
     /// The version from the last recorded `server.startup` event.
@@ -354,9 +392,10 @@ impl Provider for Stalwart {
     fn collect(&self, context: &Context<'_>) -> Collected {
         let mut report = Report::of(Self::version(context)?);
         let Some(key) = &context.native_key else {
-            report
-                .observations
-                .push(Self::unknown(context, "No API key is configured.".into())?);
+            report.observations.push(Self::unknown(
+                context,
+                vec!["No API key is configured.".into()],
+            )?);
             return Ok(report);
         };
         // The check's one request, which has its own time; it is not made
@@ -364,20 +403,30 @@ impl Provider for Stalwart {
         if context.deadline.expired() {
             report.observations.push(Self::unknown(
                 context,
-                "Not asked: the collection run's time was used up.".into(),
+                vec!["Not asked: the collection run's time was used up.".into()],
             )?);
             return Ok(report);
         }
         let client = JmapClient::new(&context.deployment.stalwart_url, key)
             .with_timeout(Duration::from_secs(8));
         let answers = match client.call_many(&calls(), MAX_RESPONSE) {
-            Ok(answers) => Answers::read(answers.into_iter().map(Result::ok).collect()),
+            Ok(answers) => answers,
             Err(error) => {
                 let finding = format!("Not readable: {}.", unread(&error));
-                report.observations.push(Self::unknown(context, finding)?);
+                report
+                    .observations
+                    .push(Self::unknown(context, vec![finding])?);
                 return Ok(report);
             }
         };
+        // The calls that answered fill their cards; the others are named.
+        let unanswered = parts_unread(&answers);
+        if !unanswered.is_empty() {
+            report
+                .observations
+                .push(Self::unknown(context, unanswered)?);
+        }
+        let answers = Answers::read(answers.into_iter().map(Result::ok).collect());
         report.observations.push(Self::spam(context, &answers)?);
         report
             .observations

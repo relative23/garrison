@@ -954,7 +954,11 @@ Notable changes for operators and users. The format follows
   again, which the Blocklists, Reverse names and Spam and ham by domain
   cards now give as well; that card is Unknown then. The Management API
   card, which said "Not readable: access denied." where Stalwart refused
-  the collector's key, gives the same advice now.
+  the collector's key, gives the same advice now, and it names the calls
+  of the check that Stalwart refused, as it refuses every one of them to a
+  key made before they were needed, or answered in a form this release
+  does not read: then it said nothing, and the cards those calls fill were
+  Unknown without a word.
 - **An answer of Stalwart's that Garrison cannot read is no refusal.** An
   answer in a form this release does not read, as a Stalwart release it
   does not support yet may give after an upgrade (no JSON, an object it
