@@ -3,16 +3,18 @@
 //! unanswered, and no more of where they lead after one, as a list that did
 //! not answer is asked no more. Each would wait out its three seconds, and
 //! the run has only so long. The lists are asked as before: the resolver
-//! answered for the mail hosts, and the lists' zones are others.
+//! answered for the mail hosts, and the lists' zones are others. One that
+//! did not answer for a mail host is asked nothing more, and what it
+//! answered before counts.
 
 use std::time::{Duration, Instant};
 
 use garrison_core::observations::State;
 
-use super::tests::{Zone, address, observed, pointer, provider, rows};
+use super::tests::{V4, Zone, address, listed, mail_host, observed, pointer, provider, rows};
 use super::*;
 use crate::providers::dns::stand_in::resolver_until;
-use crate::testing::{Remembered, assert_dated};
+use crate::testing::{Remembered, assert_dated, table};
 
 /// One list, asked about IPv4 addresses only.
 const LIST: &str = "lists = [\"up.example.org\"]\nlists_ipv6 = []";
@@ -147,4 +149,57 @@ fn where_a_reverse_name_leads_the_resolver_does_not_answer_leaves_the_others_una
         )
     );
     assert_eq!((blocklists.state, rows(&blocklists).len()), (State::Ok, 4));
+}
+
+/// The mail host answers, and one of its addresses is listed; the second
+/// mail host's first question goes unanswered. Nothing more is asked, but
+/// the listing found before is reported, and both cards say why not every
+/// address was asked.
+#[test]
+fn what_the_resolver_answered_before_it_went_silent_for_a_mail_host_counts() {
+    let mut zone = mail_host();
+    listed(&mut zone, V4, "up.example.org", [127, 0, 0, 2]);
+    let (resolver, stopping) = resolver_until(zone, |name| name == "mx2.example.test");
+    let provider = Reputation::new(&table(&format!(
+        "type = \"reputation\"\nresolver = \"{resolver}\"\n\
+         hosts = [\"mail.example.test\", \"mx2.example.test\"]\n{LIST}"
+    )))
+    .unwrap();
+    let (blocklists, reverse) = observed(&provider, &Remembered::default(), 0);
+    let asked = stopping.questions();
+    // The second mail host's A question was the last one asked.
+    assert_eq!(
+        asked.last(),
+        Some(&question("mx2.example.test", Kind::A)),
+        "{asked:?}"
+    );
+    let silent = "Not every address or list was asked: the resolver ";
+    assert_eq!(
+        (blocklists.state, blocklists.findings[0].as_str()),
+        (
+            State::Failed,
+            "203.0.113.5 is listed on up.example.org (127.0.0.2)."
+        )
+    );
+    assert!(
+        blocklists.findings[1].starts_with(silent),
+        "{:?}",
+        blocklists.findings
+    );
+    // Both addresses of the mail host fit; the card is not in order for
+    // what was not asked.
+    assert_eq!(
+        (reverse.state, rows(&reverse).len()),
+        (State::Partial, 2),
+        "{:?}",
+        reverse.findings
+    );
+    assert!(
+        reverse.findings[0].starts_with(silent),
+        "{:?}",
+        reverse.findings
+    );
+    // Not everything was asked: asked again after an hour.
+    assert_dated(&blocklists, 0, AGAIN);
+    assert_dated(&reverse, 0, AGAIN);
 }

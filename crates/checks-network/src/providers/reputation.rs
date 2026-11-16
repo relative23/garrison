@@ -306,8 +306,8 @@ impl Reputation {
         let mut keyless = None;
         // The addresses after the first MOST_ADDRESSES, counted as they come.
         let mut more = 0;
-        // Once the run's time is up, the reading keeps what it has.
-        let mut cut = false;
+        // The reading keeps what it has once time is up or the resolver is silent.
+        let (mut cut, mut silent) = (false, None);
         'hosts: for host in &hosts {
             // Stalwart may name a host that DNS cannot ask, which no option
             // refuses: it has no address to ask about, and the others do.
@@ -324,8 +324,12 @@ impl Reputation {
                     Ok(records) => records,
                     // A resolver that did not answer is asked nothing more,
                     // as the dns check does: each question would wait out
-                    // its time, and the run has only so long.
-                    Err(error @ dns::Error::NoAnswer { .. }) => return Err(error.to_string()),
+                    // its time, and the run has only so long. What it
+                    // answered before counts.
+                    Err(error @ dns::Error::NoAnswer { .. }) => {
+                        silent = Some(error.to_string());
+                        break 'hosts;
+                    }
                     // An answer it cannot use, malformed or an error of the
                     // resolver, concerns these addresses of this host alone.
                     Err(error) => {
@@ -367,6 +371,9 @@ impl Reputation {
                 }
             }
         }
+        if let Some(silent) = silent.as_ref().filter(|_| addresses.is_empty()) {
+            return Err(silent.clone());
+        }
         if more > 0 {
             left_out.push(format!(
                 "The mail hosts have {} addresses; only the first {MOST_ADDRESSES} are asked.",
@@ -378,7 +385,7 @@ impl Reputation {
             addresses,
             problem: None,
             rest,
-            cut: (cut || asker.cut).then(|| RUN_OVER.to_owned()),
+            cut: silent.or_else(|| (cut || asker.cut).then(|| RUN_OVER.to_owned())),
             left_out,
             keyless,
             hosts_unread,

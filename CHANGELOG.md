@@ -606,6 +606,13 @@ Notable changes for operators and users. The format follows
   time and leave the checks after it not run. Once such a question goes
   unanswered, no more of that kind are asked in the reading: the addresses
   after it say so, and the lists are asked as before.
+- **What the reputation check read before its resolver went silent
+  counts.** Where the resolver stopped answering for a later mail host's
+  addresses, the whole reading was dropped: both cards said "Nothing could
+  be asked: …", and a listing found for an earlier host's address went
+  unreported for at least an hour. What was asked now counts: the cards
+  show it and say that not every address or list was asked, and why, and
+  the reading is asked again after an hour.
 - **A DNS answer counts only for the question it repeats.** The `dns` and
   `reputation` checks numbered their questions in order, from the clock or
   counting from one, and took any answer with that number: whoever could
