@@ -957,10 +957,13 @@ Notable changes for operators and users. The format follows
   answer in a form this release does not read, as a Stalwart release it
   does not support yet may give after an upgrade (no JSON, an object it
   does not know, more than it reads, without what was asked, or the error
-  `unknownMethod` for a method it does not know), was taken for a refusal: the broker answered a user 403 for such an answer to
-  UserInfo, which ended that user's session, and the cards and `garrison
-  access` gave the advice to run `garrison stalwart setup` again, which
-  cannot mend it. Such an answer now grants nothing and refuses nobody:
+  `unknownMethod` for a method it does not know), was taken for a refusal:
+  the broker answered a user 403 for such an answer to UserInfo, which
+  ended that user's session, a status of UserInfo other than 401, such as
+  404 where the endpoint moved, ended every user's session as if the
+  sign-in had expired, and the cards and `garrison access` gave the advice
+  to run `garrison stalwart setup` again, which cannot mend it. Such an
+  answer now grants nothing and refuses nobody:
   the broker answers 503 "Authorization is temporarily unavailable" and its
   journal names the answer as an error, a job whose start meets one runs
   nothing and says so, and the sign-in page says that access could not be

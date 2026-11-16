@@ -86,6 +86,8 @@ fn bad_tokens_and_subjects_are_told_apart() {
     let long = "x".repeat(300);
     let server = serve(vec![
         answer(401, ""),
+        answer(403, ""),
+        answer(404, ""),
         respond(&json!({"sub": "has space"})),
         respond(&json!({"email": "a@b"})),
         respond(&json!({"sub": "45", "email": long})),
@@ -105,6 +107,16 @@ fn bad_tokens_and_subjects_are_told_apart() {
             "The access token is no longer valid".into()
         ))
     );
+    // Only 401 says that the token is not valid (RFC 6750, 3.1, and what
+    // Stalwart 1.1.0 answers); another status says nothing of it.
+    for status in [403, 404] {
+        assert_eq!(
+            oidc.userinfo(TOKEN, None),
+            Err(Error::Unreadable(format!(
+                "Stalwart answered HTTP {status}"
+            )))
+        );
+    }
     // An answer whose subject cannot be read refuses nobody.
     for _ in 0..2 {
         assert_eq!(
@@ -127,6 +139,8 @@ fn code_exchange_accepts_only_bearer_tokens_with_a_lifetime() {
         token("bearer", json!(0)),
         token("bearer", json!(1.5)),
         answer(400, r#"{"error": "invalid_grant"}"#),
+        answer(401, r#"{"error": "invalid_client"}"#),
+        answer(404, ""),
     ]);
     let oidc = provider(&server.url);
     let exchange = CodeExchange {
@@ -148,9 +162,18 @@ fn code_exchange_accepts_only_bearer_tokens_with_a_lifetime() {
             Err(Error::unreadable("The provider returned an unusable token"))
         );
     }
+    // The token endpoint refuses with 400 or 401 (RFC 6749, 5.2; Stalwart
+    // 1.1.0 answers 400 to a code it does not know); another status is no
+    // answer this release reads.
+    for _ in 0..2 {
+        assert_eq!(
+            oidc.exchange_code(&exchange),
+            Err(Error::denied("The authorization code was not accepted"))
+        );
+    }
     assert_eq!(
         oidc.exchange_code(&exchange),
-        Err(Error::denied("The authorization code was not accepted"))
+        Err(Error::unreadable("Stalwart answered HTTP 404"))
     );
     let request = server.requests().remove(0);
     assert!(

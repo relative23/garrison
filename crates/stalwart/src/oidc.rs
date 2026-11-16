@@ -131,8 +131,17 @@ impl Provider {
             .request(Request::post(&url, form.as_bytes()), exchange.client_ip)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .send()?;
-        if answer.status != 200 {
-            return Err(Error::denied("The authorization code was not accepted"));
+        // The token endpoint refuses a code, a grant or a client with 400 or
+        // 401 (RFC 6749, 5.2; Stalwart 1.1.0 answers 400 to a code it does
+        // not know); another status is no answer this release reads.
+        match answer.status {
+            200 => {}
+            400 | 401 => return Err(Error::denied("The authorization code was not accepted")),
+            status => {
+                return Err(Error::Unreadable(format!(
+                    "Stalwart answered HTTP {status}"
+                )));
+            }
         }
         let unusable = || Error::unreadable("The provider returned an unusable token");
         let value = json::parse(&answer.body, MAX_ANSWER).map_err(|_| unusable())?;
@@ -162,10 +171,22 @@ impl Provider {
             .request(Request::get(&url), client_ip)
             .header("Authorization", &authorization)
             .send()?;
-        if answer.status != 200 {
-            return Err(Error::InvalidToken(
-                "The access token is no longer valid".into(),
-            ));
+        // Only 401 says that the token is not valid (RFC 6750, 3.1; what
+        // Stalwart 1.1.0 answers to a token it does not know or revoked),
+        // which ends the user's session. Another status says nothing of
+        // the token, and a sign-out of every user for it would be wrong.
+        match answer.status {
+            200 => {}
+            401 => {
+                return Err(Error::InvalidToken(
+                    "The access token is no longer valid".into(),
+                ));
+            }
+            status => {
+                return Err(Error::Unreadable(format!(
+                    "Stalwart answered HTTP {status}"
+                )));
+            }
         }
         // No refusal of the user: an answer whose subject cannot be read
         // says nothing of who it is.

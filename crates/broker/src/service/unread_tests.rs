@@ -50,6 +50,29 @@ fn an_unreadable_userinfo_answer_is_no_refusal_of_the_user() {
     assert!(!lines.is_empty(), "{lines:?}");
 }
 
+/// UserInfo refuses a token that is no longer valid with 401, which ends
+/// the user's session; another status says nothing of the token, such as
+/// 404 where the endpoint moved, and ends nobody's.
+#[test]
+fn a_userinfo_answer_of_another_status_signs_nobody_out() {
+    kept();
+    for status in [400, 403, 404, 405] {
+        let error = checked(vec![answer(status, "")]);
+        assert_eq!(
+            (error.status, error.message.as_str()),
+            (503, "Authorization is temporarily unavailable"),
+            "{status}"
+        );
+    }
+    let lines = named("UserInfo: Stalwart answered HTTP 405");
+    assert!(!lines.is_empty(), "{lines:?}");
+    let ended = checked(vec![answer(401, "")]);
+    assert_eq!(
+        (ended.status, ended.message.as_str()),
+        (401, "Sign-in required again")
+    );
+}
+
 #[test]
 fn an_unreadable_answer_of_the_management_api_is_named_as_such() {
     kept();

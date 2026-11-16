@@ -56,8 +56,8 @@ rights that cannot be used. An answer this release does not read is one
 without JSON, with an object or a status it does not know, larger than it
 reads or without what was asked, or an error of a method other than
 `forbidden`, such as `unknownMethod` for a method Stalwart does not know, as
-a Stalwart release Garrison does not support yet may give, to UserInfo or to
-the management API. Signed-in users
+a Stalwart release Garrison does not support yet may give, to UserInfo, where
+only 401 says that a token is no longer valid, or to the management API. Signed-in users
 stay signed in and see that their rights cannot be checked, nobody new can
 sign in, and the broker's journal names the cause as an error, the answer
 by the request it answered. A typo in the policy, or an upgrade of Stalwart,

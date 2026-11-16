@@ -183,6 +183,12 @@ fn a_code_works_once_with_its_verifier_and_the_token_only_signs_in() {
         provider.userinfo(&token.access_token, None),
         Err(Error::InvalidToken(_))
     ));
+    // So is a token Stalwart never issued: UserInfo answers it 401, which
+    // alone ends a sign-in; any other status ends none.
+    assert!(matches!(
+        provider.userinfo(&random_hex(24), None),
+        Err(Error::InvalidToken(_))
+    ));
 }
 
 #[test]
