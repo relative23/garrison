@@ -459,3 +459,4 @@ fn stalwart_takes_the_mail_tests_and_knows_the_spam_text_by_its_subject() {
 }
 
 mod notification;
+mod refused;

@@ -374,9 +374,10 @@ fn a_resolver_that_does_not_answer_and_a_stalwart_that_gives_no_domains_are_unkn
         (empty[0].id.as_str(), empty[0].state),
         ("dns.records", State::Unknown)
     );
-    // Without a key, and with a key that may not read domains.
+    // Without a key, and with a key that may not read domains, whose method
+    // Stalwart refuses (`unread_tests` has each kind of failure).
     let directory = tempfile::tempdir().unwrap();
-    let config = config(directory.path());
+    let mut config = config(directory.path());
     let runner = Canned(String::new());
     let provider = Dns::new(&table("type = \"dns\"")).unwrap();
     let keyless = provider
@@ -386,11 +387,16 @@ fn a_resolver_that_does_not_answer_and_a_stalwart_that_gives_no_domains_are_unkn
         keyless.observations[0].findings,
         ["No API key is configured."]
     );
+    let stalwart = serve(vec![answer_json(&json!({
+        "methodResponses": [["error", {"type": "forbidden"}, "0"]]
+    }))]);
+    config.deployment.stalwart_url.clone_from(&stalwart.url);
     let refused = Context {
         native_key: Some("key".into()),
         ..crate::testing::context(&config, &runner)
     };
     let denied = provider.collect(&refused).unwrap();
+    stalwart.requests();
     assert!(denied.observations[0].findings[0].contains("garrison stalwart setup"));
 }
 

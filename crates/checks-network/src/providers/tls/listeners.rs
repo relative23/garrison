@@ -18,10 +18,13 @@ use serde_json::Value;
 
 use super::Endpoint;
 use crate::context::Context;
-use crate::providers::dns::mail_hosts;
+use crate::providers::dns::{mail_hosts, not_given};
 
 /// So many endpoints are probed at the most.
 const MOST: usize = 24;
+/// What to do where Stalwart refused the collector's key its listeners or
+/// its domains: named endpoints need neither.
+const FIX: &str = "run `garrison stalwart setup` again to let it read them, or name `endpoints`";
 
 /// What to probe, and what to say of what is not.
 pub(super) struct Found {
@@ -99,11 +102,8 @@ pub(super) fn endpoints(context: &Context<'_>, most: usize) -> Result<Found, Str
             None,
             &["protocol", "bind", "useTls", "implicitTls"],
         )
-        .map_err(|_| {
-            "Stalwart did not give its listeners to the collector's API key; run `garrison \
-             stalwart setup` again to let it read them, or name `endpoints`"
-        })?;
-    let (hosts, rest) = mail_hosts(context, most)?;
+        .map_err(|error| not_given(&error, "listeners", FIX))?;
+    let (hosts, rest) = mail_hosts(context, most, FIX)?;
     let mut endpoints = derived(&listeners, &hosts);
     if endpoints.is_empty() {
         return Err("Stalwart names no mail host with a listener that speaks TLS".to_owned());

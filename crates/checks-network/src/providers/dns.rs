@@ -69,22 +69,51 @@ pub(super) fn left_out(domains: usize, most: usize) -> String {
     format!("Stalwart has {domains} domains; only the first {most} are checked (`max_domains`).")
 }
 
+/// What to do where Stalwart refused the collector's key: the setup gives
+/// the key the permissions the checks need.
+pub(super) const SETUP: &str = "run `garrison stalwart setup` again to let it read them";
+
+/// Why Stalwart did not give the collector's key its `what`, by what went
+/// wrong: it did not answer, or refused the key for its rate limit, which
+/// both pass by themselves; or it refused the key, or answered what the
+/// check cannot use, for which `fix` says what to do.
+pub(super) fn not_given(error: &garrison_stalwart::Error, what: &str, fix: &str) -> String {
+    use garrison_stalwart::Error;
+    match error {
+        Error::Unavailable(_) => {
+            format!("Stalwart did not answer the collector's request for its {what}")
+        }
+        Error::Limited(_) => format!(
+            "Stalwart refused the collector's key for its rate limit (HTTP 429), so its {what} \
+             could not be read"
+        ),
+        Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
+            format!("Stalwart did not give its {what} to the collector's API key; {fix}")
+        }
+    }
+}
+
+/// Stalwart's domains, as the collector's `key` reads them.
+fn domains(context: &Context<'_>, key: &str) -> Result<Vec<Domain>, garrison_stalwart::Error> {
+    JmapClient::new(&context.deployment.stalwart_url, key)
+        .with_timeout(Duration::from_secs(8))
+        .get::<Domain>("Domain", None, &["name", "dnsZoneFile"])
+}
+
 /// The hosts Stalwart names as the mail servers of its first `most` domains,
 /// the targets of the MX records in their zone files, and where it has more
-/// domains, the finding that says so.
+/// domains, the finding that says so; where they cannot be read, why, with
+/// `fix` for a key Stalwart refused.
 pub(super) fn mail_hosts(
     context: &Context<'_>,
     most: usize,
+    fix: &str,
 ) -> Result<(Vec<String>, Option<String>), String> {
     let key = context
         .native_key
         .as_deref()
         .ok_or("the collector's API key could not be read")?;
-    let client =
-        JmapClient::new(&context.deployment.stalwart_url, key).with_timeout(Duration::from_secs(8));
-    let domains = client
-        .get::<Domain>("Domain", None, &["name", "dnsZoneFile"])
-        .map_err(|_| "Stalwart did not give its domains to the collector's API key")?;
+    let domains = domains(context, key).map_err(|error| not_given(&error, "domains", fix))?;
     let mut hosts: Vec<String> = domains
         .iter()
         .take(most)
@@ -415,15 +444,13 @@ impl Provider for Dns {
                 .push(self.unknown(context, "No API key is configured.")?);
             return Ok(report);
         };
-        let client = JmapClient::new(&context.deployment.stalwart_url, key)
-            .with_timeout(Duration::from_secs(8));
-        let Ok(domains) = client.get::<Domain>("Domain", None, &["name", "dnsZoneFile"]) else {
-            report.observations.push(self.unknown(
-                context,
-                "Stalwart did not give its domains to the collector's API key; run \
-                 `garrison stalwart setup` again to let it read them.",
-            )?);
-            return Ok(report);
+        let domains = match domains(context, key) {
+            Ok(domains) => domains,
+            Err(error) => {
+                let finding = format!("{}.", not_given(&error, "domains", SETUP));
+                report.observations.push(self.unknown(context, &finding)?);
+                return Ok(report);
+            }
         };
         let Some(resolver) = self.resolver() else {
             report
@@ -462,3 +489,5 @@ mod sts_tests;
 pub(crate) mod tests;
 #[cfg(test)]
 mod time_tests;
+#[cfg(test)]
+mod unread_tests;

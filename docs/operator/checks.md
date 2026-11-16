@@ -4,7 +4,11 @@ What Garrison shows on its pages comes from checks. The configuration calls
 them providers: each `[[providers]]` entry in `/etc/garrison/garrison.toml`
 is one check, and `type` names it. The collector runs them every minute. A
 source that is missing or unreadable shows as Unknown; it never stops the
-other checks.
+other checks. The checks that read Stalwart's domains or listeners with the
+collector's API key (`dns`, `tls`, `reputation`) say why where they could
+not: Stalwart did not answer, or refused the key for its rate limit (HTTP
+429), both of which pass by themselves, or did not give the key what the
+check reads, which `garrison stalwart setup` mends.
 
 Every card says when its source was asked ("Checked ..."). Most checks ask in
 every run, and their cards are marked stale when the last run is more than
