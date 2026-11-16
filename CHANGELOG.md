@@ -959,14 +959,19 @@ Notable changes for operators and users. The format follows
   key made before they were needed, or answered in a form this release
   does not read: then it said nothing, and the cards those calls fill were
   Unknown without a word.
-- **The card by domain says where the collector has no key for Stalwart.**
-  Without the collector's API key, its credential file empty or missing,
-  the mail flow asked Stalwart for no accounts, counted all mail it filed
-  under "unknown", and the Spam and ham by domain card was in order without
-  a word. It is now Unknown and says that the domains of the mailboxes are
-  not known because the collector has no API key for Stalwart, and that
-  `garrison stalwart setup` makes one; the counts stay, and the other
-  mail-flow cards, which need no key, are as before.
+- **Every card that needs the collector's key for Stalwart says where it
+  has none, and what makes one.** Without the collector's API key, its
+  credential file empty or missing, the DNS records and Management API
+  cards said "No API key is configured." and the Blocklists, Reverse names
+  and TLS certificates cards that the collector's API key could not be
+  read, none of them what makes one, while the mail flow asked Stalwart for
+  no accounts, counted all mail it filed under "unknown", and the Spam and
+  ham by domain card was in order without a word. Each of these cards now
+  says in the same words that the collector has no API key for Stalwart and
+  that `garrison stalwart setup` makes one, the TLS certificates card also
+  that `endpoints` named for it need none. The Spam and ham by domain card
+  is Unknown then; its counts stay, and the other mail-flow cards, which
+  need no key, are as before.
 - **An answer of Stalwart's that Garrison cannot read is no refusal.** An
   answer in a form this release does not read, as a Stalwart release it
   does not support yet may give after an upgrade (no JSON, an object it

@@ -15,7 +15,7 @@ use garrison_core::observations::{Column, Evidence, Format, Observation, Require
 use serde_json::json;
 
 use super::domains::{Domain, domains, left_out, max_domains, not_given};
-use crate::context::{Collected, Context, Provider, Report};
+use crate::context::{Collected, Context, NO_KEY, Provider, Report};
 use crate::dns::{self, Answer, Kind};
 use crate::options::{Checked, Options, fail};
 
@@ -56,7 +56,8 @@ pub(super) fn resolver_option(raw: &toml::Table, provider: &str) -> Checked<Opti
 /// The hosts Stalwart names as the mail servers of its first `most` domains,
 /// the targets of the MX records in their zone files, and where it has more
 /// domains, the finding that says so; where they cannot be read, why, with
-/// `besides` for what else mends it (see [`not_given`]).
+/// `besides` for what else mends it (see [`not_given`]), also where the
+/// collector has no key.
 pub(super) fn mail_hosts(
     context: &Context<'_>,
     most: usize,
@@ -65,7 +66,7 @@ pub(super) fn mail_hosts(
     let key = context
         .native_key
         .as_deref()
-        .ok_or("the collector's API key could not be read")?;
+        .ok_or_else(|| format!("{NO_KEY}{besides}"))?;
     let domains = domains(context, key).map_err(|error| not_given(&error, "domains", besides))?;
     let mut hosts: Vec<String> = domains
         .iter()
@@ -383,9 +384,8 @@ impl Provider for Dns {
     fn collect(&self, context: &Context<'_>) -> Collected {
         let mut report = Report::default();
         let Some(key) = &context.native_key else {
-            report
-                .observations
-                .push(self.unknown(context, "No API key is configured.")?);
+            let finding = format!("Not asked: {NO_KEY}.");
+            report.observations.push(self.unknown(context, &finding)?);
             return Ok(report);
         };
         let domains = match domains(context, key) {

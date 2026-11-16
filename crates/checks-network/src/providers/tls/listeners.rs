@@ -17,15 +17,15 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::Endpoint;
-use crate::context::Context;
+use crate::context::{Context, NO_KEY};
 use crate::providers::dns::mail_hosts;
 use crate::providers::domains::not_given;
 
 /// So many endpoints are probed at the most.
 const MOST: usize = 24;
-/// What else mends it where Stalwart refused the collector's key its
-/// listeners or its domains, or answered in a form this release does not
-/// read: named endpoints need neither.
+/// What else mends it where the collector has no key, where Stalwart
+/// refused the key its listeners or its domains, or answered in a form this
+/// release does not read: named endpoints need none of them.
 const BESIDES: &str = ", or name `endpoints`";
 
 /// What to probe, and what to say of what is not.
@@ -95,7 +95,7 @@ pub(super) fn endpoints(context: &Context<'_>, most: usize) -> Result<Found, Str
     let key = context
         .native_key
         .as_deref()
-        .ok_or("the collector's API key could not be read")?;
+        .ok_or_else(|| format!("{NO_KEY}{BESIDES}"))?;
     let client =
         JmapClient::new(&context.deployment.stalwart_url, key).with_timeout(Duration::from_secs(8));
     let listeners = client

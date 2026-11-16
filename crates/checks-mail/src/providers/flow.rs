@@ -31,7 +31,7 @@ use read::{DAY, DAYS, Week};
 
 use super::history;
 
-use crate::context::{Collected, Context, Provider, ProviderError, Report};
+use crate::context::{Collected, Context, NO_KEY, Provider, ProviderError, Report};
 use crate::kept::{Kept, cached};
 use crate::options::{Checked, Options, fail};
 
@@ -126,11 +126,7 @@ impl Flow {
     /// and the error says what makes one.
     fn accounts(context: &Context<'_>) -> Result<HashMap<i64, String>, String> {
         let Some(key) = context.native_key.as_deref() else {
-            return Err(
-                "the collector has no API key for Stalwart; run `garrison stalwart \
-                        setup`, which makes one"
-                    .to_owned(),
-            );
+            return Err(NO_KEY.to_owned());
         };
         let client = JmapClient::new(&context.deployment.stalwart_url, key)
             .with_timeout(Duration::from_secs(8));

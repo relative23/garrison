@@ -91,12 +91,20 @@ impl fmt::Debug for DqsKey {
     }
 }
 
+/// Why a check that reads Stalwart with the collector's API key could not,
+/// where the collector has none, as where its credential file is missing or
+/// empty, and what makes one. Every card that needs the key says these
+/// words, after a frame of its own, as it gives its other reasons.
+pub const NO_KEY: &str =
+    "the collector has no API key for Stalwart; run `garrison stalwart setup`, which makes one";
+
 pub struct Context<'a> {
     pub deployment: &'a Deployment,
     pub now: Timestamp,
     /// When the run's checks must be done.
     pub deadline: Deadline,
-    /// The collector's read-only management-API key, if it could be read.
+    /// The collector's read-only management-API key, if it could be read;
+    /// without it a check that needs it says [`NO_KEY`].
     pub native_key: Option<String>,
     /// User name and secret for the metrics exporter.
     pub metrics_credential: Option<(String, String)>,

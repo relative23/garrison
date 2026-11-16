@@ -19,7 +19,7 @@ use serde_json::{Map, json};
 
 use self::answers::{Arguments, MailboxAccount, Milter, SpamClassifier, SpamSettings};
 use super::mailboxes::mailboxes;
-use crate::context::{Collected, Context, Provider, ProviderError, Report};
+use crate::context::{Collected, Context, NO_KEY, Provider, ProviderError, Report};
 use crate::options::{Checked, Options};
 use crate::values::float;
 
@@ -394,7 +394,7 @@ impl Provider for Stalwart {
         let Some(key) = &context.native_key else {
             report.observations.push(Self::unknown(
                 context,
-                vec!["No API key is configured.".into()],
+                vec![format!("Not asked: {NO_KEY}.")],
             )?);
             return Ok(report);
         };

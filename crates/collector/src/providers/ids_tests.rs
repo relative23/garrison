@@ -20,9 +20,9 @@ use crate::testing::{Canned, config, now, table};
 
 /// A type with a typical configuration, as the checks' own fixtures write
 /// it: the golden test's, `tests/observation_ids.rs`' and the checks' tests'.
-struct Case {
-    kind: &'static str,
-    options: String,
+pub(super) struct Case {
+    pub(super) kind: &'static str,
+    pub(super) options: String,
     /// What Stalwart answers the collector's key with where it is within
     /// reach, one answer for each request.
     stalwart: Vec<String>,
@@ -37,7 +37,7 @@ fn golden() -> PathBuf {
 
 /// A resolver's address where nothing listens: a question is refused at
 /// once.
-fn no_resolver() -> String {
+pub(super) fn no_resolver() -> String {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     socket.local_addr().unwrap().to_string()
 }
@@ -52,7 +52,7 @@ fn case(kind: &'static str, options: &str) -> Case {
 }
 
 /// Every type, in the registry's order.
-fn cases(work: &Path) -> Vec<Case> {
+pub(super) fn cases(work: &Path) -> Vec<Case> {
     let fixtures = golden();
     let jmap = std::fs::read_to_string(fixtures.join("jmap.json")).unwrap();
     let (work, golden) = (work.display(), fixtures.display());
@@ -135,7 +135,7 @@ fn cases(work: &Path) -> Vec<Case> {
 
 /// A week in the event history with what the mail flow counts: mail filed
 /// as ham, a sender that fails SPF, a milter's verdict.
-fn history(config: &Config) {
+pub(super) fn history(config: &Config) {
     let path = config.database(Database::Events);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();

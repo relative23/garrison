@@ -385,7 +385,10 @@ fn a_resolver_that_does_not_answer_and_a_stalwart_that_gives_no_domains_are_unkn
         .unwrap();
     assert_eq!(
         keyless.observations[0].findings,
-        ["No API key is configured."]
+        [
+            "Not asked: the collector has no API key for Stalwart; run `garrison stalwart setup`, \
+             which makes one."
+        ]
     );
     let stalwart = serve(vec![answer_json(&json!({
         "methodResponses": [["error", {"type": "forbidden"}, "0"]]
