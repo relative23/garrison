@@ -1,6 +1,7 @@
 //! The questions of one reading, all to one resolver: a list that does not
-//! answer is asked no more, the lists are asked for a time in all, and
-//! nothing is asked once the run's checks must be done.
+//! answer is asked no more, and neither are reverse names once one went
+//! unanswered, nor where they lead once that did; the lists are asked for a
+//! time in all, and nothing is asked once the run's checks must be done.
 
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
@@ -15,6 +16,8 @@ use crate::dns::{self, Answer, Kind};
 pub(super) const RUN_OVER: &str = "the collection run's time was used up";
 /// Why a list was not asked about an address: the lists had their time.
 pub(super) const SLOW: &str = "the lists took too long";
+/// Why an address's reverse name, or where it leads, was not asked.
+const BEFORE: &str = "the resolver did not answer such a question before";
 
 /// The lists are asked for this long at most: the collector's run has a
 /// limit of its own, and a list that is down answers nothing for seconds.
@@ -32,6 +35,12 @@ pub(super) struct Asker {
     pub(super) cut: bool,
     /// Whether a list was left unasked because the lists had their time.
     pub(super) slow: bool,
+    /// The kinds of question about an address that the resolver did not
+    /// answer, its reverse name (PTR) or where that leads (A, AAAA): each is
+    /// asked no more, since every such question would wait out its time.
+    /// The resolver answered for the mail hosts, and the lists' zones are
+    /// others, so the lists are asked.
+    unanswered: Vec<Kind>,
 }
 
 impl Asker {
@@ -45,6 +54,7 @@ impl Asker {
             deadline,
             cut: false,
             slow: false,
+            unanswered: Vec::new(),
         }
     }
 
@@ -83,19 +93,34 @@ impl Asker {
         }
     }
 
+    /// The records of `kind` at `name` about an address, unless the resolver
+    /// did not answer such a question before; one it does not answer now is
+    /// noted, so that it is the last of its kind.
+    fn about(&mut self, name: &str, kind: Kind) -> Result<Vec<String>, String> {
+        if self.unanswered.contains(&kind) {
+            return Err(BEFORE.to_owned());
+        }
+        self.records(name, kind).map_err(|why| {
+            if matches!(why, dns::Error::NoAnswer { .. }) {
+                self.unanswered.push(kind);
+            }
+            why.to_string()
+        })
+    }
+
     /// The reverse name of `address` and whether it leads back there; `None`
     /// where the run's time was up before it could be followed back. An
     /// answer that cannot be used concerns this address alone: it is kept
     /// as why, and the reading goes on.
-    pub(super) fn reverse(&self, address: IpAddr) -> Option<Reverse> {
-        let unread = |name: Option<String>, why: &dns::Error| Reverse {
+    pub(super) fn reverse(&mut self, address: IpAddr) -> Option<Reverse> {
+        let unread = |name: Option<String>, why: String| Reverse {
             name,
             confirmed: false,
-            unread: Some(why.to_string()),
+            unread: Some(why),
         };
-        let name = match self.records(&dns::reversed(address, None), Kind::Ptr) {
+        let name = match self.about(&dns::reversed(address, None), Kind::Ptr) {
             Ok(names) => names.into_iter().next(),
-            Err(why) => return Some(unread(None, &why)),
+            Err(why) => return Some(unread(None, why)),
         };
         let Some(name) = name.map(|name| name.trim_end_matches('.').to_lowercase()) else {
             return Some(Reverse::default());
@@ -108,7 +133,7 @@ impl Asker {
         } else {
             Kind::Aaaa
         };
-        Some(match self.records(&name, back) {
+        Some(match self.about(&name, back) {
             Ok(found) => Reverse {
                 confirmed: found
                     .iter()
@@ -116,7 +141,7 @@ impl Asker {
                 name: Some(name),
                 unread: None,
             },
-            Err(why) => unread(Some(name), &why),
+            Err(why) => unread(Some(name), why),
         })
     }
 }

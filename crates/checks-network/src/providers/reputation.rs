@@ -475,6 +475,8 @@ mod limits_tests;
 #[cfg(test)]
 mod names_tests;
 #[cfg(test)]
+mod silence_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod time_tests;

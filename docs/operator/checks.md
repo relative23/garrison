@@ -322,7 +322,10 @@ hour.
   of the resolver, the card names the address and why, and is Partial where
   it would be OK, or Unknown where no address could be read; the other
   addresses and every list are asked as before, and the reading is asked
-  again after an hour.
+  again after an hour. Where the resolver does not answer such a question
+  at all, it is asked no more questions of that kind in the reading, since
+  each would wait out its three seconds: the addresses after it say so,
+  and the lists are asked as before.
 
 The lists learn the addresses they are asked about, through this host's
 resolver. Each list has terms of use of its own; remove from `lists` what you

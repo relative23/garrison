@@ -598,6 +598,14 @@ Notable changes for operators and users. The format follows
   again after an hour. A resolver that does not answer at all still ends
   the reading, as the `dns` check stops asking it: each further question
   would wait out its time.
+- **A resolver that does not answer reverse names costs one wait.** Where
+  the resolver did not answer the reputation check's question for an
+  address's reverse name, or for where that name leads, the check asked
+  the same of every further address, each question waiting out its three
+  seconds, so that twelve addresses could take most of a collection run's
+  time and leave the checks after it not run. Once such a question goes
+  unanswered, no more of that kind are asked in the reading: the addresses
+  after it say so, and the lists are asked as before.
 - **A DNS answer counts only for the question it repeats.** The `dns` and
   `reputation` checks numbered their questions in order, from the clock or
   counting from one, and took any answer with that number: whoever could
