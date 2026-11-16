@@ -274,4 +274,6 @@ impl Provider for Flow {
 #[cfg(test)]
 mod accounts_tests;
 #[cfg(test)]
+mod history_tests;
+#[cfg(test)]
 mod tests;
