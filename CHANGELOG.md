@@ -215,6 +215,14 @@ Notable changes for operators and users. The format follows
   they now have a column of their own. A milter that deferred every message
   it was shown since yesterday, as clamav-milter does while clamd is down,
   left the card in order; it is now a warning.
+- **A Stalwart that is slow to give its accounts no longer costs the mail
+  flow its counts.** The mail flow opened the event history, whose reading
+  has two seconds, and then asked Stalwart for its accounts, which may take
+  eight: where the answer took more than two seconds, every card of the
+  mail flow was Unknown for ten minutes with "the event history could not
+  be read: interrupted", which blamed the history. Stalwart is now asked
+  first; the counts stand, and only the card by domain says where the
+  domains are not known.
 - **The test messages' results are those of the listener and the mailbox
   configured.** After a change of `recipient`, `sender`, `host` or `port`,
   the Test messages card showed the results kept for the old ones under the

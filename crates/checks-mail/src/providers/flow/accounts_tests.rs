@@ -5,6 +5,10 @@
 //! mends, or answered in a form this release does not read, which names the
 //! answer and the supported Stalwart releases.
 
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
+use std::thread;
+
 use garrison_testing::http::{answer, json as answer_json, serve};
 use serde_json::json;
 
@@ -113,6 +117,75 @@ fn the_card_by_domain_says_why_the_domains_of_the_mailboxes_are_not_known() {
     assert_eq!(
         (named.state, named.findings.len(), rows(&named)),
         (State::Ok, 0, vec!["example.test | 1 | 1 | 50 %".to_owned()])
+    );
+}
+
+/// A Stalwart that answers its one request with `answer`, `after` the
+/// request came; its address, and its thread.
+fn slow(answer: String, after: Duration) -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = value.trim().parse().unwrap();
+            }
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        thread::sleep(after);
+        reader.into_inner().write_all(answer.as_bytes()).unwrap();
+    });
+    (url, handle)
+}
+
+/// Stalwart is asked before the history is opened: an answer that takes
+/// longer than the reader's two seconds costs no count, and the domains it
+/// names are used.
+#[test]
+fn a_stalwart_slow_to_give_its_accounts_costs_no_count() {
+    // Enough mail that SQLite looks at the reader's clock while it counts.
+    let events: Vec<_> = (0..6_000)
+        .map(|second| event("message-ingest.ham", 60 + second, json!({"accountId": 1})))
+        .collect();
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = history(directory.path(), &Receiver::default(), &events, 0);
+    let accounts = answer_json(&json!({"methodResponses": [["x:Account/get", {"list": [
+        {"id": "b", "emailAddress": "anna@example.test"}
+    ]}, "0"]]}));
+    let (url, stalwart) = slow(accounts, Duration::from_millis(2_500));
+    config.deployment.stalwart_url = url;
+    let runner = Canned(String::new());
+    let context = Context {
+        native_key: Some("key".to_owned()),
+        ..crate::testing::context(&config, &runner)
+    };
+    let provider = Flow::new(&table("type = \"mail-flow\"")).unwrap();
+    let observations = provider.collect(&context).unwrap().observations;
+    stalwart.join().unwrap();
+    for observation in &observations {
+        assert_eq!(
+            (observation.state, observation.findings.clone()),
+            (State::Ok, Vec::<String>::new()),
+            "{}",
+            observation.id
+        );
+    }
+    assert_eq!(
+        rows(of(&observations, "flow.spam"))[0],
+        "2026-10-29 | 6000 | 0 | 0 %"
+    );
+    assert_eq!(
+        rows(of(&observations, "flow.spam-domains")),
+        ["example.test | 6000 | 0 | 0 %"]
     );
 }
 

@@ -76,6 +76,7 @@ pub(super) fn history(
         "CREATE TABLE events(seq INTEGER PRIMARY KEY, created_at INTEGER, type TEXT, span_id TEXT, fields TEXT)",
     )
     .unwrap();
+    db.execute_batch("BEGIN").unwrap();
     for (kind, ago, span, fields) in events {
         db.execute(
             "INSERT INTO events(created_at,type,span_id,fields) VALUES(?,?,?,?)",
@@ -83,6 +84,7 @@ pub(super) fn history(
         )
         .unwrap();
     }
+    db.execute_batch("COMMIT").unwrap();
     receiver.record(&db, now().as_second() + later);
     config
 }

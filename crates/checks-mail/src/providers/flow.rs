@@ -155,26 +155,27 @@ impl Flow {
             problem: Some(problem),
             ..Read::default()
         };
+        // Stalwart first: the reader's time runs from its opening, and an
+        // answer that is slow to come must not use up the time of counts
+        // that need no account.
+        let (accounts, domains_unread) = match Self::accounts(context) {
+            Ok(accounts) => (accounts, None),
+            Err(why) => (HashMap::new(), Some(why)),
+        };
         match reading(&context.events_database, Duration::from_secs(2)) {
-            Ok(Some(db)) => {
-                let (accounts, domains_unread) = match Self::accounts(context) {
-                    Ok(accounts) => (accounts, None),
-                    Err(why) => (HashMap::new(), Some(why)),
-                };
-                match read::week(&db, now, &accounts) {
-                    Ok(week) => Read {
-                        uncovered: history::uncovered(
-                            &db,
-                            week.days.first().copied().unwrap_or(now - DAYS * DAY),
-                            now,
-                        ),
-                        week,
-                        problem: None,
-                        domains_unread,
-                    },
-                    Err(error) => problem(format!("the event history could not be read: {error}")),
-                }
-            }
+            Ok(Some(db)) => match read::week(&db, now, &accounts) {
+                Ok(week) => Read {
+                    uncovered: history::uncovered(
+                        &db,
+                        week.days.first().copied().unwrap_or(now - DAYS * DAY),
+                        now,
+                    ),
+                    week,
+                    problem: None,
+                    domains_unread,
+                },
+                Err(error) => problem(format!("the event history could not be read: {error}")),
+            },
             Ok(None) => problem("no events are recorded yet".to_owned()),
             Err(error) => problem(format!("the event history could not be opened: {error}")),
         }
