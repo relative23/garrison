@@ -257,15 +257,33 @@ pub fn certificate_fault(reason: &CertificateError) -> String {
     }
 }
 
+/// The `Host` header of a request to `host` on `port`: with the port where
+/// it is not the scheme's own (RFC 9110, 7.2), since a server that tells
+/// its names apart by host and port, as Garrison's web service does for
+/// `public_origin`, takes the name alone for another one; an IPv6 address
+/// in brackets.
+fn host_header(host: &str, port: u16, secure: bool) -> String {
+    let name = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_owned()
+    };
+    if port == if secure { 443 } else { 80 } {
+        name
+    } else {
+        format!("{name}:{port}")
+    }
+}
+
 fn exchange(
     stream: &mut impl ReadWrite,
-    host: &str,
+    authority: &str,
     path: &str,
     request: &Request<'_>,
 ) -> std::io::Result<Vec<u8>> {
     write!(
         stream,
-        "{} {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: garrison\r\nAccept: */*\r\n\
+        "{} {path} HTTP/1.1\r\nHost: {authority}\r\nUser-Agent: garrison\r\nAccept: */*\r\n\
          Connection: close\r\n",
         request.method
     )?;
@@ -377,12 +395,13 @@ fn send_at(
 ) -> Result<Answer, String> {
     let url = request.url;
     let (secure, host, port, path) = split(url)?;
+    let authority = host_header(&host, port, secure);
     let data = if secure {
         let mut tls = secure_stream_at(&host, port, roots, until, at)?;
-        exchange(&mut tls, &host, &path, request).map_err(|error| tls_error(&error))?
+        exchange(&mut tls, &authority, &path, request).map_err(|error| tls_error(&error))?
     } else {
         let mut stream = connect(&host, port, until)?;
-        exchange(&mut stream, &host, &path, request).map_err(|error| error.to_string())?
+        exchange(&mut stream, &authority, &path, request).map_err(|error| error.to_string())?
     };
     parse(&data).ok_or_else(|| format!("{url} gave no HTTP answer"))
 }

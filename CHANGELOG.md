@@ -1153,6 +1153,13 @@ Notable changes for operators and users. The format follows
   or another server with a certificate of its own, answers on 443, or it
   judged that other certificate and never warned that the one on 8443 ends.
   It now probes the origin's port and names it.
+- **A request to a port other than its scheme's own names that port.** The
+  HTTPS client sent the host name alone in `Host`, so for `public_origin =
+  "https://host:8443"` `garrison doctor` said that Garrison answered 308
+  instead of its answer to a visitor, as the web service redirects a name
+  that is not its own, and failed a working installation with the advice to
+  include `garrison.conf`. Every request of the client names such a port
+  now, the sign-in check's and the notification channels' among them.
 
 ## [0.1.2] - 2026-11-13
 
