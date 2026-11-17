@@ -31,6 +31,10 @@ mod clients;
 mod keys;
 #[path = "contract/refused.rs"]
 mod refused;
+#[path = "contract/stopper.rs"]
+mod stopper;
+#[path = "contract/stops.rs"]
+mod stops;
 #[path = "contract/together.rs"]
 mod together;
 #[path = "contract/wire.rs"]
