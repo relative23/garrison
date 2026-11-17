@@ -19,28 +19,36 @@ mod fallback;
 mod files;
 mod housekeeping;
 mod milter;
+mod precheck;
 mod requirements;
 mod restore;
 mod rollback;
 mod selinux;
+mod services;
 mod settle;
+#[cfg(test)]
+mod stand_in;
 mod state;
 mod system;
+mod toml_text;
+mod unfinished;
 mod uninstall;
 mod verify;
 
 use std::fs;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use garrison_core::time;
 
 use crate::{say, units};
-use files::{Step, announce, copy_tree, exchange, io, lock, must, place, run, switch};
+use files::{Step, announce, copy_tree, exchange, io, lock, place, run, switch};
 use requirements::{preflight, room, size, state_size};
 pub(crate) use restore::run_restore;
-use system::{install_system_files, protect_policy, unit_file};
+use services::{check_config, start, stop_services};
+use system::{install_system_files, protect_policy};
+use unfinished::Unfinished;
 pub(crate) use uninstall::run_uninstall;
 
 pub(crate) const BASE: &str = "/opt/garrison";
@@ -60,28 +68,6 @@ pub(super) const UNITS: [&str; 9] = [
     units::WATCH_TIMER,
     units::MILTER,
 ];
-const ENABLE: [&str; 5] = [
-    units::BROKER_SOCKET,
-    units::WEB,
-    units::INGEST,
-    units::COLLECT_TIMER,
-    units::WATCH_TIMER,
-];
-// Everything that writes Garrison's state: the services, the timers, and a
-// collection run or a watch that a timer started, which stopping the timer
-// alone would leave running. The macro milter is not among them: it keeps
-// nothing, and while it is down Stalwart defers mail. It starts anew with
-// the others.
-const STOP: [&str; 8] = [
-    units::WEB,
-    units::INGEST,
-    units::COLLECT_TIMER,
-    units::WATCH_TIMER,
-    units::COLLECT,
-    units::WATCH,
-    units::BROKER,
-    units::BROKER_SOCKET,
-];
 pub(super) use garrison_core::systemd::SYSTEMCTL;
 
 /// The access policy where the configuration names it, as the broker reads
@@ -96,6 +82,21 @@ fn policy_in(config: &Path) -> PathBuf {
         |_| config.join("access-policy.json"),
         |loaded| loaded.broker.policy,
     )
+}
+
+/// Whether Garrison is configured here: once its access policy is there,
+/// and also where the installer started the services before, which it
+/// enables as it starts them and only an uninstallation disables. Such an
+/// installation, whose configuration does not load or whose policy is
+/// missing, is for check-config to refuse, not a first installation.
+fn configured(installed: bool) -> bool {
+    Path::new(CONFIG).join("garrison.toml").exists()
+        && (policy().exists() || (installed && started_before()))
+}
+
+fn started_before() -> bool {
+    run(SYSTEMCTL, &["is-enabled", "--quiet", units::WEB])
+        .is_ok_and(|output| output.status.success())
 }
 
 /// The extracted release this binary belongs to: `<release>/bin/garrison`.
@@ -251,92 +252,6 @@ The command is available as {command}.",
     Ok(())
 }
 
-/// The release's own `check-config` against the system configuration. What
-/// it said goes to standard error with the installer's own reason, so that
-/// a script that keeps only that stream learns which setting failed. Where
-/// it passes, its warnings, such as a setting the units do not follow, are
-/// passed on with `warnings`: the installer's output is where an operator
-/// reads them during an upgrade.
-fn check_config(release: &Path, warnings: bool) -> Step {
-    let check = cli(release, &["check-config"])?;
-    if !check.status.success() {
-        crate::complain(&format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&check.stdout),
-            String::from_utf8_lossy(&check.stderr)
-        ));
-        return Err("check-config failed".into());
-    }
-    let said = String::from_utf8_lossy(&check.stderr);
-    if warnings && !said.trim().is_empty() {
-        crate::complain(said.trim_end());
-    }
-    Ok(())
-}
-
-/// The collector's units load the notification channels' secrets and the
-/// addresses kept as secrets, and the collector its metrics credential,
-/// which setup writes only where Stalwart's exporter is Garrison's. systemd
-/// refuses to start a unit whose credential file is missing, so an
-/// installation that has none gets empty ones, which mean: no secret, no
-/// address kept there.
-fn keep_secret_files() -> Step {
-    for name in units::NOTIFICATION_FILES
-        .iter()
-        .chain(&units::COLLECTOR_FILES)
-    {
-        let secret = Path::new(CONFIG).join("credentials").join(name);
-        if secret.symlink_metadata().is_ok() {
-            continue;
-        }
-        let created = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&secret);
-        io(created.map(drop), &secret)?;
-    }
-    Ok(())
-}
-
-fn start(release: &Path) -> Step {
-    check_config(release, true)?;
-    keep_secret_files()?;
-    reset_failed();
-    // Only what this release ships: an older one has fewer units.
-    let shipped = ENABLE.into_iter().filter(|unit| unit_file(unit).exists());
-    let mut shipped: Vec<&str> = shipped.collect();
-    let milter = milter::runs();
-    if milter {
-        shipped.push(units::MILTER);
-    }
-    let mut enable = vec!["enable"];
-    enable.extend(&shipped);
-    must(SYSTEMCTL, &enable)?;
-    // One start per unit: `restart` also starts a stopped unit. The units are
-    // ready only once they serve, so a release that cannot come up fails here,
-    // its broker too, which otherwise its first client would start.
-    let mut restart = vec!["restart"];
-    restart.extend(&shipped);
-    must(SYSTEMCTL, &restart)?;
-    must(SYSTEMCTL, &["start", units::BROKER])?;
-    settle::settle(milter)
-}
-
-/// Forget failures and systemd's start limit (5 starts in 10 s) left by a
-/// crash loop, so that a rollback right after a broken upgrade can start.
-fn reset_failed() {
-    let mut reset = vec!["reset-failed"];
-    reset.extend(UNITS);
-    let _ = run(SYSTEMCTL, &reset);
-}
-
-fn stop_services() {
-    let mut stop = vec!["stop"];
-    stop.extend(STOP);
-    let _ = run(SYSTEMCTL, &stop);
-}
-
 /// Make `release` current, install its system files and, once configured,
 /// start it; `old`, the release that ran, becomes `previous`.
 fn switch_to(release: &Path, old: Option<&Path>, configured: bool) -> Step {
@@ -357,12 +272,19 @@ fn install() -> Step {
     let _held = lock(Path::new(LOCK))?;
     let base = Path::new(BASE);
     let current = base.join("current");
-    let old = fs::canonicalize(&current).ok();
-    let earlier = fs::canonicalize(base.join("previous")).ok();
-    let configured = Path::new(CONFIG).join("garrison.toml").exists() && policy().exists();
+    // An upgrade that an earlier run began goes on, or is switched back first.
+    let resumed = fallback::before_install(&version)?;
+    let (old, earlier) = match &resumed {
+        Some(resumed) => (Some(resumed.from.clone()), resumed.previous.clone()),
+        None => (
+            fs::canonicalize(&current).ok(),
+            fs::canonicalize(base.join("previous")).ok(),
+        ),
+    };
+    let configured = resumed.is_some() || configured(old.is_some());
     // Room for the release and, before an upgrade, the backup of the state.
     let mut needs = vec![(base, size(&here))];
-    if old.is_some() && configured {
+    if old.is_some() && configured && resumed.is_none() {
         needs.push((Path::new(BACKUPS), state_size()));
     }
     room(&needs)?;
@@ -370,6 +292,7 @@ fn install() -> Step {
     // As `old` is: where /opt is a link, the path under BASE and the one the
     // links resolve to differ, and a reinstall would pass for an upgrade.
     let release = fs::canonicalize(&release).unwrap_or(release);
+    let changed = old.as_deref().filter(|old| *old != release);
     let mut restore = false;
     let mut backup = None;
     if old.is_some() && configured {
@@ -378,17 +301,36 @@ fn install() -> Step {
         protect_policy()?;
         // A configuration the new release refuses leaves the running one
         // alone. Its warnings follow as it starts.
-        check_config(&release, false)
-            .map_err(|error| format!("{error}; the running release was not touched"))?;
-        backup = Some(backup_state(&current, old.as_ref() != Some(&release))?);
+        check_config(&release, false).map_err(|error| match &resumed {
+            Some(resumed) => format!(
+                "{error}; the upgrade from {} is still unfinished: run this installer again once \
+                 check-config passes",
+                unfinished::name(&resumed.from)
+            ),
+            None => format!("{error}; the running release was not touched"),
+        })?;
+        backup = Some(match &resumed {
+            // The state may be the new release's by now.
+            Some(resumed) => resumed.backup.clone(),
+            None => backup_state(&current, changed.is_some())?,
+        });
         // Compared with the state --restore-state returns to, the one from
         // before the upgrade to this release: a reinstall keeps it, and the
         // previous release still cannot read what this one migrated.
         restore = fs::canonicalize(Path::new(BACKUPS).join(LAST))
             .is_ok_and(|last| rollback::schema_rises(&last));
+        // From here on, a run that is killed leaves an upgrade that the
+        // next run finishes.
+        if let (Some(from), Some(backup)) = (changed, &backup) {
+            unfinished::write(&Unfinished::Upgrade {
+                from: from.to_owned(),
+                to: release.clone(),
+                previous: earlier.clone(),
+                backup: backup.clone(),
+            })?;
+        }
         stop_services();
     }
-    let changed = old.as_deref().filter(|old| *old != release);
     if let Err(error) = switch_to(&release, changed, configured) {
         if !configured {
             return Err(error);
@@ -396,13 +338,23 @@ fn install() -> Step {
         // Garrison is stopped now: whatever failed, the release that ran goes
         // back, with the databases the new one migrated as they were before.
         let outcome = match changed {
-            Some(old) => fallback::fall_back(old, earlier.as_deref(), &release, backup.as_deref()),
+            Some(old) => {
+                announce("Start failed; switching back to the previous release.");
+                match fallback::switch_back(old, earlier.as_deref(), &release, backup.as_deref()) {
+                    Ok(()) => match unfinished::done() {
+                        Ok(()) => "the previous release is running".to_owned(),
+                        Err(error) => format!("the previous release is running, but {error}"),
+                    },
+                    Err(failure) => failure,
+                }
+            }
             None => "no other release was started".to_owned(),
         };
         return Err(format!(
             "The new release did not start ({error}); {outcome}. See the journal."
         ));
     }
+    unfinished::done()?;
     if !configured {
         return first_install_help();
     }
@@ -432,6 +384,9 @@ fn install() -> Step {
 pub(crate) fn start_installed() -> Step {
     preflight()?;
     let _held = lock(Path::new(LOCK))?;
+    if let Some(record) = unfinished::read()? {
+        return Err(record.finish_first());
+    }
     let current = io(
         fs::canonicalize(Path::new(BASE).join("current")),
         &Path::new(BASE).join("current"),
@@ -444,6 +399,12 @@ pub(crate) fn start_installed() -> Step {
         current.file_name().unwrap_or_default().to_string_lossy()
     ));
     Ok(())
+}
+
+/// The release that an upgrade an earlier run did not finish began from,
+/// for `garrison upgrade` to compare an archive with.
+pub(crate) fn upgrading_from() -> Option<PathBuf> {
+    unfinished::upgrading_from()
 }
 
 pub(crate) fn run_installer(rollback_requested: bool, with_state: bool) -> u8 {

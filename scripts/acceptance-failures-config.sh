@@ -84,9 +84,13 @@ scenario_policy_elsewhere() {
 scenario_unwritten() {
     step "A file the installer could not write from the configuration is named"
     upgraded
-    # A configuration that does not load, and no policy yet: not configured.
+    # A configuration that does not load, no policy yet, and services the
+    # installer never started, which it enables as it starts them: not
+    # configured, as between the first two runs of an installation.
     inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.unwritten &&
         mv /etc/garrison/access-policy.json /root/access-policy.away &&
+        systemctl disable garrison-web.service garrison-ingest.service garrison-broker.socket \
+            garrison-collect.timer garrison-watch.timer &&
         sed -i "s|^schema = 1\$|schema = 1\nnonsense = 1|" /etc/garrison/garrison.toml'
     says "the installer names the polkit rule it could not write" '/root/release/bin/garrison install' \
         "/etc/polkit-1/rules.d/50-garrison.rules was not written, since"

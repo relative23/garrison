@@ -82,13 +82,21 @@ sudo garrison restore --from /path/to/restored/latest
 
 Before anything stops, the command checks that the directory is a backup
 (`backup.json`), that the running release reads it (a backup names the
-release that wrote it, and no release reads what a newer one wrote) and that
-its copies pass `self-check --state`. It then copies the state as it is to
+release that wrote it, and no release reads what a newer one wrote), that
+its copies pass `self-check --state`, that the running release's
+`check-config` takes today's configuration with the access policy the
+backup brings, which must go where `broker.policy` names it, and that each
+copy fits beside the database it replaces. It then copies the state as it
+is to
 `/var/backups/garrison/pre-restore-*`, stops the services, puts every
-database and the access policy back with their owners and modes, removes a
+database back with its owner and mode and the access policy as a file of
+its own, root's and readable for the group `garrison-broker` alone, never
+through a link or into a folder that `broker.policy` names, removes a
 database that did not exist when the backup was made, and starts the
 services. What was recorded since the backup is in the `pre-restore-*` copy
 and no longer in Garrison; restore that copy to take the restore back.
+Run again after it was interrupted, a restore finishes and names its first
+run's copy as the state from before.
 
 A backup holds neither sessions nor credentials. After a restore everyone
 signs in again. On a new host, restore `/etc/garrison` from your host backup
@@ -163,15 +171,22 @@ failed.
 
 Before it changes anything, the installer checks that systemd, polkit and the
 free space suffice: the release and a backup as large as the databases must
-fit with room to spare. After a successful installation it keeps the running,
+fit with room to spare. Where it started the services before, the new
+release must load the configuration and find the access policy where
+`broker.policy` names it, also outside `/etc/garrison`; otherwise nothing
+changes. After a successful installation it keeps the running,
 the previous and one older release, and the three newest of its own backups
 plus the one a rollback restores; it removes the older ones. Backups you write
 with `garrison backup --to` are left alone; the `pre-restore-*` copies of a
 restore count among the installer's own.
 
-While one installer runs, a second one is refused. An installer that was
-interrupted, even killed, leaves nothing a later run cannot finish: run it
-again.
+While one installer runs, a second one is refused. An upgrade that was
+interrupted, even killed, is finished by running its installer again, or
+`garrison upgrade` with the same archive; `/opt/garrison/unfinished.json`
+notes what the installer began until a release runs again. A rollback is
+finished by running it again; one that went back to a release from before this
+one is finished by the release it left, as its first line says: `sudo
+/opt/garrison/releases/<release>/bin/garrison install --rollback`.
 
 To return to the previous release:
 
@@ -190,11 +205,17 @@ cannot load today's configuration, for example because of a `modules` line it
 does not know: remove that setting, or put back the file from before the
 upgrade (`/var/backups/garrison/last-pre-upgrade/etc/garrison.toml`). With
 `--restore-state` it first checks that the state from before the upgrade is
-there and that no release newer than the one it returns to wrote it
-(`backup.json` in a backup names the release); it then puts back every
+there, that no release newer than the one it returns to wrote it
+(`backup.json` in a backup names the release), that the release it
+returns to takes today's configuration with the access policy from before
+the upgrade and that each copy fits beside the database it replaces; it
+then puts back every
 database and the access policy and removes a database that did not exist
 when the backup was made. If a rollback fails after the services stopped, it
-starts the release that ran before.
+starts the release that ran before, and names what went back to its copy
+from before the upgrade by then: the release that ran before runs on that,
+and what was recorded there since the upgrade is lost. A restore that
+fails names what went back likewise.
 
 ## Rotating secrets
 
@@ -228,7 +249,9 @@ This stops and removes the services, the polkit rule, the nginx snippets, the
 SELinux module, the command's link and `/opt/garrison`, and keeps `/etc/garrison`, the databases in
 `/var/lib/garrison`, the installer's backups and the service users, so that
 installing again continues with them. `--purge` removes those too, but not
-backups you wrote yourself with `garrison backup --to`. After an uninstallation
+backups you wrote yourself with `garrison backup --to`; where `garrison.toml`
+does not load, it leaves an access policy kept outside `/etc/garrison` and
+says so. After an uninstallation
 the command lives on in every release archive: `./bin/garrison uninstall
 --purge`. If a server block still includes a Garrison snippet by its exact name,
 the uninstallation stops before changing anything and says so; remove the

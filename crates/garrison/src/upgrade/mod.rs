@@ -51,7 +51,12 @@ fn upgrade(archive: &Path, signature: Option<&Path>) -> Result<u8, String> {
             release.architecture
         ));
     }
-    let running = running_version()?;
+    let mut running = running_version()?;
+    // An upgrade killed once `current` named its new release is finished by
+    // the same command: it compares with the release it began from.
+    if let Some(from) = crate::install::upgrading_from() {
+        running = version_of(&from)?;
+    }
     match garrison_core::version::newer(&release.version, &running) {
         Some(true) => {}
         Some(false) => {
@@ -116,6 +121,11 @@ fn running_version() -> Result<String, String> {
     let release = installed_release(&binary, Path::new(BASE)).ok_or_else(|| {
         format!("Run the installed release: {BASE}/current/bin/garrison upgrade <archive>.")
     })?;
+    version_of(release)
+}
+
+/// The version an installed release names in its `VERSION`.
+fn version_of(release: &Path) -> Result<String, String> {
     let path = release.join("VERSION");
     let text =
         fs::read_to_string(&path).map_err(|error| format!("{}: {error}.", path.display()))?;

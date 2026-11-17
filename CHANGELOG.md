@@ -1645,6 +1645,45 @@ Notable changes for operators and users. The format follows
   the other services, and a backup names the release that wrote it:
   `--restore-state` refuses a state written by a newer release than the one
   it returns to, and removes a database that did not exist at the backup.
+- **A restored access policy is the broker's to read, and never written
+  through a link.** `garrison restore` and `install --rollback
+  --restore-state` wrote the backup's policy through a link that
+  `broker.policy` named, into whatever it pointed to, and where no policy
+  was there yet they made it root's group's: the broker could not read it
+  and did not start, and nobody could sign in. The policy
+  now goes back as a file of its own, made new as root's and readable for
+  the group `garrison-broker` alone; a link or a folder that the setting
+  names stays as it is, with what it points to or holds.
+- **`garrison restore` and `install --rollback --restore-state` check
+  before anything stops.** Both stopped Garrison and put the state back
+  before the configuration was checked: a backup whose access policy grants
+  an action that `garrison.toml` no longer has, or a setting that
+  `check-config` refuses and that was written since the services started,
+  such as a `receipt` under `/home`, left Garrison stopped on the restored
+  state, and a rollback's way back failed on the same policy. The release
+  that will start now runs its own `check-config` on today's configuration
+  with the policy that comes back, before anything stops, and a refusal
+  changes nothing.
+- **A rollback that fails once the state went back says what went back.**
+  `install --rollback --restore-state` that failed after it had put the
+  state from before the upgrade back started the release that ran before on
+  that state and said only that it runs again; a nearly full disk, which
+  nothing checked, stopped it after the first databases. It now checks,
+  before anything stops, that each copy fits beside the database it
+  replaces, as `garrison restore` does now too, and where it fails all the
+  same it names what went back to its copy, as a failed restore does.
+- **An installation whose services ran is upgraded only with a configuration
+  the new release loads and its access policy in place**, also where
+  `broker.policy` lies outside `/etc/garrison`; otherwise nothing changes.
+- **An upgrade that was interrupted, also once `current` named the new
+  release, is finished by running it again**, with the same installer or
+  `garrison upgrade` and the same archive; it switches back where the new
+  release does not start.
+- **A rollback that was interrupted is finished by running it again**; where
+  it returned to a release from before this one, run the command its first
+  line names.
+- **A restore that was interrupted is finished by running it again**, and
+  names the copy of the state its first run made.
 - **A stale event history no longer reads as a quiet mail server.** The
   mail-flow summaries and the sending accounts counted whatever the event
   history held and called it in order, also when the event receiver had not

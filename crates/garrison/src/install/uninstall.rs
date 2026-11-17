@@ -111,6 +111,21 @@ fn policy_files(policy: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Where `settings` is there and does not load, a purge cannot tell where
+/// it keeps the access policy: one kept outside CONFIG is left, and this
+/// says so.
+fn policy_unknown(settings: &Path) -> Option<String> {
+    if !settings.exists() {
+        return None;
+    }
+    let error = garrison_core::config::load(settings).err()?;
+    Some(format!(
+        "{} does not load, so an access policy it names outside {CONFIG} is not removed \
+         ({error}); remove it yourself if there is one.",
+        settings.display()
+    ))
+}
+
 fn snippets(root: &Path) -> Vec<PathBuf> {
     let folder = root.join("etc/nginx/snippets");
     // nginx reads `.conf` exactly; other cases are not snippets.
@@ -223,17 +238,24 @@ fn uninstall(purge: bool, dry_run: bool) -> Step {
     let _held = lock(Path::new(LOCK))?;
     let root = Path::new("/");
     let items = plan(root, purge, module_loaded(), &super::policy());
+    let unknown = policy_unknown(&Path::new(CONFIG).join("garrison.toml")).filter(|_| purge);
     super::milter::forgotten(Path::new(CONFIG))?;
     nginx_stays_valid(&snippets(root))?;
     if dry_run {
         for item in &items {
             announce(&format!("Would remove {}", item.describe()));
         }
+        if let Some(unknown) = &unknown {
+            announce(unknown);
+        }
         return Ok(());
     }
     for item in &items {
         announce(&format!("Removing {}", item.describe()));
         remove(item)?;
+    }
+    if let Some(unknown) = &unknown {
+        announce(unknown);
     }
     must(SYSTEMCTL, &["daemon-reload"])?;
     if run(SYSTEMCTL, &["is-active", "--quiet", "nginx"])
@@ -405,6 +427,29 @@ mod tests {
         // Without a purge it stays, as the configuration does.
         let kept = paths(&plan(root, false, false, elsewhere), root);
         assert!(!kept.iter().any(|path| path.starts_with("srv")), "{kept:?}");
+    }
+
+    /// Where garrison.toml does not load, nobody knows where it keeps the
+    /// policy: the purge says so, and only then.
+    #[test]
+    fn a_purge_says_where_it_cannot_find_the_policy() {
+        let directory = tempfile::tempdir().unwrap();
+        let settings = directory.path().join("garrison.toml");
+        assert_eq!(policy_unknown(&settings), None);
+        let text = garrison_testing::config_text(directory.path(), "http://127.0.0.1:9");
+        fs::write(&settings, &text).unwrap();
+        assert_eq!(policy_unknown(&settings), None);
+        fs::write(&settings, format!("nonsense_setting = 1\n{text}")).unwrap();
+        let said = policy_unknown(&settings).unwrap();
+        assert!(
+            said.starts_with(&format!(
+                "{} does not load, so an access policy it names outside /etc/garrison is not \
+                 removed (",
+                settings.display()
+            )),
+            "{said}"
+        );
+        assert!(said.contains("nonsense_setting"), "{said}");
     }
 
     /// A purge takes only files: a folder or a link that `broker.policy`

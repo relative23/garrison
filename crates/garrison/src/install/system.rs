@@ -196,16 +196,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
-
-    /// A release whose command prints `stdout`, or fails saying `stderr`.
-    fn release(script: &str) -> tempfile::TempDir {
-        let directory = tempfile::tempdir().unwrap();
-        fs::create_dir(directory.path().join("bin")).unwrap();
-        let binary = directory.path().join("bin/garrison");
-        fs::write(&binary, format!("#!/bin/sh\n{script}\n")).unwrap();
-        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
-        directory
-    }
+    use crate::install::stand_in::release;
 
     #[test]
     fn what_a_command_prints_is_written_and_why_it_failed_is_said() {

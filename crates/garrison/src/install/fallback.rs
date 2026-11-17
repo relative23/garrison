@@ -12,45 +12,105 @@
 //! services stay up. Otherwise the links stay as the upgrade set them:
 //! `previous` then still names the release to return to, and `install
 //! --rollback --restore-state` is the second attempt.
+//!
+//! An upgrade that an earlier run did not finish (`unfinished.rs`) goes on
+//! here, or is switched back before anything else.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use garrison_core::config;
 
 use super::files::{Step, announce, switch};
 use super::system::install_system_files;
+use super::unfinished::{self, Unfinished, name};
 use super::{BASE, CONFIG, cli, command, start, state, stop_services};
 
-/// How the switch back ended, for the installer's last line.
-pub(super) fn fall_back(
+/// An upgrade an earlier run began, which this run of its release goes on with.
+pub(super) struct Resumed {
+    /// The release that ran before it.
+    pub(super) from: PathBuf,
+    /// What `previous` named before it.
+    pub(super) previous: Option<PathBuf>,
+    /// The state from before it.
+    pub(super) backup: PathBuf,
+}
+
+/// Before an installer of release `version` goes on: an upgrade that an
+/// earlier run began goes on where this run installs that upgrade's release
+/// again and `current` already names it, since its state may already be the
+/// new release's; any other run first switches back to the release that
+/// ran, as after a failed start. Another unfinished command is to be
+/// finished first.
+pub(super) fn before_install(version: &str) -> Step<Option<Resumed>> {
+    let Some(record) = unfinished::read()? else {
+        return Ok(None);
+    };
+    let (from, to, previous, backup) = match record {
+        Unfinished::Upgrade {
+            from,
+            to,
+            previous,
+            backup,
+        } => (from, to, previous, backup),
+        other => return Err(other.finish_first()),
+    };
+    let current = std::fs::canonicalize(Path::new(BASE).join("current")).ok();
+    if current.as_deref() == Some(to.as_path()) && name(&to) == version {
+        announce(&format!(
+            "Going on with the upgrade from {} to {version} that an earlier run did not finish.",
+            name(&from)
+        ));
+        return Ok(Some(Resumed {
+            from,
+            previous,
+            backup,
+        }));
+    }
+    announce(&format!(
+        "Switching back to {} first: an earlier run did not finish the upgrade to {}.",
+        name(&from),
+        name(&to)
+    ));
+    switch_back(&from, previous.as_deref(), &to, Some(&backup)).map_err(|failure| {
+        format!(
+            "Switching back to {} from the unfinished upgrade to {} failed: {failure}.",
+            name(&from),
+            name(&to)
+        )
+    })?;
+    unfinished::done()?;
+    Ok(None)
+}
+
+/// Back to `old`, the release that ran, from `attempted`: what the new
+/// release migrated goes back to its copy in `backup`, `old` must read the
+/// state and stay up, and `previous` names `earlier` again. Where that
+/// fails, nothing of a release that is not current keeps running, and the
+/// links are set so that `install --rollback --restore-state` is the second
+/// attempt; the error says so.
+pub(super) fn switch_back(
     old: &Path,
     earlier: Option<&Path>,
     attempted: &Path,
     backup: Option<&Path>,
-) -> String {
-    announce("Start failed; switching back to the previous release.");
-    match switched_back(old, earlier, backup) {
-        Ok(()) => "the previous release is running".to_owned(),
-        Err(error) => {
-            // Nothing of a release that is not current keeps running, and
-            // `previous` keeps naming the release to return to.
-            stop_services();
-            let kept = switch(&Path::new(BASE).join("current"), attempted)
-                .and_then(|()| switch(&Path::new(BASE).join("previous"), old));
-            let again = format!(
-                "`{} install --rollback --restore-state` returns to it with the state from \
-                 before the upgrade",
-                command::name()
-            );
-            match kept {
-                Ok(()) => format!("the previous release did not start either ({error}); {again}"),
-                Err(links) => format!(
-                    "the previous release did not start either ({error}), and the links \
-                     could not be set back ({links})"
-                ),
-            }
+) -> Step {
+    switched_back(old, earlier, backup).map_err(|error| {
+        stop_services();
+        let kept = switch(&Path::new(BASE).join("current"), attempted)
+            .and_then(|()| switch(&Path::new(BASE).join("previous"), old));
+        let again = format!(
+            "`{} install --rollback --restore-state` returns to it with the state from before \
+             the upgrade",
+            command::name()
+        );
+        match kept {
+            Ok(()) => format!("the previous release did not start either ({error}); {again}"),
+            Err(links) => format!(
+                "the previous release did not start either ({error}), and the links could not \
+                 be set back ({links})"
+            ),
         }
-    }
+    })
 }
 
 /// Return what the new release migrated, then start `old` and see that it
