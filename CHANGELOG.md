@@ -1185,6 +1185,9 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` fails a macro filter entry in Stalwart that asks another
   port than `[milter]` names**, as after a change of `port` without setup, with
   which Stalwart defers all incoming mail.
+- **`garrison doctor` says that nginx does not reach the web service where it
+  answers 502 for Garrison**, and names the service, the include's port and the
+  SELinux module instead of the include itself.
 
 ## [0.1.2] - 2026-11-13
 

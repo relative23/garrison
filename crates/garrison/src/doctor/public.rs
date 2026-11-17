@@ -76,7 +76,7 @@ fn visitor_answer(status: u16, body: &str) -> bool {
             .is_ok_and(|value| value.get("session").is_some_and(serde_json::Value::is_null))
 }
 
-fn interface(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Finding> {
+pub(super) fn interface(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Finding> {
     let url = format!("{}/api/session", config.deployment.public_origin);
     match get(&url, roots) {
         Ok(answer) if visitor_answer(answer.status, &answer.body) => {
@@ -93,6 +93,19 @@ fn interface(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Finding> {
             });
             findings
         }
+        // What nginx answers where it does not reach the web service.
+        Ok(answer) if matches!(answer.status, 502..=504) => vec![Finding::fail(
+            format!(
+                "{url} answers {}: nginx does not reach Garrison's web service on \
+                 127.0.0.1:{}",
+                answer.status, config.web.port
+            ),
+            format!(
+                "`systemctl status {}` says whether it runs; the lines above name an include or \
+                 an SELinux module for another port.",
+                crate::units::WEB
+            ),
+        )],
         Ok(answer) => vec![Finding::fail(
             format!(
                 "{url} answers {} instead of Garrison's answer to a visitor",

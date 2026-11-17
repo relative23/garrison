@@ -158,23 +158,28 @@ fn clock() -> Finding {
     }
 }
 
+/// The room left on the disk of `path`.
+pub(super) fn room(path: &str) -> Finding {
+    match rustix::fs::statvfs(path) {
+        Ok(stat) => {
+            let free = stat.f_bavail.saturating_mul(stat.f_frsize) >> 20;
+            if free >= 1024 {
+                Finding::ok(format!("{path} has {free} MiB free"))
+            } else {
+                Finding::warn(
+                    format!("{path} has only {free} MiB free"),
+                    "Databases and backups grow; make room before the next upgrade.",
+                )
+            }
+        }
+        Err(error) => Finding::unknown(format!("free space of {path}: {error}")),
+    }
+}
+
 fn space() -> Vec<Finding> {
     ["/var/lib/garrison", "/var/backups"]
-        .iter()
-        .map(|path| match rustix::fs::statvfs(*path) {
-            Ok(stat) => {
-                let free = stat.f_bavail.saturating_mul(stat.f_frsize) >> 20;
-                if free >= 1024 {
-                    Finding::ok(format!("{path} has {free} MiB free"))
-                } else {
-                    Finding::warn(
-                        format!("{path} has only {free} MiB free"),
-                        "Databases and backups grow; make room before the next upgrade.",
-                    )
-                }
-            }
-            Err(_) => Finding::unknown(format!("free space of {path}")),
-        })
+        .into_iter()
+        .map(room)
         .collect()
 }
 

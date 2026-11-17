@@ -308,7 +308,36 @@ fn milter_on_another_port() -> Broken {
     }
 }
 
-const HOSTS: [fn() -> Broken; 11] = [
+/// nginx answers 502 for Garrison's name: it does not reach the web
+/// service, so the include nginx has, which "must include garrison.conf"
+/// would name, is not what is wrong.
+fn nginx_answers_502() -> Broken {
+    let gateway = "<html>Bad gateway</html>";
+    let server = serve_until(
+        vec![format!(
+            "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n{gateway}",
+            gateway.len()
+        )],
+        2036,
+        1,
+        1,
+    );
+    let roots = Arc::new(server.roots.clone());
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    config.deployment.public_origin.clone_from(&server.url);
+    let found = public::interface(&config, &roots);
+    server.finish();
+    Broken {
+        host: "nginx answering 502 for Garrison",
+        found,
+        said: "nginx does not reach Garrison's web service".into(),
+        fix: Some("systemctl status garrison-web.service".into()),
+    }
+}
+
+const HOSTS: [fn() -> Broken; 12] = [
     events_database_is_a_folder,
     origin_with_a_port,
     issuer_answers_with_a_web_page,
@@ -320,6 +349,7 @@ const HOSTS: [fn() -> Broken; 11] = [
     dqs_key_of_two_words,
     selinux_module_for_another_port,
     milter_on_another_port,
+    nginx_answers_502,
 ];
 
 /// What is wrong with what doctor said on `broken`, if anything.

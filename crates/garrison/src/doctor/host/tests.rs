@@ -316,3 +316,18 @@ fn the_selinux_module_is_judged_by_the_port_it_lets_nginx_reach() {
     let none = tempfile::tempdir().unwrap();
     assert!(on(&none, true, 8091).is_none());
 }
+
+/// Where the disk of a folder cannot be asked, the line says why.
+#[test]
+fn free_space_that_cannot_be_asked_is_unknown_with_why() {
+    let found = room("/garrison-test-folder-that-is-not-there");
+    assert_eq!(found.level, Level::Unknown, "{}", found.line());
+    assert!(
+        found
+            .what
+            .starts_with("free space of /garrison-test-folder-that-is-not-there: "),
+        "{}",
+        found.what
+    );
+    assert_ne!(room("/").level, Level::Unknown);
+}
