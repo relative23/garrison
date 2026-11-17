@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use garrison_testing::silent::Silent;
 
-use super::tests::{provider, results, server};
+use super::tests::{SILENT, provider, results, server};
 use super::*;
 use crate::context::{Context, Deadline};
 use crate::testing::{Canned, Remembered, config, now};
@@ -41,12 +41,17 @@ const NOT_SENT: &str = "not tested: not sent: the collection run's time was used
 
 #[test]
 fn a_server_that_never_greets_costs_one_wait_and_the_next_run_sends_the_rest() {
-    let silent = Silent::new();
-    let mute = provider(silent.address.port());
+    // One listener for both runs: it never greets the first session.
+    let (port, handle) = server([SILENT, "550 5.7.1 Message rejected as spam"]);
+    let provider = provider(port);
     let memory = Remembered::default();
-    let (first, took) = collected(&mute, &memory, 0, Deadline::within(Duration::from_secs(1)));
+    let (first, took) = collected(
+        &provider,
+        &memory,
+        0,
+        Deadline::within(Duration::from_secs(1)),
+    );
     // The test file waited out a step; the spam text was not sent.
-    assert_eq!(silent.finish(), 1);
     assert!(took < Duration::from_secs(15), "{took:?}");
     assert_eq!(
         results(&first),
@@ -54,10 +59,9 @@ fn a_server_that_never_greets_costs_one_wait_and_the_next_run_sends_the_rest() {
     );
     assert_eq!(first.state, State::Unknown);
     // The next run, a minute later, sends what this one had no time for,
-    // and only that.
-    let (port, handle) = server(["550 5.7.1 Message rejected as spam"]);
-    let (next, _) = collected(&provider(port), &memory, 60, Deadline::NONE);
-    assert_eq!(handle.join().unwrap().len(), 1);
+    // and only that: two sessions in all.
+    let (next, _) = collected(&provider, &memory, 60, Deadline::NONE);
+    assert_eq!(handle.join().unwrap().len(), 2);
     assert_eq!(
         results(&next),
         [

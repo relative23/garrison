@@ -230,6 +230,93 @@ fn untrusted_files_with_more_than_tables_and_indexes_are_refused() {
 }
 
 #[test]
+fn a_pipe_or_a_folder_in_place_of_a_database_is_refused_without_waiting() {
+    // The user who writes a database can put a named pipe in its place,
+    // whose open waits for a writer: every reader is refused at once instead.
+    let directory = tempfile::tempdir().unwrap();
+    let pipe = directory.path().join("pipe.sqlite");
+    rustix::fs::mknodat(
+        rustix::fs::CWD,
+        &pipe,
+        rustix::fs::FileType::Fifo,
+        rustix::fs::Mode::from_raw_mode(0o644),
+        0,
+    )
+    .unwrap();
+    let folder = directory.path().join("folder.sqlite");
+    fs::create_dir(&folder).unwrap();
+    for path in [pipe, folder] {
+        let (sender, receiver) = mpsc::channel();
+        let opened = path.clone();
+        thread::spawn(move || {
+            let reader = reading(&opened, Duration::from_secs(1)).map(|_| ());
+            let untrusted = open_untrusted(&opened, OpenFlags::SQLITE_OPEN_READ_ONLY).map(|_| ());
+            let _ = sender
+                .send([reader, untrusted].map(|answer| answer.map_err(|error| error.to_string())));
+        });
+        let answers = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|_| panic!("{} was waited for", path.display()));
+        assert_eq!(
+            answers,
+            [
+                Err("not a regular file".to_owned()),
+                Err("not a regular file".to_owned())
+            ],
+            "{}",
+            path.display()
+        );
+    }
+}
+
+/// Run again by the test below as a writer in a process of its own: takes
+/// the database that `GARRISON_TEST_WRITER` names for writing, without
+/// waiting, and says whether it could.
+#[test]
+#[ignore = "the other process of a_second_reader_keeps_the_lock_of_the_first"]
+fn a_writer_of_another_process() {
+    let Ok(path) = std::env::var("GARRISON_TEST_WRITER") else {
+        return;
+    };
+    let db = Connection::open(path).unwrap();
+    db.busy_timeout(Duration::ZERO).unwrap();
+    let taken = db.execute_batch("BEGIN EXCLUSIVE").is_ok();
+    println!("writer: {}", if taken { "took it" } else { "was refused" });
+}
+
+#[test]
+fn a_second_reader_keeps_the_lock_of_the_first() {
+    // POSIX locks belong to the process: closing any descriptor of the file
+    // drops them all. Two readers of one database at once, as the web
+    // service runs them, must keep another process's writer out.
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shared.sqlite");
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("CREATE TABLE t(a); INSERT INTO t VALUES(1);")
+        .unwrap();
+    let first = reading(&path, Duration::from_secs(5)).unwrap().unwrap();
+    let count: i64 = first
+        .query_row("SELECT count(*) FROM t", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
+    let second = reading(&path, Duration::from_secs(5)).unwrap().unwrap();
+    let writer = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "sqlite::tests::a_writer_of_another_process",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("GARRISON_TEST_WRITER", &path)
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&writer.stdout);
+    assert!(said.contains("writer: was refused"), "{said}");
+    drop((first, second));
+}
+
+#[test]
 fn the_bundled_sqlite_reads_no_stale_memory_from_a_crafted_log() {
     // RUSTSEC-2026-0459: before 3.54.0 a database with a write-ahead log of
     // another page size made queries return bytes of the reader's memory, and

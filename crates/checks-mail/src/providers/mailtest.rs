@@ -4,8 +4,11 @@
 //! Only where an operator names a recipient. At most once in the configured
 //! hours, the provider hands both to the local SMTP listener the way a
 //! stranger would, without signing in. A test that did not happen, because
-//! no session came about or the server turned it away before the message,
-//! is no result to keep that long: it alone is tried again after an hour.
+//! no session came about, the server turned it away before the message or
+//! only deferred the message (4xx), is no result to keep that long: it alone
+//! is tried again after an hour. Stalwart defers a message where a milter
+//! defers it, as a scanner that cannot scan does, or where it cannot reach
+//! one whose entry says to defer then: a deferral is no verdict.
 //!
 //! A scanner must refuse the test file while the session lasts. The spam
 //! text is refused there too, or accepted and then filed as spam, which the
@@ -19,9 +22,7 @@
 //! message carries a document that a macro filter such as Garrison's milter
 //! takes for one with macros; it must be refused like the test file.
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Column, Evidence, Format, Observation, Required, State, Table};
@@ -33,16 +34,12 @@ use serde_json::json;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::kept::cached;
 use crate::options::{Checked, Options, fail};
-use crate::timed::Timed;
-use message::{Envelope, Test};
+use message::Test;
+use session::SESSION;
 
 mod message;
+mod session;
 
-/// One step of a session waits this long at most: the connection, one reply.
-const TIMEOUT: Duration = Duration::from_secs(10);
-/// A session has this long in all, so that a server that sends a line now
-/// and then cannot hold the run.
-const SESSION: Duration = Duration::from_secs(20);
 const MEMORY: &str = "mailtest";
 /// How long Stalwart may take to file an accepted message.
 const VERDICT_WITHIN: i64 = 900;
@@ -50,8 +47,6 @@ const VERDICT_WITHIN: i64 = 900;
 const AGAIN: i64 = 3600;
 /// Why a test was not sent.
 const RUN_OVER: &str = "the collection run's time was used up";
-/// The longest line of a reply that is read.
-const LONGEST: usize = 2048;
 
 /// How the server answered one test, as the status database keeps it.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -75,11 +70,22 @@ struct Sent {
 }
 
 impl Sent {
-    /// Whether the test happened: the server refused the message itself or
-    /// took it. A session that did not come that far tested nothing.
+    /// Whether the test happened: the server took the message itself or
+    /// refused it for good (5xx). A session that did not come that far, and
+    /// a message the server only deferred (4xx), tested nothing.
     fn happened(&self) -> bool {
-        self.at_data && (self.code == 250 || (400..600).contains(&self.code))
+        self.at_data && (self.code == 250 || (500..600).contains(&self.code))
     }
+}
+
+/// What the tests were sent to and from: results for another listener,
+/// recipient or sender are not these tests'.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+struct Aim {
+    host: String,
+    port: u16,
+    recipient: String,
+    sender: String,
 }
 
 /// The last result of each test, as the status database keeps them.
@@ -90,6 +96,10 @@ struct Tests {
     /// The macro test, where the operator switched it on.
     #[serde(default)]
     macros: Option<Sent>,
+    /// What they were sent to. An earlier release kept none; its results are
+    /// taken as made for the configuration as it is.
+    #[serde(default)]
+    aim: Option<Aim>,
 }
 
 #[derive(Debug)]
@@ -103,41 +113,6 @@ pub struct MailTest {
     macros: bool,
     /// How long one session may take in all.
     session: Duration,
-}
-
-/// One reply of the server: its code and its last line. A line is read up to
-/// `LONGEST`, so that a server that sends no end of line cannot fill memory.
-fn reply(reader: &mut impl BufRead) -> Result<(u16, String), String> {
-    loop {
-        let mut data = Vec::new();
-        let read = reader
-            .take(LONGEST as u64 + 1)
-            .read_until(b'\n', &mut data)
-            .map_err(|error| error.to_string())?;
-        if read == 0 {
-            return Err("the server closed the session".to_owned());
-        }
-        if read > LONGEST {
-            return Err("the server's reply is too long".to_owned());
-        }
-        let text = String::from_utf8_lossy(&data);
-        let line = text.trim_end();
-        let code: u16 = line
-            .get(..3)
-            .and_then(|code| code.parse().ok())
-            .ok_or("the server's reply is no SMTP reply")?;
-        // `250-` goes on, `250 ` ends the reply.
-        if line.as_bytes().get(3) != Some(&b'-') {
-            return Ok((code, line.chars().take(200).collect()));
-        }
-    }
-}
-
-/// `Message queued with id 4b786a616e00000.` names the queue ID in hex; the
-/// event history writes it as a number.
-fn queue_id(reply: &str) -> Option<String> {
-    let hex = reply.rsplit_once("with id ")?.1.trim_end_matches('.');
-    u64::from_str_radix(hex, 16).ok().map(|id| id.to_string())
 }
 
 impl MailTest {
@@ -196,106 +171,38 @@ impl MailTest {
         self
     }
 
-    /// One session that hands `test` to the server, all of it within the
-    /// session's time.
-    fn send(&self, context: &Context<'_>, test: Test) -> Sent {
-        let failed = |reply: String| Sent {
-            reply,
-            ..Sent::default()
+    /// What the event history says became of an accepted message, or why it
+    /// could not be read.
+    fn filed(context: &Context<'_>, queue: &str) -> Result<Option<&'static str>, String> {
+        let text = |error: rusqlite::Error| error.to_string();
+        let Some(db) = reading(&context.events_database, Duration::from_secs(2))
+            .map_err(|error| error.to_string())?
+        else {
+            // Nothing is recorded yet, so nothing is filed yet either.
+            return Ok(None);
         };
-        let until = Instant::now() + self.session;
-        let connected = (self.host.as_str(), self.port)
-            .to_socket_addrs()
-            .ok()
-            .and_then(|mut addresses| addresses.next())
-            .ok_or_else(|| "no address".to_owned())
-            .and_then(|address| {
-                TcpStream::connect_timeout(&address, TIMEOUT.min(self.session))
-                    .map_err(|error| error.to_string())
-            });
-        let stream = match connected {
-            Ok(stream) => stream,
-            Err(error) => return failed(format!("no session: {error}")),
-        };
-        let mut reader = BufReader::new(Timed::new(stream, until, TIMEOUT));
-        let origin = &context.deployment.public_origin;
-        let name = origin
-            .split_once("://")
-            .map_or(origin.as_str(), |(_, host)| host);
-        let message = test.message(&Envelope {
-            from: if self.sender.is_empty() {
-                &self.recipient
-            } else {
-                &self.sender
-            },
-            to: &self.recipient,
-            date: time::mail_date(context.now),
-            stamp: context.now.as_second(),
-            host: name,
-        });
-        let steps = [
-            (None, 220),
-            (Some(format!("EHLO {name}\r\n")), 250),
-            (Some(format!("MAIL FROM:<{}>\r\n", self.sender)), 250),
-            (Some(format!("RCPT TO:<{}>\r\n", self.recipient)), 250),
-            (Some("DATA\r\n".to_owned()), 354),
-            (Some(message), 250),
-        ];
-        let mut last = Sent::default();
-        for (index, (command, expected)) in steps.iter().enumerate() {
-            if let Some(command) = command
-                && reader.get_mut().write_all(command.as_bytes()).is_err()
-            {
-                return failed("the server closed the session".to_owned());
-            }
-            match reply(&mut reader) {
-                Ok((code, said)) => {
-                    last = Sent {
-                        queue: queue_id(&said).filter(|_| code == 250 && index == 5),
-                        reply: said,
-                        code,
-                        at_data: index == 5,
-                        at: None,
-                        cut: false,
-                    };
-                    if code != *expected {
-                        break;
-                    }
-                }
-                Err(error) => return failed(error),
-            }
-        }
-        let _ = reader.get_mut().write_all(b"QUIT\r\n");
-        last
-    }
-
-    /// What the event history says became of an accepted message.
-    fn filed(context: &Context<'_>, queue: &str) -> Option<&'static str> {
-        let db = reading(&context.events_database, Duration::from_secs(2))
-            .ok()
-            .flatten()?;
         let mut statement = db
             .prepare("SELECT type FROM events WHERE queue_id=? LIMIT 200")
-            .ok()?;
+            .map_err(text)?;
         let kinds: Vec<String> = statement
             .query_map([queue], |row| row.get(0))
-            .ok()?
+            .map_err(text)?
             .filter_map(Result::ok)
             .collect();
-        if kinds.iter().any(|kind| kind == "message-ingest.spam") {
+        Ok(if kinds.iter().any(|kind| kind == "message-ingest.spam") {
             Some("spam")
         } else if kinds.iter().any(|kind| kind == "message-ingest.ham") {
             Some("ham")
         } else {
             None
-        }
+        })
     }
 
     /// The result of one test that was sent at `at`: its state and what to
     /// say of it.
     fn judged(context: &Context<'_>, test: Test, sent: &Sent, at: i64) -> (State, String) {
         if !sent.happened() {
-            // Refused before the message, or no session.
+            // Refused before the message, deferred, or no session.
             return (State::Unknown, format!("not tested: {}", sent.reply));
         }
         if sent.code != 250 {
@@ -309,21 +216,25 @@ impl MailTest {
         if let Some(said) = unfiltered {
             return (State::Failed, said.to_owned());
         }
-        let filed = sent
-            .queue
-            .as_deref()
-            .and_then(|queue| Self::filed(context, queue));
+        let filed = match sent.queue.as_deref() {
+            Some(queue) => Self::filed(context, queue),
+            None => Ok(None),
+        };
         match filed {
-            Some("spam") => (State::Ok, "accepted and filed as spam".to_owned()),
-            Some(_) => (
+            Err(why) => (
+                State::Unknown,
+                format!("accepted; the event history could not be read: {why}"),
+            ),
+            Ok(Some("spam")) => (State::Ok, "accepted and filed as spam".to_owned()),
+            Ok(Some(_)) => (
                 State::Failed,
                 "accepted and delivered as ordinary mail".to_owned(),
             ),
-            None if context.now.as_second().saturating_sub(at) <= VERDICT_WITHIN => (
+            Ok(None) if context.now.as_second().saturating_sub(at) <= VERDICT_WITHIN => (
                 State::Unknown,
                 "accepted; the event history does not show yet how it was filed".to_owned(),
             ),
-            None => (
+            Ok(None) => (
                 State::Unknown,
                 "accepted; the event history never showed how it was filed".to_owned(),
             ),
@@ -347,9 +258,9 @@ impl MailTest {
     }
 
     /// For how long results kept at `kept` are used: until the first test is
-    /// due again, and not at all once the macro test was switched on or off.
+    /// due again, and not at all where they are not this configuration's.
     fn wait(&self, kept: i64, tests: &Tests) -> i64 {
-        if tests.macros.is_some() != self.macros {
+        if !self.fits(tests) {
             return 0;
         }
         [
@@ -367,8 +278,7 @@ impl MailTest {
     /// The tests that are due, sent now; the others stay as they were kept.
     fn tested(&self, context: &Context<'_>, before: Option<(i64, Tests)>) -> Tests {
         let now = context.now.as_second();
-        // Results from before the macro test was switched are not these tests.
-        let before = before.filter(|(_, tests)| tests.macros.is_some() == self.macros);
+        let before = before.filter(|(_, tests)| self.fits(tests));
         let result = |test: Test, kept: fn(&Tests) -> Option<&Sent>| {
             let stays = before.as_ref().and_then(|(at, tests)| {
                 let sent = kept(tests)?;
@@ -401,7 +311,26 @@ impl MailTest {
             macros: self
                 .macros
                 .then(|| result(Test::Macro, |tests| tests.macros.as_ref())),
+            aim: Some(self.aim()),
         }
+    }
+
+    /// What this configuration sends the tests to and from.
+    fn aim(&self) -> Aim {
+        Aim {
+            host: self.host.clone(),
+            port: self.port,
+            recipient: self.recipient.clone(),
+            sender: self.sender.clone(),
+        }
+    }
+
+    /// Whether results kept are of the tests this configuration asks for:
+    /// not where the macro test was switched since, nor where they were sent
+    /// to another listener or recipient or from another sender.
+    fn fits(&self, tests: &Tests) -> bool {
+        tests.macros.is_some() == self.macros
+            && tests.aim.as_ref().is_none_or(|aim| *aim == self.aim())
     }
 }
 
@@ -448,7 +377,10 @@ impl Provider for MailTest {
         let findings: Vec<String> = results
             .iter()
             .filter(|(_, _, (state, _))| *state != State::Ok)
-            .map(|(test, _, (_, said))| format!("{}: {said}.", test.label()))
+            // A reply that ends its sentence ends the finding with it.
+            .map(|(test, _, (_, said))| {
+                format!("{}: {}.", test.label(), said.trim_end_matches('.'))
+            })
             .collect();
         let stated = |at: i64| time::Timestamp::from_second(at).ok().map(time::isoformat);
         let column = |label: &str, format: Format| Column {
@@ -468,7 +400,7 @@ impl Provider for MailTest {
         .with_scope(format!(
             "Garrison handed the test messages to the local SMTP listener without signing in, \
              addressed to {}. Each test is sent again {} hours after it was sent; one that did \
-             not happen is tried again after an hour.",
+             not happen, as one the server deferred, is tried again after an hour.",
             self.recipient,
             self.every / 3600
         ))
@@ -492,6 +424,8 @@ impl Provider for MailTest {
     }
 }
 
+#[cfg(test)]
+mod kept_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

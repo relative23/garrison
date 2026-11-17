@@ -45,7 +45,7 @@ observation the checks report is in [observation ids](observations.md).
 | `stalwart` | `milter_host`, `milter_port`, `max_accounts` | Spam settings, classifier, milter, queue, mailbox storage, running version |
 | `prometheus` | `path` | Native counters and gauges for the dashboard |
 | `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
-| `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning |
+| `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning, and where both are there the newer one counts, also for the dashboard's signature age |
 | `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30), `verify_days` (0: not expected), `restore_days` (0), `path`, `modules` | What the backup tool reported of its repository; see below |
 | `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
@@ -113,7 +113,9 @@ that a signed-in account hands in names the message's sender address and
 not the account. An account that sends under several of its addresses shows
 once for each, and each has its own usual number. A mailbox with many
 aliases can so stay below a threshold that it would pass as one account;
-lower `factor` or `burst` where that matters.
+lower `factor` or `burst` where that matters. The limits apply at once: a
+change of them judges the next run's card, also over the reading of up to
+ten minutes before.
 
 The table lists the 20 addresses that need a look first, with messages,
 recipients, their usual number a day, the busiest hour, bounces and the IP
@@ -129,6 +131,13 @@ is Unknown and says since when; a warning it
 did see stays a warning. Where events were lost in the 14 days before, no
 usual number is named until that window has passed, since an average over
 days that are missing would make an ordinary day look like an outlier.
+
+The check reads the newest 200 000 submissions of the 15 days, and as many
+bounces. Where there are more, the usual number is that of the whole days
+before the last one that were read, none is named where fewer than three
+were, and the card says so; where the last day itself was not read whole,
+or bounces were left, its figures are a part, and the card is Partial where
+it would be OK.
 
 ## `tls`
 
@@ -160,11 +169,17 @@ minutes. They count; none of them is a verdict, except where it says so.
   went to, which Stalwart's accounts name. Where Stalwart did not give them
   to the collector's key, or the collector has no key for Stalwart, that
   mail is counted under "unknown", and the card by domain is Unknown and
-  says why; the first run with a key reads them at once.
+  says why; the first run with a key reads them at once. The other cards
+  need no account, and a Stalwart that is slow to answer costs them
+  nothing: it is asked before the history is read.
 - `milter`: what Stalwart's milters said of the mail they were shown (a
   virus scanner's, Garrison's own macro filter), by day, on the Antivirus
-  page. A milter that could not be reached since yesterday is a warning. A
-  host without a milter has no such card.
+  page. A milter that could not be reached since yesterday is a warning,
+  and so is one that deferred every message it was shown since yesterday
+  and passed or refused none, as a scanner does that cannot scan. A reply
+  of the milter's own, with which Garrison's macro filter refuses a
+  message, is counted apart: Stalwart's event does not say whether it
+  refused or deferred. A host without a milter has no such card.
 - `authentication`: how many senders passed SPF, DKIM, DMARC, ARC and the
   check of the reverse name, on the Spam filter page; and the sender domains
   whose mail failed SPF or DMARC, which are forged senders or senders whose
@@ -173,6 +188,13 @@ minutes. They count; none of them is a verdict, except where it says so.
 - `tls`: how much mail came in on port 25 with and without STARTTLS and how
   many deliveries went out to hosts that offered TLS, on the DNS & TLS page,
   with the sender domains and hosts without TLS.
+
+The lists by domain, of spam and ham, of the failing senders and of mail
+without TLS, are made from the newest 50 000 events of each kind in the
+seven days, and show the 20 busiest rows. A card whose list read only the
+newest events says so and is Partial where it would be OK; one that shows
+the 20 busiest of more says how many there are. The counts by day and the
+numbers of mail with and without TLS count every event of the week.
 
 A summary is in order only over a history that holds the week. While the
 event receiver has not reported for five minutes or runs without storing
@@ -428,15 +450,51 @@ shows how an accepted one was filed. The check runs only where you name a
 harmless message there.
 
 Each test is sent again `every_hours` after it was sent. One that did not
-happen, because no session came about or the server turned it away before
-the message, is "not tested": it alone is tried again after an hour, and the
-table says when each test was sent.
+happen, because no session came about, the server turned it away before
+the message or it deferred the message with a temporary reply (4xx), is
+"not tested": it alone is tried again after an hour, and the table says when
+each test was sent. A deferral is no verdict: Stalwart defers a message
+where a milter defers it, as a scanner that cannot scan does
+(clamav-milter's `OnFail Defer` while clamd is down), and where it cannot
+reach a milter whose entry says to defer then, as setup writes Garrison's
+filter for `when_unreachable = "defer"`.
+The results are those of the tests as configured: a change of
+`recipient`, `sender`, `host`, `port` or `macro_document` sends the tests
+anew in the next run, and nothing kept for what was configured before is
+shown.
 
 With `macro_document = true` a third message carries a document that a macro
 filter takes for one with macros (it holds none, only the name a macro
 project has inside a document). It must be refused. Switch this on together
 with [`[milter]`](configuration.md#milter) and `on_macro = "reject"`; a filter that only
 marks takes the document, and the check then reports that nothing refused it.
+
+## `clamav`
+
+The card "Antivirus configuration" reads clamav-milter's file
+(`milter_config`) and clamd's (`clamd_config`) as ClamAV reads them. It
+holds clamav-milter's `OnInfected` against `expect_on_infected` (default
+`Reject`) and `OnFail` against `expect_on_fail` (default `Defer`); one that
+differs is a warning. A directive the file does not set counts with
+clamav-milter's own default, `Quarantine` for an infected message and
+`Defer` for a failure, so a file without `OnInfected` warns unless
+`expect_on_infected` is `Quarantine`. A value counts in any case; of a
+directive set twice the first counts, as ClamAV takes it, and the card says
+so; every `ClamdSocket` counts, since clamav-milter takes turns with them. A
+value clamav-milter does not take there, a typo or `Quarantine` and
+`Blackhole` for `OnFail`, is a warning: clamav-milter does not start with
+such a file. A file that cannot be read is named with why, and the card is
+Unknown; a policy that was read stays a warning where only clamd's file
+cannot be read. `garrison check-config` takes for `expect_on_infected` only
+`Accept`, `Reject`, `Defer`, `Blackhole` and `Quarantine`, and for
+`expect_on_fail` only the first three.
+
+Where `fangfrisch_database` names Fangfrisch's database, the card
+"Signature databases" shows when Fangfrisch last checked each file, from
+its whole refresh log; where that database cannot be read, the card says
+why and is Partial where it would be OK. A file a check reads that is no
+regular file, such as a named pipe in place of a database or of ClamAV's
+files, is not opened, and the card says "not a regular file".
 
 ## `receipt`
 

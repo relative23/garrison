@@ -76,6 +76,7 @@ pub(super) fn history(
         "CREATE TABLE events(seq INTEGER PRIMARY KEY, created_at INTEGER, type TEXT, span_id TEXT, fields TEXT)",
     )
     .unwrap();
+    db.execute_batch("BEGIN").unwrap();
     for (kind, ago, span, fields) in events {
         db.execute(
             "INSERT INTO events(created_at,type,span_id,fields) VALUES(?,?,?,?)",
@@ -83,6 +84,7 @@ pub(super) fn history(
         )
         .unwrap();
     }
+    db.execute_batch("COMMIT").unwrap();
     receiver.record(&db, now().as_second() + later);
     config
 }
@@ -305,8 +307,8 @@ fn a_milter_that_could_not_be_reached_is_a_warning_and_a_host_without_one_has_no
         milter.findings
     );
     let by_day = rows(milter);
-    assert_eq!(by_day[0], "2026-10-29 | 2 | 1 | 0 | 0 | 1");
-    assert_eq!(by_day[3], "2026-10-26 | 0 | 0 | 0 | 1 | 0");
+    assert_eq!(by_day[0], "2026-10-29 | 2 | 1 | 0 | 0 | 0 | 1");
+    assert_eq!(by_day[3], "2026-10-26 | 0 | 0 | 0 | 1 | 0 | 0");
     // A quiet week: in order. No milter event at all: nothing to show.
     let quiet = observed(&events[..3], None, &Remembered::default(), 0);
     assert_eq!(of(&quiet, "flow.milter").state, State::Ok);
@@ -320,6 +322,51 @@ fn a_milter_that_could_not_be_reached_is_a_warning_and_a_host_without_one_has_no
         .map(|observation| observation.id.as_str())
         .collect();
     assert_eq!(ids, ["flow.authentication", "flow.spam", "flow.tls"]);
+}
+
+#[test]
+fn a_milter_that_deferred_everything_since_yesterday_is_a_warning_and_own_replies_count_apart() {
+    // A scanner that cannot scan defers each message: nothing was judged.
+    let deferred: Vec<Event> = (0..3)
+        .map(|second| event("milter.action-temp-fail", 60 + second, json!({})))
+        .collect();
+    let milter = |events: &[Event]| {
+        of(
+            &observed(events, None, &Remembered::default(), 0),
+            "flow.milter",
+        )
+        .clone()
+    };
+    let card = milter(&deferred);
+    assert_eq!(
+        (card.state, card.findings),
+        (
+            State::Warning,
+            vec![
+                "The milter deferred all 3 messages it was shown since yesterday and passed or \
+                 refused none, so their senders were asked to try again later. A scanner that \
+                 cannot scan answers so, as clamav-milter does while clamd is down."
+                    .to_owned()
+            ]
+        )
+    );
+    // One it passed is a verdict.
+    let mut passed = deferred.clone();
+    passed.push(event("milter.action-accept", 120, json!({})));
+    assert_eq!(milter(&passed).state, State::Ok);
+    // A reply of the milter's own, as Garrison's filter refuses with, may
+    // have refused: it is counted apart, and is no deferral.
+    let mut replied = deferred.clone();
+    replied.push(event("milter.action-reply-code", 120, json!({})));
+    replied.push(event("milter.action-reply-code", 121, json!({})));
+    let card = milter(&replied);
+    assert_eq!(card.state, State::Ok, "{:?}", card.findings);
+    assert_eq!(rows(&card)[0], "2026-10-29 | 0 | 0 | 0 | 3 | 2 | 0");
+    // Deferrals before yesterday are history.
+    let older: Vec<Event> = (0..3)
+        .map(|second| event("milter.action-temp-fail", 3 * DAY + second, json!({})))
+        .collect();
+    assert_eq!(milter(&older).state, State::Ok);
 }
 
 #[test]

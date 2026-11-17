@@ -294,10 +294,27 @@ pub fn open_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, Sqlit
 /// writer or reads anything.
 fn connect_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, SqliteError> {
     let path = with_resolved_directory(path)?;
+    regular(&path)?;
     Ok(Connection::open_with_flags(
         path,
         flags | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )?)
+}
+
+/// Refuses a named pipe or other file that is no regular file at `path`,
+/// whose open by SQLite, without `O_NONBLOCK`, could wait for ever. It looks
+/// without opening: closing a descriptor of the file would drop every lock
+/// this process holds on it, another reader's among them. A link, or what
+/// cannot be looked at, is left to SQLite's own open to refuse or name. A
+/// swap between this look and SQLite's open needs write access to the
+/// folder, which only the writing service and root have.
+fn regular(path: &Path) -> Result<(), SqliteError> {
+    match fs::symlink_metadata(path) {
+        Ok(found) if !found.is_file() && !found.file_type().is_symlink() => {
+            Err(SqliteError::Io(std::io::Error::other("not a regular file")))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// `path` with its directory resolved to the real one; the file name is kept.

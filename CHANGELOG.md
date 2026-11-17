@@ -28,6 +28,12 @@ Notable changes for operators and users. The format follows
   stops. Keep it where the collector sees it, or show it the place
   read-only with a drop-in, as
   [checks](docs/operator/checks.md#paths-the-collector-cannot-see) shows.
+- An `expect_on_infected` or `expect_on_fail` of the `clamav` check that
+  clamav-milter does not take there is refused by `garrison check-config`
+  now, and with it the upgrade, before anything stops. Such a value never
+  matched a file, so the card warned of it in every run: write one of
+  `Accept`, `Reject`, `Defer`, `Blackhole` and `Quarantine`, for
+  `expect_on_fail` one of the first three, in any case.
 
 ### Added
 
@@ -176,12 +182,95 @@ Notable changes for operators and users. The format follows
   of a domain, which already stopped asking, said that the resolver gave no
   answer for the records left; they now say "not asked" too, and a domain's
   MTA-STS policy, which was still fetched then, is fetched in the next run.
+- **A named pipe in place of a file a check reads no longer holds the
+  collection run.** The user that writes the event history or Fangfrisch's
+  database could put a named pipe in its place, and root with ClamAV's
+  files: opening it waited for a writer, so the run never reached its
+  snapshot and systemd ended it, run after run. A reader of a database that
+  another user writes, the web service's history queries and root's
+  commands among them, now refuses one that is no regular file before
+  SQLite opens it, and the checks say "not a regular file" on their cards.
+  The Signature databases card also says when Fangfrisch's database cannot
+  be read, and is Partial then; it reads Fangfrisch's whole refresh log,
+  where it read its first 512 rows.
 - **A mail server that sends a line without end no longer stops the
   collector.** The test messages and the mail notifications read each line
   of a reply whole before they looked at its length, so a listener that
   sent data without an end of line filled the collector's memory until
   systemd ended it, and the run with it. A line is now read up to 2 KiB,
   and such a reply is "the server's reply is too long".
+- **A test message the server deferred is no longer counted as refused.**
+  The mail test took any reply from 400 to 599 to its message for a
+  refusal. Where clamd was down and clamav-milter deferred every message,
+  as its default `OnFail Defer` has it, or where a milter Stalwart names
+  could not be reached, Stalwart answered 451 (measured with Stalwart
+  1.1.0), and the Test messages card was in order for a day although
+  nothing had been scanned. A temporary reply (4xx) is now "not tested",
+  Unknown, and that test is tried again after an hour.
+- **The milter verdicts card counts a milter's own replies apart, and
+  warns where a milter judged nothing.** It counted a reply of the milter's
+  own as deferred, though such a reply refuses a message as well: Garrison's
+  macro filter refuses with one, so its refusals showed as deferrals.
+  Stalwart's event for it names no code (measured with Stalwart 1.1.0), so
+  they now have a column of their own. A milter that deferred every message
+  it was shown since yesterday, as clamav-milter does while clamd is down,
+  left the card in order; it is now a warning.
+- **A Stalwart that is slow to give its accounts no longer costs the mail
+  flow its counts.** The mail flow opened the event history, whose reading
+  has two seconds, and then asked Stalwart for its accounts, which may take
+  eight: where the answer took more than two seconds, every card of the
+  mail flow was Unknown for ten minutes with "the event history could not
+  be read: interrupted", which blamed the history. Stalwart is now asked
+  first; the counts stand, and only the card by domain says where the
+  domains are not known.
+- **The mail flow's lists say what they left out, and its TLS numbers are
+  of one week.** Past 50 000 events of a kind in the week, the TLS card set
+  the newest 50 000 MAIL FROMs against the newest 50 000 STARTTLS events,
+  which reach back to other times, so mail that had TLS counted as mail
+  without it and its domains were listed as plain, on a card in order; the
+  one word of the cut went to the first card in name order and spoke only
+  of the lists. The numbers of incoming mail with and without TLS now count
+  all of the week in one query, a card whose list read only the newest
+  events says so and is Partial where it would be in order, and a list that
+  shows its 20 busiest rows of more says how many there are.
+- **Past 200 000 submissions, an address's usual volume is that of the days
+  that were read.** The sending addresses check read the newest 200 000
+  submissions of its 15 days and divided what it read of the days before by
+  every day the history held, so each usual volume was too low and an
+  ordinary day could warn, naming the address; the card said only "More
+  mail was handed in than is counted here.". The usual volume is now that
+  of the whole days before the last one that were read, none is named where
+  fewer than three were, the card says how many, and a last day or bounces
+  past the limit make it Partial where it would be in order.
+- **The test messages' results are those of the listener and the mailbox
+  configured.** After a change of `recipient`, `sender`, `host` or `port`,
+  the Test messages card showed the results kept for the old ones under the
+  new names until each test was due again, a day later by default and up to
+  a week. Such a change now sends the tests anew in the next run, as a
+  change of `macro_document` already did; results kept by an earlier
+  release count as made for the configuration as it is.
+- **The sending addresses' limits apply at once.** A change of
+  `min_recipients`, `factor`, `burst` or `bounces` reached the card only
+  with the next reading of the event history, up to ten minutes later,
+  since the reading kept the reasons found with the limits of its time. The
+  card now applies the limits configured in each run.
+- **The dashboard's signature age is that of the database the card
+  judges.** Where an old `daily.cvd` lies beside the `daily.cld` that the
+  updates keep current, the Signature databases card judged the newer file
+  and the dashboard's "Signature age" showed the older one's, often days.
+  Both now take the newer daily database.
+- **The antivirus configuration card reads clamav-milter's file as
+  clamav-milter does.** A file that set no `OnInfected`, as the sample file
+  of the RHEL family's package, one that set it twice or in lower case, and
+  one with a value clamav-milter does not take, left the card in order,
+  while the milter quarantined (its default), did what the first line said,
+  or did not start at all. The card now counts a directive the file does
+  not set with clamav-milter's default, Quarantine for an infected message
+  and Defer for a failure, takes a value in any case and the first of two
+  lines, as clamav-milter 1.4 does, and warns of a value it does not take,
+  with which it does not start. The scanner's limits show the first value
+  too, every scanner socket is listed, and a file that cannot be read is
+  named with why. See [checks](docs/operator/checks.md#clamav).
 - **On a phone, the menu takes the keyboard as it opens.** The menu stayed
   hidden while it slid in, so a Tab pressed in that moment passed it by.
   It is now shown as it opens, and hidden only once it has slid out.

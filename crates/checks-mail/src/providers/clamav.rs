@@ -18,11 +18,13 @@ use garrison_core::sqlite::reading;
 use garrison_core::time;
 use serde_json::json;
 
-use super::directives::directives;
+use super::directives;
 use crate::context::{Collected, Context, HostPath, Provider, ProviderError, Report, Use};
 use crate::options::{Checked, Options, fail};
+use policy::{ON_FAIL, ON_INFECTED};
 
-const ACTIONS: [&str; 5] = ["Accept", "Reject", "Defer", "Blackhole", "Quarantine"];
+mod policy;
+
 const DEFAULT_SIGNATURES: [&str; 6] = [
     "main.cvd",
     "main.cld",
@@ -32,7 +34,7 @@ const DEFAULT_SIGNATURES: [&str; 6] = [
     "bytecode.cld",
 ];
 
-type Directives = BTreeMap<String, Option<String>>;
+type Directives = BTreeMap<String, Vec<String>>;
 
 /// `25M` and friends in bytes.
 fn size(value: Option<&str>) -> Option<u64> {
@@ -62,8 +64,10 @@ fn yes(value: Option<&str>) -> Option<bool> {
     }
 }
 
+/// The value `ClamAV` takes of a directive: the first, where the file sets it
+/// more than once.
 fn get<'a>(values: Option<&'a Directives>, key: &str) -> Option<&'a str> {
-    values?.get(key)?.as_deref()
+    values?.get(key)?.first().map(String::as_str)
 }
 
 #[derive(Debug)]
@@ -73,8 +77,8 @@ pub struct Clamav {
     database: PathBuf,
     signatures: Vec<String>,
     fangfrisch: Option<PathBuf>,
-    expect_on_infected: String,
-    expect_on_fail: String,
+    expect_on_infected: &'static str,
+    expect_on_fail: &'static str,
 }
 
 /// The daily signature database is older than this only where updates no
@@ -129,35 +133,49 @@ impl Clamav {
             } else {
                 None
             },
-            expect_on_infected: options.text("expect_on_infected", Some("Reject"))?,
-            expect_on_fail: options.text("expect_on_fail", Some("Defer"))?,
+            expect_on_infected: ON_INFECTED.expected(&options, "Reject")?,
+            expect_on_fail: ON_FAIL.expected(&options, "Defer")?,
         })
     }
 
+    /// The card of the policy and limits the two files set. A policy that
+    /// was read stays what it is where the scanner's file could not be read;
+    /// only "in order" needs both.
     fn configuration(&self, context: &Context<'_>) -> Result<Observation, ProviderError> {
-        let milter = directives(&self.milter_config);
-        let clamd = directives(&self.clamd_config);
-        let (m, c) = (milter.as_ref(), clamd.as_ref());
-        let action = |key: &str| get(m, key).filter(|value| ACTIONS.contains(value));
-        let (infected, failure) = (action("OnInfected"), action("OnFail"));
-        let mut findings = Vec::new();
-        if let Some(infected) = infected.filter(|value| *value != self.expect_on_infected) {
-            findings.push(format!(
-                "Detected malware is handled with {infected}, not {}.",
-                self.expect_on_infected
-            ));
-        }
-        if let Some(failure) = failure.filter(|value| *value != self.expect_on_fail) {
-            findings.push(format!(
-                "Scanner failures are handled with {failure}, not {}.",
-                self.expect_on_fail
-            ));
-        }
-        let state = match (m.is_some() && c.is_some(), findings.is_empty()) {
-            (false, _) => State::Unknown,
-            (true, false) => State::Warning,
-            (true, true) => State::Ok,
+        let milter = directives::values(&self.milter_config);
+        let clamd = directives::values(&self.clamd_config);
+        let (m, c) = (milter.as_ref().ok(), clamd.as_ref().ok());
+        // Each finding with whether it needs a look.
+        let mut findings: Vec<(bool, String)> = Vec::new();
+        let mut action = |policy: &policy::Policy, expected: &str| {
+            let values = m?.get(policy.key).map_or(&[][..], Vec::as_slice);
+            let judged = policy.judged(values, expected, &self.milter_config);
+            findings.extend(judged.findings);
+            judged.action
         };
+        let infected = action(&ON_INFECTED, self.expect_on_infected);
+        let failure = action(&ON_FAIL, self.expect_on_fail);
+        for (path, read) in [(&self.milter_config, &milter), (&self.clamd_config, &clamd)] {
+            if let Err(why) = read {
+                findings.push((
+                    false,
+                    format!("{} could not be read: {why}.", path.display()),
+                ));
+            }
+        }
+        let state = if m.is_none() {
+            State::Unknown
+        } else if findings.iter().any(|(look, _)| *look) {
+            State::Warning
+        } else if c.is_none() {
+            State::Unknown
+        } else {
+            State::Ok
+        };
+        // clamav-milter takes turns with every scanner it is given.
+        let scanners = m
+            .and_then(|values| values.get("ClamdSocket"))
+            .map(|sockets| sockets.join(", "));
         let bytes =
             |label: &str, values, key| Field::new(label, size(get(values, key)), Format::Bytes);
         let flag = |label: &str, key| Field::new(label, yes(get(c, key)), Format::Boolean);
@@ -180,7 +198,7 @@ impl Clamav {
             Field::text("Detected malware", infected),
             Field::text("Scanner failure", failure),
             Field::text("Milter socket", get(m, "MilterSocket")),
-            Field::text("Scanner socket", get(m, "ClamdSocket")),
+            Field::text("Scanner socket", scanners),
             bytes("Milter file limit", m, "MaxFileSize"),
             bytes("Scanner stream limit", c, "StreamMaxLength"),
             bytes("Scanner file limit", c, "MaxFileSize"),
@@ -189,10 +207,20 @@ impl Clamav {
             flag("Alert when limits are exceeded", "AlertExceedsMax"),
             flag("Alert for encrypted content", "AlertEncrypted"),
         ])
-        .with_findings(findings))
+        .with_findings(findings.into_iter().map(|(_, finding)| finding).collect()))
     }
 
-    fn signatures(&self, context: &Context<'_>) -> Result<Observation, ProviderError> {
+    /// The card of the signature files, and the age in hours of the newest
+    /// daily database that it judges, which the dashboard's gauge shows.
+    fn signatures(
+        &self,
+        context: &Context<'_>,
+    ) -> Result<(Observation, Option<f64>), ProviderError> {
+        let log = self
+            .fangfrisch
+            .as_deref()
+            .map(|path| refresh_log(path, &self.signatures));
+        let checked = log.as_ref().and_then(|read| read.as_ref().ok());
         let mut rows = Vec::new();
         // The newest daily database and its age in hours: the one file that
         // changes every day, and so the one that shows whether updates arrive.
@@ -216,7 +244,7 @@ impl Clamav {
                 json!(name),
                 json!(info.len()),
                 json!(modified),
-                json!(self.refreshed(name)),
+                json!(checked.and_then(|checks| checks.get(name))),
             ]);
         }
         let column = |label: &str, format| Column {
@@ -243,7 +271,25 @@ impl Clamav {
             ),
             Some(_) => (State::Ok, None),
         };
-        Ok(Observation::new(Required {
+        let mut findings: Vec<String> = finding.into_iter().collect();
+        // A refresh log that is named and cannot be read leaves its column
+        // empty: the card says why, and is not in order for it.
+        let state = match (&log, self.fangfrisch.as_deref()) {
+            (Some(Err(why)), Some(path)) => {
+                findings.push(format!(
+                    "The Fangfrisch database {} could not be read: {why}; when it last checked \
+                     each file is not known.",
+                    path.display()
+                ));
+                if state == State::Ok {
+                    State::Partial
+                } else {
+                    state
+                }
+            }
+            _ => state,
+        };
+        let observation = Observation::new(Required {
             id: "clamav.signatures",
             provider: self.name(),
             title: "Signature databases",
@@ -254,7 +300,7 @@ impl Clamav {
             source: &self.database.display().to_string(),
         })?
         .with_scope("File times do not prove a successful update check or a loaded database.")
-        .with_findings(finding.into_iter().collect())
+        .with_findings(findings)
         .with_table(Table {
             columns: vec![
                 column("File", Format::Text),
@@ -264,28 +310,44 @@ impl Clamav {
             ],
             rows,
         })
-        .with_max_age(900))
+        .with_max_age(900);
+        Ok((observation, daily.map(|(_, hours)| hours)))
     }
+}
 
-    /// When Fangfrisch last checked this file, from its refresh log.
-    fn refreshed(&self, name: &str) -> Option<String> {
-        let db = reading(self.fangfrisch.as_deref()?, Duration::from_secs(2)).ok()??;
-        let mut statement = db
-            .prepare("SELECT path, updated FROM refreshlog LIMIT 512")
-            .ok()?;
-        let mut rows = statement.query([]).ok()?;
-        while let Ok(Some(row)) = rows.next() {
-            let path: String = row.get::<_, rusqlite::types::Value>(0).ok().map(sql_text)?;
-            if Path::new(&path).file_name().and_then(|file| file.to_str()) == Some(name) {
-                let updated = sql_text(row.get::<_, rusqlite::types::Value>(1).ok()?);
-                // Fangfrisch writes UTC without saying so.
-                return time::parse_naive_utc(&updated)
-                    .or_else(|| time::parse(&updated))
-                    .map(time::isoformat);
-            }
+/// When Fangfrisch last checked each of the files `listed`, by the file's
+/// name, from the refresh log of its database at `path`; or why it could not
+/// be read. The reader's time bounds the scan, and the names kept are the
+/// listed ones, whatever the log's writer put there.
+pub(super) fn refresh_log(
+    path: &Path,
+    listed: &[String],
+) -> Result<BTreeMap<String, String>, String> {
+    let text = |error: rusqlite::Error| error.to_string();
+    let db = reading(path, Duration::from_secs(2))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "it is not there".to_owned())?;
+    let mut statement = db
+        .prepare("SELECT path, updated FROM refreshlog")
+        .map_err(text)?;
+    let mut rows = statement.query([]).map_err(text)?;
+    let mut found = BTreeMap::new();
+    while let Some(row) = rows.next().map_err(text)? {
+        let path = sql_text(row.get::<_, rusqlite::types::Value>(0).map_err(text)?);
+        let updated = sql_text(row.get::<_, rusqlite::types::Value>(1).map_err(text)?);
+        // Fangfrisch writes UTC without saying so.
+        let checked = time::parse_naive_utc(&updated).or_else(|| time::parse(&updated));
+        let name = Path::new(&path)
+            .file_name()
+            .and_then(|file| file.to_str())
+            .filter(|name| listed.iter().any(|file| file == name));
+        if let (Some(name), Some(checked)) = (name, checked) {
+            found
+                .entry(name.to_owned())
+                .or_insert_with(|| time::isoformat(checked));
         }
-        None
     }
+    Ok(found)
 }
 
 fn sql_text(value: rusqlite::types::Value) -> String {
@@ -338,20 +400,7 @@ impl Provider for Clamav {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let signatures = self.signatures(context)?;
-        let daily = signatures
-            .table
-            .iter()
-            .flat_map(|table| &table.rows)
-            .find(|row| {
-                row[0]
-                    .as_str()
-                    .is_some_and(|name| name.starts_with("daily."))
-            });
-        let age = daily
-            .and_then(|row| row[2].as_str())
-            .and_then(time::parse)
-            .map(|modified| context.seconds_since(modified) / 3600.0);
+        let (signatures, age) = self.signatures(context)?;
         let mut report = Report {
             observations: vec![self.configuration(context)?, signatures],
             ..Report::default()
@@ -398,7 +447,21 @@ mod tests {
         let clamav = Clamav::new(&table(&raw)).unwrap();
         let (config, runner) = (config(directory.path()), Canned(String::new()));
         let unknown = clamav.configuration(&context(&config, &runner)).unwrap();
-        assert_eq!((unknown.state, unknown.findings.len()), (State::Unknown, 0));
+        assert_eq!(
+            (unknown.state, unknown.findings),
+            (
+                State::Unknown,
+                vec![format!(
+                    "{} could not be read: No such file or directory (os error 2).",
+                    missing.display()
+                )]
+            )
+        );
+        // What was seen of the policy stays what it is.
+        std::fs::write(&milter, "OnInfected Accept\n").unwrap();
+        let drift = clamav.configuration(&context(&config, &runner)).unwrap();
+        assert_eq!(drift.state, State::Warning, "{:?}", drift.findings);
+        std::fs::write(&milter, "OnInfected Reject\nOnFail Defer\n").unwrap();
         std::fs::write(&missing, "MaxFileSize 25M\n").unwrap();
         let known = clamav.configuration(&context(&config, &runner)).unwrap();
         assert_eq!(known.state, State::Ok);
