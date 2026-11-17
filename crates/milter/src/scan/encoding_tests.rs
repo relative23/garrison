@@ -5,8 +5,7 @@
 //! evasion does not turn ordinary mail into "unscanned".
 //!
 //! What a conforming decoder reconstructs was measured with Python's `email`,
-//! `quopri` and `base64` on this host (evidence under
-//! `private/evidence/.../lane-milter/`). Encodings a conforming encoder would
+//! `quopri` and `base64`. Encodings a conforming encoder would
 //! not write for a MIME part, which only some lenient clients reconstruct,
 //! are a documented limit and are checked apart, so the limit cannot drift
 //! into a silent `Clean` unnoticed.

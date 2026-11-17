@@ -1,7 +1,7 @@
 //! Rules that every check of this crate keeps, each held over all of its
 //! places, so that a new check, or a new place of one, that breaks a rule
 //! fails here: no card is in order where its check could not look, and a
-//! limit that cuts what a card shows says what it left out (O-07).
+//! limit that cuts what a card shows says what it left out.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -407,7 +407,7 @@ fn cuts(at: &dyn Fn(&str) -> PathBuf) -> Vec<(&'static str, String)> {
 }
 
 /// Every limit in this crate's code that cuts what a card shows says what
-/// it left out (O-07): the rows of a list receipt past its table, a text
+/// it left out: the rows of a list receipt past its table, a text
 /// past 300 characters, which a condition still compares whole, and the
 /// packages past five that need a restart. A limit that refuses a source
 /// whole leaves its card Unknown, never cut. A new limit fails here until it
@@ -473,7 +473,7 @@ fn every_cut_says_what_it_left_out() {
         (
             "providers/version.rs",
             "const MAX_OUTPUT",
-            "N-163: the card is Unknown where it cuts",
+            "the card is Unknown where it cuts",
         ),
         ("providers/version.rs", ".take(MAX_OUTPUT)", "the same cut"),
         (

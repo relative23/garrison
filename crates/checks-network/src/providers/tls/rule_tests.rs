@@ -4,7 +4,7 @@
 //! the check could not learn of Stalwart's listeners and domains. For each
 //! the card is not OK, and a finding names it; Stalwart's domains after the
 //! first `max_domains` are named, and the card keeps the state of the
-//! endpoints probed (T-36). A new way that ends OK or says nothing fails
+//! endpoints probed. A new way that ends OK or says nothing fails
 //! here.
 
 use std::net::TcpListener;

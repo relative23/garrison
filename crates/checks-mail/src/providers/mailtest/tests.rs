@@ -209,7 +209,7 @@ fn an_accepted_test_file_and_spam_delivered_as_mail_are_failures() {
 }
 
 /// What Stalwart answers at the end of a message that a milter deferred or
-/// that it could not hand to a milter (measured on Stalwart 1.1.0, O-12).
+/// that it could not hand to a milter (measured on Stalwart 1.1.0).
 const DEFERRED: &str = "451 4.3.5 Unable to accept message at this time.";
 
 #[test]

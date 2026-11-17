@@ -37,7 +37,7 @@ const signedIn = {
 
 /** Each write, sent from where the interface sends it, without an answer.
  * The header's theme button saves the preferences as the Settings page does;
- * it says nothing of any failed save yet (N-133, the next block's). */
+ * it says nothing of any failed save yet. */
 const CASES: Record<string, () => Promise<void>> = {
   submitAction: async () => {
     configure({ csrf: "csrf-token", onUnauthorized: () => undefined, onRefused: () => undefined });

@@ -149,7 +149,7 @@ fn stalwart_takes_a_notification_its_own_account_submits_past_the_spam_filter() 
 
 /// An account whose password has spaces in it signs in for a notification
 /// with the password as the collector reads it from its credential file,
-/// where a token's form would refuse it (T-32).
+/// where a token's form would refuse it.
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn a_password_with_spaces_read_from_its_file_signs_the_account_in() {

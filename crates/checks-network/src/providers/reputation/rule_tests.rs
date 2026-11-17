@@ -9,7 +9,7 @@
 //! resolver, the key and Stalwart's mail hosts that no reading can do
 //! without. For each, the card is not OK, and a finding names what was not
 //! judged; Stalwart's domains after the first `max_domains` are named, and
-//! the cards keep the state of the hosts asked (T-36). A new way that ends
+//! the cards keep the state of the hosts asked. A new way that ends
 //! OK or says nothing fails here.
 
 use std::time::Duration;
