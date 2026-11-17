@@ -8,6 +8,10 @@
 
 mod support;
 
+// The tests of one part, beside this crate's root.
+#[path = "backup_check/repositories.rs"]
+mod repositories;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -17,12 +21,14 @@ use support::{finished, text};
 
 /// restic and borg as far as the command asks them. `BROKEN` names a step
 /// that fails; every call is noted in `CALLS` with borg's time zone.
+/// `REPO_ID` is the ID the repository has, whatever its name.
 const STAND_IN: &str = r#"#!/bin/sh
 tool=$(basename "$0")
 echo "$tool TZ=${TZ-unset} $*" >> "$CALLS"
 for word in "$@"; do
-    case $word in snapshots | stats | check | restore | list | info | extract) verb=$word; break ;; esac
+    case $word in snapshots | stats | check | restore | list | info | extract | cat) verb=$word; break ;; esac
 done
+id=${REPO_ID:-5e1f0c3a9b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f}
 if [ "${BROKEN-}" = "$verb" ]; then
     echo "progress that is not the last word"
     echo "Fatal: the repository is locked by another process" >&2
@@ -33,6 +39,7 @@ case $tool-$verb in
         printf '%s' '[{"time":"2026-11-10T02:00:03.839457992Z","paths":["/srv"],"id":"c92ca1cc","short_id":"c92ca1cc"},
             {"time":"2026-11-11T02:00:04.601910362Z","paths":["/srv"],"id":"0039082a","short_id":"0039082a"}]' ;;
     restic-stats) printf '{"total_size":300006,"snapshots_count":2}' ;;
+    restic-cat) printf '{"version":2,"id":"%s","chunker_polynomial":"27e6426c4ae9ff"}' "$id" ;;
     restic-check) echo "check all packs"; echo "no errors were found" ;;
     restic-restore)
         while [ $# -gt 0 ]; do
@@ -41,14 +48,17 @@ case $tool-$verb in
         done
         mkdir -p "$target$(dirname "$path")" && printf 'restored' > "$target$path" ;;
     borg-list)
-        printf '%s' '{"archives":[{"name":"host-2026-11-11","time":"2026-11-11T02:00:04.000000"},
-            {"name":"host-2026-11-10","time":"2026-11-10T02:00:03.000000"}],"repository":{"id":"1f"}}' ;;
+        printf '{"archives":[{"name":"host-2026-11-11","time":"2026-11-11T02:00:04.000000"},
+            {"name":"host-2026-11-10","time":"2026-11-10T02:00:03.000000"}],"repository":{"id":"%s"}}' "$id" ;;
     borg-info) printf '{"cache":{"stats":{"unique_csize":4096,"total_size":9000}}}' ;;
     borg-check) ;;
     borg-extract) mkdir -p "$(dirname "$3")" && printf 'restored' > "$3" ;;
     *) echo "unexpected call: $*" >&2; exit 64 ;;
 esac
 "#;
+
+/// The ID the stand-ins give the repository where `REPO_ID` gives none.
+const REPOSITORY_ID: &str = "5e1f0c3a9b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f";
 
 /// A directory with both stand-ins, first in the search path of a run.
 struct Tools {
@@ -72,6 +82,13 @@ impl Tools {
 
     /// One run of the command with `arguments`, and with `broken` failing.
     fn run(&self, arguments: &[&str], broken: Option<&str>) -> Output {
+        let broken: Vec<(&str, &str)> = broken.map(|step| ("BROKEN", step)).into_iter().collect();
+        self.run_with(arguments, &broken)
+    }
+
+    /// One run of the command with `arguments` in an environment that holds
+    /// `environment` besides the stand-ins, as a backup job's unit gives it.
+    fn run_with(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
         let path = format!(
             "{}:{}",
             self.directory.path().display(),
@@ -84,11 +101,10 @@ impl Tools {
             .env("PATH", path)
             .env("CALLS", self.directory.path().join("calls"))
             .env_remove("RESTIC_REPOSITORY")
+            .env_remove("RESTIC_REPOSITORY_FILE")
             .env_remove("BORG_REPO")
-            .env_remove("TZ");
-        if let Some(broken) = broken {
-            command.env("BROKEN", broken);
-        }
+            .env_remove("TZ")
+            .envs(environment.iter().copied());
         finished(&mut command)
     }
 
@@ -147,14 +163,15 @@ fn restic_is_asked_without_a_lock_and_the_report_keeps_the_last_check() {
     // that runs; the restore goes to a directory of its own, which is gone.
     let calls = tools.calls();
     assert_eq!(
-        calls[..3],
+        calls[..4],
         [
             "restic TZ=unset -r /srv/repo snapshots --json --no-lock",
             "restic TZ=unset -r /srv/repo stats --json --mode raw-data --no-lock",
+            "restic TZ=unset -r /srv/repo cat config --no-lock",
             "restic TZ=unset -r /srv/repo check",
         ]
     );
-    let restore: Vec<&str> = calls[3].split(' ').collect();
+    let restore: Vec<&str> = calls[4].split(' ').collect();
     assert_eq!(
         [&restore[..8], &restore[9..]].concat(),
         [
@@ -177,7 +194,7 @@ fn restic_is_asked_without_a_lock_and_the_report_keeps_the_last_check() {
     );
     assert!(!Path::new(restore[8]).exists());
     let complete = json!({
-        "tool": "restic", "repository": "/srv/repo", "problem": null,
+        "tool": "restic", "repository": "/srv/repo", "repositoryId": REPOSITORY_ID, "problem": null,
         "snapshots": {"count": 2, "newest": "2026-11-11T02:00:04+00:00", "sizeBytes": 300_006},
         "verify": {"ok": true, "detail": "no errors were found"},
         "restore": {"ok": true, "detail": "/etc/hosts: 1 files, 8 bytes"},
@@ -188,7 +205,7 @@ fn restic_is_asked_without_a_lock_and_the_report_keeps_the_last_check() {
     // The daily run only lists: the last check and restore stay in the report.
     let listed = tools.run(&["restic", "--repo", "/srv/repo", "--report", to], None);
     assert_eq!(listed.status.code(), Some(0));
-    assert_eq!(tools.calls().len(), 2);
+    assert_eq!(tools.calls().len(), 3);
     assert_eq!(timeless(read(&report)), complete);
     assert_eq!(read(&report)["verify"]["at"], checked);
 }
@@ -226,7 +243,7 @@ fn what_restic_fails_at_ends_the_command_with_its_last_word() {
     );
     assert_eq!(read(&report)["verify"]["ok"], false);
     assert_eq!(read(&report)["restore"]["ok"], true);
-    assert_eq!(tools.calls().len(), 3);
+    assert_eq!(tools.calls().len(), 4);
 
     // A repository that cannot be listed: no snapshots are claimed, and
     // neither check nor restore is tried.
@@ -311,7 +328,7 @@ fn borg_runs_in_utc_and_restores_from_its_newest_archive() {
     assert_eq!(
         timeless(read(&report)),
         json!({
-            "tool": "borg", "repository": "/srv/borg", "problem": null,
+            "tool": "borg", "repository": "/srv/borg", "repositoryId": REPOSITORY_ID, "problem": null,
             "snapshots": {"count": 2, "newest": "2026-11-11T02:00:04+00:00", "sizeBytes": 4096},
             "verify": {"ok": true, "detail": "no problems found"},
             "restore": {"ok": true, "detail": "/etc/hosts: 1 files, 8 bytes"},
@@ -456,6 +473,11 @@ fn a_real_restic_repository_is_listed_checked_and_restored() {
     );
     let written = read(&report);
     assert_eq!(written["repository"], repo.to_str().unwrap());
+    let id = written["repositoryId"].as_str().unwrap();
+    assert!(
+        id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "{id}"
+    );
     assert_eq!(written["snapshots"]["count"], 2);
     assert!(written["snapshots"]["newest"].is_string());
     // What is stored is less than the data: the second file compresses.

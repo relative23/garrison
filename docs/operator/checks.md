@@ -199,13 +199,26 @@ The command adds no secret of its own: it runs with the environment your
 backup job already has (`RESTIC_REPOSITORY`, `RESTIC_PASSWORD_FILE`,
 `BORG_REPO`, `BORG_PASSPHRASE` and the like), or takes the repository with
 `--repo`. It writes `/var/lib/garrison/backup-check/<tool>.json`, which the
-provider reads. A report that is a link or no plain file, is larger than
-256 KiB, is not one JSON object as the command writes it, or can be changed
-by a user other than root makes the check Unknown. The command reads the
-report it wrote last the same way, to keep its last check and restore: from
-anything else it keeps neither, says so and writes its report in that place.
-Call the command from the backup job's own unit, and less often with the two
-longer runs:
+provider reads. The report names the repository as the tool was given it,
+without what signs in to it (one that restic reads from the file
+`RESTIC_REPOSITORY_FILE` names by that file; an empty `RESTIC_REPOSITORY`
+or `BORG_REPO` names none, as the tools take it), and holds the
+repository's own ID, which restic gives with `restic cat config` and borg
+with its listing. A run keeps the last check and restore of the report
+before it only where that report is of the same tool and the same ID,
+whatever the repository's name: another repository under the same name,
+as another disk mounted at its place or a file that now names another one,
+starts without them, and so does a run for which the tool gives no ID, as
+where it cannot open the repository; the command says so. A report that an
+earlier release wrote holds no ID: its check and restore are kept once
+where tool and name are the same, and the ID is recorded with them. A
+report that is a link or no plain file, is larger than 256 KiB, is not one
+JSON object as the command writes it, or can be changed by a user other
+than root makes the check Unknown. The command reads the report it wrote
+last the same way, to keep its last check and restore: from anything else
+it keeps neither, says so and writes its report in that place. Call the
+command from the backup job's own unit, and less often with the two longer
+runs:
 
 ```ini
 # In the backup job's unit: report after every backup.
@@ -224,9 +237,12 @@ the last check or restore is older than that. A check or restore that failed,
 and a repository the tool could not open, is Failed. A test restore proves
 that the newest snapshot can be read with the password and holds the path;
 it restores into a directory of its own under `/var/tmp`, counts the files
-and removes them, and does not compare them with the originals. The exit
-code of the command is 1 when something it ran failed, so the unit shows it
-too.
+and removes them, and does not compare them with the originals. A copy that
+an interrupted run left there, as after a reboot or a stopped unit, is
+removed by the next test restore once it has not changed for an hour and no
+run holds it; the command says so, and names a copy it could not remove.
+The exit code of the command is 1 when something it ran failed, so the unit
+shows it too.
 
 ## `systemd`: one-shot jobs
 

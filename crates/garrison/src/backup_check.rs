@@ -5,29 +5,28 @@
 //! environment (`RESTIC_REPOSITORY`, `RESTIC_PASSWORD_FILE`, `BORG_REPO`,
 //! `BORG_PASSPHRASE` and the like): the command adds no secret of its own
 //! and keeps none. Every run lists the snapshots and reads the repository's
-//! size. `--verify` also runs the tool's integrity check, `--restore PATH`
+//! size and its own ID. `--verify` also runs the tool's integrity check, `--restore PATH`
 //! restores that path from the newest snapshot into a directory of its own
-//! and removes it again. The report keeps the last check and the last
-//! restore until the next one.
+//! and removes it again, after what interrupted restores left. The report
+//! keeps the last check and the last restore until the next one.
 
 use std::fs;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use garrison_collector::backups::{
-    MAX_REPORT, Report, Run, Snapshots, Tool, borg_archives, borg_size, named, restic_size,
-    restic_snapshots,
+    MAX_REPORT, Report, Run, Snapshots, Tool, borg_archives, borg_id, borg_size, named, restic_id,
+    restic_size, restic_snapshots,
 };
 use garrison_core::files::{atomic_write, read_json};
 use garrison_core::{json, time};
 
 use crate::{complain, say};
 
+mod restore;
+
 /// Where the reports go, one file for each tool.
 pub(crate) const REPORTS: &str = "/var/lib/garrison/backup-check";
-/// Restores go to disk, not into `/tmp`, which may be memory.
-const RESTORES: &str = "/var/tmp";
 const MAX_DETAIL: usize = 200;
 
 /// What the command was asked to do.
@@ -103,39 +102,12 @@ fn now() -> String {
         .map_or_else(|_| time::isoformat(now), time::isoformat)
 }
 
-/// The files below `directory` and their bytes; links are not followed.
-fn restored(directory: &Path) -> (u64, u64) {
-    let (mut files, mut bytes) = (0, 0);
-    let mut open = vec![directory.to_path_buf()];
-    while let Some(next) = open.pop() {
-        for entry in fs::read_dir(&next).into_iter().flatten().flatten() {
-            let Ok(kind) = entry.metadata().map(|_| entry.file_type()) else {
-                continue;
-            };
-            match kind {
-                Ok(kind) if kind.is_dir() => open.push(entry.path()),
-                Ok(kind) if kind.is_file() => {
-                    files += 1;
-                    bytes += entry.metadata().map_or(0, |metadata| metadata.len());
-                }
-                _ => {}
-            }
-        }
-    }
-    (files, bytes)
-}
-
-/// A directory of its own for one restore, readable by root alone.
-fn restore_directory() -> Result<PathBuf, String> {
-    let mut random = [0u8; 8];
-    getrandom::fill(&mut random).map_err(|error| error.to_string())?;
-    let name = garrison_core::hex::encode(&random);
-    let path = Path::new(RESTORES).join(format!("garrison-restore-{name}"));
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&path)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-    Ok(path)
+/// What a listing gave: the snapshots, the repository's own ID where the
+/// tool gave one, and for borg the newest archive's name.
+struct Listed {
+    snapshots: Snapshots,
+    id: Option<String>,
+    newest: Option<String>,
 }
 
 /// One tool's way of being asked.
@@ -159,8 +131,9 @@ impl Repository {
         archive.map_or_else(|| repo.to_owned(), |archive| format!("{repo}::{archive}"))
     }
 
-    /// The snapshots and the size, and for borg the newest archive's name.
-    fn snapshots(&self) -> Result<(Snapshots, Option<String>), String> {
+    /// The snapshots and the size, the repository's ID, and for borg the
+    /// newest archive's name.
+    fn snapshots(&self) -> Result<Listed, String> {
         let at = now();
         match self.tool {
             Tool::Restic => {
@@ -174,15 +147,20 @@ impl Repository {
                 let mut arguments = self.restic();
                 arguments.extend(["stats", "--json", "--mode", "raw-data", "--no-lock"]);
                 let size_bytes = restic_size(&run(self.tool, &arguments, None).stdout);
-                Ok((
-                    Snapshots {
+                // The listing does not name the repository; its config does.
+                let mut arguments = self.restic();
+                arguments.extend(["cat", "config", "--no-lock"]);
+                let config = run(self.tool, &arguments, None);
+                Ok(Listed {
+                    snapshots: Snapshots {
                         at,
                         count,
                         newest,
                         size_bytes,
                     },
-                    None,
-                ))
+                    id: config.ok.then(|| restic_id(&config.stdout)).flatten(),
+                    newest: None,
+                })
             }
             Tool::Borg => {
                 let repo = self.borg(None);
@@ -195,15 +173,16 @@ impl Repository {
                 let (count, newest, name) = borg_archives(&listed.stdout)?;
                 arguments[0] = "info";
                 let size_bytes = borg_size(&run(self.tool, &arguments, None).stdout);
-                Ok((
-                    Snapshots {
+                Ok(Listed {
+                    snapshots: Snapshots {
                         at,
                         count,
                         newest,
                         size_bytes,
                     },
-                    name,
-                ))
+                    id: borg_id(&listed.stdout),
+                    newest: name,
+                })
             }
         }
     }
@@ -234,69 +213,6 @@ impl Repository {
             detail,
         }
     }
-
-    /// Restore `path` from the newest snapshot into a directory of its own,
-    /// count what arrived and remove it again.
-    fn restore(&self, path: &str, newest: Option<&str>) -> Run {
-        let at = now();
-        let failed = |detail: String| Run {
-            at: at.clone(),
-            ok: false,
-            detail,
-        };
-        let directory = match restore_directory() {
-            Ok(directory) => directory,
-            Err(error) => return failed(error),
-        };
-        let ran = match self.tool {
-            Tool::Restic => {
-                let target = directory.display().to_string();
-                let mut arguments = self.restic();
-                arguments.extend([
-                    "restore",
-                    "latest",
-                    "--no-lock",
-                    "--target",
-                    &target,
-                    "--include",
-                    path,
-                ]);
-                run(self.tool, &arguments, None)
-            }
-            Tool::Borg => match newest {
-                Some(newest) => {
-                    // borg restores into the directory it runs in, and names
-                    // paths without their first slash.
-                    let archive = self.borg(Some(newest));
-                    run(
-                        self.tool,
-                        &["extract", &archive, path.trim_start_matches('/')],
-                        Some(&directory),
-                    )
-                }
-                None => Ran {
-                    ok: false,
-                    stdout: String::new(),
-                    last: "the repository has no archive".to_owned(),
-                },
-            },
-        };
-        let (files, bytes) = restored(&directory);
-        let _ = fs::remove_dir_all(&directory);
-        if !ran.ok {
-            return failed(ran.last);
-        }
-        if files == 0 {
-            return failed(format!(
-                "{path} was not in the newest snapshot: nothing was restored"
-            ));
-        }
-        Run {
-            at,
-            ok: true,
-            detail: format!("{path}: {files} files, {bytes} bytes"),
-        }
-    }
 }
 
 /// The report the last run wrote, read as the collector reads it: no link
@@ -317,6 +233,76 @@ fn last_report(path: &Path) -> Option<Report> {
     report
 }
 
+/// The repository as restic reads it from the file its environment names,
+/// where it names it so: two repositories named so differ by their files.
+fn named_in_file(tool: Tool) -> Option<String> {
+    let file = std::env::var_os("RESTIC_REPOSITORY_FILE")
+        .filter(|file| tool == Tool::Restic && !file.is_empty())?;
+    Some(format!("(named in {})", Path::new(&file).display()))
+}
+
+/// The last report where it is one of the repository this run asks, as
+/// the tool's own ID for it says, whatever the repository's name: of
+/// another, and where the tool gave this run no ID, nothing is kept, since
+/// the card would show it as this repository's. A report that an earlier
+/// release wrote holds no ID: it is kept this once where tool and name are
+/// the same, and the ID that this run records comes with it. Each is said
+/// where the report held a check or a restore.
+fn kept(path: &Path, before: Report, tool: Tool, name: &str, id: Option<&str>) -> Option<Report> {
+    let held = before.verify.is_some() || before.restore.is_some();
+    let say = |why: &str| {
+        if held {
+            complain(&format!("The last report, {}, {why}", path.display()));
+        }
+    };
+    let lost = "its last integrity check and test restore are not kept.";
+    let Some(id) = id else {
+        say(&format!(
+            "is not known to be of this repository, since {} gave no ID for it: {lost}",
+            tool.name()
+        ));
+        return None;
+    };
+    match before.repository_id.as_deref() {
+        Some(theirs) if before.tool == tool && theirs == id => Some(before),
+        None if before.tool == tool && before.repository == name => {
+            say(&format!(
+                "holds no repository ID, as an earlier release wrote it: its last integrity \
+                 check and test restore are kept this once as those of {name}, whose ID {id} \
+                 is recorded with them."
+            ));
+            Some(before)
+        }
+        theirs => {
+            say(&format!(
+                "is of the {} repository {} (ID {}), and this run asks the {} repository \
+                 {name} (ID {id}): {lost}",
+                before.tool.name(),
+                before.repository,
+                theirs.unwrap_or("not recorded"),
+                tool.name()
+            ));
+            None
+        }
+    }
+}
+
+/// What a run says of its listing.
+fn listing(tool: Tool, snapshots: &Snapshots) -> String {
+    let noun = if tool == Tool::Restic {
+        "snapshot"
+    } else {
+        "archive"
+    };
+    format!(
+        "{}: {} {noun}{}, the newest of {}.",
+        tool.name(),
+        snapshots.count,
+        if snapshots.count == 1 { "" } else { "s" },
+        snapshots.newest.as_deref().unwrap_or("no date")
+    )
+}
+
 pub(crate) fn run_check(asked: &Asked) -> u8 {
     let Some(tool) = Tool::named(&asked.tool) else {
         complain("The backup tool is restic or borg.");
@@ -326,25 +312,40 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
         .report
         .clone()
         .unwrap_or_else(|| Path::new(REPORTS).join(format!("{}.json", tool.name())));
-    // What the last run wrote stays, where this one does not run that part.
-    let before = last_report(&path);
     let variable = if tool == Tool::Restic {
         "RESTIC_REPOSITORY"
     } else {
         "BORG_REPO"
     };
-    let known = asked.repo.clone().or_else(|| std::env::var(variable).ok());
+    // An empty variable names nothing, as the tools take it.
+    let known = asked
+        .repo
+        .clone()
+        .or_else(|| {
+            std::env::var(variable)
+                .ok()
+                .filter(|named| !named.is_empty())
+        })
+        .or_else(|| named_in_file(tool));
     let repository = Repository {
         tool,
         given: asked.repo.clone(),
     };
+    let name = named(
+        known
+            .as_deref()
+            .unwrap_or("(named in the tool's own configuration)"),
+    );
+    let listed = repository.snapshots();
+    let id = listed.as_ref().ok().and_then(|listed| listed.id.clone());
+    // What the last run wrote of this repository stays, where this one does
+    // not run that part.
+    let before =
+        last_report(&path).and_then(|before| kept(&path, before, tool, &name, id.as_deref()));
     let mut report = Report {
         tool,
-        repository: named(
-            known
-                .as_deref()
-                .unwrap_or("(named in the tool's own configuration)"),
-        ),
+        repository: name,
+        repository_id: id,
         snapshots: None,
         problem: None,
         verify: before.as_ref().and_then(|before| before.verify.clone()),
@@ -352,22 +353,11 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
     };
     let mut failed = false;
     let mut newest = None;
-    match repository.snapshots() {
-        Ok((snapshots, name)) => {
-            let noun = if tool == Tool::Restic {
-                "snapshot"
-            } else {
-                "archive"
-            };
-            say(&format!(
-                "{}: {} {noun}{}, the newest of {}.",
-                tool.name(),
-                snapshots.count,
-                if snapshots.count == 1 { "" } else { "s" },
-                snapshots.newest.as_deref().unwrap_or("no date")
-            ));
-            report.snapshots = Some(snapshots);
-            newest = name;
+    match listed {
+        Ok(listed) => {
+            say(&listing(tool, &listed.snapshots));
+            report.snapshots = Some(listed.snapshots);
+            newest = listed.newest;
         }
         Err(problem) => {
             failed = true;
@@ -393,13 +383,8 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
         .as_deref()
         .filter(|_| report.problem.is_none())
     {
-        let run = repository.restore(wanted, newest.as_deref());
-        say(&format!(
-            "Restore test: {} ({})",
-            if run.ok { "passed" } else { "FAILED" },
-            run.detail
-        ));
-        failed |= !run.ok;
+        let (run, failing) = restore::tested(&repository, wanted, newest.as_deref());
+        failed |= failing;
         report.restore = Some(run);
     }
     let text = serde_json::to_vec_pretty(&report).unwrap_or_default();
@@ -439,17 +424,6 @@ mod tests {
             "Fatal: wrong password or no key found"
         );
         assert_eq!(last_line(&[&"x".repeat(500)]).len(), MAX_DETAIL);
-    }
-
-    #[test]
-    fn what_a_restore_brought_is_counted_without_following_links() {
-        let directory = tempfile::tempdir().unwrap();
-        fs::create_dir_all(directory.path().join("data/mail")).unwrap();
-        fs::write(directory.path().join("data/mail/a.txt"), "hello\n").unwrap();
-        fs::write(directory.path().join("data/b.bin"), [0u8; 100]).unwrap();
-        std::os::unix::fs::symlink("/etc", directory.path().join("data/link")).unwrap();
-        assert_eq!(restored(directory.path()), (2, 106));
-        assert_eq!(restored(&directory.path().join("missing")), (0, 0));
     }
 
     #[test]

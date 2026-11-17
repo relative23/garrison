@@ -343,11 +343,15 @@ within 30 seconds of any other job, counted from when each job began. A job
 dated ahead of this host's clock, as after the clock went back, holds nothing
 back.
 
-After changing actions, write the polkit rule again (or run the installer
-again, which does the same):
+After changing actions, give the profiles of the access policy the actions
+as they are now, then run the installer again, or write the polkit rule and
+restart the broker, which reads `[[actions]]` only when it starts
+([access](access.md#when-the-actions-change)):
 
 ```sh
+sudo garrison access update
 sudo sh -c 'garrison polkit-rule > /etc/polkit-1/rules.d/50-garrison.rules'
+sudo systemctl restart garrison-broker
 ```
 
 The polkit rule is what allows the broker to run exactly these units.
@@ -382,7 +386,9 @@ run ended:
 ```
 
 Garrison only starts the unit. What it installs, and whether it restarts
-services or the host, is the job's own configuration.
+services or the host, is the job's own configuration. Added after `garrison
+access init`, it reaches the Maintenance page once the profiles have it, as
+above.
 
 ## `[[providers]]`
 

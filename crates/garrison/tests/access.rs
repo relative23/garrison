@@ -6,6 +6,16 @@
 
 mod support;
 
+// The tests of one part each, beside this crate's root.
+#[path = "access/actions.rs"]
+mod actions;
+#[path = "access/folder.rs"]
+mod folder;
+#[path = "access/links.rs"]
+mod links;
+#[path = "access/roles.rs"]
+mod roles;
+
 use std::collections::BTreeSet;
 
 use garrison_testing::http::serve;
@@ -89,22 +99,61 @@ fn init_binds_only_roles_with_every_administrator_right() {
     assert!(text(&again.stdout).contains("exists; use --force to replace it"));
 }
 
+/// Where no role qualifies, as where the administrators' role lacks a right
+/// or is none of Stalwart's default administrator roles, init still writes
+/// the default profiles, binds no role, says so and how to bind one, and
+/// ends with 1; `bind-role` then binds the role the operator names.
 #[test]
-fn init_without_an_administrator_role_writes_nothing() {
+fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
     let authentication = json!({"id": "singleton", "defaultAdminRoleIds": names(&["weak"]),
                                 "defaultUserRoleIds": {}});
+    let roles = json!([
+        role("weak", &["authenticate"], "Weak"),
+        role("admins", &ADMINISTRATOR_RIGHTS, "Administrators of our own")
+    ]);
     let server = serve(vec![
         respond("x:Authentication/get", &json!([authentication])),
-        respond(
-            "x:Role/get",
-            &json!([role("weak", &["authenticate"], "Weak")]),
-        ),
+        respond("x:Role/get", &roles),
+        respond("x:Authentication/get", &json!([authentication])),
+        respond("x:Role/get", &roles),
     ]);
     let directory = against(&server.url);
     let init = run(directory.path(), &["access", "init"]);
     assert_eq!(init.status.code(), Some(1), "{}", text(&init.stderr));
-    assert!(text(&init.stdout).contains("No native administrator role"));
-    assert!(!directory.path().join("policy.json").exists());
+    assert_eq!(
+        text(&init.stderr),
+        "No native administrator role with full administrative rights was found, so the \
+         policy binds no role and nobody can sign in yet. The administrator profile requires \
+         authenticate, sysAccountUpdate, sysDomainUpdate, sysRoleUpdate and sysActionCreate.\n\
+         Stalwart's default administrator role weak (Weak) lacks sysAccountUpdate, \
+         sysDomainUpdate, sysRoleUpdate and sysActionCreate: give the role those rights in the \
+         native administration (Roles), then run garrison access bind-role weak --profile \
+         administrator. As it is, it meets none of the profiles.\n"
+    );
+    let written = policy(directory.path());
+    assert_eq!(written["roleBindings"], json!({}));
+    let profiles: Vec<&String> = written["profiles"].as_object().unwrap().keys().collect();
+    assert_eq!(profiles, ["administrator", "operator", "viewer"]);
+    let bound = run(
+        directory.path(),
+        &[
+            "access",
+            "bind-role",
+            "admins",
+            "--profile",
+            "administrator",
+        ],
+    );
+    assert_eq!(bound.status.code(), Some(0), "{}", text(&bound.stderr));
+    assert!(
+        !text(&bound.stdout).contains("Note: role"),
+        "{}",
+        text(&bound.stdout)
+    );
+    assert_eq!(
+        policy(directory.path())["roleBindings"],
+        json!({"admins": "administrator"})
+    );
     server.requests();
 }
 
@@ -228,7 +277,15 @@ fn an_answer_this_release_does_not_read_is_said_as_one() {
 
 #[test]
 fn a_role_is_bound_to_a_known_profile_once_stalwart_knows_it() {
-    let server = serve(vec![respond("x:Role/get", &json!([{"id": "r2"}]))]);
+    let authentication =
+        json!({"id": "singleton", "defaultAdminRoleIds": {}, "defaultUserRoleIds": {}});
+    let server = serve(vec![
+        respond("x:Authentication/get", &json!([authentication])),
+        respond(
+            "x:Role/get",
+            &json!([role("r2", &["authenticate", "sysAccountGet"], "Readers")]),
+        ),
+    ]);
     let directory = against(&server.url);
     garrison_testing::write_private(
         &directory.path().join("policy.json"),
@@ -269,12 +326,14 @@ fn access_changes_keep_a_backup_and_write_the_policy() {
             "{arguments:?}: {}",
             text(&output.stderr)
         );
-        assert!(text(&output.stdout).contains("Saved "));
+        let said = text(&output.stdout);
+        assert!(said.contains("Saved "), "{said}");
+        // Without root the file cannot be made root's, and the note says
+        // which file the broker cannot read.
         if !rustix::process::geteuid().is_root() {
-            assert!(
-                text(&output.stdout)
-                    .contains("Note: could not set group garrison-broker on the policy file.")
-            );
+            let policy = directory.path().join("policy.json");
+            let note = format!("Note: the broker cannot read {}: ", policy.display());
+            assert!(said.contains(&note), "{said}");
         }
     }
     let written = std::fs::read_to_string(directory.path().join("policy.json")).unwrap();

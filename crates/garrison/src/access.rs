@@ -2,38 +2,31 @@
 //!
 //! There is deliberately no web endpoint that writes the policy. Every change
 //! keeps the previous file as a timestamped backup, so a mistake can be undone
-//! with `cp`.
+//! with `cp`. The files beside the policy are reached as `folder` says.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::io;
+use std::path::Path;
 
 use clap::Subcommand;
-use garrison_authz::policy::{Policy, Profile, is_profile_name, parse_policy};
+use garrison_authz::policy::{Policy, is_profile_name, parse_policy};
 use garrison_authz::{Authority, Error, SUPPORTED};
 use garrison_core::config::Config;
-use garrison_core::files::atomic_write;
-use garrison_core::modules::ModuleId;
-use garrison_core::time;
-use garrison_stalwart::jmap::{JmapClient, Object};
+use garrison_core::files::read_protected;
+use garrison_stalwart::jmap::JmapClient;
 use garrison_stalwart::oidc::is_subject;
-use garrison_stalwart::permissions::{
-    AUTHENTICATION_PROPERTIES, Account, AccountRoles, Authentication, Permissions, ROLE_PROPERTIES,
-    Role, RoleIds, evaluate, native_rights,
-};
+use garrison_stalwart::permissions::native_rights;
 use serde_json::{Value, json};
 
 use crate::{complain, credentials, say};
 
-const VIEWER_PERMISSIONS: [&str; 3] = ["authenticate", "sysAccountGet", "sysDomainGet"];
-const ADMIN_PERMISSIONS: [&str; 5] = [
-    "authenticate",
-    "sysAccountUpdate",
-    "sysDomainUpdate",
-    "sysRoleUpdate",
-    "sysActionCreate",
-];
+mod defaults;
+mod folder;
+
+use defaults::{Roles, administrator_roles, default_profiles};
+use folder::{Current, Folder, MAX_POLICY};
+
 const POLICY_GROUP: &str = "garrison-broker";
 
 fn profile_name(value: &str) -> Result<String, String> {
@@ -48,7 +41,7 @@ fn profile_name(value: &str) -> Result<String, String> {
 pub(crate) enum Command {
     /// Create the policy and bind native administrator roles.
     Init {
-        /// Replace an existing policy (a backup of it is kept).
+        /// Replace an existing policy with the default one (a backup of it is kept).
         #[arg(long)]
         force: bool,
     },
@@ -80,57 +73,8 @@ pub(crate) enum Command {
         /// The OIDC subject, for a local account its numeric account ID.
         subject: String,
     },
-}
-
-fn strings(items: &[&str]) -> BTreeSet<String> {
-    items.iter().map(ToString::to_string).collect()
-}
-
-fn default_profiles(config: &Config) -> BTreeMap<String, Profile> {
-    let all: BTreeSet<ModuleId> = ModuleId::all().collect();
-    let mut viewer_modules = all.clone();
-    viewer_modules.remove(&ModuleId::Actions);
-    let every: BTreeSet<String> = config
-        .broker
-        .actions
-        .iter()
-        .map(|action| action.id.clone())
-        .collect();
-    let operator: BTreeSet<String> = config
-        .broker
-        .actions
-        .iter()
-        .filter(|action| action.operator)
-        .map(|action| action.id.clone())
-        .collect();
-    let mut operator_rights = strings(&VIEWER_PERMISSIONS);
-    operator_rights.insert("sysActionCreate".into());
-    BTreeMap::from([
-        (
-            "viewer".to_owned(),
-            Profile {
-                modules: viewer_modules,
-                actions: BTreeSet::new(),
-                required: strings(&VIEWER_PERMISSIONS),
-            },
-        ),
-        (
-            "operator".to_owned(),
-            Profile {
-                modules: all.clone(),
-                actions: operator,
-                required: operator_rights,
-            },
-        ),
-        (
-            "administrator".to_owned(),
-            Profile {
-                modules: all,
-                actions: every,
-                required: strings(&ADMIN_PERMISSIONS),
-            },
-        ),
-    ])
+    /// Give the profiles the actions garrison.toml has now, as init does.
+    Update,
 }
 
 /// JSON with two-space indentation and a final newline.
@@ -147,54 +91,53 @@ pub(crate) fn group_id(name: &str) -> Option<u32> {
     })
 }
 
-/// Validate, back up the previous file and replace it atomically.
-fn save(config: &Config, policy: &Policy) -> Result<(), String> {
+/// Validate, back up the previous file and put the new one in its place.
+fn save(config: &Config, folder: &Folder, policy: &Policy) -> Result<(), String> {
     let document = policy.to_document();
-    let ids: BTreeSet<&str> = config
-        .broker
-        .actions
-        .iter()
-        .map(|action| action.id.as_str())
-        .collect();
     // Never write an invalid policy.
-    parse_policy(&document, &ids).map_err(|error| error.to_string())?;
+    parse_policy(&document, &action_ids(config)).map_err(|error| error.to_string())?;
     let path = &config.broker.policy;
-    if path.exists() {
-        let stamp = time::now().strftime("%Y%m%dT%H%M%S");
-        let backup = path.with_file_name(format!(
-            "{}.{stamp}.bak",
-            path.file_name().unwrap_or_default().to_string_lossy()
-        ));
-        fs::copy(path, &backup).map_err(|error| error.to_string())?;
-        fs::set_permissions(&backup, fs::Permissions::from_mode(0o600))
-            .map_err(|error| error.to_string())?;
-    }
+    let kept = match folder.current()? {
+        Current::File => Some(folder.back_up(&folder.content()?)?),
+        Current::Missing => None,
+        Current::Other => return Err(not_a_file(path)),
+    };
     let text = format!("{}\n", pretty(&document));
-    atomic_write(path, text.as_bytes(), 0o640).map_err(|error| error.to_string())?;
-    let owned = group_id(POLICY_GROUP).is_some_and(|gid| {
-        let (root, group) = (rustix::fs::Uid::ROOT, rustix::fs::Gid::from_raw(gid));
-        rustix::fs::chown(path, Some(root), Some(group)).is_ok()
-    });
-    if !owned {
-        say(&format!(
-            "Note: could not set group {POLICY_GROUP} on the policy file."
-        ));
+    let group = group_id(POLICY_GROUP).map(rustix::fs::Gid::from_raw);
+    if let Some(note) = folder.replace(text.as_bytes(), group)? {
+        say(&note);
     }
-    say(&format!("Saved {}", path.display()));
+    match kept {
+        Some(backup) => say(&format!(
+            "Saved {}; the previous file is kept as {}.",
+            path.display(),
+            backup.display()
+        )),
+        None => say(&format!("Saved {}", path.display())),
+    }
     Ok(())
 }
 
-/// Hold `<policy>.lock` while the policy is read and written.
-fn locked<T>(config: &Config, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-    let policy = &config.broker.policy;
-    let path: PathBuf = policy.with_file_name(format!(
-        "{}.lock",
-        policy.file_name().unwrap_or_default().to_string_lossy()
-    ));
-    let file = fs::File::create(&path).map_err(|error| error.to_string())?;
-    rustix::fs::flock(&file, rustix::fs::FlockOperation::LockExclusive)
-        .map_err(|error| error.to_string())?;
-    work()
+/// Hold `<policy>.lock` while the policy is read and written; with `make`,
+/// in a folder made where it is missing.
+fn locked<T>(
+    config: &Config,
+    make: bool,
+    work: impl FnOnce(&Folder) -> Result<T, String>,
+) -> Result<T, String> {
+    let folder = Folder::open(&config.broker.policy, make)?;
+    let _held = folder.lock()?;
+    work(&folder)
+}
+
+/// What to say of a link, a folder or anything else at the policy's name,
+/// which neither this command nor the installer changes.
+fn not_a_file(path: &Path) -> String {
+    format!(
+        "{} is a link or a folder, not a file: remove it; then `garrison access init` makes \
+         the file itself there.",
+        path.display()
+    )
 }
 
 fn authority(config: &Config) -> Authority {
@@ -218,8 +161,105 @@ fn said(error: Error) -> String {
     }
 }
 
+/// Whether there is a file at the policy's name to read.
+fn there(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(folder::missing(path)),
+        Ok(kind) if !kind.is_file() => Err(not_a_file(path)),
+        _ => Ok(()),
+    }
+}
+
 fn load(config: &Config) -> Result<Policy, String> {
-    authority(config).policy().map_err(said)
+    let path = &config.broker.policy;
+    there(path)?;
+    authority(config).policy().map_err(|error| {
+        // What keeps the policy from reading beside such actions comes
+        // first: `update` cannot mend it.
+        if let Err(other) = written(config) {
+            return other;
+        }
+        let gone = gone(config);
+        if gone.is_empty() {
+            return said(error);
+        }
+        format!(
+            "The access policy {} names {}, which garrison.toml no longer has: run `garrison \
+             access update`, which takes {} out of the profiles.",
+            path.display(),
+            gone.join(", "),
+            if gone.len() == 1 { "it" } else { "them" }
+        )
+    })
+}
+
+/// The actions the policy's profiles name, as it is written; none where it
+/// cannot be read.
+fn named(config: &Config) -> BTreeSet<String> {
+    let Ok(raw) = read_protected(&config.broker.policy, MAX_POLICY) else {
+        return BTreeSet::new();
+    };
+    let profiles = raw["profiles"].as_object().into_iter().flatten();
+    profiles
+        .filter_map(|(_, profile)| profile["actions"].as_array())
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The actions the policy names that garrison.toml no longer has.
+fn gone(config: &Config) -> Vec<String> {
+    let configured = action_ids(config);
+    named(config)
+        .into_iter()
+        .filter(|action| !configured.contains(action.as_str()))
+        .collect()
+}
+
+fn action_ids(config: &Config) -> BTreeSet<&str> {
+    config
+        .broker
+        .actions
+        .iter()
+        .map(|action| action.id.as_str())
+        .collect()
+}
+
+/// The policy as it is written, actions that garrison.toml no longer has
+/// among them, which `update` takes out.
+fn written(config: &Config) -> Result<Policy, String> {
+    let path = &config.broker.policy;
+    there(path)?;
+    let raw = read_protected(path, MAX_POLICY)
+        .map_err(|error| format!("Garrison access policy: {error}"))?;
+    let named = named(config);
+    let mut known = action_ids(config);
+    known.extend(named.iter().map(String::as_str));
+    parse_policy(&raw, &known).map_err(|error| error.to_string())
+}
+
+/// The profiles get the actions of garrison.toml, as `defaults::follow`
+/// gives them.
+fn update(config: &Config) -> Result<u8, String> {
+    locked(config, false, |folder| {
+        let mut policy = written(config)?;
+        let changes = defaults::follow(config, &mut policy);
+        if changes.is_empty() {
+            say("The profiles have the actions garrison.toml names; nothing to change.");
+            return Ok(0);
+        }
+        save(config, folder, &policy)?;
+        for change in &changes {
+            say(change);
+        }
+        say(
+            "Run the installer again now: it writes the polkit rule for these actions and \
+             restarts the broker, which reads them only when it starts. Until then a broker \
+             that does not know an action the policy names lets nobody use Garrison.",
+        );
+        Ok(0)
+    })
 }
 
 fn native(config: &Config) -> Result<JmapClient, String> {
@@ -229,87 +269,71 @@ fn native(config: &Config) -> Result<JmapClient, String> {
         .with_timeout(std::time::Duration::from_secs(10)))
 }
 
-/// Roles that are default *administrator* roles and hold all admin rights.
-fn administrator_roles(config: &Config) -> Result<BTreeMap<String, String>, String> {
-    let client = native(config)?;
-    let authentication: Authentication = client
-        .get(
-            "Authentication",
-            Some(&["singleton"]),
-            &AUTHENTICATION_PROPERTIES,
-        )
-        .map_err(said)?
-        .into_iter()
-        .next()
-        .ok_or("Stalwart returned no object")?;
-    let admin = &authentication.default_admin_role_ids.0;
-    let user = &authentication.default_user_role_ids.0;
-    let mut properties: Vec<&str> = ROLE_PROPERTIES.to_vec();
-    properties.push("description");
-    // Every role of the server, also those of tenants and of other software.
-    // One this release cannot read is left out, and an administrator role
-    // that inherits from it is then not evaluated as one.
-    let (mut roles, mut descriptions) = (BTreeMap::new(), BTreeMap::new());
-    for object in client
-        .get::<Object>("Role", None, &properties)
-        .map_err(said)?
-    {
-        let description = object.get("description").and_then(Value::as_str);
-        let description = description.map(str::to_owned);
-        if let Ok(role) = serde_json::from_value::<Role>(Value::Object(object)) {
-            descriptions.insert(role.id.clone(), description);
-            roles.insert(role.id.clone(), role);
-        }
-    }
-    let mut result = BTreeMap::new();
-    for identifier in admin.difference(user) {
-        // A user who has this role and nothing else.
-        let account = Account {
-            kind: "User".to_owned(),
-            roles: AccountRoles::Custom {
-                role_ids: RoleIds(BTreeSet::from([identifier.clone()])),
-            },
-            permissions: Permissions::Inherit {},
-            member_tenant_id: None,
-        };
-        let rights = evaluate(&account, &roles, &authentication).map_err(said)?;
-        if ADMIN_PERMISSIONS
-            .iter()
-            .all(|name| rights.permissions.contains(*name))
-        {
-            let description = descriptions.get(identifier).cloned().flatten();
-            result.insert(
-                identifier.clone(),
-                description.unwrap_or_else(|| identifier.clone()),
-            );
-        }
-    }
-    Ok(result)
-}
-
 fn init(config: &Config, force: bool) -> Result<u8, String> {
-    if config.broker.policy.exists() && !force {
+    let path = &config.broker.policy;
+    let exists = || {
         say(&format!(
             "{} exists; use --force to replace it (a backup is kept).",
-            config.broker.policy.display()
+            path.display()
         ));
-        return Ok(1);
-    }
-    let roles = administrator_roles(config)?;
-    if roles.is_empty() {
-        say("No native administrator role with full administrative rights was found.");
-        return Ok(1);
-    }
-    let policy = Policy {
-        profiles: default_profiles(config),
-        role_bindings: roles
-            .keys()
-            .map(|role| (role.clone(), "administrator".to_owned()))
-            .collect(),
-        ..Policy::default()
+        Ok(1)
     };
-    locked(config, || save(config, &policy))?;
-    for (identifier, description) in &roles {
+    match fs::symlink_metadata(path) {
+        Ok(kind) if !kind.is_file() => return Err(not_a_file(path)),
+        Ok(_) if !force => return exists(),
+        _ => {}
+    }
+    // Under the lock, so that nothing that came meanwhile is replaced
+    // without --force, and before Stalwart is asked.
+    let done = locked(config, true, |folder| {
+        let there = matches!(folder.current()?, Current::File);
+        if !force && there {
+            return Ok(None);
+        }
+        let candidates = administrator_roles(config)?;
+        let qualified: Vec<&String> = candidates
+            .iter()
+            .filter(|(_, candidate)| candidate.lacks.is_empty())
+            .map(|(identifier, _)| identifier)
+            .collect();
+        // A new policy would bind nobody and sign everyone out: one that
+        // reads stays, whatever --force says.
+        if qualified.is_empty() && there && written(config).is_ok() {
+            return Ok(Some((candidates, false)));
+        }
+        let policy = Policy {
+            profiles: default_profiles(config),
+            role_bindings: qualified
+                .iter()
+                .map(|role| ((*role).clone(), "administrator".to_owned()))
+                .collect(),
+            ..Policy::default()
+        };
+        save(config, folder, &policy)?;
+        Ok(Some((candidates, true)))
+    })?;
+    let Some((candidates, saved)) = done else {
+        return exists();
+    };
+    let bound: Vec<(&String, &String)> = candidates
+        .iter()
+        .filter(|(_, candidate)| candidate.lacks.is_empty())
+        .map(|(identifier, candidate)| (identifier, &candidate.description))
+        .collect();
+    if bound.is_empty() {
+        let kept = if saved {
+            String::new()
+        } else {
+            format!(
+                "\nWith no role to bind, a new default policy would bind no role and sign \
+                 everyone out: {} is kept as it is.",
+                path.display()
+            )
+        };
+        complain(&format!("{}{kept}", defaults::unbound(&candidates)));
+        return Ok(1);
+    }
+    for (identifier, description) in bound {
         say(&format!(
             "Bound native role {identifier} ({description}) to profile administrator."
         ));
@@ -345,7 +369,7 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
             say(&pretty(&load(config)?.to_document()));
             Ok(0)
         }
-        Command::BindRole { role, profile } => locked(config, || {
+        Command::BindRole { role, profile } => locked(config, false, |folder| {
             let mut policy = load(config)?;
             if !policy.profiles.contains_key(profile) {
                 let known: Vec<&str> = policy.profiles.keys().map(String::as_str).collect();
@@ -355,34 +379,44 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
                 ));
                 return Ok(1);
             }
-            // The role must exist.
-            native(config)?
-                .get::<Object>("Role", Some(&[role.as_str()]), &["id"])
-                .map_err(said)?;
+            // The role must exist; what it lacks for the profile is said.
+            let roles = Roles::read(config)?;
+            if !roles.exists(role) {
+                return Err(format!(
+                    "Stalwart has no role {role}: bind one of the roles the native \
+                     administration shows (Roles)."
+                ));
+            }
+            let rights = roles.rights(role)?;
             policy.role_bindings.insert(role.clone(), profile.clone());
-            save(config, &policy).map(|()| 0)
+            save(config, folder, &policy)?;
+            if let Some(note) = defaults::fit(&policy, profile, role, rights.as_ref()) {
+                say(&note);
+            }
+            Ok(0)
         }),
-        Command::UnbindRole { role } => locked(config, || {
+        Command::UnbindRole { role } => locked(config, false, |folder| {
             let mut policy = load(config)?;
             policy.role_bindings.remove(role);
-            save(config, &policy).map(|()| 0)
+            save(config, folder, &policy).map(|()| 0)
         }),
         Command::Deny { subject, undo } => {
             if !is_subject(subject) {
                 say("Invalid subject");
                 return Ok(1);
             }
-            locked(config, || {
+            locked(config, false, |folder| {
                 let mut policy = load(config)?;
                 if *undo {
                     policy.denied.remove(subject);
                 } else {
                     policy.denied.insert(subject.clone());
                 }
-                save(config, &policy).map(|()| 0)
+                save(config, folder, &policy).map(|()| 0)
             })
         }
         Command::Check { subject } => check(config, subject),
+        Command::Update => update(config),
     }
 }
 

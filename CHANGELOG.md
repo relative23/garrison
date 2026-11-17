@@ -370,6 +370,88 @@ Notable changes for operators and users. The format follows
   backup-check` reads the report it wrote last the same way, where it had
   read it through a link, whole and from a pipe that kept it waiting: from
   anything but such a file it keeps no last check or restore and says so.
+- **An interrupted test restore no longer leaves its copy of the mail
+  behind.** `garrison backup-check --restore` restores into a directory of
+  its own under `/var/tmp` and removes it, but one stopped on the way, as by
+  a reboot, a stopped unit or the kernel's out-of-memory killer, left the
+  restored mail there, and each later run made and removed only its own, so
+  copies piled up with each interrupted run. A test restore now first
+  removes the copies earlier runs left, those of its own making that have
+  not changed for an hour and that no run holds, and says so; a link,
+  another user's folder or anything else of that name stays as it is. A
+  copy that cannot be removed, the run's own included, is named with how to
+  remove it, and the command then ends with 1.
+- **`garrison access` follows no link beside the policy.** Root runs it,
+  and `broker.policy` may name a folder that another user can write to,
+  such as a service's state directory. The command opened its lock through
+  a link put at `<policy>.lock`, which emptied the file the link named, such
+  as `/etc/passwd`, and copied the policy over the file a link at the
+  backup's name named and made it root's alone. Every file beside the
+  policy is now reached by its name in the policy's folder, never through a
+  link: a lock that is a link, another user's file or a second name of
+  another file (a hard link) is refused and left as it is, the policy is
+  read no further than the broker reads it (64 KiB), a backup takes a name
+  that nothing has (`<timestamp>-1` and so on after the time), and
+  the new policy is written to a file of its own, made root's and readable
+  for the broker's group before it takes the policy's place. Each error
+  names the file it is about, where it named none, and says so where the
+  command was run without root; a save names the backup it kept.
+- **`garrison access init` makes the policy's folder.** Where
+  `broker.policy` named a folder that was not made yet, `garrison doctor`
+  said to run `garrison access init`, which asked Stalwart for its roles and
+  then failed with "No such file or directory (os error 2)". It now makes
+  the folder, root's with mode 755 as `/etc/garrison` whatever the umask,
+  so that the broker reaches the policy in it; the other commands say that
+  the policy is missing and that `init` makes it.
+- **`garrison access init` leaves a way in where no role of Stalwart's
+  qualifies.** Where Stalwart's default administrator role lacked one of the
+  five rights the administrator profile requires, or the administrators had
+  a role of their own, `init` wrote nothing, and every other `garrison
+  access` command failed for want of a policy, so no command led to one. It
+  now writes the default profiles without a binding and ends with 1, and
+  says on standard error what the administrator profile requires and, for
+  each of Stalwart's default administrator roles, which of those rights it
+  lacks, that Stalwart's administrator gives them to the role, and which
+  profiles it meets as it is. `garrison access bind-role` says the same of
+  a role it binds to a profile whose rights the role lacks, whose users
+  would get nothing of it. Where a policy that reads is there, `init
+  --force` keeps it in that case, since a new one would bind nobody and sign
+  everyone out.
+- **An action added after `garrison access init` reaches its users.**
+  `init` gives the `administrator` profile every action of `[[actions]]`
+  and the `operator` profile those marked `operator = true`, as
+  `garrison.toml` has them then, and nothing changed them later: an action
+  added afterwards was granted to nobody and missing from the Maintenance
+  page, and one taken out left a policy that names it, so that nobody could
+  use Garrison and every `garrison access` command and the installer
+  refused it. `garrison access update` gives the two profiles the actions
+  as `garrison.toml` names them now and takes from every profile those it
+  no longer has; role bindings, accounts and denials stay, and the previous
+  file is kept. A policy that names an action `garrison.toml` no longer has
+  is said so, with `update` as the way out. The broker reads `[[actions]]`
+  only when it starts: after `update`, run the installer again or restart
+  the broker, as [access](docs/operator/access.md#when-the-actions-change)
+  says, which also says what `init --force` drops and how the policy file
+  is written.
+- **A backup's card shows that repository's check and restore alone.**
+  `garrison backup-check` kept the last integrity check and test restore of
+  the report before it, whatever repository or tool that report was of: a
+  run for another repository under the same report, as with a changed
+  `RESTIC_REPOSITORY` or `--repo`, another disk mounted at the
+  repository's place or a `RESTIC_REPOSITORY_FILE` that now names another
+  one, or with borg under restic's `--report`, showed the old repository's
+  check and restore as the new one's, and the card was in order on their
+  times. The report now holds the repository's own ID, which restic gives
+  with `restic cat config` (one more call a run) and borg with its listing,
+  and the two are kept only from a report of the same tool and the same ID,
+  whatever the repository's name. Otherwise the run starts without them and
+  says why, and so does a run for which the tool gives no ID; the card then
+  says that none has been reported where one is expected. A report that an
+  earlier release wrote holds no ID: its check and restore are kept once
+  where tool and name are the same, and the ID is recorded with them. The
+  report names a repository that restic reads from the file
+  `RESTIC_REPOSITORY_FILE` names by that file, also beside an empty
+  `RESTIC_REPOSITORY`, which restic takes for none.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year
