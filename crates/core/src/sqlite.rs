@@ -313,4 +313,6 @@ fn blanks_skipped(mut text: &str) -> &str {
 }
 
 #[cfg(test)]
+mod reader_tests;
+#[cfg(test)]
 mod tests;
