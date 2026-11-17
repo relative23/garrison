@@ -182,6 +182,17 @@ Notable changes for operators and users. The format follows
   of a domain, which already stopped asking, said that the resolver gave no
   answer for the records left; they now say "not asked" too, and a domain's
   MTA-STS policy, which was still fetched then, is fetched in the next run.
+- **A named pipe in place of a file a check reads no longer holds the
+  collection run.** The user that writes the event history or Fangfrisch's
+  database could put a named pipe in its place, and root with ClamAV's
+  files: opening it waited for a writer, so the run never reached its
+  snapshot and systemd ended it, run after run. A reader of a database that
+  another user writes, the web service's history queries and root's
+  commands among them, now refuses one that is no regular file before
+  SQLite opens it, and the checks say "not a regular file" on their cards.
+  The Signature databases card also says when Fangfrisch's database cannot
+  be read, and is Partial then; it reads Fangfrisch's whole refresh log,
+  where it read its first 512 rows.
 - **A mail server that sends a line without end no longer stops the
   collector.** The test messages and the mail notifications read each line
   of a reply whole before they looked at its length, so a listener that

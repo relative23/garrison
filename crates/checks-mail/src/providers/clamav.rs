@@ -216,6 +216,8 @@ impl Clamav {
         &self,
         context: &Context<'_>,
     ) -> Result<(Observation, Option<f64>), ProviderError> {
+        let log = self.fangfrisch.as_deref().map(refresh_log);
+        let checked = log.as_ref().and_then(|read| read.as_ref().ok());
         let mut rows = Vec::new();
         // The newest daily database and its age in hours: the one file that
         // changes every day, and so the one that shows whether updates arrive.
@@ -239,7 +241,7 @@ impl Clamav {
                 json!(name),
                 json!(info.len()),
                 json!(modified),
-                json!(self.refreshed(name)),
+                json!(checked.and_then(|checks| checks.get(name))),
             ]);
         }
         let column = |label: &str, format| Column {
@@ -266,6 +268,24 @@ impl Clamav {
             ),
             Some(_) => (State::Ok, None),
         };
+        let mut findings: Vec<String> = finding.into_iter().collect();
+        // A refresh log that is named and cannot be read leaves its column
+        // empty: the card says why, and is not in order for it.
+        let state = match (&log, self.fangfrisch.as_deref()) {
+            (Some(Err(why)), Some(path)) => {
+                findings.push(format!(
+                    "The Fangfrisch database {} could not be read: {why}; when it last checked \
+                     each file is not known.",
+                    path.display()
+                ));
+                if state == State::Ok {
+                    State::Partial
+                } else {
+                    state
+                }
+            }
+            _ => state,
+        };
         let observation = Observation::new(Required {
             id: "clamav.signatures",
             provider: self.name(),
@@ -277,7 +297,7 @@ impl Clamav {
             source: &self.database.display().to_string(),
         })?
         .with_scope("File times do not prove a successful update check or a loaded database.")
-        .with_findings(finding.into_iter().collect())
+        .with_findings(findings)
         .with_table(Table {
             columns: vec![
                 column("File", Format::Text),
@@ -290,26 +310,34 @@ impl Clamav {
         .with_max_age(900);
         Ok((observation, daily.map(|(_, hours)| hours)))
     }
+}
 
-    /// When Fangfrisch last checked this file, from its refresh log.
-    fn refreshed(&self, name: &str) -> Option<String> {
-        let db = reading(self.fangfrisch.as_deref()?, Duration::from_secs(2)).ok()??;
-        let mut statement = db
-            .prepare("SELECT path, updated FROM refreshlog LIMIT 512")
-            .ok()?;
-        let mut rows = statement.query([]).ok()?;
-        while let Ok(Some(row)) = rows.next() {
-            let path: String = row.get::<_, rusqlite::types::Value>(0).ok().map(sql_text)?;
-            if Path::new(&path).file_name().and_then(|file| file.to_str()) == Some(name) {
-                let updated = sql_text(row.get::<_, rusqlite::types::Value>(1).ok()?);
-                // Fangfrisch writes UTC without saying so.
-                return time::parse_naive_utc(&updated)
-                    .or_else(|| time::parse(&updated))
-                    .map(time::isoformat);
-            }
+/// When Fangfrisch last checked each file, by the file's name, from the whole
+/// refresh log of its database at `path`, which the reader's time bounds; or
+/// why it could not be read.
+fn refresh_log(path: &Path) -> Result<BTreeMap<String, String>, String> {
+    let text = |error: rusqlite::Error| error.to_string();
+    let db = reading(path, Duration::from_secs(2))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "it is not there".to_owned())?;
+    let mut statement = db
+        .prepare("SELECT path, updated FROM refreshlog")
+        .map_err(text)?;
+    let mut rows = statement.query([]).map_err(text)?;
+    let mut found = BTreeMap::new();
+    while let Some(row) = rows.next().map_err(text)? {
+        let path = sql_text(row.get::<_, rusqlite::types::Value>(0).map_err(text)?);
+        let updated = sql_text(row.get::<_, rusqlite::types::Value>(1).map_err(text)?);
+        // Fangfrisch writes UTC without saying so.
+        let checked = time::parse_naive_utc(&updated).or_else(|| time::parse(&updated));
+        let name = Path::new(&path).file_name().and_then(|file| file.to_str());
+        if let (Some(name), Some(checked)) = (name, checked) {
+            found
+                .entry(name.to_owned())
+                .or_insert_with(|| time::isoformat(checked));
         }
-        None
     }
+    Ok(found)
 }
 
 fn sql_text(value: rusqlite::types::Value) -> String {

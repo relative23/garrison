@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use rusqlite::config::DbConfig;
 use rusqlite::{Connection, OpenFlags};
+use rustix::fs::{Mode, OFlags};
 
 use crate::config::Database;
 
@@ -227,10 +228,31 @@ pub fn open_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, Sqlit
 /// writer or reads anything.
 fn connect_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, SqliteError> {
     let path = with_resolved_directory(path)?;
+    regular(&path)?;
     Ok(Connection::open_with_flags(
         path,
         flags | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )?)
+}
+
+/// Refuses what is at `path` unless it is a regular file. SQLite opens a
+/// database without `O_NONBLOCK`, so a named pipe there would hold the open
+/// until a writer came, and the user who can replace the file decides that:
+/// it is opened here first as `files` opens a file, without waiting and
+/// without following a link, and looked at. What cannot be opened so, such
+/// as a link or a file that is not there, is left to SQLite's own open to
+/// name. A pipe put there in the moment between this look and SQLite's open
+/// still holds that open; SQLite offers none that does not wait.
+fn regular(path: &Path) -> Result<(), SqliteError> {
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let Ok(file) = rustix::fs::open(path, flags, Mode::empty()) else {
+        return Ok(());
+    };
+    if fs::File::from(file).metadata()?.is_file() {
+        Ok(())
+    } else {
+        Err(SqliteError::Io(std::io::Error::other("not a regular file")))
+    }
 }
 
 /// `path` with its directory resolved to the real one; the file name is kept.

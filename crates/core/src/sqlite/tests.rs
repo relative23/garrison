@@ -388,6 +388,46 @@ fn untrusted_files_with_more_than_tables_and_indexes_are_refused() {
 }
 
 #[test]
+fn a_pipe_or_a_folder_in_place_of_a_database_is_refused_without_waiting() {
+    // The user who writes a database can put a named pipe in its place,
+    // whose open waits for a writer: every reader is refused at once instead.
+    let directory = tempfile::tempdir().unwrap();
+    let pipe = directory.path().join("pipe.sqlite");
+    rustix::fs::mknodat(
+        rustix::fs::CWD,
+        &pipe,
+        rustix::fs::FileType::Fifo,
+        Mode::from_raw_mode(0o644),
+        0,
+    )
+    .unwrap();
+    let folder = directory.path().join("folder.sqlite");
+    fs::create_dir(&folder).unwrap();
+    for path in [pipe, folder] {
+        let (sender, receiver) = mpsc::channel();
+        let opened = path.clone();
+        thread::spawn(move || {
+            let reader = reading(&opened, Duration::from_secs(1)).map(|_| ());
+            let untrusted = open_untrusted(&opened, OpenFlags::SQLITE_OPEN_READ_ONLY).map(|_| ());
+            let _ = sender
+                .send([reader, untrusted].map(|answer| answer.map_err(|error| error.to_string())));
+        });
+        let answers = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|_| panic!("{} was waited for", path.display()));
+        assert_eq!(
+            answers,
+            [
+                Err("not a regular file".to_owned()),
+                Err("not a regular file".to_owned())
+            ],
+            "{}",
+            path.display()
+        );
+    }
+}
+
+#[test]
 fn the_bundled_sqlite_reads_no_stale_memory_from_a_crafted_log() {
     // RUSTSEC-2026-0459: before 3.54.0 a database with a write-ahead log of
     // another page size made queries return bytes of the reader's memory, and

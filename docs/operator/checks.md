@@ -425,6 +425,13 @@ cannot be read. `garrison check-config` takes for `expect_on_infected` only
 `Accept`, `Reject`, `Defer`, `Blackhole` and `Quarantine`, and for
 `expect_on_fail` only the first three.
 
+Where `fangfrisch_database` names Fangfrisch's database, the card
+"Signature databases" shows when Fangfrisch last checked each file, from
+its whole refresh log; where that database cannot be read, the card says
+why and is Partial where it would be OK. A file a check reads that is no
+regular file, such as a named pipe in place of a database or of ClamAV's
+files, is not opened, and the card says "not a regular file".
+
 ## `receipt`
 
 An example:

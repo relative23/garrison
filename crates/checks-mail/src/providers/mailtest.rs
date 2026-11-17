@@ -171,26 +171,31 @@ impl MailTest {
         self
     }
 
-    /// What the event history says became of an accepted message.
-    fn filed(context: &Context<'_>, queue: &str) -> Option<&'static str> {
-        let db = reading(&context.events_database, Duration::from_secs(2))
-            .ok()
-            .flatten()?;
+    /// What the event history says became of an accepted message, or why it
+    /// could not be read.
+    fn filed(context: &Context<'_>, queue: &str) -> Result<Option<&'static str>, String> {
+        let text = |error: rusqlite::Error| error.to_string();
+        let Some(db) = reading(&context.events_database, Duration::from_secs(2))
+            .map_err(|error| error.to_string())?
+        else {
+            // Nothing is recorded yet, so nothing is filed yet either.
+            return Ok(None);
+        };
         let mut statement = db
             .prepare("SELECT type FROM events WHERE queue_id=? LIMIT 200")
-            .ok()?;
+            .map_err(text)?;
         let kinds: Vec<String> = statement
             .query_map([queue], |row| row.get(0))
-            .ok()?
+            .map_err(text)?
             .filter_map(Result::ok)
             .collect();
-        if kinds.iter().any(|kind| kind == "message-ingest.spam") {
+        Ok(if kinds.iter().any(|kind| kind == "message-ingest.spam") {
             Some("spam")
         } else if kinds.iter().any(|kind| kind == "message-ingest.ham") {
             Some("ham")
         } else {
             None
-        }
+        })
     }
 
     /// The result of one test that was sent at `at`: its state and what to
@@ -211,21 +216,25 @@ impl MailTest {
         if let Some(said) = unfiltered {
             return (State::Failed, said.to_owned());
         }
-        let filed = sent
-            .queue
-            .as_deref()
-            .and_then(|queue| Self::filed(context, queue));
+        let filed = match sent.queue.as_deref() {
+            Some(queue) => Self::filed(context, queue),
+            None => Ok(None),
+        };
         match filed {
-            Some("spam") => (State::Ok, "accepted and filed as spam".to_owned()),
-            Some(_) => (
+            Err(why) => (
+                State::Unknown,
+                format!("accepted; the event history could not be read: {why}"),
+            ),
+            Ok(Some("spam")) => (State::Ok, "accepted and filed as spam".to_owned()),
+            Ok(Some(_)) => (
                 State::Failed,
                 "accepted and delivered as ordinary mail".to_owned(),
             ),
-            None if context.now.as_second().saturating_sub(at) <= VERDICT_WITHIN => (
+            Ok(None) if context.now.as_second().saturating_sub(at) <= VERDICT_WITHIN => (
                 State::Unknown,
                 "accepted; the event history does not show yet how it was filed".to_owned(),
             ),
-            None => (
+            Ok(None) => (
                 State::Unknown,
                 "accepted; the event history never showed how it was filed".to_owned(),
             ),
