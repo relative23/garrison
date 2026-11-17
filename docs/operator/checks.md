@@ -62,9 +62,15 @@ observation the checks report is in [observation ids](observations.md).
 Five checks of the host itself. Each reads what the host already knows and
 changes nothing; one that cannot be made is Unknown.
 
-- `updates`: the updates the package manager would install, security updates
-  apart, which are a warning. It reads the metadata the host has fetched, so
-  it is as fresh as the host's own update job keeps it. It asks again within
+- `updates`: the updates a full upgrade would install, security updates
+  apart, which are a warning. On Debian and Ubuntu that is what `apt-get
+  dist-upgrade` installs: an update that needs a package not installed yet,
+  as each kernel update with a new ABI does, counts too, where plain `apt-get
+  upgrade` keeps it back. An update counts as a security update by the
+  archive it comes from. It reads the metadata the host has fetched, so it is
+  as fresh as the host's own update job keeps it; where apt has fetched no
+  package lists at all (`/var/lib/apt/lists`), as a container image leaves
+  it, the card is Unknown and says so. It asks again within
   five minutes once packages are installed or removed or new metadata is
   fetched, and otherwise every six hours. It reads `apt` (Debian, Ubuntu) and
   `dnf` 4 (the RHEL family, Amazon Linux); elsewhere it is Unknown. The

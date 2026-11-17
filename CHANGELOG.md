@@ -457,6 +457,20 @@ Notable changes for operators and users. The format follows
   read the installed kernels; loading a module stays out of its reach, as
   it holds no capability and may not make such a call. Where the kernels
   cannot be read, the card says so and is Unknown, never in order.
+- **A kernel update on Debian and Ubuntu counts as a pending update.** The
+  updates card asked apt what `apt-get upgrade` would install, which keeps
+  back every update that needs a package not installed yet, as each kernel
+  update with a new ABI does, security fixes included, and prints no line
+  for it: a host whose only pending security update was its kernel's
+  counted none and was in order (measured on Debian 13 and Ubuntu 24.04).
+  The card now asks what a full upgrade installs (`apt-get -s
+  dist-upgrade`) and counts each installed package it would update, by the
+  archive the update comes from, never by the package's name; a package it
+  installs new, such as the kernel's image, is part of the update that
+  needs it. A host whose apt has fetched no package lists, as a container
+  image leaves it, is Unknown and says so, where apt's "0 upgraded" made it
+  in order; once the lists are fetched it is asked again within five
+  minutes.
 - **`garrison doctor` names what makes each file.** For a missing access
   policy it said to run `garrison stalwart setup` or the installer, neither
   of which makes one; it now names `garrison access init`, and `garrison

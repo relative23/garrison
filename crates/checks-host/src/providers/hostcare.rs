@@ -216,7 +216,7 @@ impl HostCare {
         let observation = self
             .observation(context, "updates", "System updates", state, &asked.source)?
             .with_scope(
-                "What the package manager would install, from the metadata the host has fetched; \
+                "What a full upgrade would install, from the metadata the host has fetched; \
                  asked again after a change to the packages or the metadata, otherwise every six hours.",
             )
             .with_fields(vec![

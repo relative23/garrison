@@ -12,12 +12,31 @@ pub(super) struct Pending {
     pub(super) other: u64,
 }
 
-/// `apt-get -s upgrade`: one `Inst` line for each package it would install,
-/// with the archive it comes from in brackets.
+/// `apt-get -s dist-upgrade`: an `Inst` line for each package a full upgrade
+/// installs. An update names the version installed now, `Inst curl [8.14.1-2]
+/// (8.14.1-2+deb13u2 Debian:13.2/stable [amd64])`, with the archives it comes
+/// from in parentheses; a package that is new, such as the image of a kernel
+/// with a new ABI, names none and is part of the update that needs it. Only
+/// the archives say whether an update is a security update, never the
+/// package's name. Other lines are apt's sentences, which the host's
+/// language changes (measured), and are not read.
 pub(super) fn apt(output: &str) -> Pending {
     let mut pending = Pending::default();
-    for line in output.lines().filter(|line| line.starts_with("Inst ")) {
-        if line.to_lowercase().contains("security") {
+    for line in output.lines() {
+        let Some((_, rest)) = line
+            .strip_prefix("Inst ")
+            .and_then(|rest| rest.split_once(' '))
+        else {
+            continue;
+        };
+        let Some((_installed, rest)) = rest
+            .strip_prefix('[')
+            .and_then(|rest| rest.split_once("] ("))
+        else {
+            continue;
+        };
+        let archives = rest.split_once(')').map_or(rest, |(archives, _)| archives);
+        if archives.to_lowercase().contains("security") {
             pending.security += 1;
         } else {
             pending.other += 1;
@@ -146,12 +165,18 @@ mod tests {
             Inst zlib1g [1:1.3.1-1] (1:1.3.1-1+deb13u1 Debian-Security:13/stable-security [amd64])\n\
             Inst curl [8.14.1-2] (8.14.1-2+deb13u2 Debian:13.2/stable [amd64])\n\
             Inst openssl [3.0.13] (3.0.13-0ubuntu3.9 Ubuntu:24.04/noble-security [amd64])\n\
-            Conf zlib1g (1:1.3.1-1+deb13u1 Debian-Security:13/stable-security [amd64])\n";
+            Conf zlib1g (1:1.3.1-1+deb13u1 Debian-Security:13/stable-security [amd64])\n\
+            Inst linux-image-6.12.117+deb13-amd64 (6.12.117-1 Debian-Security:13/stable-security [amd64])\n\
+            Inst debian-security-support [1:13+2025.10.01] (1:13+2026.01.01 Debian:13.7/stable [all])\n\
+            Inst libssl3t64 [3.0.13-0ubuntu3.4] (3.0.13-0ubuntu3.5 Ubuntu:24.04/noble-updates, \
+            Ubuntu:24.04/noble-security [amd64]) [libssl-dev:amd64 ]\n";
+        // The new kernel image is part of its update; a name is no archive;
+        // a list of packages left broken meanwhile follows the archives.
         assert_eq!(
             apt(output),
             Pending {
-                security: 2,
-                other: 1
+                security: 3,
+                other: 2
             }
         );
         assert_eq!(

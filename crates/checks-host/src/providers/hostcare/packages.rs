@@ -1,17 +1,18 @@
 //! Asking the host's package manager for the updates it would install.
 
-use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
+use std::{fs, io};
 
 use super::reading::{self, Pending};
 use crate::command::Runner;
 
 /// What changes when packages are installed or removed or new metadata is
-/// fetched: rpm's and dpkg's databases and apt's package cache. The
+/// fetched: rpm's and dpkg's databases, apt's package cache and the folder
+/// of its package lists, where an image may keep no cache. The
 /// `repomd.xml` of each repository in dnf's cache comes on top.
-const CHANGES: [&str; 7] = [
+const CHANGES: [&str; 8] = [
     "var/lib/rpm/rpmdb.sqlite",
     "var/lib/rpm/rpmdb.sqlite-wal",
     "var/lib/rpm/Packages",
@@ -19,7 +20,11 @@ const CHANGES: [&str; 7] = [
     "usr/lib/sysimage/rpm/rpmdb.sqlite-wal",
     "var/lib/dpkg/status",
     "var/cache/apt/pkgcache.bin",
+    APT_LISTS,
 ];
+
+/// Where apt keeps the package lists that `apt-get update` fetches.
+const APT_LISTS: &str = "var/lib/apt/lists";
 
 const DNF: [&str; 5] = [
     "dnf",
@@ -39,7 +44,21 @@ pub(super) fn pending(root: &Path, runner: &dyn Runner) -> (String, Result<Pendi
             .map_err(|error| format!("{} did not run: {error}", arguments[0]))
     };
     if has("apt-get") {
-        let simulated = run(&["apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade"]);
+        let source = "apt-get -s dist-upgrade".to_owned();
+        // Without lists apt answers "0 upgraded", from nothing it knows of.
+        if let Err(problem) = apt_lists(root) {
+            return (source, Err(problem));
+        }
+        // A full upgrade: plain `upgrade` keeps back every update that needs
+        // a package not installed yet, as each kernel with a new ABI does,
+        // and prints no line for it (measured on Debian 13 and Ubuntu 24.04).
+        let simulated = run(&[
+            "apt-get",
+            "-s",
+            "-o",
+            "Debug::NoLocking=true",
+            "dist-upgrade",
+        ]);
         let listed = simulated.and_then(|output| {
             if output.code == Some(0) {
                 Ok(reading::apt(&output.stdout))
@@ -47,7 +66,7 @@ pub(super) fn pending(root: &Path, runner: &dyn Runner) -> (String, Result<Pendi
                 Err("apt-get could not work out the upgrade".to_owned())
             }
         });
-        ("apt-get -s upgrade".to_owned(), listed)
+        (source, listed)
     } else if has("dnf5") {
         let problem = "this check does not read dnf 5 yet".to_owned();
         ("dnf".to_owned(), Err(problem))
@@ -75,6 +94,32 @@ pub(super) fn pending(root: &Path, runner: &dyn Runner) -> (String, Result<Pendi
     } else {
         let problem = "no package manager this check reads was found (apt, dnf 4)".to_owned();
         ("package manager".to_owned(), Err(problem))
+    }
+}
+
+/// Whether apt has fetched a package list, a file of a repository's packages
+/// (`…_Packages`, or compressed, `…_Packages.lz4`), and why not.
+fn apt_lists(root: &Path) -> Result<(), String> {
+    let missing = || {
+        format!(
+            "apt has no package lists in /{APT_LISTS}; `apt-get update` fetches them, as the \
+             host's update job does"
+        )
+    };
+    let entries = match fs::read_dir(root.join(APT_LISTS)) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(missing()),
+        Err(error) => {
+            return Err(format!(
+                "apt's package lists in /{APT_LISTS} cannot be read: {error}"
+            ));
+        }
+        Ok(entries) => entries,
+    };
+    let mut entries = entries.flatten();
+    if entries.any(|entry| entry.file_name().to_string_lossy().contains("_Packages")) {
+        Ok(())
+    } else {
+        Err(missing())
     }
 }
 
