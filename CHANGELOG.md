@@ -863,6 +863,19 @@ Notable changes for operators and users. The format follows
   Alerts page called the channels in order as soon as they were named.
   Their check is now Unknown until the first notification has gone out;
   `garrison notify-test` shows at once whether a message arrives.
+- **The channels' check judges the channels configured now.** A
+  notification that a channel did not take kept the check Failed with
+  "The last notification did not go out" until another notification went
+  out, which on a quiet host may be weeks later, also after that channel was
+  taken out of `[notifications]`, and it came back when a channel was named
+  again after all had been taken out. What a notification did is now kept
+  for each channel by the name the page shows, with the notification's time,
+  "The notification of … did not go out: …": a channel taken out, or named
+  otherwise, such as at another server, is no longer judged by it, and a
+  channel named since the last notification is Unknown, not in order, until
+  one has gone out on it. `garrison notify-test` shows whether a message
+  goes out now and does not change the check. What a release before this one
+  kept is read as before, without a time.
 - **A release list that stops answering is said.** While GitHub gave no
   answer, the release checks kept the last release it had named without a
   word. They now say since when no answer came, and after three days "the

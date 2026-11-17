@@ -12,6 +12,7 @@
 //! title and first finding of the observation; the message goes out on
 //! every channel the operator configured.
 
+mod card;
 pub mod channels;
 pub mod mail;
 pub mod secrets;
@@ -19,12 +20,12 @@ pub mod secrets;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
+use garrison_core::observations::{Observation, State};
 use garrison_core::time;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 
+use card::{Last, SENT};
 pub use channels::{Channels, Level, Note, taken};
 pub use secrets::{Address, Secret, Secrets};
 
@@ -32,8 +33,6 @@ use crate::context::{Deadline, Memory};
 use crate::fetch;
 
 const OPEN: &str = "notify.open";
-const SENT: &str = "notify.sent";
-const PROBLEM: &str = "notify.problem";
 /// The runs in a row a check must not be in order in before it is told, and
 /// fail in before a warning that was told is told again as a failure.
 const RUNS: u32 = 2;
@@ -332,15 +331,17 @@ fn after_run_with(
     deadline: Deadline,
 ) -> Option<Observation> {
     if channels.is_empty() {
+        card::forget(memory);
         return None;
     }
+    let named = channels.named();
     let open: Opens = memory
         .recall(OPEN)
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
     let open = carried_over(open, garrison_core::observations::RENAMED);
     let (next, news) = compare(&open, observations);
-    let mut problem = memory.recall(PROBLEM).filter(|text| !text.is_empty());
+    let mut last = Last::recalled(memory, &named);
     let kept = if news.is_empty() {
         next
     } else {
@@ -349,8 +350,7 @@ fn after_run_with(
         if let Some(failures) = &failures {
             log::warn!("A notification did not go out: {failures}");
         }
-        memory.keep(PROBLEM, failures.as_deref().unwrap_or_default());
-        problem = failures;
+        last = Some(Last::sent(now.as_second(), &named, &outcomes));
         if any {
             // Told once a channel took it: the others are not sent it again,
             // and the page shows which of them did not take it.
@@ -364,66 +364,17 @@ fn after_run_with(
     if let Ok(text) = serde_json::to_string(&kept) {
         memory.keep(OPEN, &text);
     }
+    if let Some(last) = &last {
+        last.keep(memory, &named);
+    }
     let waiting = kept.values().filter(|entry| entry.state != "ok").count();
-    let last = memory
-        .recall(SENT)
-        .and_then(|text| text.parse().ok())
-        .and_then(|second| time::Timestamp::from_second(second).ok())
-        .map(time::isoformat);
-    // Channels that are named have not yet carried a message: only one that
-    // went out shows that they work.
-    let never = "No message has gone out on these channels yet, so it is not known whether one \
-                 would arrive. `garrison notify-test` sends a test message; this check is in \
-                 order once the first notification has gone out.";
-    // A channel whose secret cannot be used cannot send, whatever it did
-    // before: that is known in every run, without a message to send.
-    let mut findings: Vec<String> = channels
-        .unusable()
-        .into_iter()
-        .map(|line| format!("{line}."))
-        .collect();
-    let state = match (&problem, &last) {
-        (Some(problem), _) => {
-            findings.push(format!("The last notification did not go out: {problem}."));
-            State::Failed
-        }
-        _ if !findings.is_empty() => State::Failed,
-        (None, None) => {
-            findings.push(never.to_owned());
-            State::Unknown
-        }
-        (None, Some(_)) => State::Ok,
-    };
-    let names = channels.names().join(", ");
-    Observation::new(Required {
-        id: "notifications.channels",
-        provider: "notifications",
-        title: "Notifications",
-        modules: [ModuleId::Alerts],
-        evidence: Evidence::Probe,
-        state,
-        checked_at: &time::isoformat(now),
-        source: &names,
-    })
-    .ok()
-    .map(|observation| {
-        observation
-            .with_scope(
-                "Garrison sends a message on these channels when one of its checks fails or \
-                 warns in two runs in a row, and when it is in order again.",
-            )
-            .with_fields(vec![
-                Field::text("Channels", names),
-                Field::new("Checks not in order", waiting, Format::Number),
-                Field::new("Last notification", last, Format::Datetime),
-            ])
-            .with_findings(findings)
-            .with_max_age(180)
-    })
+    card::card(channels, &named, last.as_ref(), waiting, memory, now)
 }
 
 #[cfg(test)]
 mod address_tests;
+#[cfg(test)]
+mod card_tests;
 #[cfg(test)]
 mod notice_tests;
 #[cfg(test)]

@@ -240,12 +240,18 @@ server is what failed. Name a mailbox elsewhere, or a second channel, for
 what must reach you then.
 
 The Alerts page shows the channels, how many checks are not in order and when
-the last message went out. Until a first notification has gone out, its
-check of the channels is Unknown: that a channel is named does not show that
-a message arrives. `garrison notify-test` shows that at once; the check
-itself is in order with the first notification of a collection run. A
-channel whose secret cannot be used makes the check Failed in every run,
-whether a message is due or not.
+the last message went out. Until a first notification has gone out on a
+channel, its check of the channels is Unknown: that a channel is named does
+not show that a message arrives. `garrison notify-test` shows that at once;
+the check itself is in order with the first notification of a collection run
+that each channel took. A channel whose secret cannot be used makes the check
+Failed in every run, whether a message is due or not. A notification that a
+channel did not take makes it Failed with the notification's time, until the
+next notification goes out; `garrison notify-test` shows whether one goes
+out now, but does not change the check. A channel taken out of this section,
+or named otherwise, such as at another server, is no longer judged by it, and
+one named since the last notification is Unknown until one has gone out on
+it.
 
 ## `[milter]`
 

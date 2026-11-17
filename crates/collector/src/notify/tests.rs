@@ -1,3 +1,5 @@
+use garrison_core::modules::ModuleId;
+use garrison_core::observations::{Evidence, Required};
 use garrison_testing::http::{answer, serve};
 use serde_json::{Value, json};
 
@@ -180,7 +182,7 @@ fn a_message_that_does_not_go_out_is_tried_again_and_shown() {
     assert_eq!(refused.state, State::Failed);
     assert_eq!(
         refused.findings,
-        ["The last notification did not go out: ntfy: it answered 403."]
+        ["The notification of 2026-10-29T12:00:00+00:00 did not go out: ntfy: it answered 403."]
     );
     assert_eq!(refused.modules, [ModuleId::Alerts].into());
     // The next run sends it; the channel is in order again.
@@ -333,8 +335,10 @@ fn every_channel_gets_the_message_and_one_that_fails_is_named() {
     assert_eq!(partly.state, State::Failed);
     let finding = &partly.findings[0];
     assert!(
-        finding
-            .starts_with("The last notification did not go out: webhook: it answered 500; mail: "),
+        finding.starts_with(
+            "The notification of 2026-10-29T12:00:00+00:00 did not go out: webhook: it answered \
+             500; mail: "
+        ),
         "{finding}"
     );
     assert_eq!(topic.requests().len(), 1);

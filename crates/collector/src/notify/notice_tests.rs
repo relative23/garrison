@@ -80,7 +80,7 @@ fn a_cut_head_or_another_status_is_no_message_sent() {
         assert_eq!(
             channel.findings,
             [format!(
-                "The last notification did not go out: ntfy: {said}."
+                "The notification of 2026-10-29T12:00:00+00:00 did not go out: ntfy: {said}."
             )]
         );
         // Not taken, so the next run sends it again.

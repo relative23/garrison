@@ -189,19 +189,26 @@ impl Channels {
     /// of an address, never the rest of it.
     #[must_use]
     pub fn names(&self) -> Vec<String> {
-        let mut names = Vec::new();
+        self.named().into_iter().map(|(_, name)| name).collect()
+    }
+
+    /// The same, each with its kind, as [`Channels::send`] names it.
+    #[must_use]
+    pub fn named(&self) -> Vec<(&'static str, String)> {
+        let mut named = Vec::new();
         for (channel, address) in [("ntfy", &self.ntfy), ("webhook", &self.webhook)] {
             if let Some(address) = address {
-                names.push(match address.usable() {
+                let name = match address.usable() {
                     Ok(url) => format!("{channel} at {}", host_of(url)),
                     Err(_) => format!("{channel}, whose address cannot be read"),
-                });
+                };
+                named.push((channel, name));
             }
         }
         if let Some(mail) = &self.mail {
-            names.push(format!("mail to {}", mail.to));
+            named.push(("mail", format!("mail to {}", mail.to)));
         }
-        names
+        named
     }
 
     /// Send `note` on every channel and say how each one took it.

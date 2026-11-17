@@ -97,7 +97,8 @@ fn run(config: &Config, credentials: &Credentials, at: i64) -> Result<(), String
 
 /// The status database of a host whose collector ran four times, the last
 /// a minute before the tests' clock, with a day of history older than
-/// eight, which a run thins, and the memory a run reads but these do not
+/// eight, which a run thins, a notification an earlier release told of,
+/// which the last run reads, and the memory a run reads but these do not
 /// write.
 fn filled(directory: &Path) -> PathBuf {
     let (config, credentials) = host(directory);
@@ -106,6 +107,16 @@ fn filled(directory: &Path) -> PathBuf {
         run(&config, &credentials, t0 - minutes * 60).unwrap();
     }
     let path = config.database(Database::Status);
+    let keep = |pairs: &[(&str, String)]| {
+        let db = Connection::open(&path).unwrap();
+        for (key, value) in pairs {
+            db.execute(
+                "INSERT OR REPLACE INTO memory VALUES(?, ?)",
+                [*key, value.as_str()],
+            )
+            .unwrap();
+        }
+    };
     let db = Connection::open(&path).unwrap();
     for minute in 0..60 {
         db.execute(
@@ -115,17 +126,15 @@ fn filled(directory: &Path) -> PathBuf {
         .unwrap();
     }
     drop(db);
-    run(&config, &credentials, t0 - 60).unwrap();
-    let db = Connection::open(&path).unwrap();
-    for (key, value) in [
-        ("store.ahead-for", "0".to_owned()),
-        ("store.dqs-keys-rebuild-began", (t0 - 60).to_string()),
+    keep(&[
         ("notify.sent", (t0 - 3600).to_string()),
         ("notify.problem", "webhook: it answered 500".to_owned()),
-    ] {
-        db.execute("INSERT OR REPLACE INTO memory VALUES(?, ?)", [key, &value])
-            .unwrap();
-    }
+    ]);
+    run(&config, &credentials, t0 - 60).unwrap();
+    keep(&[
+        ("store.ahead-for", "0".to_owned()),
+        ("store.dqs-keys-rebuild-began", (t0 - 60).to_string()),
+    ]);
     path
 }
 
