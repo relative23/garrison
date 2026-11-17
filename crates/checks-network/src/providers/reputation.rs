@@ -396,6 +396,8 @@ mod made_tests;
 #[cfg(test)]
 mod names_tests;
 #[cfg(test)]
+mod rule_tests;
+#[cfg(test)]
 mod silence_tests;
 #[cfg(test)]
 mod tests;

@@ -11,9 +11,9 @@ use crate::testing::{Certificates, certificates, certificates_until, now};
 /// 1024) and nothing on a test host listens on it. A free port that a test
 /// gives back can be bound by another test's server before the connection
 /// is made, which answered a TLS probe with an HTTP test server.
-const CLOSED: u16 = 9;
+pub(super) const CLOSED: u16 = 9;
 
-fn roots(certificates: &Certificates) -> RootCertStore {
+pub(super) fn roots(certificates: &Certificates) -> RootCertStore {
     let mut roots = RootCertStore::empty();
     roots.add(certificates.ca.clone()).unwrap();
     roots
@@ -25,7 +25,7 @@ fn trusted(certificates: &Certificates) -> Arc<RootCertStore> {
 
 /// A TLS listener for `localhost` that serves one connection; with
 /// `smtp`, it first speaks SMTP up to STARTTLS (or refuses it).
-fn listener(certificates: &Certificates, smtp: Option<&'static str>) -> u16 {
+pub(super) fn listener(certificates: &Certificates, smtp: Option<&'static str>) -> u16 {
     listener_with(certificates, smtp, rustls::DEFAULT_VERSIONS)
 }
 

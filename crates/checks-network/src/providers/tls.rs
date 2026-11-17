@@ -478,6 +478,8 @@ impl Provider for Tls {
 }
 
 #[cfg(test)]
+mod rule_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod time_tests;

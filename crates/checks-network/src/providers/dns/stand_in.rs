@@ -276,13 +276,13 @@ pub(crate) fn guessable(numbers: &[u16]) -> bool {
             .all(|pair| pair[1] == pair[0].wrapping_add(1))
 }
 
-pub(super) fn text(value: &str) -> Vec<u8> {
+pub(crate) fn text(value: &str) -> Vec<u8> {
     let mut data = vec![u8::try_from(value.len()).unwrap()];
     data.extend_from_slice(value.as_bytes());
     data
 }
 
-pub(super) fn host(prefix: &[u8], name: &str) -> Vec<u8> {
+pub(crate) fn host(prefix: &[u8], name: &str) -> Vec<u8> {
     let mut data = prefix.to_vec();
     for label in name.split('.') {
         data.push(u8::try_from(label.len()).unwrap());
