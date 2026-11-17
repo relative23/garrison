@@ -339,6 +339,42 @@ fn an_account_of_a_type_this_release_does_not_know_refuses_nobody() {
     drop(server);
 }
 
+/// An account Stalwart says it does not have, for a subject UserInfo still
+/// names. Where the policy binds the subject to that account by hand,
+/// Garrison's own setup is broken. Otherwise two answers of Stalwart's do not
+/// fit together: an answer this release does not read. Neither refuses the
+/// user; Stalwart 1.1.0 answers the token of a removed account 403 at
+/// UserInfo already (the web's contract test).
+#[test]
+fn an_account_stalwart_does_not_have_refuses_nobody() {
+    let identity = respond(&json!({"sub": "1", "email": "ann@example.test"}));
+    let missing = |id: &str| {
+        respond(&json!({"methodResponses": [["x:Account/get",
+            {"list": [], "notFound": [id]}, "0"]]}))
+    };
+    let (unbound, server, _directory) = authority(vec![identity.clone(), missing("b")]);
+    assert_eq!(
+        unbound.authorize(TOKEN),
+        Err(Error::Unreadable(
+            "the management API: x:Account/get found no account b for the subject UserInfo \
+             named"
+                .into()
+        ))
+    );
+    server.requests();
+    let (bound, server, directory) = authority(vec![identity, missing("zz")]);
+    let mut document = policy_document();
+    document["subjects"] = json!({"1": {"accountId": "zz", "profile": "viewer"}});
+    write_policy(&config(directory.path(), &server.url), &document);
+    assert_eq!(
+        bound.authorize(TOKEN),
+        Err(Error::Misconfigured(
+            "the policy binds subject 1 to account zz, which Stalwart does not have".into()
+        ))
+    );
+    server.requests();
+}
+
 #[test]
 fn a_denied_subject_is_refused_before_the_native_lookup() {
     let (authority, server, directory) = authority(native("e", &[]));

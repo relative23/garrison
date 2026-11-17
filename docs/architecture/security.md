@@ -51,12 +51,14 @@ names the reason of each.
 Everything else grants nothing and refuses nobody, and is answered 503: a
 Stalwart or a broker that is temporarily unavailable, a setup of Garrison's
 own that is broken, and an answer of Stalwart's in a form this release does
-not read. The setup is a policy that does not read, is not protected or
-names an action the configuration does not have; a broker key that is
+not read. The setup is a policy that does not read, is not protected,
+names an action the configuration does not have or binds a subject to an
+account Stalwart does not have; a broker key that is
 missing or that Stalwart no longer takes; and an answer about an account's
 rights that cannot be used. An answer this release does not read is one
 without JSON, with an object or a status it does not know (an account of a
-type other than a user or a group too), larger than it
+type other than a user or a group too, or no account for a subject that
+UserInfo named), larger than it
 reads or without what was asked, or an error of a method other than
 `forbidden`, such as `unknownMethod` for a method Stalwart does not know, as
 a Stalwart release Garrison does not support yet may give, to UserInfo, where

@@ -23,7 +23,7 @@ use garrison_broker::protocol::BrokerError;
 use garrison_core::config::Config;
 use garrison_stalwart::Error;
 use garrison_testing::http::{answer, json};
-use garrison_testing::{credentials, write_private};
+use garrison_testing::{credentials, policy_document, write_policy, write_private};
 use garrison_web::security::Broker;
 use serde_json::{Value, json as value};
 use support::brokers::{
@@ -168,6 +168,18 @@ fn keyless(config: &Config) {
     std::fs::remove_file(credentials(config).path(&config.broker.native_key)).unwrap();
 }
 
+/// The policy binds subject 1 by hand to an account Stalwart does not have.
+fn bound_to_a_missing_account(config: &Config) {
+    let mut document = policy_document();
+    document["subjects"] = value!({"1": {"accountId": "zz", "profile": "viewer"}});
+    write_policy(config, &document);
+}
+
+/// Stalwart's management API has no account of `id`.
+fn missing(id: &str) -> String {
+    json(&value!({"methodResponses": [["x:Account/get", {"list": [], "notFound": [id]}, "0"]]}))
+}
+
 /// The account of subject 1 as Stalwart's management API answers for it.
 fn account(shape: &Value) -> String {
     listed("x:Account/get", &value!([shape]))
@@ -297,6 +309,23 @@ fn undecided() -> Vec<AtStalwart> {
                 "the management API: x:Account/get returned an account of a type this release \
                  does not know (\"Individual\")"
                     .into(),
+            ),
+        ),
+        case(
+            "an account Stalwart does not have",
+            at_the_api(missing("b")),
+            Error::Unreadable(
+                "the management API: x:Account/get found no account b for the subject \
+                 UserInfo named"
+                    .into(),
+            ),
+        ),
+        AtStalwart(
+            "a binding to an account Stalwart does not have",
+            at_the_api(missing("zz")),
+            bound_to_a_missing_account,
+            Error::Misconfigured(
+                "the policy binds subject 1 to account zz, which Stalwart does not have".into(),
             ),
         ),
         case(

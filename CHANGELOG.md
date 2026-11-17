@@ -1176,6 +1176,17 @@ Notable changes for operators and users. The format follows
   broker's journal names the reason. An account of a type other than a user
   or a group, as a Stalwart release Garrison does not support yet might
   answer, refuses nobody, as any answer this release does not read.
+- **An account Stalwart does not have is named for what it is.** Where the
+  management API had no account for a subject that UserInfo still named,
+  the broker answered that Garrison is not set up to check access rights,
+  with an error that named no account. Where the policy binds that subject
+  under `subjects` to the account, the line now says "the policy binds
+  subject … to account …, which Stalwart does not have", which is the
+  setup to mend; otherwise the two answers of Stalwart's do not fit
+  together, an answer this release does not read: rights cannot be
+  checked, and nobody is signed out for it. An account removed while its
+  user is signed in gets 403 from UserInfo first (measured on Stalwart
+  1.1.0), so its session keeps that answer until its time ends.
 - **A broker that gives no answer is worded alike everywhere, and the
   journal says why.** Where the broker gave no answer (stopped, its 16
   places taken, its socket gone), pages said "Authorization is temporarily

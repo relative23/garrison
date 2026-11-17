@@ -285,3 +285,51 @@ fn the_webui_still_has_the_sidebar_the_switch_row_is_built_for() {
         );
     }
 }
+
+/// An account removed while its user is signed in: UserInfo answers its
+/// token 403, which Garrison takes for no sign-out, as a block of the
+/// address answers the same, and the management API has no such account.
+/// So a token that UserInfo still takes names an account Stalwart has,
+/// unless the policy binds the subject by hand (`authz::Authority`).
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn a_removed_accounts_token_is_answered_403_at_userinfo() {
+    let mut sign_in = lab();
+    let origin = sign_in.origin.clone();
+    let provider = Provider::new(&sign_in.lab.url, ISSUER);
+    let verifier = random_hex(32);
+    let params = sign_in.returned(&query(
+        &origin,
+        &redirect_uri(&origin),
+        "openid",
+        Some(&verifier),
+    ));
+    let (client, callback) = (client_id(&origin), redirect_uri(&origin));
+    let token = provider
+        .exchange_code(&CodeExchange {
+            client_id: &client,
+            redirect_uri: &callback,
+            code: &params["code"],
+            verifier: &verifier,
+            client_ip: None,
+        })
+        .unwrap();
+    let identity = provider.userinfo(&token.access_token, None).unwrap();
+    let account = garrison_stalwart::ids::account_id_for_subject(&identity.subject).unwrap();
+    sign_in
+        .lab
+        .call("x:Account/set", &json!({"destroy": [account]}));
+    sign_in.lab.created.retain(|(_, id)| *id != account);
+    assert_eq!(
+        provider.userinfo(&token.access_token, None),
+        Err(Error::Unreadable("Stalwart answered HTTP 403".into()))
+    );
+    let after = sign_in.lab.call(
+        "x:Account/get",
+        &json!({"ids": [account], "properties": ["id"]}),
+    );
+    assert_eq!(
+        (&after["list"], &after["notFound"]),
+        (&json!([]), &json!([account]))
+    );
+}

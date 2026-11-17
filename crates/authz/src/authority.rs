@@ -133,6 +133,25 @@ impl Authority {
         let rights = match account_rights(&self.native_client()?, &account_id) {
             Ok(Native::Rights(rights)) => rights,
             Ok(Native::Ineligible) => return Err(Error::Denied(NOT_EVALUATED.into())),
+            // Stalwart has no account of the ID: where the policy names it
+            // by hand, Garrison's own setup is broken; otherwise UserInfo and
+            // the management API answered what does not fit together, which
+            // refuses nobody. A removed account's token gets 403 at UserInfo
+            // first (Stalwart 1.1.0; the web's contract test).
+            Ok(Native::Missing) => {
+                let subject = &identity.subject;
+                return Err(if policy.subjects.contains_key(subject) {
+                    Error::Misconfigured(format!(
+                        "the policy binds subject {subject} to account {account_id}, which \
+                         Stalwart does not have"
+                    ))
+                } else {
+                    Error::Unreadable(format!(
+                        "the management API: x:Account/get found no account {account_id} for \
+                         the subject UserInfo named"
+                    ))
+                });
+            }
             Err(Error::Denied(reason) | Error::InvalidToken(reason)) => {
                 return Err(Error::Misconfigured(format!(
                     "the account's rights could not be read from Stalwart: {reason}"

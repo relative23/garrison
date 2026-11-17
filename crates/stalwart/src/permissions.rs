@@ -21,7 +21,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use crate::Error;
-use crate::jmap::JmapClient;
+use crate::jmap::{Get, Got, JmapClient};
 
 pub const MAX_ROLES: usize = 64;
 const MAX_DEPTH: usize = 16;
@@ -339,6 +339,8 @@ pub enum Native {
     /// of a type this release knows: what Stalwart says of the user's
     /// account, not of the key that read it.
     Ineligible,
+    /// Stalwart has no account of the ID asked for (`notFound`).
+    Missing,
 }
 
 /// Whether Garrison evaluates the rights of the account `object`, by its
@@ -367,14 +369,41 @@ fn evaluated(object: &Value) -> Result<bool, Error> {
     }
 }
 
+/// The account `account_id` as Stalwart sends it, or `None` where Stalwart
+/// says that it has none (`notFound`), which [`JmapClient::get`] does not
+/// tell apart from a refusal; anything else this release does not read.
+fn account_object(client: &JmapClient, account_id: &str) -> Result<Option<Value>, Error> {
+    let method = "x:Account/get";
+    let asked = Get {
+        ids: Some(&[account_id]),
+        properties: Some(&ACCOUNT_PROPERTIES),
+    };
+    let unread = |what: &str| Error::unreadable(format!("{method} {what}"));
+    let got: Got<Value> = json::object(Value::Object(client.call(method, asked)?))
+        .map_err(|_| unread("returned no list of objects"))?;
+    let mut objects = got.list.into_iter();
+    let missing = got.not_found.unwrap_or_default();
+    match (objects.next(), objects.next(), missing.as_slice()) {
+        (None, None, [id]) if id.as_str() == Some(account_id) => Ok(None),
+        (Some(object), None, [])
+            if object.get("id").and_then(Value::as_str) == Some(account_id) =>
+        {
+            Ok(Some(object))
+        }
+        _ => Err(unread("did not return the objects asked for")),
+    }
+}
+
 /// Read one account's role graph from Stalwart and evaluate it, or find,
 /// before anything else is read, that it is an account Garrison evaluates no
-/// rights for.
+/// rights for, or one Stalwart does not have.
 ///
 /// Roles are fetched in batches of eight, only as far as the account's roles
 /// reach, and never more than [`MAX_ROLES`].
 pub fn account_rights(client: &JmapClient, account_id: &str) -> Result<Native, Error> {
-    let object: Value = first(client.get("Account", Some(&[account_id]), &ACCOUNT_PROPERTIES)?)?;
+    let Some(object) = account_object(client, account_id)? else {
+        return Ok(Native::Missing);
+    };
     if !evaluated(&object)? {
         return Ok(Native::Ineligible);
     }
@@ -413,6 +442,9 @@ pub fn native_rights(client: &JmapClient, account_id: &str) -> Result<Rights, Er
     match account_rights(client, account_id)? {
         Native::Rights(rights) => Ok(rights),
         Native::Ineligible => Err(Error::denied(NOT_A_USER)),
+        Native::Missing => Err(Error::denied(
+            "x:Account/get found no object of an ID asked for",
+        )),
     }
 }
 
