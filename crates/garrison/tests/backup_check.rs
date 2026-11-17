@@ -8,6 +8,10 @@
 
 mod support;
 
+// The tests of one part, beside this crate's root.
+#[path = "backup_check/repositories.rs"]
+mod repositories;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -72,6 +76,13 @@ impl Tools {
 
     /// One run of the command with `arguments`, and with `broken` failing.
     fn run(&self, arguments: &[&str], broken: Option<&str>) -> Output {
+        let broken: Vec<(&str, &str)> = broken.map(|step| ("BROKEN", step)).into_iter().collect();
+        self.run_with(arguments, &broken)
+    }
+
+    /// One run of the command with `arguments` in an environment that holds
+    /// `environment` besides the stand-ins, as a backup job's unit gives it.
+    fn run_with(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
         let path = format!(
             "{}:{}",
             self.directory.path().display(),
@@ -84,11 +95,10 @@ impl Tools {
             .env("PATH", path)
             .env("CALLS", self.directory.path().join("calls"))
             .env_remove("RESTIC_REPOSITORY")
+            .env_remove("RESTIC_REPOSITORY_FILE")
             .env_remove("BORG_REPO")
-            .env_remove("TZ");
-        if let Some(broken) = broken {
-            command.env("BROKEN", broken);
-        }
+            .env_remove("TZ")
+            .envs(environment.iter().copied());
         finished(&mut command)
     }
 

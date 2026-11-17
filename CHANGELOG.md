@@ -381,6 +381,18 @@ Notable changes for operators and users. The format follows
   another user's folder or anything else of that name stays as it is. A
   copy that cannot be removed, the run's own included, is named with how to
   remove it, and the command then ends with 1.
+- **A backup's card shows that repository's check and restore alone.**
+  `garrison backup-check` kept the last integrity check and test restore of
+  the report before it, whatever repository or tool that report was of: a
+  run for another repository under the same report, as with a changed
+  `RESTIC_REPOSITORY` or `--repo`, or with borg under restic's `--report`,
+  showed the old repository's check and restore as the new one's, and the
+  card was in order on their times. They are now kept only from a report of
+  the same tool and repository; otherwise the run starts without them and
+  says why, and the card says that none has been reported where one is
+  expected. A repository that restic reads from the file
+  `RESTIC_REPOSITORY_FILE` names is named by that file, so that two named so
+  are told apart.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year

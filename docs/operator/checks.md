@@ -199,13 +199,19 @@ The command adds no secret of its own: it runs with the environment your
 backup job already has (`RESTIC_REPOSITORY`, `RESTIC_PASSWORD_FILE`,
 `BORG_REPO`, `BORG_PASSPHRASE` and the like), or takes the repository with
 `--repo`. It writes `/var/lib/garrison/backup-check/<tool>.json`, which the
-provider reads. A report that is a link or no plain file, is larger than
-256 KiB, is not one JSON object as the command writes it, or can be changed
-by a user other than root makes the check Unknown. The command reads the
-report it wrote last the same way, to keep its last check and restore: from
-anything else it keeps neither, says so and writes its report in that place.
-Call the command from the backup job's own unit, and less often with the two
-longer runs:
+provider reads. The report names the repository as the tool was given it,
+without what signs in to it; one that restic reads from the file
+`RESTIC_REPOSITORY_FILE` names is named by that file. A run keeps the last
+check and restore of the report before it only where that report is of the
+same tool and the same repository: under a report of another, as where a
+second unit names another repository or `--report` names one file for
+restic and borg, it starts without them and says so. A report that is a
+link or no plain file, is larger than 256 KiB, is not one JSON object as the
+command writes it, or can be changed by a user other than root makes the
+check Unknown. The command reads the report it wrote last the same way, to
+keep its last check and restore: from anything else it keeps neither, says
+so and writes its report in that place. Call the command from the backup
+job's own unit, and less often with the two longer runs:
 
 ```ini
 # In the backup job's unit: report after every backup.

@@ -218,6 +218,33 @@ fn last_report(path: &Path) -> Option<Report> {
     report
 }
 
+/// The repository as restic reads it from the file its environment names,
+/// where it names it so: two repositories named so differ by their files.
+fn named_in_file(tool: Tool) -> Option<String> {
+    let file = std::env::var_os("RESTIC_REPOSITORY_FILE").filter(|_| tool == Tool::Restic)?;
+    Some(format!("(named in {})", Path::new(&file).display()))
+}
+
+/// The last report where it is one of `tool` for `repository`. Of another
+/// tool or repository nothing is kept, since the card would show it as this
+/// repository's, and that is said where it held a check or a restore.
+fn kept(path: &Path, before: Report, tool: Tool, repository: &str) -> Option<Report> {
+    if before.tool == tool && before.repository == repository {
+        return Some(before);
+    }
+    if before.verify.is_some() || before.restore.is_some() {
+        complain(&format!(
+            "The last report, {}, is of the {} repository {}, and this run asks the {} \
+             repository {repository}: its last integrity check and test restore are not kept.",
+            path.display(),
+            before.tool.name(),
+            before.repository,
+            tool.name()
+        ));
+    }
+    None
+}
+
 pub(crate) fn run_check(asked: &Asked) -> u8 {
     let Some(tool) = Tool::named(&asked.tool) else {
         complain("The backup tool is restic or borg.");
@@ -227,25 +254,31 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
         .report
         .clone()
         .unwrap_or_else(|| Path::new(REPORTS).join(format!("{}.json", tool.name())));
-    // What the last run wrote stays, where this one does not run that part.
-    let before = last_report(&path);
     let variable = if tool == Tool::Restic {
         "RESTIC_REPOSITORY"
     } else {
         "BORG_REPO"
     };
-    let known = asked.repo.clone().or_else(|| std::env::var(variable).ok());
+    let known = asked
+        .repo
+        .clone()
+        .or_else(|| std::env::var(variable).ok())
+        .or_else(|| named_in_file(tool));
     let repository = Repository {
         tool,
         given: asked.repo.clone(),
     };
+    let name = named(
+        known
+            .as_deref()
+            .unwrap_or("(named in the tool's own configuration)"),
+    );
+    // What the last run wrote of this repository stays, where this one does
+    // not run that part.
+    let before = last_report(&path).and_then(|before| kept(&path, before, tool, &name));
     let mut report = Report {
         tool,
-        repository: named(
-            known
-                .as_deref()
-                .unwrap_or("(named in the tool's own configuration)"),
-        ),
+        repository: name,
         snapshots: None,
         problem: None,
         verify: before.as_ref().and_then(|before| before.verify.clone()),
