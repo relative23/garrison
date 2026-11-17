@@ -471,6 +471,15 @@ Notable changes for operators and users. The format follows
   image leaves it, is Unknown and says so, where apt's "0 upgraded" made it
   in order; once the lists are fetched it is asked again within five
   minutes.
+- **A second kernel flavor is no kernel update.** The restart card took
+  every kernel in `/lib/modules` whose release sorts after the running
+  one's for an update of it, so a second flavor of the same release
+  installed beside it, Debian's `-cloud-amd64` beside `-amd64`, Ubuntu's
+  `-lowlatency` beside `-generic` or AlmaLinux's debug kernel (`+debug`),
+  made it call a restart due (names measured on each). It now holds only
+  the kernels of the running one's flavor against it; Debian's backports
+  kernel, `6.12.95+deb12-cloud-amd64` beside the stock
+  `6.1.0-56-cloud-amd64`, still counts as the update it is.
 - **`garrison doctor` names what makes each file.** For a missing access
   policy it said to run `garrison stalwart setup` or the installer, neither
   of which makes one; it now names `garrison access init`, and `garrison

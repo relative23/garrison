@@ -79,7 +79,13 @@ changes nothing; one that cannot be made is Unknown.
   names the repository.
 - `restart`: whether installed updates need a restart of the host. On every
   distribution a kernel installed in `/lib/modules` that is newer than the
-  one that runs is a warning. The check also reads `/run/reboot-required`,
+  one that runs, and of its flavor, is a warning. The flavor is the
+  release's name from its first hyphen before a letter on, such as `-amd64`,
+  `-cloud-amd64` or `-generic`, or else from its last plus on, such as
+  `+debug`: another flavor installed beside the running kernel, such as a
+  debug or cloud kernel, is no update of it and is not compared, while
+  Debian's backports kernel has the flavor of the stock kernel it updates.
+  The check also reads `/run/reboot-required`,
   the marker that packages of Debian and Ubuntu write where their update
   needs a restart, as Debian's dbus does, so that such an update shows too.
   The RHEL family, Fedora, Amazon Linux and openSUSE do not write it: there

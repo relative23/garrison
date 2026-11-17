@@ -182,7 +182,14 @@ sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT value FROM snapshots,
     AND json_extract(value, '\$.id') = 'host.restart'" > /root/restart.json
 cat /root/restart.json
 SQL
-newer=99.0.0-garrison-acceptance
+# It is of the running kernel's flavor, as the check compares only those:
+# the name from the first hyphen before a letter (-amd64, -generic), or else
+# from the last plus (+debug). In a container that is the host's kernel.
+flavor=$(inside 'uname -r' | awk '{
+    if (match($0, /-[A-Za-z]/)) print substr($0, RSTART)
+    else if (match($0, /[+][^+]*$/)) print substr($0, RSTART)
+}')
+newer=99.0.0$flavor
 inside "mkdir -p /lib/modules/$newer && : > /lib/modules/$newer/modules.dep"
 check "with a newer kernel installed a collection run starts" "$collect"
 check "the restart card names the newer kernel and says that a restart is due" "

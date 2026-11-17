@@ -105,6 +105,23 @@ pub(super) fn by_version(left: &str, right: &str) -> Ordering {
     left.len().cmp(&right.len())
 }
 
+/// A kernel release's flavor: its name from the first hyphen that a letter
+/// follows, as Debian's `-amd64` and `-cloud-amd64`, Ubuntu's `-generic` and
+/// `-lowlatency`, or, where it has none, from its last plus, as the RHEL
+/// family's `+debug`; empty for neither. So Debian's backports kernel,
+/// `6.12.95+deb12-cloud-amd64`, has the flavor of the stock kernel it
+/// updates, `6.1.0-56-cloud-amd64` (names measured 2026-11-17).
+pub(super) fn flavor(release: &str) -> &str {
+    let named = release
+        .as_bytes()
+        .windows(2)
+        .position(|pair| pair[0] == b'-' && pair[1].is_ascii_alphabetic());
+    match named {
+        Some(index) => &release[index..],
+        None => release.rfind('+').map_or("", |index| &release[index..]),
+    }
+}
+
 /// One reading of the free disk space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub(super) struct Sample {
@@ -222,6 +239,25 @@ mod tests {
         );
         assert_eq!(by_version("5.14.0-070", "5.14.0-70"), Ordering::Equal);
         assert_eq!(by_version("5.14.0", "5.14.0-1"), Ordering::Less);
+    }
+
+    /// The folders that Debian's, Ubuntu's and `AlmaLinux`'s kernel packages
+    /// leave in /lib/modules (measured 2026-11-17).
+    #[test]
+    fn a_kernel_flavor_is_the_name_after_the_version() {
+        for (release, named) in [
+            ("6.12.107+deb13-amd64", "-amd64"),
+            ("6.12.107+deb13-cloud-amd64", "-cloud-amd64"),
+            ("6.1.0-56-cloud-amd64", "-cloud-amd64"),
+            ("6.12.95+deb12-cloud-amd64", "-cloud-amd64"),
+            ("6.8.0-31-generic", "-generic"),
+            ("6.8.0-31-lowlatency", "-lowlatency"),
+            ("6.12.0-264.16.1.el10_3.x86_64", ""),
+            ("6.12.0-264.16.1.el10_3.x86_64+debug", "+debug"),
+            ("6.9.3", ""),
+        ] {
+            assert_eq!(flavor(release), named, "{release}");
+        }
     }
 
     #[test]

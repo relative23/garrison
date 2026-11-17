@@ -153,6 +153,97 @@ fn a_marker_or_a_newer_kernel_says_that_a_restart_is_due() {
     assert_eq!(look(&[]).state, State::Unknown);
 }
 
+/// A second flavor of a kernel, installed beside the one that runs, is no
+/// update of it: Debian's cloud kernel, Ubuntu's low-latency kernel and
+/// `AlmaLinux`'s debug kernel. A newer kernel of the flavor that runs is one,
+/// also Debian's backports kernel beside the stock one. The folders are
+/// those the kernels' packages left in /lib/modules (measured 2026-11-17 in
+/// containers of Debian 12 and 13, Ubuntu 24.04 and `AlmaLinux` 10).
+#[test]
+fn only_a_newer_kernel_of_the_running_flavor_makes_a_restart_due() {
+    let nothing = Programs::new(Vec::new());
+    let look = |running: &str, installed: &[&str]| {
+        let root = tempfile::tempdir().unwrap();
+        let osrelease = format!("{running}\n");
+        let mut files = vec![("proc/sys/kernel/osrelease".to_owned(), osrelease)];
+        files.extend(
+            installed
+                .iter()
+                .map(|kernel| (format!("lib/modules/{kernel}/modules.dep"), String::new())),
+        );
+        let files: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(path, text)| (path.as_str(), text.as_str()))
+            .collect();
+        host(root.path(), &files);
+        checked(
+            &provider(root.path(), "\"restart\""),
+            &nothing,
+            &Remembered::default(),
+            0,
+        )
+    };
+    let beside: Vec<(&str, State, Vec<String>, serde_json::Value)> = [
+        ("6.12.107+deb13-amd64", "6.12.107+deb13-cloud-amd64"),
+        ("6.8.0-31-generic", "6.8.0-31-lowlatency"),
+        (
+            "6.12.0-264.16.1.el10_3.x86_64",
+            "6.12.0-264.16.1.el10_3.x86_64+debug",
+        ),
+        (
+            "6.12.0-264.16.1.el10_3.x86_64+debug",
+            "6.12.0-264.16.1.el10_3.x86_64",
+        ),
+    ]
+    .into_iter()
+    .map(|(running, other)| {
+        let observation = look(running, &[running, other]);
+        let newest = field(&observation, "Newest installed kernel").clone();
+        (running, observation.state, observation.findings, newest)
+    })
+    .collect();
+    let in_order: Vec<(&str, State, Vec<String>, serde_json::Value)> = beside
+        .iter()
+        .map(|(running, ..)| (*running, State::Ok, Vec::new(), json!(running)))
+        .collect();
+    assert_eq!(beside, in_order);
+    for (running, installed, newer) in [
+        (
+            "6.12.107+deb13-amd64",
+            &[
+                "6.12.107+deb13-amd64",
+                "6.12.107+deb13-cloud-amd64",
+                "6.12.117+deb13-amd64",
+            ][..],
+            "6.12.117+deb13-amd64",
+        ),
+        (
+            "6.8.0-31-lowlatency",
+            &[
+                "6.8.0-31-generic",
+                "6.8.0-31-lowlatency",
+                "6.8.0-149-lowlatency",
+            ][..],
+            "6.8.0-149-lowlatency",
+        ),
+        (
+            "6.1.0-56-cloud-amd64",
+            &["6.1.0-56-cloud-amd64", "6.12.95+deb12-cloud-amd64"][..],
+            "6.12.95+deb12-cloud-amd64",
+        ),
+    ] {
+        let observation = look(running, installed);
+        assert_eq!(
+            observation.findings,
+            [format!(
+                "Kernel {newer} is installed and {running} runs: a restart of the host is due."
+            )],
+            "{running}"
+        );
+        assert_eq!(observation.state, State::Warning, "{running}");
+    }
+}
+
 /// Where the installed kernels cannot be read, as where the collector's
 /// sandbox hides them, an update of the kernel would not show: the card says
 /// so and is Unknown, never in order. The distribution's marker still counts.
