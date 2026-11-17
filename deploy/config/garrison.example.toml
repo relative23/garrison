@@ -78,8 +78,10 @@ allowed_peers = ["garrison"]
 # on_incomplete = "tag"
 
 # Maintenance actions: each starts or restarts one existing systemd unit.
-# `garrison polkit-rule` turns this list into the polkit rule that lets
-# the broker run exactly these operations. Regenerate it after every change.
+# After every change, run `garrison access update`, which gives the access
+# profiles these actions (`operator = true` puts one in the operator
+# profile), then the installer again: it writes the polkit rule and restarts
+# the broker.
 [[actions]]
 id = "restart_resolver"
 title = "Restart DNS resolver"
