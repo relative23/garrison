@@ -744,6 +744,11 @@ Notable changes for operators and users. The format follows
   lists that holds it, such as SBL and XBL; the Blocklists card named only
   the first, so a listing beside it went unnamed, and which one came first
   could change from run to run. Every code is named now, in order.
+- **An MTA-STS policy is read again once its record changes.** The DNS
+  check keeps a domain's policy for an hour, also where the domain's
+  `_mta-sts` record changed in between: a policy mended under a new id, as
+  senders take it at once, still showed as before for up to an hour. It is
+  read again in the first run that finds another record.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not

@@ -31,6 +31,12 @@ struct Fetched {
     /// fetches it.
     #[serde(default)]
     unasked: bool,
+    /// The domain's record for the policy when it was fetched: once that
+    /// changes, the policy is fetched again, as a sender takes a record
+    /// with another id for a new policy (RFC 8461, 3.1). None where an
+    /// earlier release kept it.
+    #[serde(default)]
+    record: Option<Vec<String>>,
 }
 
 /// What a domain's policy adds to its card.
@@ -88,43 +94,49 @@ pub(super) fn names(policy: &Policy, host: &str) -> bool {
 }
 
 /// The policy at `url`, from the status database where it was fetched within
-/// the hour, or `None` where it is due and the run's time for its checks is
-/// over: the next run fetches it. Its server's certificate is judged at the
-/// run's time, against `roots` or else the system's authorities.
+/// the hour under the domain's `record` as it is now, or `None` where it is
+/// due and the run's time for its checks is over: the next run fetches it.
+/// Its server's certificate is judged at the run's time, against `roots` or
+/// else the system's authorities.
 pub(super) fn policy(
     context: &Context<'_>,
     domain: &str,
     url: &str,
     roots: Option<&fetch::Roots>,
+    record: &[String],
 ) -> Option<Result<Policy, String>> {
     let key = format!("dns.sts.{domain}");
-    let fetched = cached(
-        context,
-        &key,
-        |_, fetched: &Fetched| if fetched.unasked { 0 } else { EVERY },
-        |_| {
-            if context.deadline.expired() {
-                return Fetched {
-                    outcome: Err(String::new()),
-                    unasked: true,
-                };
-            }
-            Fetched {
-                outcome: fetch::get_at(
-                    url,
-                    &roots.cloned().unwrap_or_else(fetch::roots),
-                    context.now,
-                )
-                .and_then(|answer| match (answer.status, answer.cut) {
-                    (200, None) => parse(&answer.body),
-                    // What came before a cut is no policy to judge by.
-                    (200, Some(cut)) => Err(cut),
-                    (status, _) => Err(format!("the server answered {status}")),
-                }),
-                unasked: false,
-            }
-        },
-    );
+    let wait = |_, fetched: &Fetched| {
+        if fetched.unasked || fetched.record.as_deref() != Some(record) {
+            0
+        } else {
+            EVERY
+        }
+    };
+    let fetched = cached(context, &key, wait, |_| {
+        if context.deadline.expired() {
+            return Fetched {
+                outcome: Err(String::new()),
+                unasked: true,
+                record: Some(record.to_vec()),
+            };
+        }
+        Fetched {
+            outcome: fetch::get_at(
+                url,
+                &roots.cloned().unwrap_or_else(fetch::roots),
+                context.now,
+            )
+            .and_then(|answer| match (answer.status, answer.cut) {
+                (200, None) => parse(&answer.body),
+                // What came before a cut is no policy to judge by.
+                (200, Some(cut)) => Err(cut),
+                (status, _) => Err(format!("the server answered {status}")),
+            }),
+            unasked: false,
+            record: Some(record.to_vec()),
+        }
+    });
     (!fetched.answer.unasked).then_some(fetched.answer.outcome)
 }
 
@@ -179,18 +191,20 @@ pub(super) fn judged(
     }
 }
 
-/// The table's row for the policy of `domain` and what it adds to the card.
-/// `url` is where the tests serve a policy, with `roots` that trust its
-/// server.
+/// The table's row for the policy of `domain`, whose `record` for it was
+/// found, and what it adds to the card. `url` is where the tests serve a
+/// policy, with `roots` that trust its server.
 pub(super) fn checked(
     context: &Context<'_>,
     domain: &str,
     hosts: &[String],
+    record: &[String],
     url: Option<&str>,
     roots: Option<&fetch::Roots>,
 ) -> (Vec<serde_json::Value>, Outcome) {
     let own = format!("https://mta-sts.{domain}/.well-known/mta-sts.txt");
-    let (stated, result, outcome) = match policy(context, domain, url.unwrap_or(&own), roots) {
+    let read = policy(context, domain, url.unwrap_or(&own), roots, record);
+    let (stated, result, outcome) = match read {
         None => (String::new(), "not asked", Outcome::Unasked),
         Some(read) => {
             let (stated, result, finding) = judged(domain, hosts, &read);

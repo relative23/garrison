@@ -231,9 +231,14 @@ impl Dns {
             left: records.len() - asked_for.len(),
             ..Tally::default()
         };
+        // What the record for an MTA-STS policy holds, as found.
+        let mut policy_record = Vec::new();
         for record in asked_for {
             let (verdict, found, why) = asked(context, resolver, record, silent);
             tally.counted(&name, record, verdict, why.as_deref());
+            if record.name == format!("_mta-sts.{name}") {
+                policy_record.clone_from(&found);
+            }
             // An answer that cannot be used says what it was.
             let result = match (verdict, why) {
                 (Verdict::Unread, Some(why)) => format!("not read: {why}"),
@@ -254,15 +259,12 @@ impl Dns {
         }
         // A domain that publishes the record for an MTA-STS policy must have
         // one that senders can read and that names its mail hosts.
-        let published = rows.iter().any(|row: &Vec<serde_json::Value>| {
-            row[0] == format!("_mta-sts.{name}")
-                && row[4].as_str().is_some_and(|found| !found.is_empty())
-        });
-        let policy = published.then(|| {
+        let policy = (!policy_record.is_empty()).then(|| {
             let (row, outcome) = sts::checked(
                 context,
                 &name,
                 &hosts,
+                &policy_record,
                 self.policy_url.as_deref(),
                 self.roots.as_ref(),
             );

@@ -247,7 +247,9 @@ check asks the resolver for them and compares:
   warning: senders that check DANE refuse a server whose record is wrong,
   which happens when a certificate is renewed and the record is not.
 - Where the record for an MTA-STS policy is published, the policy itself is
-  read from `https://mta-sts.<domain>/.well-known/mta-sts.txt`, once an hour.
+  read from `https://mta-sts.<domain>/.well-known/mta-sts.txt`, once an hour,
+  and at once where the record changed, as senders take a record with
+  another id for a new policy.
   A policy that cannot be read, or that does not name one of the domain's
   mail hosts, is a warning, also beside records that could not be read or
   were not asked: senders that honour it stop delivering. A policy file
