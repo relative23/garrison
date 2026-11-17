@@ -61,10 +61,23 @@ impl Note {
     }
 }
 
-/// `host` of `https://host/...`.
+/// The server of an address, `host` or `host:port`, never more of it: what
+/// an earlier release kept for the watch may hold a query right after it.
 pub(crate) fn host_of(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    rest.split('/').next().unwrap_or(rest)
+    rest.split(['/', '?', '#', '\\']).next().unwrap_or(rest)
+}
+
+/// An error of a request to `url` that names its server alone, where the
+/// client named the whole address or all up to its first `/`.
+fn named_by_server(error: &str, url: &str) -> String {
+    let server = host_of(url);
+    let error = error.replace(url, &format!("the address at {server}"));
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    match rest.split('/').next() {
+        Some(taken) if taken != server && !taken.is_empty() => error.replace(taken, server),
+        _ => error,
+    }
 }
 
 /// Send `body` as JSON to `url`, done by `until`; an empty token sends none.
@@ -99,7 +112,7 @@ fn post(
         .map(|answer| answer.status)
         .map_err(|error| match url {
             "" => error,
-            url => error.replace(url, &format!("the address at {}", host_of(url))),
+            url => named_by_server(&error, url),
         })
 }
 

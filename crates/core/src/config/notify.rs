@@ -13,11 +13,39 @@ fn fail<T>(message: impl Into<String>) -> Result<T, ConfigError> {
     Err(ConfigError(message.into()))
 }
 
+/// An address as the collector's client sends it, as written: it takes all
+/// up to the first `/` for the server, so a query right after the host is
+/// no name it can ask, and would show in an error that names the server.
+/// The error never repeats the address.
+fn sendable(text: &str, name: &str) -> Result<(), ConfigError> {
+    let Some(rest) = text.strip_prefix("https://") else {
+        return fail(format!("{name} must be an https:// URL"));
+    };
+    let server = rest.split('/').next().unwrap_or_default();
+    let host = |character: char| character.is_ascii_alphanumeric() || "-._:[]".contains(character);
+    if !server.chars().all(host) {
+        return fail(format!(
+            "{name} must name its server alone before its first \"/\": write \
+             https://host/?key=…, not https://host?key=…"
+        ));
+    }
+    if text
+        .chars()
+        .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return fail(format!(
+            "{name} must be one line of printable characters without spaces"
+        ));
+    }
+    Ok(())
+}
+
 /// An ntfy topic's address, `https://host/topic`: the last part of the path
 /// names the topic. `name` is what an error calls the value. The collector
 /// holds an address read from a file to the same rules.
 pub fn ntfy_address(text: &str, name: &str) -> Result<String, ConfigError> {
     let url = https_url(Some(&Value::String(text.to_owned())), name)?;
+    sendable(&url, name)?;
     let topic = url.trim_end_matches('/').rsplit('/').next().unwrap_or("");
     let named =
         !topic.is_empty() && !topic.contains(['.', ':', '?', '#']) && url.matches('/').count() >= 3;
@@ -29,7 +57,9 @@ pub fn ntfy_address(text: &str, name: &str) -> Result<String, ConfigError> {
 
 /// A webhook's address, which every message is posted to.
 pub fn webhook_address(text: &str, name: &str) -> Result<String, ConfigError> {
-    https_url(Some(&Value::String(text.to_owned())), name)
+    let url = https_url(Some(&Value::String(text.to_owned())), name)?;
+    sendable(&url, name)?;
+    Ok(url)
 }
 
 /// A channel's address as written, or the file that holds it: `credential:NAME`

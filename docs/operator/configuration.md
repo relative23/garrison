@@ -171,7 +171,9 @@ webhook_url = "https://hooks.example.org/garrison"
 
 Each message is one `POST` with a JSON body; any answer from 200 to 299
 counts as taken. A token in the file `notify-webhook-token` goes along as
-`Authorization: Bearer`.
+`Authorization: Bearer`. A key in a query follows a path:
+`https://hooks.example.org/?key=…`; `check-config` refuses
+`https://hooks.example.org?key=…`.
 
 ```json
 {

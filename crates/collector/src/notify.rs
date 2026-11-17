@@ -376,6 +376,8 @@ mod address_tests;
 #[cfg(test)]
 mod card_tests;
 #[cfg(test)]
+mod mark_tests;
+#[cfg(test)]
 mod notice_tests;
 #[cfg(test)]
 mod secret_tests;

@@ -28,6 +28,10 @@ Notable changes for operators and users. The format follows
   stops. Keep it where the collector sees it, or show it the place
   read-only with a drop-in, as
   [checks](docs/operator/checks.md#paths-the-collector-cannot-see) shows.
+- A notification address with a query right after its server, such as
+  `https://hooks.example.org?key=…`, on which nothing ever went out, is
+  refused by `check-config`, and with it the upgrade. Write
+  `https://hooks.example.org/?key=…`.
 
 ### Added
 
@@ -226,6 +230,10 @@ Notable changes for operators and users. The format follows
   Alerts page, in the journal and by `garrison notify-test`; for a webhook
   that carries its key in its address, that was the key. Such an error now
   names the server only.
+- **A channel's name and errors show only its server, also for an address
+  with its key right after the server**, which put the key on the Alerts
+  page and in the journal, even when kept in a file. Such an address is
+  now refused, without the key.
 - **A state that a page does not know no longer stops it or reads as OK.**
   A page opened before an upgrade that brings a new state of a check failed
   on such a state and showed its error instead of its checks, and the
