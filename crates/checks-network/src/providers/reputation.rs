@@ -32,7 +32,7 @@ mod verdict;
 
 use asker::{Asker, PATIENCE, RUN_OVER};
 use named::{Before, names};
-use reading::{Asked, Read};
+use reading::{Asked, Made, Read};
 
 const EVERY: i64 = 6 * 3600;
 const AGAIN: i64 = 3600;
@@ -126,12 +126,21 @@ impl Reputation {
         self
     }
 
-    /// Ask about every address of the mail hosts.
-    fn read(&self, context: &Context<'_>) -> Result<Read, String> {
-        let resolver = self
-            .resolver
-            .or_else(system_resolver)
-            .ok_or("this host names no resolver in /etc/resolv.conf")?;
+    /// What a reading made now is made with, where it asks `resolver`.
+    fn made(&self, resolver: Option<SocketAddr>) -> Made {
+        let named = |zones: &[String]| zones.iter().map(|zone| shown(zone)).collect();
+        Made {
+            resolver: resolver.map(|address| address.to_string()),
+            hosts: self.hosts.clone(),
+            max_domains: self.hosts.is_empty().then_some(self.max_domains),
+            lists: named(&self.lists),
+            lists_ipv6: named(&self.lists_ipv6),
+        }
+    }
+
+    /// Ask `resolver` about every address of the mail hosts.
+    fn read(&self, context: &Context<'_>, resolver: Option<SocketAddr>) -> Result<Read, String> {
+        let resolver = resolver.ok_or("this host names no resolver in /etc/resolv.conf")?;
         let (mut hosts, rest) = if self.hosts.is_empty() {
             mail_hosts(context, self.max_domains, "")?
         } else {
@@ -244,16 +253,20 @@ impl Reputation {
 
     /// The last reading, or a new one where that is due: after six hours,
     /// after an hour where not everything could be asked or read, as where
-    /// a list gave no verdict, and at once for
-    /// one that an earlier release kept with a zone's key, for one that
-    /// had no key for the Data Query Service where this run has one, or
-    /// another reason to have none, and for one made without the
-    /// collector's key where this run has it.
+    /// a list gave no verdict, and at once for one made with another
+    /// resolver or other options than this run's, or that an earlier
+    /// release kept, for one that an earlier release kept with a zone's
+    /// key, for one that had no key for the Data Query Service where this
+    /// run has one, or another reason to have none, and for one made
+    /// without the collector's key where this run has it.
     fn known(&self, context: &Context<'_>) -> Kept<Read> {
+        let resolver = self.resolver.or_else(system_resolver);
+        let made = self.made(resolver);
         let missing = dqs::missing(&context.dqs_key);
         let keyed = context.native_key.is_some();
         let wait = |_, read: &Read| {
-            if read.names_a_key()
+            if read.made.as_ref() != Some(&made)
+                || read.names_a_key()
                 || (read.keyless.is_some() && read.keyless != missing)
                 || (read.no_native_key && keyed)
             {
@@ -270,8 +283,9 @@ impl Reputation {
                 EVERY
             }
         };
-        cached(context, MEMORY, wait, |_| {
-            self.read(context).unwrap_or_else(|problem| Read {
+        cached(context, MEMORY, wait, |_| Read {
+            made: Some(made.clone()),
+            ..self.read(context, resolver).unwrap_or_else(|problem| Read {
                 problem: Some(problem),
                 // Without hosts of its own it asks Stalwart for them.
                 no_native_key: self.hosts.is_empty() && !keyed,
@@ -337,6 +351,8 @@ mod answers_tests;
 mod dqs_tests;
 #[cfg(test)]
 mod limits_tests;
+#[cfg(test)]
+mod made_tests;
 #[cfg(test)]
 mod names_tests;
 #[cfg(test)]

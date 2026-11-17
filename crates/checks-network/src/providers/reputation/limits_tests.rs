@@ -171,6 +171,9 @@ fn a_list_left_unasked_is_known_by_the_reading_not_by_the_words_of_its_row() {
                            "lists": [["up.example.org", "Clear"],
                                      ["down.example.org", said]]}],
             "problem": null,
+            // As the provider below makes it, so that it is used.
+            "made": {"resolver": "127.0.0.1:9", "hosts": [], "max_domains": 20,
+                     "lists": ["up.example.org"], "lists_ipv6": []},
         });
         if marked {
             kept["lists_unasked"] = json!(true);

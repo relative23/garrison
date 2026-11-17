@@ -55,6 +55,27 @@ pub(super) struct Read {
     /// row's words only say so.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(super) lists_unasked: bool,
+    /// What the reading was made with; none where an earlier release kept
+    /// it.
+    #[serde(default)]
+    pub(super) made: Option<Made>,
+}
+
+/// What a reading is made with: the resolver it asks and the options that
+/// decide what it asks. A reading made with others is made again at once,
+/// as is one an earlier release kept, which says nothing of them: a
+/// resolver, a list or a mail host the operator changes shows in the next
+/// run, not hours later.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub(super) struct Made {
+    /// The resolver: the option's, or the first of /etc/resolv.conf.
+    pub(super) resolver: Option<String>,
+    pub(super) hosts: Vec<String>,
+    /// How many of Stalwart's domains name the mail hosts, without `hosts`.
+    pub(super) max_domains: Option<usize>,
+    /// The lists, named as the cards name them: a zone's key stays out.
+    pub(super) lists: Vec<String>,
+    pub(super) lists_ipv6: Vec<String>,
 }
 
 impl Read {

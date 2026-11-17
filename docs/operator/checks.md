@@ -281,7 +281,11 @@ A receiving server looks the sender's address up in blocklists and asks for
 its reverse name. The check asks the same questions, every six hours, for
 every address of the mail hosts: `hosts`, or without it the hosts Stalwart
 names in the MX records of its domains, of the first `max_domains` of them;
-the cards say when Stalwart has more. It asks about eight mail hosts and
+the cards say when Stalwart has more. A reading made with another resolver
+than the run's, the one `resolver` names or else the first of
+`/etc/resolv.conf`, or with other `hosts`, `max_domains`, `lists` or
+`lists_ipv6`, is made again in the next run, as is one an earlier release
+kept. It asks about eight mail hosts and
 twelve addresses at the most, and asks the lists for 30 seconds in all.
 Where there are more, or a list was left unasked, the cards say so, and are
 Partial where they would be OK. So they are for a mail host Stalwart names
@@ -316,7 +320,8 @@ once.
   your own on the host gets one. An answer outside 127.0.0.0/8 comes from a
   resolver that answers names that do not exist with an address of its own:
   no list can be read through it, and the card stays Unknown until the
-  check asks another (`resolver`). A zone of Spamhaus' Data Query Service
+  check asks another: name one with `resolver`, which the next run asks. A
+  zone of Spamhaus' Data Query Service
   is read by Spamhaus' own codes too: a key that is disabled or used
   against its terms gives no verdict, never a listing. Its name holds the
   subscriber's key, `KEY.zen.dq.spamhaus.net`, and `garrison.toml` is read

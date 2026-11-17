@@ -702,6 +702,15 @@ Notable changes for operators and users. The format follows
   list's question that got no usable answer said "the list did not answer
   before", also where it had answered with an error; they now say that the
   list was not asked again and after which address.
+- **The reputation check reads again at once after its options change.** It
+  used its reading for up to six hours after `resolver`, `hosts`,
+  `max_domains`, `lists` or `lists_ipv6` changed, or the resolver
+  `/etc/resolv.conf` names: a list taken out still showed, a listing on it
+  Failed, one added did not show, and a resolver named because the card
+  said that Spamhaus refuses the one before was asked hours later. A
+  reading now notes what it was made with, and one made otherwise is made
+  again in the next run. A reading an earlier release kept says nothing of
+  it, and the first run after the upgrade makes it again.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not
