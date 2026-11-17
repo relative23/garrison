@@ -1117,8 +1117,8 @@ Notable changes for operators and users. The format follows
   through a link.** `garrison restore` and `install --rollback
   --restore-state` wrote the backup's policy through a link that
   `broker.policy` named, into whatever it pointed to, and where no policy
-  was there yet they made it root's group's, which the broker cannot read:
-  nobody could sign in while the restore said that Garrison runs. The policy
+  was there yet they made it root's group's: the broker could not read it
+  and did not start, and nobody could sign in. The policy
   now goes back as a file of its own, made new as root's and readable for
   the group `garrison-broker` alone; a link or a folder that the setting
   names stays as it is, with what it points to or holds.
@@ -1140,6 +1140,9 @@ Notable changes for operators and users. The format follows
   before anything stops, that each copy fits beside the database it
   replaces, as `garrison restore` does now too, and where it fails all the
   same it names what went back to its copy, as a failed restore does.
+- **An installation whose services ran is upgraded only with a configuration
+  the new release loads and its access policy in place**, also where
+  `broker.policy` lies outside `/etc/garrison`; otherwise nothing changes.
 - **A stale event history no longer reads as a quiet mail server.** The
   mail-flow summaries and the sending accounts counted whatever the event
   history held and called it in order, also when the event receiver had not

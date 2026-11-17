@@ -167,7 +167,10 @@ failed.
 
 Before it changes anything, the installer checks that systemd, polkit and the
 free space suffice: the release and a backup as large as the databases must
-fit with room to spare. After a successful installation it keeps the running,
+fit with room to spare. Where it started the services before, the new
+release must load the configuration and find the access policy where
+`broker.policy` names it, also outside `/etc/garrison`; otherwise nothing
+changes. After a successful installation it keeps the running,
 the previous and one older release, and the three newest of its own backups
 plus the one a rollback restores; it removes the older ones. Backups you write
 with `garrison backup --to` are left alone; the `pre-restore-*` copies of a
@@ -241,7 +244,9 @@ This stops and removes the services, the polkit rule, the nginx snippets, the
 SELinux module, the command's link and `/opt/garrison`, and keeps `/etc/garrison`, the databases in
 `/var/lib/garrison`, the installer's backups and the service users, so that
 installing again continues with them. `--purge` removes those too, but not
-backups you wrote yourself with `garrison backup --to`. After an uninstallation
+backups you wrote yourself with `garrison backup --to`; where `garrison.toml`
+does not load, it leaves an access policy kept outside `/etc/garrison` and
+says so. After an uninstallation
 the command lives on in every release archive: `./bin/garrison uninstall
 --purge`. If a server block still includes a Garrison snippet by its exact name,
 the uninstallation stops before changing anything and says so; remove the

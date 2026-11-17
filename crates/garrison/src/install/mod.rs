@@ -82,6 +82,21 @@ fn policy_in(config: &Path) -> PathBuf {
     )
 }
 
+/// Whether Garrison is configured here: once its access policy is there,
+/// and also where the installer started the services before, which it
+/// enables as it starts them and only an uninstallation disables. Such an
+/// installation, whose configuration does not load or whose policy is
+/// missing, is for check-config to refuse, not a first installation.
+fn configured(installed: bool) -> bool {
+    Path::new(CONFIG).join("garrison.toml").exists()
+        && (policy().exists() || (installed && started_before()))
+}
+
+fn started_before() -> bool {
+    run(SYSTEMCTL, &["is-enabled", "--quiet", units::WEB])
+        .is_ok_and(|output| output.status.success())
+}
+
 /// The extracted release this binary belongs to: `<release>/bin/garrison`.
 fn here() -> Step<PathBuf> {
     let binary = std::env::current_exe().map_err(|error| error.to_string())?;
@@ -257,7 +272,7 @@ fn install() -> Step {
     let current = base.join("current");
     let old = fs::canonicalize(&current).ok();
     let earlier = fs::canonicalize(base.join("previous")).ok();
-    let configured = Path::new(CONFIG).join("garrison.toml").exists() && policy().exists();
+    let configured = configured(old.is_some());
     // Room for the release and, before an upgrade, the backup of the state.
     let mut needs = vec![(base, size(&here))];
     if old.is_some() && configured {
