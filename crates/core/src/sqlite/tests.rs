@@ -284,6 +284,39 @@ fn a_reader_that_waits_for_the_writer_stops_once_its_request_is_gone() {
     assert_eq!(staying.recv_timeout(Duration::from_secs(5)), Ok(Ok(1)));
 }
 
+/// A reader that waits out the writer's lock is told so by its error, and
+/// by no other: neither a query out of its time nor a broken file reads as
+/// the writer's moment.
+#[test]
+fn a_reader_that_waits_out_the_writer_is_told_so() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("items.sqlite");
+    let writer = open_writer(&path, MIGRATIONS, Sharing::WithReaders, 0o600).unwrap();
+    writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let started = Instant::now();
+    let error = reading(&path, Duration::from_secs(60)).unwrap_err();
+    assert!(
+        started.elapsed() >= FOR_THE_WRITER,
+        "{:?}",
+        started.elapsed()
+    );
+    let SqliteError::Sqlite(cause) = error else {
+        panic!("{error}")
+    };
+    assert!(
+        held_by_the_writer(&cause) && !out_of_time(&cause),
+        "{cause}"
+    );
+    writer.execute_batch("COMMIT").unwrap();
+    let failure = |code| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None);
+    for other in [
+        rusqlite::ffi::SQLITE_INTERRUPT,
+        rusqlite::ffi::SQLITE_CORRUPT,
+    ] {
+        assert!(!held_by_the_writer(&failure(other)), "{other}");
+    }
+}
+
 #[test]
 fn schema_statements_are_read_as_sqlite_reads_them() {
     for (sql, kind) in [

@@ -20,7 +20,7 @@ use rusqlite::Connection;
 use serde::Deserialize;
 
 use crate::app::App;
-use crate::error::{ApiError, ApiResult, blocking};
+use crate::error::{ApiError, ApiResult, SLOW, blocking, stopped};
 use crate::models::errors::{
     BadAnswer, Busy, Internal, Invalid, NotFound, Refused, SignInRequired, Unavailable,
 };
@@ -162,22 +162,31 @@ pub(super) async fn run<T: Send + 'static>(
     let path = app.config.database(Database::Events);
     let missing = "The event history is not available yet";
     app.queries
-        .run(path, missing, move |db| query(db).map_err(failure))
+        .run(path, missing, move |db| {
+            query(db).map_err(|error| failure(&error))
+        })
         .await
 }
 
-/// What a failed history query tells the user.
-fn failure(error: QueryError) -> ApiError {
+/// What a failed history query tells the user, where its filter, if it has
+/// one, is too wide for its time: `slow`.
+fn failed(error: &QueryError, slow: &'static str) -> ApiError {
     match error {
         QueryError::Invalid => ApiError::new(400, "Invalid query"),
-        // The reader's progress handler interrupts queries over their budget.
-        error @ QueryError::Sqlite(_) if error.is_interrupted() => {
-            ApiError::new(503, "The query took too long; narrow the filter")
+        // The reader's progress handler interrupts queries over their
+        // budget, and the writer's commit may outlast a reader's wait.
+        QueryError::Sqlite(cause) => {
+            stopped(cause, slow).unwrap_or_else(|| ApiError::internal(error))
         }
         // What the history holds and cannot be read is the service's fault;
         // the journal names it under the answer's reference.
-        error @ (QueryError::Unreadable(_) | QueryError::Sqlite(_)) => ApiError::internal(&error),
+        QueryError::Unreadable(_) => ApiError::internal(error),
     }
+}
+
+/// What a failed list, detail or summary of the history tells the user.
+fn failure(error: &QueryError) -> ApiError {
+    failed(error, "The query took too long; narrow the filter")
 }
 
 /// How complete the recorded event history is.
@@ -213,7 +222,7 @@ async fn coverage(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Js
         )?;
         let db = reading(&app.config.database(Database::Events), READ_BUDGET)?;
         let coverage = history::read(db.as_deref(), time::now().as_second())
-            .map_err(|error| ApiError::internal(&error))?;
+            .map_err(|error| failed(&error, SLOW))?;
         Ok(Json(coverage.into()))
     })
     .await
@@ -437,6 +446,7 @@ async fn session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::WAITED;
 
     #[test]
     fn failed_queries_say_what_the_user_can_do() {
@@ -447,10 +457,14 @@ mod tests {
             ))
         };
         let answers = [
-            failure(QueryError::Invalid),
-            failure(sqlite(rusqlite::ffi::SQLITE_INTERRUPT)),
-            failure(sqlite(rusqlite::ffi::SQLITE_CORRUPT)),
-            failure(QueryError::Unreadable("Event 2 cannot be read".to_owned())),
+            failure(&QueryError::Invalid),
+            failure(&sqlite(rusqlite::ffi::SQLITE_INTERRUPT)),
+            failure(&sqlite(rusqlite::ffi::SQLITE_BUSY)),
+            failure(&sqlite(rusqlite::ffi::SQLITE_CORRUPT)),
+            failure(&QueryError::Unreadable("Event 2 cannot be read".to_owned())),
+            // The coverage has no filter to narrow.
+            failed(&sqlite(rusqlite::ffi::SQLITE_INTERRUPT), SLOW),
+            failed(&sqlite(rusqlite::ffi::SQLITE_BUSY), SLOW),
         ];
         let answers: Vec<(u16, &str)> = answers
             .iter()
@@ -461,8 +475,11 @@ mod tests {
             [
                 (400, "Invalid query"),
                 (503, "The query took too long; narrow the filter"),
+                (503, WAITED),
                 (500, "Internal error"),
                 (500, "Internal error"),
+                (503, SLOW),
+                (503, WAITED),
             ]
         );
     }

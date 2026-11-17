@@ -203,6 +203,16 @@ pub fn out_of_time(error: &rusqlite::Error) -> bool {
     error.sqlite_error_code() == Some(rusqlite::ErrorCode::OperationInterrupted)
 }
 
+/// Whether a reader gave up waiting for the writer's lock: the writer held
+/// its database for longer than a reader waits for it (SQLite's busy), as
+/// while a large clean-up commits or on a slow disk, or the reader's
+/// request went away meanwhile. That is the writer's moment, which passes,
+/// not a fault of the database or of the request.
+#[must_use]
+pub fn held_by_the_writer(error: &rusqlite::Error) -> bool {
+    error.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+}
+
 /// Open a database that another user writes: a service reading a file of
 /// another service, or a root-run command reading any service's file.
 ///

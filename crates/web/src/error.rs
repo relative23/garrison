@@ -8,10 +8,36 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use garrison_collector::store::{HistoryError, SnapshotError};
-use garrison_core::sqlite::{SqliteError, out_of_time};
+use garrison_core::sqlite::{SqliteError, held_by_the_writer, out_of_time};
 
 use crate::models::ErrorDetail;
 use crate::store::StoreError;
+
+/// What a reader of another service's database answers where that service
+/// held its database for longer than a reader waits, as the receiver does
+/// while it removes a tenth of a full history: the writer's moment, which
+/// passes. A narrower filter would not help.
+pub const WAITED: &str =
+    "The query waited too long for another service's write; try again in a moment";
+
+/// What a read of another service's database that was stopped answers: one
+/// that waited out the writer's commit, [`WAITED`], or one that ran out of
+/// its own time, `slow`, which says what the user can do. Neither is a fault
+/// of the service, so neither needs the journal; `None` for any other error.
+#[must_use]
+pub fn stopped(cause: &rusqlite::Error, slow: &'static str) -> Option<ApiError> {
+    if held_by_the_writer(cause) {
+        Some(ApiError::new(503, WAITED))
+    } else if out_of_time(cause) {
+        Some(ApiError::new(503, slow))
+    } else {
+        None
+    }
+}
+
+/// What a read stopped by its own time says where there is no filter to
+/// narrow and no period to shorten.
+pub const SLOW: &str = "The query took too long; try again in a moment";
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{detail}")]
@@ -75,15 +101,28 @@ impl From<StoreError> for ApiError {
     }
 }
 
+/// Only a reader of another service's database meets this, where it opens
+/// the database; the web service's own store has errors of its own.
 impl From<SqliteError> for ApiError {
     fn from(error: SqliteError) -> Self {
-        ApiError::internal(&error)
+        match &error {
+            SqliteError::Sqlite(cause) => stopped(cause, SLOW),
+            SqliteError::NewerSchema
+            | SqliteError::JournalMode(_)
+            | SqliteError::ForeignSchema
+            | SqliteError::Io(_) => None,
+        }
+        .unwrap_or_else(|| ApiError::internal(&error))
     }
 }
 
 impl From<SnapshotError> for ApiError {
     fn from(error: SnapshotError) -> Self {
-        ApiError::internal(&error)
+        match &error {
+            SnapshotError::Sqlite(cause) => stopped(cause, SLOW),
+            SnapshotError::Unreadable(_) => None,
+        }
+        .unwrap_or_else(|| ApiError::internal(&error))
     }
 }
 
@@ -91,12 +130,13 @@ impl From<SnapshotError> for ApiError {
 /// request: the user can ask for less, and nothing needs the journal.
 impl From<HistoryError> for ApiError {
     fn from(error: HistoryError) -> Self {
-        match error {
-            HistoryError::Sqlite(cause) if out_of_time(&cause) => {
-                ApiError::new(503, "The query took too long; choose a shorter period")
+        match &error {
+            HistoryError::Sqlite(cause) => {
+                stopped(cause, "The query took too long; choose a shorter period")
             }
-            error => ApiError::internal(&error),
+            HistoryError::Invalid => None,
         }
+        .unwrap_or_else(|| ApiError::internal(&error))
     }
 }
 
@@ -149,6 +189,43 @@ mod tests {
             let answer = ApiError::from(broken).into_response();
             assert_eq!(answer.status(), StatusCode::INTERNAL_SERVER_ERROR);
             assert!(cause(&answer).is_some());
+        }
+    }
+
+    /// Each error a reader of another service's database can meet, from
+    /// opening it to its query, says that a wait for the writer passes, and
+    /// hands nothing to the journal; a broken database stays the service's
+    /// fault.
+    #[test]
+    fn a_reader_that_waited_out_the_writer_is_told_that_it_passes() {
+        let failure = |code| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None);
+        let busy = || failure(rusqlite::ffi::SQLITE_BUSY);
+        let answers = [
+            ApiError::from(SqliteError::Sqlite(busy())),
+            ApiError::from(SnapshotError::Sqlite(busy())),
+            ApiError::from(HistoryError::Sqlite(busy())),
+        ];
+        for answer in answers {
+            assert_eq!(
+                (answer.status.as_u16(), answer.detail.as_str()),
+                (503, WAITED)
+            );
+            assert_eq!(cause(&answer.into_response()), None);
+        }
+        // The status out of its own time has no filter to narrow.
+        let slow = ApiError::from(SnapshotError::Sqlite(failure(
+            rusqlite::ffi::SQLITE_INTERRUPT,
+        )));
+        assert_eq!((slow.status.as_u16(), slow.detail.as_str()), (503, SLOW));
+        for broken in [
+            ApiError::from(SqliteError::Sqlite(failure(rusqlite::ffi::SQLITE_CORRUPT))),
+            ApiError::from(SqliteError::ForeignSchema),
+            ApiError::from(SnapshotError::Sqlite(failure(
+                rusqlite::ffi::SQLITE_CORRUPT,
+            ))),
+        ] {
+            assert_eq!(broken.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert!(cause(&broken.into_response()).is_some());
         }
     }
 }

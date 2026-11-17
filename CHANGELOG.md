@@ -1141,6 +1141,16 @@ Notable changes for operators and users. The format follows
   alone, whatever its archives' headers claim, and the filter answers within
   20 seconds of a message's end, the wait for its turn included. A message
   whose scan is not done by then gets what `on_incomplete` says.
+- **A page whose database is being written says that it passes.** Where
+  the event receiver or the collector held its database for longer than
+  the two seconds a page waits for it, as the receiver does while it
+  removes a tenth of a full event history at its size limit, the event
+  history, Deliveries, Sessions, Attacks & bans, Delivery problems, the
+  history's coverage, the status and the metric history answered "Internal
+  error", and the web service's journal got an error for each request. They
+  now say that the query waited too long for another service's write and to
+  try again in a moment (503), with nothing in the journal; a read of the
+  status or of the coverage stopped by its own time says to try again too.
 
 ## [0.1.2] - 2026-11-13
 
