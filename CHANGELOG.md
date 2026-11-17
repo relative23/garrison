@@ -1141,6 +1141,12 @@ Notable changes for operators and users. The format follows
   alone, whatever its archives' headers claim, and the filter answers within
   20 seconds of a message's end, the wait for its turn included. A message
   whose scan is not done by then gets what `on_incomplete` says.
+- **`garrison doctor` no longer takes an events database it cannot read for
+  an empty one.** A history that is damaged, that the receiver's writer held
+  for longer than doctor waits, or a folder in the database's place gave "no
+  Stalwart event recorded yet" with the advice about the webhook. It now says
+  that when the last event arrived is not known, with the database and why,
+  as it does for the status database.
 
 ## [0.1.2] - 2026-11-13
 

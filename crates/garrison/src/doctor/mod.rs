@@ -316,3 +316,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod broken_tests;

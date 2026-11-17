@@ -11,6 +11,7 @@ use garrison_collector::watch;
 use garrison_core::config::{Config, Database};
 use garrison_core::systemd::SYSTEMCTL;
 use garrison_core::{sqlite, time};
+use rusqlite::OptionalExtension;
 
 use super::{Finding, counted};
 use crate::units;
@@ -198,22 +199,39 @@ fn selinux() -> Option<Finding> {
     })
 }
 
-fn events(config: &Config) -> Finding {
-    let path = config.database(Database::Events);
+/// When the newest event arrived, as the history holds it: `None` where it
+/// holds none, and why where it cannot be read, which is no answer that
+/// none arrived.
+fn newest_event(path: &Path) -> Result<Option<i64>, String> {
+    let Some(reader) =
+        sqlite::reading(path, Duration::from_secs(5)).map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
     // The event stored last: after the clock went back, one received since
     // is dated before those it dated ahead.
-    let newest = sqlite::reading(&path, Duration::from_secs(5))
-        .ok()
-        .flatten()
-        .and_then(|reader| {
-            reader
-                .query_row(
-                    "SELECT received_at FROM events ORDER BY rowid DESC LIMIT 1",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
-                .ok()
-        });
+    reader
+        .query_row(
+            "SELECT received_at FROM events ORDER BY rowid DESC LIMIT 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+pub(super) fn events(config: &Config) -> Finding {
+    let path = config.database(Database::Events);
+    let newest = match newest_event(&path) {
+        Ok(newest) => newest,
+        Err(error) => {
+            return Finding::unknown(format!(
+                "when the last Stalwart event arrived: the events database {} cannot be read \
+                 ({error})",
+                path.display()
+            ));
+        }
+    };
     let now = time::now().as_second();
     match newest {
         // A damaged or hand-edited history: no age, neither recent nor old.

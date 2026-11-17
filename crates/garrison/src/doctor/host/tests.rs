@@ -74,6 +74,38 @@ fn a_snapshot_dated_at_no_time_gives_no_age() {
     }
 }
 
+/// A history without an event, or none at all, is no event yet; one that
+/// cannot be read says nothing of whether events arrive, and the line says
+/// why instead, as the status database's does.
+#[test]
+fn an_events_database_that_cannot_be_read_is_unknown_with_the_reason() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    let path = config.database(Database::Events);
+    let none = events(&config);
+    assert_eq!(
+        (none.level, none.what.as_str()),
+        (Level::Warn, "no Stalwart event recorded yet")
+    );
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("CREATE TABLE events(received_at INTEGER NOT NULL)")
+        .unwrap();
+    drop(db);
+    assert_eq!(events(&config).what, "no Stalwart event recorded yet");
+    fs::write(&path, "no database").unwrap();
+    let unread = events(&config);
+    assert_eq!(unread.level, Level::Unknown, "{}", unread.line());
+    assert!(
+        unread.what.starts_with(&format!(
+            "when the last Stalwart event arrived: the events database {} cannot be read (",
+            path.display()
+        )),
+        "{}",
+        unread.what
+    );
+}
+
 /// A damaged or hand-edited event history may record its newest event
 /// at a time that is none: that is no arrival minutes or hours ago.
 #[test]
