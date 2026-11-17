@@ -1,4 +1,4 @@
-import { boolean, bytes, days, duration, formatValue, gib, milliseconds, number, relative, safeUrl, text } from "../src/lib/format";
+import { ago, boolean, bytes, days, duration, formatValue, gib, milliseconds, number, safeUrl, text } from "../src/lib/format";
 import { parse, href } from "../src/lib/router";
 
 describe("formatting", () => {
@@ -45,10 +45,12 @@ describe("formatting", () => {
     expect(gib(1.234)).toBe("1.23 GiB");
   });
 
-  it("describes times relative to now", () => {
-    expect(relative(1000, 1000 * 1000 - 120_000)).toBe("in 2 min");
-    expect(relative(1000, 1000 * 1000 + 30_000)).toBe("just now");
-    expect(relative(1000, 1000 * 1000 + 3 * 3600_000)).toBe("3.0 h ago");
+  it("says how long ago something was from its age, not from a time", () => {
+    expect(ago(-120)).toBe("in 2 min");
+    expect(ago(-30)).toBe("just now");
+    expect(ago(30)).toBe("just now");
+    expect(ago(3 * 3600)).toBe("3.0 h ago");
+    expect(ago(null)).toBe("Unknown");
   });
 
   it("accepts only plain https links", () => {

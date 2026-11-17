@@ -471,6 +471,14 @@
               "null"
             ]
           },
+          "lastBatchAge": {
+            "description": "Seconds from `lastBatchAt` to this answer, by the server's clock; null\nbefore the first batch. A page adds the time it waits since: the\nbrowser's own clock may be another than the server's.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "lastBatchAt": {
             "format": "int64",
             "type": [

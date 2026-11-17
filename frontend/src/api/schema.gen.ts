@@ -427,6 +427,13 @@ export interface components {
             gaps: components["schemas"]["Gap"][];
             /** Format: int64 */
             heartbeatAt?: number | null;
+            /**
+             * Format: int64
+             * @description Seconds from `lastBatchAt` to this answer, by the server's clock; null
+             *     before the first batch. A page adds the time it waits since: the
+             *     browser's own clock may be another than the server's.
+             */
+            lastBatchAge?: number | null;
             /** Format: int64 */
             lastBatchAt?: number | null;
             limitations: string[];

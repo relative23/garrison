@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 
 import { Logs } from "../src/modules/Logs";
-import { coverage, event } from "./support/fixtures";
+import { coverage, event, NOW } from "./support/fixtures";
 import { renderView } from "./support/render";
 import { serve, type Call } from "./support/server";
 
@@ -116,8 +116,16 @@ describe("history coverage", () => {
       { start: 100, end: 200, reason: "receiver-offline" },
       { start: 300, end: 400, reason: "a-future-reason" },
     ];
-    const quiet = Math.floor(Date.now() / 1000) - 3 * 3600;
-    const value = coverage({ receiver: "stale", heartbeatAt: quiet, lastBatchAt: quiet, gapCount: 2, gaps, retentionDays: null });
+    const quiet = NOW - 3 * 3600;
+    const value = coverage({
+      receiver: "stale",
+      heartbeatAt: quiet,
+      lastBatchAt: quiet,
+      lastBatchAge: 3 * 3600,
+      gapCount: 2,
+      gaps,
+      retentionDays: null,
+    });
     serve({ "GET coverage": { body: value }, "GET events": { body: { items: [], next: null } } });
     renderView(<Logs />);
     const banner = await screen.findByText(/Recording since/);
@@ -126,6 +134,17 @@ describe("history coverage", () => {
     expect(banner.textContent).toContain("2 recording gaps.");
     expect(screen.getByText(/The event receiver was offline/)).toBeTruthy();
     expect(screen.getByText(/a-future-reason/)).toBeTruthy();
+  });
+
+  it("says when the last batch arrived by the age the server gave, whatever the browser's clock says", async () => {
+    // The browser's clock runs five hours ahead of the server's.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime((NOW + 5 * 3600) * 1000);
+    const value = coverage({ lastBatchAt: NOW - 3 * 3600, lastBatchAge: 3 * 3600 });
+    serve({ "GET coverage": { body: value }, "GET events": { body: { items: [], next: null } } });
+    renderView(<Logs />);
+    const banner = await screen.findByText(/Recording since/);
+    expect(banner.textContent).toContain(" · last received 3.0 h ago · ");
   });
 
   it("warns when the receiver runs but stores nothing", async () => {

@@ -1,8 +1,10 @@
 // The page's own clock, which says only how long the page has waited: since
 // an answer arrived, for instance. The browser's time of day may run hours
 // ahead of the host's or behind it, and may be set while the page is open, so
-// a check's staleness is its age at the server's answer plus the time the
-// page has waited since (src/lib/staleness.ts).
+// it is never compared with a time the server sent. A check's age and
+// staleness, and how long ago the last events arrived, are the server's
+// figures at its answer plus the time the page has waited since
+// (src/lib/staleness.ts, src/components/Events.tsx).
 //
 // The wait is the larger of what the browser's two clocks counted. The
 // monotonic one, performance.now(), is not set with the wall clock, but on

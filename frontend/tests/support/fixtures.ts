@@ -16,7 +16,9 @@ import type {
   StatusResponse,
 } from "../../src/api/client";
 
-const NOW = Math.floor(Date.now() / 1000);
+/** The server's clock, in seconds: the time of its answers. A test may set
+ * the browser's own clock elsewhere. */
+export const NOW = Math.floor(Date.now() / 1000);
 
 /** Every module, in the server's order. */
 const MODULES = [

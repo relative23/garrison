@@ -47,6 +47,20 @@ describe("ObservationCard", () => {
     expect(screen.getByText("Warning")).toBeTruthy();
   });
 
+  it("says how long ago its source was asked by the age the server gave, not by the browser's clock", () => {
+    // Asked two hours before the server's answer; the browser's clock is
+    // weeks after `checkedAt`, and may be another than the server's.
+    show({ ...base, age: 7200 });
+    expect(screen.getByText(/^Checked 2\.0 h ago/)).toBeTruthy();
+    cleanup();
+    // A check dated ahead of the server's clock, and one whose time cannot be read.
+    show({ ...base, age: -300 });
+    expect(screen.getByText(/^Checked in 5 min/)).toBeTruthy();
+    cleanup();
+    show({ ...base, age: null });
+    expect(screen.getByText(/^Checked Unknown/)).toBeTruthy();
+  });
+
   it("marks stale observations instead of showing their old state", () => {
     show({ ...base, state: "ok", stale: true, findings: [] });
     expect(screen.getByText("Stale")).toBeTruthy();

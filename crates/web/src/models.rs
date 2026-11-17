@@ -362,6 +362,11 @@ pub struct Coverage {
     pub recording_since: Option<i64>,
     #[serde(default)]
     pub last_batch_at: Option<i64>,
+    /// Seconds from `lastBatchAt` to this answer, by the server's clock; null
+    /// before the first batch. A page adds the time it waits since: the
+    /// browser's own clock may be another than the server's.
+    #[serde(default)]
+    pub last_batch_age: Option<i64>,
     /// Since when the receiver runs without storing what Stalwart sends
     /// (`receiver` is then "refusing"); null while it stores.
     #[serde(default)]

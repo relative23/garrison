@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import type { Observation } from "../api/client";
 import { useTranslation } from "../i18n";
-import { dateTime, formatValue, relative, text, type Format } from "../lib/format";
+import { ago, dateTime, formatValue, text, type Format } from "../lib/format";
 import { EvidenceLabel, StateBadge } from "./Status";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./ui/card";
@@ -75,7 +75,7 @@ function ObservationTable({ observation, limit }: { observation: Observation; li
 
 export function ObservationCard({ observation, limit, className }: { observation: Observation; limit?: number; className?: string }) {
   const { t } = useTranslation();
-  const { title, state, stale, evidence, fields, findings, scope, source, checkedAt } = observation;
+  const { title, state, stale, evidence, fields, findings, scope, source, checkedAt, age } = observation;
   return (
     <Card aria-labelledby={`obs-${observation.id}`} className={className}>
       <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
@@ -109,7 +109,8 @@ export function ObservationCard({ observation, limit, className }: { observation
         {scope && <p>{scope}</p>}
         {/* A source may be an address without a space to break at. */}
         <p className="wrap-anywhere">
-          <span title={dateTime(checkedAt)}>{t("observation.checked", { when: relative(checkedAt) })}</span> · {source}
+          {/* How long ago by the server's age, never by the browser's clock (src/lib/clock.ts). */}
+          <span title={dateTime(checkedAt)}>{t("observation.checked", { when: ago(age) })}</span> · {source}
         </p>
       </CardFooter>
     </Card>

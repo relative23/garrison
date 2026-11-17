@@ -158,6 +158,14 @@ Notable changes for operators and users. The format follows
   that failed then said that checks grown too old were marked stale while
   none was. A page now counts the larger of the browser's two clocks, and
   its checks turn stale within fifteen seconds of waking.
+- **A card says how old its check is by the server's clock.** "Checked …
+  ago" on every card and "last received …" above the event views compared
+  the server's times with the browser's own clock: a browser two hours
+  ahead called a fresh check "Checked 2.0 h ago" beside a badge that was
+  not stale, and one behind said "Checked in 10 min", or "last received
+  just now" of a webhook silent for hours. Both now count on from the age
+  the server gives in its answer; the coverage answer of the API carries
+  it in the new field `lastBatchAge`.
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",

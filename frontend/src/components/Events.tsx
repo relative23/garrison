@@ -4,7 +4,8 @@ import { useState, type FormEvent, type ReactNode } from "react";
 
 import { api, type Coverage, type EventItem } from "../api/client";
 import { useTranslation } from "../i18n";
-import { dateTime, milliseconds, number, relative, text } from "../lib/format";
+import { elapsed, usePageTime } from "../lib/clock";
+import { ago, dateTime, milliseconds, number, text } from "../lib/format";
 import { follow, href } from "../lib/router";
 import { useResource, type Resource } from "../lib/useResource";
 import { ErrorState, Notice } from "./Status";
@@ -42,7 +43,8 @@ export function useCoverage(): Resource<Coverage> {
  * says that, and not what an earlier answer said. */
 export function CoverageBanner({ coverage }: { coverage: Resource<Coverage> }) {
   const { t } = useTranslation();
-  const { data, error } = coverage;
+  const now = usePageTime();
+  const { data, error, receivedAt } = coverage;
   if (error) return <ErrorState tone="warning" lead={t("events.coverage.unknown")} error={error} retry={coverage.reload} />;
   if (!data) return null;
   if (!data.available) {
@@ -67,12 +69,14 @@ export function CoverageBanner({ coverage }: { coverage: Resource<Coverage> }) {
     const limit = isLimit(data.trimmed.limit) ? data.trimmed.limit : "other";
     notes.push(t(`events.coverage.trimmed.${limit}`, { time: dateTime(data.trimmed.until) }));
   }
+  // The last batch's age by the server's clock at its answer, and since
+  // then by the page's: the browser's own clock may be another.
+  const lastBatch = data.lastBatchAge == null || receivedAt === null ? null : data.lastBatchAge + elapsed(receivedAt, now) / 1000;
   const summary = t("events.coverage.summary", {
     since: dateTime(data.recordingSince),
     events: t("events.coverage.count", { count: data.eventCount, value: number(data.eventCount) }),
     // Events that stop arriving while the receiver runs point at Stalwart's webhook.
-    received:
-      data.lastBatchAt == null ? t("events.coverage.receivedNever") : t("events.coverage.received", { when: relative(data.lastBatchAt) }),
+    received: data.lastBatchAt == null ? t("events.coverage.receivedNever") : t("events.coverage.received", { when: ago(lastBatch) }),
     retention:
       data.retentionDays == null ? t("events.coverage.retentionUnknown") : t("events.coverage.retention", { count: data.retentionDays }),
   });

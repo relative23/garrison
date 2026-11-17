@@ -47,10 +47,11 @@ export function dateTime(value: unknown): string {
   return date ? date.toLocaleString(locale(), { dateStyle: "medium", timeStyle: "short" }) : unknown();
 }
 
-export function relative(value: unknown, now: number = Date.now()): string {
-  const date = toDate(value);
-  if (!date) return unknown();
-  const seconds = Math.round((now - date.getTime()) / 1000);
+/** How long ago something was, from its age in seconds as the server gave it
+ * and the page counted on (src/lib/clock.ts); an age below zero is a time
+ * ahead of the server's clock. */
+export function ago(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds)) return unknown();
   if (seconds < -60) return i18n.t("format.inFuture", { duration: duration(-seconds) });
   if (seconds < 60) return i18n.t("format.justNow");
   return i18n.t("format.ago", { duration: duration(seconds) });
