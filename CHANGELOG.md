@@ -1188,6 +1188,14 @@ Notable changes for operators and users. The format follows
   line there too. The web service's line for a sign-in the rights check
   rejected names the broker's words: "Sign-in rejected by authorization
   (HTTP 503: Authorization is temporarily unavailable)".
+- **A sign-in that Garrison cannot keep ends on the sign-in page.** Where
+  the web service could not store a new session (a full disk, an I/O
+  error, its database locked beyond five seconds) or had no random numbers
+  for a sign-in, the browser was left at `/auth/callback` or `/auth/login`
+  with the API's `{"detail":"Internal error"}` and the login cookie kept.
+  It now goes back to the sign-in page with the reason `internal` and the
+  reference under which the web service's journal names the cause, and the
+  login cookie goes.
 
 ## [0.1.2] - 2026-11-13
 

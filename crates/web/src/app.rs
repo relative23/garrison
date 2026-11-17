@@ -35,6 +35,12 @@ const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; conn
                    img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'self'; \
                    frame-ancestors 'none'";
 
+/// The reference of the request being answered, which the journal names
+/// for an internal error: a page that cannot show the answer's
+/// `X-Request-Id`, as the sign-in page after a redirect, gets it from here.
+#[derive(Clone, Debug)]
+pub(crate) struct Reference(pub(crate) String);
+
 /// The hash (`sha256-…`) of the stylesheet a drawn page carries inline, set by
 /// the page's handler: the policy of that answer allows this one stylesheet as
 /// well, and still no inline style otherwise.
@@ -166,10 +172,14 @@ async fn headers(request: Request, next: Next) -> Response {
 
 /// Every answer carries a reference, and an internal error is logged with
 /// it: the reference the interface shows finds the journal line.
-async fn reference(request: Request, next: Next) -> Response {
+async fn reference(mut request: Request, next: Next) -> Response {
     let mut bytes = [0; 6];
     let reference = if getrandom::fill(&mut bytes).is_ok() {
-        hex::encode(&bytes)
+        let reference = hex::encode(&bytes);
+        request
+            .extensions_mut()
+            .insert(Reference(reference.clone()));
+        reference
     } else {
         "unavailable".to_owned()
     };

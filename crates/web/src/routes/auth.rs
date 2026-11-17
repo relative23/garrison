@@ -3,16 +3,20 @@
 //! The state and the PKCE verifier of a sign-in live only in the browser's
 //! `HttpOnly` login cookie. A request that is not signed in writes nothing on the
 //! server, so nobody can fill a table and lock other users out of signing in.
+//!
+//! A browser comes to these routes, not the interface's requests: whatever
+//! keeps a sign-in from its session sends it back to the sign-in page with a
+//! reason the page explains, never an answer of the API.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use axum::{Extension, Router};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use garrison_core::constant_time;
@@ -23,9 +27,9 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use url::form_urlencoded;
 
-use crate::app::{App, INTERFACE};
+use crate::app::{App, INTERFACE, Reference};
 use crate::attempts::{self, Refusal};
-use crate::error::{ApiResult, blocking};
+use crate::error::{ApiError, ApiResult, Cause, blocking};
 use crate::security::{SESSION_COOKIE, STATE_COOKIE, Visitor};
 use crate::store::{NewSession, random_token};
 
@@ -94,12 +98,20 @@ async fn client_metadata(State(app): State<Arc<App>>) -> Response {
     .into_response()
 }
 
-async fn login(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Response> {
+async fn login(
+    State(app): State<Arc<App>>,
+    visitor: Visitor,
+    reference: Option<Extension<Reference>>,
+) -> Response {
     if visitor.header("sec-fetch-site") == Some("cross-site") {
-        return Ok(redirect(&format!("{INTERFACE}/?login_error=cross-site")));
+        return redirect(&format!("{INTERFACE}/?login_error=cross-site"));
     }
-    let state = random_token(32)?;
-    let verifier = random_token(48)?;
+    let (state, verifier) = match (random_token(32), random_token(48)) {
+        (Ok(state), Ok(verifier)) => (state, verifier),
+        (Err(error), _) | (_, Err(error)) => {
+            return failed_here(&ApiError::from(error), reference.as_deref());
+        }
+    };
     let query = form_urlencoded::Serializer::new(String::new())
         .append_pair("client_id", &app.client_id())
         .append_pair("redirect_uri", &app.redirect_uri())
@@ -121,7 +133,7 @@ async fn login(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Respo
         &format!("{state}.{verifier}"),
         STATE_SECONDS,
     );
-    Ok(response)
+    response
 }
 
 /// Why a sign-in got no session, as the sign-in page explains it. Stalwart
@@ -168,6 +180,23 @@ fn sign_in_again(reason: &str) -> Response {
     response
 }
 
+/// Back to the sign-in page after a fault of the web service's own, such as
+/// a session store that takes no new row or no random numbers: the page says
+/// so, with the reference under which this journal names the cause, as for
+/// an internal error of the API, and the login cookie goes.
+fn failed_here(error: &ApiError, reference: Option<&Reference>) -> Response {
+    let mut reason = "internal".to_owned();
+    if let Some(Reference(reference)) = reference {
+        reason.push_str("&reference=");
+        reason.push_str(reference);
+    }
+    let mut response = sign_in_again(&reason);
+    response
+        .extensions_mut()
+        .insert(Cause(error.cause().to_owned()));
+    response
+}
+
 /// Why the token exchange failed, for the journal.
 fn kind(error: &Error) -> &'static str {
     match error {
@@ -182,6 +211,7 @@ fn kind(error: &Error) -> &'static str {
 async fn callback(
     State(app): State<Arc<App>>,
     visitor: Visitor,
+    reference: Option<Extension<Reference>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     let failure = || sign_in_again(Ended::Failed.reason());
@@ -211,7 +241,7 @@ async fn callback(
             response
         }
         Ok(Err(ended)) => sign_in_again(ended.reason()),
-        Err(error) => error.into_response(),
+        Err(error) => failed_here(&error, reference.as_deref()),
     }
 }
 
@@ -288,7 +318,9 @@ fn finish(
         Err(error) => {
             // No session holds this token: nothing here would ever end it.
             revoke(app, &token.access_token);
-            return Err(error.into());
+            return Err(ApiError::internal(&format!(
+                "the sign-in's session could not be stored: {error}"
+            )));
         }
     };
     log::info!("Sign-in successful");
@@ -347,6 +379,34 @@ mod tests {
         assert_eq!(reason(Error::InvalidToken("old".into())), "1");
         assert_eq!(reason(Error::Misconfigured("no key".into())), "1");
         assert_eq!(reason(Error::Unreadable("unusable".into())), "unchecked");
+    }
+
+    /// A fault of the web service's own ends on the sign-in page with the
+    /// reference, which the journal's line of the cause names, and without
+    /// the login cookie.
+    #[test]
+    fn a_fault_here_sends_the_browser_back_with_its_reference() {
+        let failed = failed_here(
+            &ApiError::internal(&"database or disk is full"),
+            Some(&Reference("0123456789ab".into())),
+        );
+        assert_eq!(failed.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            failed.headers()[header::LOCATION],
+            "/admin/?login_error=internal&reference=0123456789ab"
+        );
+        let cookie = failed.headers()[header::SET_COOKIE].to_str().unwrap();
+        assert!(cookie.starts_with("__Host-garrison_login=") && cookie.contains("Max-Age=0"));
+        let Some(Cause(cause)) = failed.extensions().get::<Cause>() else {
+            panic!("no cause for the journal")
+        };
+        assert_eq!(cause, "database or disk is full");
+        // Without a reference, as where no random numbers were there for one.
+        let unnamed = failed_here(&ApiError::internal(&"no random numbers"), None);
+        assert_eq!(
+            unnamed.headers()[header::LOCATION],
+            "/admin/?login_error=internal"
+        );
     }
 
     /// Stalwart's 429 is its rate limit, which passes once Stalwart's minute

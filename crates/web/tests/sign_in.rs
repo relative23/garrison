@@ -8,6 +8,8 @@ mod support;
 use std::collections::HashMap;
 use std::time::Duration;
 
+use axum::http::{Method, StatusCode};
+
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use garrison_web::attempts::{BUDGET, MAX_NETWORKS};
@@ -351,8 +353,96 @@ async fn a_token_whose_session_could_not_be_stored_is_revoked() {
         format!("/auth/callback?state={state}&code=code-admin&iss=https%3A%2F%2Fmail.example.test");
     let answer = setup.client.get(&callback).await;
     holder.execute_batch("ROLLBACK").unwrap();
+    // Back on the sign-in page, which says that Garrison failed on its side
+    // and names the reference under which its journal says why; the login
+    // cookie goes, as after any other failed sign-in.
+    assert_eq!(answer.status, StatusCode::SEE_OTHER);
+    let reference = answer.header("x-request-id");
+    assert_eq!(reference.len(), 12, "{reference}");
+    assert_eq!(
+        answer.header("location"),
+        format!("/admin/?login_error=internal&reference={reference}")
+    );
+    assert!(!setup.client.cookies.contains_key(STATE_COOKIE));
     // No session, and no token left behind that nothing here would ever end.
-    assert_ne!(answer.header("location"), "/admin/");
     assert!(!setup.client.cookies.contains_key(SESSION_COOKIE));
     assert_eq!(*setup.provider.revoked.lock().unwrap(), ["admin-token"]);
+}
+
+/// A browser comes to the sign-in routes, not the interface: whatever keeps
+/// a sign-in from its session ends on the sign-in page with a reason it
+/// explains, the login cookie removed, never on an answer of the API. Each
+/// way the two routes can refuse or fail is asked here.
+#[tokio::test]
+async fn every_sign_in_without_a_session_ends_on_the_sign_in_page() {
+    let mut setup = setup();
+    setup.broker.set(
+        "bad-token",
+        refused(503, "Authorization is temporarily unavailable"),
+    );
+    let issuer = "iss=https%3A%2F%2Fmail.example.test";
+    let other = "iss=https%3A%2F%2Fstalwart.example.test";
+    let long = "c".repeat(4097);
+    let cases = [
+        ("another state", "state=other&code=code-admin", issuer, "1"),
+        ("another issuer", "code=code-admin", other, "1"),
+        ("no issuer", "code=code-admin", "", "1"),
+        ("no code", "", issuer, "1"),
+        (
+            "a code that is too long",
+            &format!("code={long}"),
+            issuer,
+            "1",
+        ),
+        ("a code Stalwart refuses", "code=code-expired", issuer, "1"),
+        ("Stalwart away", "code=code-outage", issuer, "unavailable"),
+        (
+            "Stalwart's rate limit",
+            "code=code-limited",
+            issuer,
+            "limited",
+        ),
+        (
+            "an exchange it does not read",
+            "code=code-unreadable",
+            issuer,
+            "unchecked",
+        ),
+        ("rights not checkable", "code=unknown", issuer, "unchecked"),
+    ];
+    for (case, query, issuer, reason) in cases {
+        let state = login(&mut setup.client).await["state"].clone();
+        let query = if query.starts_with("state=") {
+            query.to_owned()
+        } else {
+            format!("state={state}&{query}")
+        };
+        let answer = setup
+            .client
+            .get(&format!("/auth/callback?{query}&{issuer}"))
+            .await;
+        assert_eq!(
+            (answer.status, answer.header("location")),
+            (
+                StatusCode::SEE_OTHER,
+                format!("/admin/?login_error={reason}").as_str()
+            ),
+            "{case}"
+        );
+        assert!(answer.header("set-cookie").contains("Max-Age=0"), "{case}");
+    }
+    // A sign-in that does not start from the page gets no login cookie.
+    let answer = setup
+        .client
+        .send(
+            Method::GET,
+            "/auth/login",
+            &[("sec-fetch-site", "cross-site")],
+            None,
+        )
+        .await;
+    assert_eq!(
+        (answer.status, answer.header("location")),
+        (StatusCode::SEE_OTHER, "/admin/?login_error=cross-site")
+    );
 }
