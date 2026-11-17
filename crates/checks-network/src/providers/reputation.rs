@@ -15,7 +15,6 @@ use std::net::{IpAddr, SocketAddr};
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Field, Format};
-use serde::{Deserialize, Serialize};
 
 use super::dns::{mail_hosts, resolver_option, system_resolver};
 use super::domains::max_domains;
@@ -28,11 +27,12 @@ mod asker;
 mod cards;
 mod dqs;
 mod named;
+mod reading;
 mod verdict;
 
 use asker::{Asker, PATIENCE, RUN_OVER};
 use named::{Before, names};
-use verdict::Said;
+use reading::{Asked, Read};
 
 const EVERY: i64 = 6 * 3600;
 const AGAIN: i64 = 3600;
@@ -49,89 +49,6 @@ const LISTS: [&str; 4] = [
     "bl.mailspike.net",
 ];
 const LISTS_IPV6: [&str; 1] = ["zen.spamhaus.org"];
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-struct Asked {
-    host: String,
-    address: String,
-    /// The address's reverse name, if it has one.
-    pointer: Option<String>,
-    /// Whether that name leads back to the address.
-    confirmed: bool,
-    /// Why the reverse name, or where it leads, could not be read: an
-    /// answer the check cannot use counts for this address alone.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    unread: Option<String>,
-    lists: Vec<(String, Said)>,
-}
-
-/// What the status database keeps of the last reading.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-struct Read {
-    hosts: Vec<String>,
-    addresses: Vec<Asked>,
-    problem: Option<String>,
-    /// What to say of Stalwart's domains after the first `max_domains`.
-    #[serde(default)]
-    rest: Option<String>,
-    /// Why not every address or list was asked, where that is so.
-    #[serde(default)]
-    cut: Option<String>,
-    /// What the reading's own limits left out: mail hosts after the first
-    /// [`MOST_HOSTS`], addresses after the first [`MOST_ADDRESSES`].
-    #[serde(default)]
-    left_out: Vec<String>,
-    /// Why the zones of Spamhaus' Data Query Service written without their
-    /// key were not asked, where the run had no key.
-    #[serde(default)]
-    keyless: Option<String>,
-    /// Whether Stalwart's mail hosts were not asked for want of the
-    /// collector's key: made again in the first run that has one.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    no_native_key: bool,
-    /// The mail hosts whose addresses of a kind could not be read, and why:
-    /// an answer the check cannot use counts for that host alone.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    hosts_unread: Vec<String>,
-    /// Whether a list went unasked about an address because the lists had
-    /// had their time: the blocklists card cannot be in order then. The
-    /// row's words only say so.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    lists_unasked: bool,
-}
-
-impl Read {
-    /// Whether an address's reverse name could not be read: the reverse
-    /// names card cannot be in order then.
-    fn reverse_unread(&self) -> bool {
-        self.addresses.iter().any(|asked| asked.unread.is_some())
-    }
-
-    /// Whether a list that was asked gave no verdict about an address: the
-    /// blocklists card cannot be in order then, and the next reading may
-    /// get one.
-    fn no_verdict(&self) -> bool {
-        self.addresses.iter().any(|asked| {
-            asked
-                .lists
-                .iter()
-                .any(|(_, said)| matches!(said, Said::Unanswered(_)))
-        })
-    }
-
-    /// Whether an address of the mail hosts was neither asked nor counted:
-    /// then neither card can be in order.
-    fn incomplete(&self) -> bool {
-        self.cut.is_some() || !self.left_out.is_empty() || !self.hosts_unread.is_empty()
-    }
-
-    /// Whether it names a zone with a key, as an earlier release kept it.
-    fn names_a_key(&self) -> bool {
-        self.addresses
-            .iter()
-            .any(|asked| asked.lists.iter().any(|(zone, _)| shown(zone) != *zone))
-    }
-}
 
 /// A list's zone as the cards and the status database name it. A zone of
 /// Spamhaus' Data Query Service, `KEY.zen.dq.spamhaus.net`, holds the
