@@ -13,7 +13,7 @@ use crate::testing::{Canned, now};
 fn said(about: impl Fn(&str) -> bool) -> Vec<String> {
     crate::journal::lines()
         .into_iter()
-        .filter(|line| line.target == "garrison_collector::run")
+        .filter(|line| line.target.starts_with("garrison_collector::run"))
         .map(|line| line.text)
         .filter(|line| about(line))
         .collect()
