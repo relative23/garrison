@@ -1044,6 +1044,19 @@ Notable changes for operators and users. The format follows
   FILE; made a new one", removes the key of that description that nobody
   held and has the broker read the new one; the advice about a bridge
   network comes for 403 alone.
+- **A plain setup replaces the keys that a stopped rotation left side by
+  side.** A `garrison stalwart setup --rotate` interrupted after it made a
+  new key, or whose removal of the old keys failed too, left two keys of
+  one description in Stalwart. A plain run then updated the first one
+  listed, said "secret unchanged" and kept the other valid for good, and
+  where the old key was listed first, it gave a new permission or network
+  to that key and not to the file's. Stalwart holds at most five API keys
+  for the administrator's account, so such keys piled up until a rotation
+  could make none ("You have exceeded your quota of 5 API keys."), the next
+  run included. Stalwart shows no key's secret, so no run can tell which
+  key a file holds: where Stalwart has more than one key of a description,
+  a plain run now makes one anew and removes them all, and where the quota
+  leaves the new key no room beside the old ones, these go first.
   A user without Stalwart's administrator rights got as far as the first
   API key, whose permissions Stalwart does not let it grant, and setup
   named only Stalwart's refusal; it now says to run setup as an

@@ -33,12 +33,22 @@ pub(super) fn holds_key(path: &Path) -> bool {
     files::holds(path, Form::Token).is_ok_and(|held| held == Holds::Secret)
 }
 
-/// What `ensure` did, and the keys a new one replaces. `setup` removes those
-/// once the services that hold them have restarted with the new one, or
+/// What `ensure` did: the step, the keys a new one replaces, and whether
+/// the file holds a key this run made. `setup` removes the replaced keys
+/// once the services that hold them have restarted with the new one, also
 /// when it fails on the way (`remove`).
 pub(super) struct Ensured {
     pub(super) step: String,
     pub(super) replaced: Vec<String>,
+    pub(super) made: bool,
+}
+
+/// Whether Stalwart refused a new object for its account's quota, as
+/// `Admin::call` words a refusal: JMAP's error type `overQuota` (RFC 8620),
+/// which Stalwart gives where an account holds as many API keys as it may,
+/// five (measured on Stalwart 1.1.0).
+fn over_quota(error: &str) -> bool {
+    error.contains(r#""type":"overQuota""#)
 }
 
 pub(super) fn ensure(
@@ -60,18 +70,66 @@ pub(super) fn ensure(
         },
         allowed_ips: networks,
     };
-    if let (Some(first), true, false) = (existing.first(), holds_key(&target), rotate) {
-        admin.set("x:ApiKey/set", &Set::update(&first.id, rights()))?;
+    // The one key of its description is kept where its file holds a key.
+    // Where Stalwart has several, as after a rotation that was stopped or
+    // whose clean-up failed, no run can tell which one the file holds, since
+    // Stalwart shows no key's secret: a new key replaces them all, as where
+    // the file holds none.
+    if let ([only], true, false) = (existing.as_slice(), holds_key(&target), rotate) {
+        admin.set("x:ApiKey/set", &Set::update(&only.id, rights()))?;
         return Ok(Ensured {
             step: format!("updated API key '{description}' (secret unchanged)"),
             replaced: Vec::new(),
+            made: false,
         });
     }
+    let mut replaced: Vec<String> = existing.iter().map(|item| item.id.clone()).collect();
+    let path = target.display();
+    let mut step = match (existing.len(), rotate) {
+        (0, _) | (1, false) => format!("created API key '{description}' -> {path}"),
+        (count, false) => {
+            format!("replaced the {count} API keys '{description}' with one -> {path}")
+        }
+        (_, true) => format!("replaced API key '{description}' -> {path}"),
+    };
     // A new key first and its file next. A running service keeps the old
-    // key until it restarts, so the old keys go after that (`remove`).
+    // key until it restarts, so the old keys go after that (`remove`). Where
+    // Stalwart's quota leaves the new key no room beside them, they go
+    // first, and the broker checks no rights until it restarts.
+    match make(admin, &target, description, rights()) {
+        Err(error) if over_quota(&error) && !replaced.is_empty() => {
+            remove(admin, &replaced)?;
+            replaced.clear();
+            make(admin, &target, description, rights())?;
+            step.push_str(" (the old ones went first: Stalwart's quota of API keys left no room)");
+        }
+        Err(error) if over_quota(&error) => {
+            return Err(format!(
+                "{error}. Stalwart holds no more API keys for the administrator's account: \
+                 remove those of its keys that are no longer needed in the Stalwart WebUI"
+            ));
+        }
+        done => done?,
+    }
+    Ok(Ensured {
+        step,
+        replaced,
+        made: true,
+    })
+}
+
+/// A new key, its secret written to `target`. A key whose secret is lost is
+/// of no use to anyone, so where the file cannot be written, the new key
+/// goes again.
+fn make(
+    admin: &Admin,
+    target: &Path,
+    description: &str,
+    rights: KeyRights<'_>,
+) -> Result<(), String> {
     let new_key = NewKey {
         description,
-        rights: rights(),
+        rights,
         expires_at: None,
     };
     let created: Created<NewSecret> = admin
@@ -79,26 +137,16 @@ pub(super) fn ensure(
         .map_err(|error| refused(&error, description))?;
     let new = created.created.get(NEW);
     let new = new.ok_or("Stalwart did not return the new API key secret")?;
-    // A key whose secret is lost is of no use to anyone, so where its file
-    // cannot be written, the new key goes again.
-    if let Err(error) = write_secret(&target, &new.secret) {
-        let undone = admin.set("x:ApiKey/set", &Set::<()>::Destroy([new.id.as_str()]));
-        return Err(match undone {
-            Ok(()) => format!("{error}; the new API key was taken out of Stalwart again"),
-            Err(_) => format!(
-                "{error}; the new API key stays in Stalwart without its secret, and the next \
-                 run replaces it"
-            ),
-        });
-    }
-    let done = if rotate && !existing.is_empty() {
-        "replaced"
-    } else {
-        "created"
+    let Err(error) = write_secret(target, &new.secret) else {
+        return Ok(());
     };
-    Ok(Ensured {
-        step: format!("{done} API key '{description}' -> {}", target.display()),
-        replaced: existing.into_iter().map(|item| item.id).collect(),
+    let undone = admin.set("x:ApiKey/set", &Set::<()>::Destroy([new.id.as_str()]));
+    Err(match undone {
+        Ok(()) => format!("{error}; the new API key was taken out of Stalwart again"),
+        Err(_) => format!(
+            "{error}; the new API key stays in Stalwart without its secret, and the next run \
+             replaces it"
+        ),
     })
 }
 
@@ -216,15 +264,18 @@ mod tests {
     };
 
     /// What `ensure` does for the collector's key with the file holding
-    /// `written`, while Stalwart still has a key of that description: the
-    /// step, the keys it replaces, what the file holds after, and whether
-    /// it asked Stalwart for a new key.
-    fn ensured(written: &str) -> (String, Vec<String>, String, bool) {
+    /// `written`, while Stalwart has the keys `listed` of that description:
+    /// the step, the keys it replaces, what the file holds after, and
+    /// whether it asked Stalwart for a new key.
+    fn ensured(written: &str, listed: &[&str]) -> (String, Vec<String>, String, bool) {
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join(COLLECTOR.file);
         garrison_testing::write_private(&file, written.as_bytes());
-        let listed = json(&json!({"methodResponses": [["x:ApiKey/get",
-            {"list": [{"id": "old", "description": "garrison collector"}]}, "0"]]}));
+        let listed: Vec<_> = listed
+            .iter()
+            .map(|id| json!({"id": id, "description": "garrison collector"}))
+            .collect();
+        let listed = json(&json!({"methodResponses": [["x:ApiKey/get", {"list": listed}, "0"]]}));
         let set = json(&json!({"methodResponses": [["x:ApiKey/set",
             {"created": {"new": {"id": "fresh", "secret": NEW}}, "updated": {"old": null}}, "0"]]}));
         let server = serve(vec![listed, set]);
@@ -239,12 +290,8 @@ mod tests {
             .step
             .replace(&directory.path().display().to_string(), "DIR");
         let held = std::fs::read_to_string(&file).unwrap();
-        (
-            step,
-            done.replaced,
-            held,
-            requests[1].contains("\"create\""),
-        )
+        assert_eq!(done.made, requests[1].contains("\"create\""));
+        (step, done.replaced, held, done.made)
     }
 
     /// A key file that holds no key, as an empty one, gets a new key, as a
@@ -255,7 +302,7 @@ mod tests {
     fn a_key_file_that_holds_no_key_gets_a_new_one() {
         for written in ["", "\n", " \r\n", "short\n"] {
             assert_eq!(
-                ensured(written),
+                ensured(written, &["old"]),
                 (
                     "created API key 'garrison collector' -> DIR/collector-native-key".to_owned(),
                     vec!["old".to_owned()],
@@ -266,7 +313,7 @@ mod tests {
             );
         }
         assert_eq!(
-            ensured(&format!("{OLD}\n")),
+            ensured(&format!("{OLD}\n"), &["old"]),
             (
                 "updated API key 'garrison collector' (secret unchanged)".to_owned(),
                 Vec::new(),
@@ -274,6 +321,66 @@ mod tests {
                 false
             )
         );
+    }
+
+    /// Where Stalwart has two keys of the description, as after a rotation
+    /// that was stopped before it removed the old one, no run can tell which
+    /// the file holds: a plain run makes one anew and replaces both, where
+    /// it once updated the first and kept the other for good.
+    #[test]
+    fn two_keys_of_one_description_are_replaced_by_one() {
+        assert_eq!(
+            ensured(&format!("{OLD}\n"), &["old", "older"]),
+            (
+                "replaced the 2 API keys 'garrison collector' with one -> \
+                 DIR/collector-native-key"
+                    .to_owned(),
+                vec!["old".to_owned(), "older".to_owned()],
+                format!("{NEW}\n"),
+                true
+            )
+        );
+    }
+
+    /// Stalwart holds at most five keys for an account. Where a new key finds
+    /// no room beside the old ones, these go first and the new one is made
+    /// then, so that a rotation stopped after it made its keys does not
+    /// leave every later run refused.
+    #[test]
+    fn a_full_quota_lets_the_old_keys_go_first() {
+        let directory = tempfile::tempdir().unwrap();
+        let listed = json(&json!({"methodResponses": [["x:ApiKey/get", {"list": [
+            {"id": "old", "description": "garrison collector"},
+            {"id": "older", "description": "garrison collector"}]}, "0"]]}));
+        let full = json(
+            &json!({"methodResponses": [["x:ApiKey/set", {"notCreated": {"new": {
+            "type": "overQuota", "description": "You have exceeded your quota of 5 API keys."}}},
+            "0"]]}),
+        );
+        let gone = |id: &str| {
+            json(&json!({"methodResponses": [["x:ApiKey/set", {"destroyed": [id]}, "0"]]}))
+        };
+        let made = json(&json!({"methodResponses": [["x:ApiKey/set",
+            {"created": {"new": {"id": "fresh", "secret": NEW}}}, "0"]]}));
+        let server = serve(vec![listed, full, gone("old"), gone("older"), made]);
+        let admin = Admin {
+            url: format!("{}/jmap/", server.url),
+            authorization: "Bearer admin".to_owned(),
+        };
+        let networks = Enabled::of(["127.0.0.1/32"]);
+        let done = ensure(&admin, directory.path(), &COLLECTOR, &networks, true).unwrap();
+        let requests = server.requests();
+        assert!(requests[2].contains(r#""destroy":["old"]"#));
+        assert!(requests[3].contains(r#""destroy":["older"]"#));
+        assert_eq!(
+            done.step
+                .replace(&directory.path().display().to_string(), "DIR"),
+            "replaced API key 'garrison collector' -> DIR/collector-native-key (the old ones \
+             went first: Stalwart's quota of API keys left no room)"
+        );
+        assert_eq!((done.replaced, done.made), (Vec::<String>::new(), true));
+        let held = std::fs::read_to_string(directory.path().join(COLLECTOR.file)).unwrap();
+        assert_eq!(held, format!("{NEW}\n"));
     }
 
     /// A key whose file cannot be written goes again, so that Stalwart keeps

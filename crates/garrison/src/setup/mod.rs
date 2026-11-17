@@ -353,6 +353,7 @@ fn configure(
     let mut fresh = rotate || restart::unheld(directory);
     let broker = keys::ensure(admin, directory, &BROKER, networks, rotate)?;
     replaced.extend(broker.replaced);
+    fresh |= broker.made;
     let collector = keys::ensure(admin, directory, &COLLECTOR, networks, rotate)?;
     replaced.extend(collector.replaced);
     let mut steps = vec![
