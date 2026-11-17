@@ -85,7 +85,9 @@ Before anything stops, the command checks that the directory is a backup
 release that wrote it, and no release reads what a newer one wrote) and that
 its copies pass `self-check --state`. It then copies the state as it is to
 `/var/backups/garrison/pre-restore-*`, stops the services, puts every
-database and the access policy back with their owners and modes, removes a
+database back with its owner and mode and the access policy as a file of
+its own, root's and readable for the group `garrison-broker` alone, never
+through a link or into a folder that `broker.policy` names, removes a
 database that did not exist when the backup was made, and starts the
 services. What was recorded since the backup is in the `pre-restore-*` copy
 and no longer in Garrison; restore that copy to take the restore back.

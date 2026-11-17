@@ -8,15 +8,17 @@
 //! Whoever calls has stopped every writer first: a service that still runs
 //! would write into a file that is no longer the database.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
 use garrison_core::config::{Config, Database};
 use garrison_core::version;
+use rustix::fs::{Gid, Uid};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use super::files::{Step, announce, place, relabel, replace_in};
+use super::files::{Step, announce, relabel, replace_in};
 
 /// What a backup says of itself in `backup.json`.
 #[derive(Debug, Default, Deserialize)]
@@ -79,7 +81,7 @@ fn put_back(config: &Config, database: Database, copy: &Path) -> Step {
     without_journals(folder, database);
     // The service user owns this directory: replace the file without
     // following anything planted there, and keep the directory's owner.
-    replace_in(folder, database.file_name(), copy, database.mode())?;
+    replace_in(folder, database.file_name(), copy, database.mode(), None)?;
     relabel(std::slice::from_ref(&destination));
     Ok(())
 }
@@ -102,9 +104,19 @@ fn copy_of(source: &Path, database: Database) -> std::path::PathBuf {
     source.join(database.writer()).join(database.file_name())
 }
 
-/// Put back every database and the policy as `source` holds them, and
-/// remove the databases it says did not exist.
-pub(super) fn restore_all(source: &Path, config: &Config) -> Step {
+/// Who owns the access policy, as the installer leaves it: root, with the
+/// broker's group, which alone reads it. Asked before anything stops.
+pub(super) fn policy_owner() -> Step<(Uid, Gid)> {
+    let group = crate::access::group_id("garrison-broker").ok_or(
+        "The group garrison-broker, which reads the access policy, does not exist; the \
+         installer makes it.",
+    )?;
+    Ok((Uid::ROOT, Gid::from_raw(group)))
+}
+
+/// Put back every database and the policy as `source` holds them, the
+/// policy owned by `owner`, and remove the databases it says did not exist.
+pub(super) fn restore_all(source: &Path, config: &Config, owner: (Uid, Gid)) -> Step {
     announce(&format!(
         "Restoring Garrison state from {}",
         source.display()
@@ -120,10 +132,32 @@ pub(super) fn restore_all(source: &Path, config: &Config) -> Step {
     }
     let policy = source.join(crate::ops::POLICY_COPY);
     if policy.exists() {
-        let target = config.broker.policy.clone();
-        place(&policy, &target, 0o640)?;
-        relabel(&[target]);
+        put_policy_back(&policy, &config.broker.policy, owner)?;
     }
+    Ok(())
+}
+
+/// The access policy as the broker reads it: a file of its own, made new
+/// with `owner`, root and the broker's group, mode 0640, and renamed into
+/// place. A link or a folder that `broker.policy` names stays as it is,
+/// and so does what a link points to; a policy kept outside /etc/garrison
+/// may lie in a folder that others can write.
+fn put_policy_back(copy: &Path, target: &Path, owner: (Uid, Gid)) -> Step {
+    let named = || format!("broker.policy names {}", target.display());
+    if fs::symlink_metadata(target).is_ok_and(|kind| !kind.is_file()) {
+        return Err(format!(
+            "{}, which is not a file of its own; it was left as it is",
+            named()
+        ));
+    }
+    let (Some(folder), Some(name)) = (target.parent(), target.file_name().and_then(OsStr::to_str))
+    else {
+        return Err(format!("{}, which is no file's name", named()));
+    };
+    // The broker reaches the file through the folders' links, as here.
+    let folder = fs::canonicalize(folder).map_err(|error| format!("{}: {error}", named()))?;
+    replace_in(&folder, name, copy, 0o640, Some(owner))?;
+    relabel(&[target.to_owned()]);
     Ok(())
 }
 
@@ -250,7 +284,7 @@ mod tests {
         let (config, backup) = failed_upgrade(directory.path());
         fs::write(backup.join(crate::ops::POLICY_COPY), "{}").unwrap();
         fs::create_dir_all(config.broker.policy.parent().unwrap()).unwrap();
-        restore_all(&backup, &config).unwrap();
+        restore_all(&backup, &config, own()).unwrap();
         for kept in [Database::Web, Database::Events, Database::Status] {
             assert_eq!(note(&config.database(kept)), "before the upgrade");
         }
@@ -259,8 +293,82 @@ mod tests {
         // A backup that does not say what was absent removes nothing.
         database(&config.database(Database::Jobs), 3, "kept");
         fs::remove_file(backup.join("backup.json")).unwrap();
-        restore_all(&backup, &config).unwrap();
+        restore_all(&backup, &config, own()).unwrap();
         assert_eq!(note(&config.database(Database::Jobs)), "kept");
+    }
+
+    /// The policy goes back only as a file of its own: a link that
+    /// `broker.policy` names stays as it is, and so does what it points to.
+    #[test]
+    fn the_policy_never_goes_back_through_a_link() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let (config, backup) = failed_upgrade(directory.path());
+        fs::write(backup.join(crate::ops::POLICY_COPY), "{\"restored\": true}").unwrap();
+        let victim = directory.path().join("passwd");
+        fs::write(&victim, "root:x:0:0::/root:/bin/sh\n").unwrap();
+        fs::set_permissions(&victim, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::create_dir_all(config.broker.policy.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&victim, &config.broker.policy).unwrap();
+        let refused = restore_all(&backup, &config, own()).unwrap_err();
+        assert!(refused.contains("not a file of its own"), "{refused}");
+        assert_eq!(
+            fs::read_to_string(&victim).unwrap(),
+            "root:x:0:0::/root:/bin/sh\n"
+        );
+        assert_eq!(mode(&victim), 0o644);
+        assert!(
+            fs::symlink_metadata(&config.broker.policy)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        // Nor into a folder of that name, which keeps what it holds.
+        fs::remove_file(&config.broker.policy).unwrap();
+        fs::create_dir(&config.broker.policy).unwrap();
+        fs::write(config.broker.policy.join("mail"), "kept").unwrap();
+        assert!(restore_all(&backup, &config, own()).is_err());
+        let kept = fs::read_to_string(config.broker.policy.join("mail")).unwrap();
+        assert_eq!(kept, "kept");
+    }
+
+    /// Where no policy is there yet, or one that others may read, the copy
+    /// becomes a new file of the owner's with mode 0640; the folder's owner
+    /// does not count, unlike for a database.
+    #[test]
+    fn the_policy_goes_back_as_a_new_file_of_its_owner() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let (config, backup) = failed_upgrade(directory.path());
+        fs::write(backup.join(crate::ops::POLICY_COPY), "{\"restored\": true}").unwrap();
+        let policy = &config.broker.policy;
+        fs::create_dir_all(policy.parent().unwrap()).unwrap();
+        for before in [None, Some(0o644)] {
+            if let Some(mode) = before {
+                fs::write(policy, "{}").unwrap();
+                fs::set_permissions(policy, fs::Permissions::from_mode(mode)).unwrap();
+            }
+            restore_all(&backup, &config, own()).unwrap();
+            let written = fs::symlink_metadata(policy).unwrap();
+            assert!(written.file_type().is_file());
+            assert_eq!(mode(policy), 0o640);
+            let (uid, gid) = own();
+            assert_eq!((written.uid(), written.gid()), (uid.as_raw(), gid.as_raw()));
+            assert_eq!(fs::read_to_string(policy).unwrap(), "{\"restored\": true}");
+            assert!(fs::remove_file(policy).is_ok());
+        }
+    }
+
+    /// The test's own user and group stand in for root and the broker's.
+    fn own() -> (Uid, Gid) {
+        (rustix::process::getuid(), rustix::process::getgid())
+    }
+
+    fn mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path).unwrap().permissions().mode() & 0o777
     }
 
     #[test]

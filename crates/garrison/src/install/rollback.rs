@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use garrison_core::config::{self, Database};
+use rustix::fs::{Gid, Uid};
 
 use super::files::{Step, announce, io, lock, switch};
 use super::system::install_system_files;
@@ -45,19 +46,20 @@ fn restore_source(name: &str) -> Step<PathBuf> {
     }
 }
 
-/// Put the pre-upgrade copies of the databases and the policy back.
-fn restore_state(source: &Path) -> Step {
+/// Put the pre-upgrade copies of the databases and the policy back, the
+/// policy owned by `owner`.
+fn restore_state(source: &Path, owner: (Uid, Gid)) -> Step {
     // The configured state directories, which need not be the defaults.
     let settings = Path::new(CONFIG).join("garrison.toml");
     let config = config::load(&settings)
         .map_err(|error| format!("Cannot load {}: {error}", settings.display()))?;
-    state::restore_all(source, &config)
+    state::restore_all(source, &config, owner)
 }
 
 /// Make `target` current and `current` previous, then start `target`.
-fn roll_back_to(target: &Path, current: &Path, source: Option<&Path>) -> Step {
-    if let Some(source) = source {
-        restore_state(source)?;
+fn roll_back_to(target: &Path, current: &Path, source: Option<(&Path, (Uid, Gid))>) -> Step {
+    if let Some((source, owner)) = source {
+        restore_state(source, owner)?;
     }
     let base = Path::new(BASE);
     switch(&base.join("current"), target)?;
@@ -100,12 +102,17 @@ pub(super) fn rollback(with_state: bool) -> Step {
         ));
     }
     let source = if with_state {
-        Some(restore_source(&name)?)
+        let owner =
+            state::policy_owner().map_err(|error| format!("{error} Nothing was changed."))?;
+        Some((restore_source(&name)?, owner))
     } else {
         None
     };
     stop_services();
-    if let Err(error) = roll_back_to(&target, &current, source.as_deref()) {
+    let restoring = source
+        .as_ref()
+        .map(|(source, owner)| (source.as_path(), *owner));
+    if let Err(error) = roll_back_to(&target, &current, restoring) {
         // Garrison is stopped now: back to the release that ran, and running.
         announce("Rollback failed; starting the release that ran before.");
         switch(&base.join("current"), &current)?;

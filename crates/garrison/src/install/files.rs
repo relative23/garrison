@@ -56,18 +56,24 @@ fn at<T>(result: rustix::io::Result<T>, what: &Path) -> Step<T> {
     result.map_err(|error| format!("{}: {error}", what.display()))
 }
 
-/// Replace `name` in `directory` with a copy of `source`, owned like the
-/// directory and with `mode`.
+/// Replace `name` in `directory` with a copy of `source`, with `mode`, owned
+/// by `owner` or else like the directory.
 ///
 /// Root runs this in a state directory that a service user owns, and that user
 /// may have planted symbolic links there. So no path inside the directory is
 /// resolved: the copy is a new file next to the target, owner and mode are set
 /// on its descriptor, and a rename replaces whatever `name` was without
 /// following it.
-pub(super) fn replace_in(directory: &Path, name: &str, source: &Path, mode: u32) -> Step {
+pub(super) fn replace_in(
+    directory: &Path,
+    name: &str,
+    source: &Path,
+    mode: u32,
+    owner: Option<(Uid, Gid)>,
+) -> Step {
     let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let folder = at(rustix::fs::open(directory, flags, Mode::empty()), directory)?;
-    let owner = at(rustix::fs::fstat(&folder), directory)?;
+    let folder_owner = at(rustix::fs::fstat(&folder), directory)?;
     let pending = format!(".{name}.restoring");
     // A leftover or a planted link under that name goes first; unlink never follows it.
     match rustix::fs::unlinkat(&folder, pending.as_str(), AtFlags::empty()) {
@@ -85,7 +91,12 @@ pub(super) fn replace_in(directory: &Path, name: &str, source: &Path, mode: u32)
         rustix::fs::fchmod(&file, Mode::from_raw_mode(mode)),
         directory,
     )?;
-    let (uid, gid) = (Uid::from_raw(owner.st_uid), Gid::from_raw(owner.st_gid));
+    let (uid, gid) = owner.unwrap_or_else(|| {
+        (
+            Uid::from_raw(folder_owner.st_uid),
+            Gid::from_raw(folder_owner.st_gid),
+        )
+    });
     at(rustix::fs::fchown(&file, Some(uid), Some(gid)), directory)?;
     io(file.sync_all(), directory)?;
     at(
@@ -215,7 +226,7 @@ mod tests {
         // The service user points both the target and the pending name elsewhere.
         symlink(&victim, state.join("web.sqlite")).unwrap();
         symlink(&victim, state.join(".web.sqlite.restoring")).unwrap();
-        replace_in(&state, "web.sqlite", &copy, 0o600).unwrap();
+        replace_in(&state, "web.sqlite", &copy, 0o600, None).unwrap();
 
         assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
         assert_eq!(fs::metadata(&victim).unwrap().mode() & 0o777, 0o644);
@@ -236,7 +247,7 @@ mod tests {
         // A state directory that is itself a link is refused.
         let link = directory.path().join("link");
         symlink(&state, &link).unwrap();
-        assert!(replace_in(&link, "web.sqlite", &copy, 0o600).is_err());
+        assert!(replace_in(&link, "web.sqlite", &copy, 0o600, None).is_err());
     }
 
     /// The lock once its holder has given it up. The kernel lets it go when

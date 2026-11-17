@@ -1113,6 +1113,15 @@ Notable changes for operators and users. The format follows
   the other services, and a backup names the release that wrote it:
   `--restore-state` refuses a state written by a newer release than the one
   it returns to, and removes a database that did not exist at the backup.
+- **A restored access policy is the broker's to read, and never written
+  through a link.** `garrison restore` and `install --rollback
+  --restore-state` wrote the backup's policy through a link that
+  `broker.policy` named, into whatever it pointed to, and where no policy
+  was there yet they made it root's group's, which the broker cannot read:
+  nobody could sign in while the restore said that Garrison runs. The policy
+  now goes back as a file of its own, made new as root's and readable for
+  the group `garrison-broker` alone; a link or a folder that the setting
+  names stays as it is, with what it points to or holds.
 - **A stale event history no longer reads as a quiet mail server.** The
   mail-flow summaries and the sending accounts counted whatever the event
   history held and called it in order, also when the event receiver had not

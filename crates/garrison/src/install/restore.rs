@@ -66,6 +66,7 @@ fn restore(from: &Path) -> Step {
     let settings = Path::new(CONFIG).join("garrison.toml");
     let config = config::load(&settings)
         .map_err(|error| format!("Cannot load {}: {error}", settings.display()))?;
+    let owner = state::policy_owner().map_err(|error| format!("{error} Nothing was changed."))?;
     // What is there now, so that this restore can be taken back.
     let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
     let kept = Path::new(BACKUPS).join(format!("pre-restore-{stamp}"));
@@ -81,7 +82,7 @@ fn restore(from: &Path) -> Step {
         ));
     }
     stop_services();
-    let restored = state::restore_all(&source, &config);
+    let restored = state::restore_all(&source, &config, owner);
     // Garrison is stopped now: whatever was put back, it starts again.
     let started = start(&current);
     match (restored, started) {
