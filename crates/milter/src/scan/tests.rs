@@ -29,7 +29,7 @@ pub(crate) fn message(name: &str, attachment: &[u8]) -> Vec<u8> {
 
 /// An old Office file as far as the scan reads one: the compound file's
 /// first bytes and a directory that names what `storages` names.
-fn compound(storages: &[&str]) -> Vec<u8> {
+pub(crate) fn compound(storages: &[&str]) -> Vec<u8> {
     let mut data = OLE.to_vec();
     data.resize(512, 0);
     for name in storages {
@@ -41,7 +41,7 @@ fn compound(storages: &[&str]) -> Vec<u8> {
 
 const TEXT: &[u8] = b"<w:document><w:body><w:p>Nothing but text.</w:p></w:body></w:document>";
 
-fn plain_document() -> Vec<u8> {
+pub(crate) fn plain_document() -> Vec<u8> {
     archive(&[
         ("[Content_Types].xml", b"<Types/>", true),
         ("word/document.xml", TEXT, true),

@@ -223,6 +223,23 @@ Notable changes for operators and users. The format follows
   session, as when a tab is shown again or another tab starts, the page
   stayed signed in, its menu and data in view, until a later request was
   refused, up to a minute later. It now says that the session has ended.
+- **A document with macros is found however the message wraps it.** The scan
+  undid quoted-printable only when the message held one of four byte strings,
+  so an Office document written as quoted-printable on a single line, in
+  lower-case hexadecimal, or with only some bytes escaped passed as clean;
+  base64 a sender broke up with white space or with characters outside its
+  alphabet was not read, nor was a uuencoded attachment; and a document
+  behind an odd boundary, an unusual `Content-Type` or deep nesting was
+  missed. The scan now finds the document without reading the message's
+  structure: it undoes quoted-printable over the whole message, decodes the
+  base64 of the whole message on each of the four grids a run of symbols can
+  sit on (ignoring every byte outside the alphabet, so boundaries, headers
+  and junk fall away), and reads a uuencode `begin`/`end` block wherever it
+  stands. No boundary, nesting depth or header is read to decide this, so
+  none of them hides a document. A part that declares a transfer encoding the
+  scan cannot decode, or a uuencode block begun and not ended, is marked
+  unscanned (`on_incomplete`), not passed as clean. yEnc stays a named limit
+  (see [configuration](docs/operator/configuration.md#milter)).
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",

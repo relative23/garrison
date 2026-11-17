@@ -110,8 +110,10 @@ fn names_macros(data: &[u8]) -> bool {
     false
 }
 
-/// Whether a file begins with `ActiveMime` somewhere in `data`: at its start
-/// or a line's, and followed by the bytes of a file, not by a sentence.
+/// Whether `ActiveMime` stands in `data` followed by the bytes of a file, not
+/// by a sentence. The marker is sought at any offset: a decoded base64 stream
+/// holds the file with noise before it, so where the file begins is not read;
+/// the binary bytes that must follow keep the word in prose from counting.
 fn active_mime(data: &[u8]) -> bool {
     let mut at = 0;
     while let Some(offset) = data[at..]
@@ -120,12 +122,11 @@ fn active_mime(data: &[u8]) -> bool {
     {
         let found = at + offset;
         at = found + ACTIVE_MIME.len();
-        let begins = found == 0 || data[found - 1] == b'\n';
         let binary = data[at..]
             .iter()
             .take(16)
             .any(|byte| *byte < 0x20 && !matches!(byte, b'\t' | b'\r' | b'\n'));
-        if begins && binary {
+        if binary {
             return true;
         }
     }
