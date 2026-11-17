@@ -31,7 +31,7 @@ scenario_unloaded() {
         printf "\n[collector]\nnative_key = \"credential:my-key\"\n" >> /etc/garrison/garrison.toml'
     check "the collector's unit hands it no credential of another name" \
         'systemctl start garrison-collect.service &&
-            journalctl -u garrison-collect.service -n 30 --no-pager | grep -q "The collector API key is unavailable"'
+            journalctl -u garrison-collect.service -n 30 --no-pager | grep -q "The collector has no API key for Stalwart"'
     refused "the installer refuses a secret under a name its unit does not load" \
         '/root/release/bin/garrison install' \
         "garrison-collect.service loads this secret only as credential:collector-native-key"

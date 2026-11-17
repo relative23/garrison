@@ -991,6 +991,12 @@ Notable changes for operators and users. The format follows
   doctor`, which called such a file private and in order, fails it, names
   the service it leaves without a key and the setup that makes one; the
   files that may be empty, such as `metrics-credential`, stay in order.
+  The collector's journal said in every run, once a minute, that its key
+  was unavailable and Stalwart's observations Unknown, which named neither
+  the file nor the fix and was not so of every card. It now says once for
+  each reason that the collector has no API key for Stalwart, with the
+  file, why and what makes one, that every card that needs the key says
+  so, and once that it has the key again.
 - **An answer of Stalwart's that Garrison cannot read is no refusal.** An
   answer in a form this release does not read, as a Stalwart release it
   does not support yet may give after an upgrade (no JSON, an object it

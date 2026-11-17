@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use std::{fmt, io};
 
 use garrison_core::config::{Config, ConfigError, Database};
-use garrison_core::credentials::{Credentials, SecretSource};
+use garrison_core::credentials::{Credentials, SecretSource, made_by_setup};
 use garrison_core::files::{Form, ProtectedFileError};
 use garrison_core::json;
 use garrison_core::modules::ModuleId;
@@ -22,7 +22,7 @@ use garrison_core::time::{self, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::command::Runner;
-use crate::context::{Context, Deadline, DqsKey, Provider};
+use crate::context::{Context, Deadline, DqsKey, Memory, Provider};
 use crate::notify::{Channels, Secrets};
 use crate::snapshot::{ProviderError, SCHEMA, Snapshot};
 use crate::store::StatusStore;
@@ -94,12 +94,37 @@ fn alone(database: &Path) -> Result<File, Error> {
     }
 }
 
-fn native_key(config: &Config, credentials: &Credentials) -> Option<String> {
-    let key = credentials.read_secret(&config.collector.native_key).ok();
-    if key.is_none() {
-        log::warn!("The collector API key is unavailable; Stalwart observations are Unknown");
+/// Where the status database keeps what the journal last said of the
+/// collector's API key for Stalwart: why it had none, or nothing.
+const KEY_SAID: &str = "run.native-key";
+
+/// The collector's API key for Stalwart, read anew for each run. Where it
+/// has none, the journal says why, with the file and what makes a key,
+/// once for each reason, since the runs come every minute; and once that
+/// it has the key again. The cards that need the key say so themselves.
+fn native_key(config: &Config, credentials: &Credentials, memory: &dyn Memory) -> Option<String> {
+    let source = &config.collector.native_key;
+    let read = credentials.read_secret(source);
+    let why = read
+        .as_ref()
+        .err()
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    if memory.recall(KEY_SAID).unwrap_or_default() != why {
+        match &read {
+            Ok(_) => log::info!(
+                "The collector has an API key for Stalwart again, from {}",
+                credentials.path(source).display()
+            ),
+            Err(error) => log::warn!(
+                "The collector has no API key for Stalwart: {error}{}. Every card that needs it \
+                 says so until then.",
+                made_by_setup(error)
+            ),
+        }
+        memory.keep(KEY_SAID, &why);
     }
-    key
+    read.ok()
 }
 
 /// The scrape credential file, as `garrison stalwart setup` writes it and
@@ -312,7 +337,7 @@ pub fn collect_within(
         deployment: &config.deployment,
         now,
         deadline: Deadline::within(time.checks),
-        native_key: native_key(config, credentials),
+        native_key: native_key(config, credentials, &store),
         metrics_credential: metrics_credential(config, credentials),
         dqs_key: dqs_key(config, credentials),
         events_database: config.database(Database::Events),
@@ -416,5 +441,7 @@ pub fn collect(
     collect_from(&providers, config, credentials, runner, time::now())
 }
 
+#[cfg(test)]
+mod journal_tests;
 #[cfg(test)]
 mod tests;
