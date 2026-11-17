@@ -85,12 +85,17 @@ pub(super) fn mail_hosts(
 
 /// Why records were not asked.
 const RUN_OVER: &str = "the collection run's time was used up";
+/// So many of a domain's records are asked at the most: each run asks every
+/// one of them again, and one domain is not to take the others' time.
+const MOST_RECORDS: usize = 60;
 
 /// What the questions about a domain's records came to.
 #[derive(Debug, Default)]
 struct Tally {
-    /// The records Stalwart names for the domain.
+    /// The records Stalwart names for the domain that are asked.
     records: usize,
+    /// The records it names after the first [`MOST_RECORDS`], not asked.
+    left: usize,
     /// The records that are not as Stalwart names them.
     open: Vec<String>,
     /// The needed records the resolver gave no answer for.
@@ -99,6 +104,47 @@ struct Tally {
     unasked: usize,
     /// What is said of the records whose name is no DNS name.
     nameless: Vec<String>,
+}
+
+impl Tally {
+    /// What the verdict on `record` of the domain `name` adds, and whether
+    /// the record is not as Stalwart names it.
+    fn counted(&mut self, name: &str, record: &Expected, verdict: Verdict) -> bool {
+        let needed = needed(name, record);
+        let counts = match verdict {
+            Verdict::Missing => needed,
+            // An SPF or DMARC policy of the operator's own is in order;
+            // another DKIM key or mail host is not what Stalwart uses.
+            Verdict::Differs => {
+                // A TLSA record is a matter of choice, but one that is
+                // published and wrong makes senders that check DANE refuse.
+                record.kind == Kind::Tlsa
+                    || needed && (record.kind == Kind::Mx || record.name.contains("._domainkey."))
+            }
+            Verdict::Unanswered => {
+                self.unanswered += usize::from(needed);
+                false
+            }
+            Verdict::Unasked => {
+                self.unasked += 1;
+                false
+            }
+            Verdict::NoName => {
+                self.nameless.push(format!(
+                    "{}, so its {} record was not asked.",
+                    dns::no_name(&record.name),
+                    record.kind.name()
+                ));
+                needed
+            }
+            Verdict::Published => false,
+        };
+        if counts {
+            self.open
+                .push(format!("{} {}", record.kind.name(), record.name));
+        }
+        counts
+    }
 }
 
 /// The state of a domain and what to say of it: the records that are not as
@@ -130,7 +176,7 @@ fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>) {
         )
     } else if tally.unasked == tally.records {
         (State::Unknown, Vec::new())
-    } else if tally.unasked > 0 {
+    } else if tally.unasked > 0 || tally.left > 0 {
         (State::Partial, Vec::new())
     } else {
         (State::Ok, Vec::new())
@@ -144,6 +190,12 @@ fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>) {
             tally.unasked,
             tally.records,
             if tally.unasked == 1 { "was" } else { "were" }
+        ));
+    }
+    if tally.left > 0 {
+        findings.push(format!(
+            "Stalwart names {} records for this domain; only the first {MOST_RECORDS} are asked.",
+            tally.records + tally.left
         ));
     }
     if tally.open.iter().any(|record| record.starts_with("TLSA ")) {
@@ -267,53 +319,27 @@ impl Dns {
     ) -> Result<Observation, crate::context::ProviderError> {
         let name = plain(&domain.name);
         let records = expected(domain.dns_zone_file.as_deref().unwrap_or_default());
+        // The mail hosts are those of every MX record, asked or not.
+        let hosts = mx_hosts(&records);
+        let asked_for = &records[..records.len().min(MOST_RECORDS)];
         let mut rows = Vec::new();
         let mut tally = Tally {
-            records: records.len(),
+            records: asked_for.len(),
+            left: records.len() - asked_for.len(),
             ..Tally::default()
         };
-        for record in &records {
+        for record in asked_for {
             let (verdict, found) = asked(context, resolver, record, silent);
-            let needed = needed(&name, record);
-            let counts = match verdict {
-                Verdict::Missing => needed,
-                // An SPF or DMARC policy of the operator's own is in order;
-                // another DKIM key or mail host is not what Stalwart uses.
-                Verdict::Differs => {
-                    // A TLSA record is a matter of choice, but one that is
-                    // published and wrong makes senders that check DANE refuse.
-                    record.kind == Kind::Tlsa
-                        || needed
-                            && (record.kind == Kind::Mx || record.name.contains("._domainkey."))
-                }
-                Verdict::Unanswered => {
-                    tally.unanswered += usize::from(needed);
-                    false
-                }
-                Verdict::Unasked => {
-                    tally.unasked += 1;
-                    false
-                }
-                Verdict::NoName => {
-                    tally.nameless.push(format!(
-                        "{}, so its {} record was not asked.",
-                        dns::no_name(&record.name),
-                        record.kind.name()
-                    ));
-                    needed
-                }
-                Verdict::Published => false,
-            };
-            if counts {
-                tally
-                    .open
-                    .push(format!("{} {}", record.kind.name(), record.name));
-            }
+            tally.counted(&name, record, verdict);
             let short = |text: &str| text.chars().take(120).collect::<String>();
             rows.push(vec![
                 json!(record.name),
                 json!(record.kind.name()),
-                json!(if needed { "needed" } else { "optional" }),
+                json!(if needed(&name, record) {
+                    "needed"
+                } else {
+                    "optional"
+                }),
                 json!(short(&record.value)),
                 json!(short(&found.join(" | "))),
                 json!(verdict.label()),
@@ -329,7 +355,7 @@ impl Dns {
             let (row, outcome) = sts::checked(
                 context,
                 &name,
-                &mx_hosts(&records),
+                &hosts,
                 self.policy_url.as_deref(),
                 self.roots.as_ref(),
             );

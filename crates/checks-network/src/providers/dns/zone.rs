@@ -3,9 +3,6 @@
 
 use crate::dns::Kind;
 
-/// The most records of one domain that are read.
-const MOST_RECORDS: usize = 60;
-
 /// One record Stalwart names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Expected {
@@ -53,7 +50,7 @@ pub(super) fn expected(zone: &str) -> Vec<Expected> {
             Kind::Tlsa => data.trim().to_ascii_lowercase(),
             Kind::A | Kind::Aaaa => data.trim().to_owned(),
         };
-        if !value.is_empty() && records.len() < MOST_RECORDS {
+        if !value.is_empty() {
             records.push(Expected {
                 name: plain(name),
                 kind,

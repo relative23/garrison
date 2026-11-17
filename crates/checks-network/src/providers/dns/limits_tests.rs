@@ -1,7 +1,9 @@
-//! What the dns check leaves out by a limit, it says. An answer is read
-//! whole, however many records it holds.
+//! What the dns check leaves out by a limit, it says: it asks the first 60
+//! records Stalwart names for a domain. An answer is read whole, however
+//! many records it holds.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use super::stand_in::{host, resolver, text};
 use super::tests::collected;
@@ -35,4 +37,41 @@ fn a_policy_after_many_other_texts_is_found() {
         (domain.state, domain.findings.clone()),
         (State::Ok, Vec::<String>::new())
     );
+}
+
+/// Stalwart may name more records for a domain than the check asks, as for
+/// many DKIM selectors or TLSA records: the first 60 are asked, and the
+/// card says how many there are and is not in order for the others. Every
+/// MX record still names a mail host, for the checks that ask about them.
+#[test]
+fn records_after_the_first_sixty_are_named_and_keep_the_card_from_being_in_order() {
+    // Sixty optional records that are not published, then the MX record.
+    let mut zone_file = String::new();
+    for number in 0..60 {
+        writeln!(
+            zone_file,
+            "s{number}.example.test. IN CNAME mail.example.test."
+        )
+        .unwrap();
+    }
+    zone_file.push_str("example.test. IN MX 10 mail.example.test.\n");
+    let (address, handle) = resolver(BTreeMap::new(), None, 60);
+    let observations = collected(
+        &json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+        address,
+    );
+    assert_eq!(handle.join().unwrap().len(), 60);
+    let domain = &observations[0];
+    assert_eq!(domain.table.as_ref().unwrap().rows.len(), 60);
+    assert_eq!(
+        (domain.state, domain.findings.clone()),
+        (
+            State::Partial,
+            vec![
+                "Stalwart names 61 records for this domain; only the first 60 are asked."
+                    .to_owned()
+            ]
+        )
+    );
+    assert_eq!(mx_hosts(&expected(&zone_file)), ["mail.example.test"]);
 }

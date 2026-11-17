@@ -659,6 +659,12 @@ Notable changes for operators and users. The format follows
   verification tokens, was "missing", a warning, and where the resolver
   changes the order of the records, the card changed from run to run. Every
   record of an answer is read now.
+- **The DNS check says when it leaves a domain's records out.** It asks the
+  first 60 records Stalwart names for a domain and left the others out
+  without a word, so the card was OK for records it never asked, and an MX
+  record after the 60th gave the reputation and TLS checks no mail host.
+  The card now says how many records Stalwart names and is Partial where it
+  would be OK, and every MX record names a mail host.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not
