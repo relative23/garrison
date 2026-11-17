@@ -36,7 +36,7 @@ const IMAGES: [(&str, &str); 1] = [(
 /// `.github/workflows/ci.yml` runs it while it is none of [`IMAGES`], so the
 /// pull request shows whether Garrison still fits before the release becomes
 /// a supported one (CONTRIBUTING.md, "Supporting a new Stalwart release").
-const NEWEST: &str = "stalwartlabs/stalwart:v1.1.0@sha256:f772aa6ef8cd8018969fa491640f1436b0270eb14e2c219b5f37f1a77020837e";
+const NEWEST: &str = "stalwartlabs/stalwart:v1.1.1@sha256:5ebdf474b237161742fe4309396af4ae8797c938e8e6eb7e2d4837332c4f9851";
 const NAME: &str = "garrison-lab-stalwart";
 const PORT: u16 = 18180;
 const RECOVERY: &str = "contract-recovery:Contract-Recovery-2026";
