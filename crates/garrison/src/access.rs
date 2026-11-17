@@ -4,36 +4,28 @@
 //! keeps the previous file as a timestamped backup, so a mistake can be undone
 //! with `cp`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use clap::Subcommand;
-use garrison_authz::policy::{Policy, Profile, is_profile_name, parse_policy};
+use garrison_authz::policy::{Policy, is_profile_name, parse_policy};
 use garrison_authz::{Authority, Error, SUPPORTED};
 use garrison_core::config::Config;
 use garrison_core::files::atomic_write;
-use garrison_core::modules::ModuleId;
 use garrison_core::time;
 use garrison_stalwart::jmap::{JmapClient, Object};
 use garrison_stalwart::oidc::is_subject;
-use garrison_stalwart::permissions::{
-    AUTHENTICATION_PROPERTIES, Account, AccountRoles, Authentication, Permissions, ROLE_PROPERTIES,
-    Role, RoleIds, evaluate, native_rights,
-};
+use garrison_stalwart::permissions::native_rights;
 use serde_json::{Value, json};
 
 use crate::{complain, credentials, say};
 
-const VIEWER_PERMISSIONS: [&str; 3] = ["authenticate", "sysAccountGet", "sysDomainGet"];
-const ADMIN_PERMISSIONS: [&str; 5] = [
-    "authenticate",
-    "sysAccountUpdate",
-    "sysDomainUpdate",
-    "sysRoleUpdate",
-    "sysActionCreate",
-];
+mod defaults;
+
+use defaults::{administrator_roles, default_profiles};
+
 const POLICY_GROUP: &str = "garrison-broker";
 
 fn profile_name(value: &str) -> Result<String, String> {
@@ -80,57 +72,6 @@ pub(crate) enum Command {
         /// The OIDC subject, for a local account its numeric account ID.
         subject: String,
     },
-}
-
-fn strings(items: &[&str]) -> BTreeSet<String> {
-    items.iter().map(ToString::to_string).collect()
-}
-
-fn default_profiles(config: &Config) -> BTreeMap<String, Profile> {
-    let all: BTreeSet<ModuleId> = ModuleId::all().collect();
-    let mut viewer_modules = all.clone();
-    viewer_modules.remove(&ModuleId::Actions);
-    let every: BTreeSet<String> = config
-        .broker
-        .actions
-        .iter()
-        .map(|action| action.id.clone())
-        .collect();
-    let operator: BTreeSet<String> = config
-        .broker
-        .actions
-        .iter()
-        .filter(|action| action.operator)
-        .map(|action| action.id.clone())
-        .collect();
-    let mut operator_rights = strings(&VIEWER_PERMISSIONS);
-    operator_rights.insert("sysActionCreate".into());
-    BTreeMap::from([
-        (
-            "viewer".to_owned(),
-            Profile {
-                modules: viewer_modules,
-                actions: BTreeSet::new(),
-                required: strings(&VIEWER_PERMISSIONS),
-            },
-        ),
-        (
-            "operator".to_owned(),
-            Profile {
-                modules: all.clone(),
-                actions: operator,
-                required: operator_rights,
-            },
-        ),
-        (
-            "administrator".to_owned(),
-            Profile {
-                modules: all,
-                actions: every,
-                required: strings(&ADMIN_PERMISSIONS),
-            },
-        ),
-    ])
 }
 
 /// JSON with two-space indentation and a final newline.
@@ -227,64 +168,6 @@ fn native(config: &Config) -> Result<JmapClient, String> {
         .native_client()
         .map_err(said)?
         .with_timeout(std::time::Duration::from_secs(10)))
-}
-
-/// Roles that are default *administrator* roles and hold all admin rights.
-fn administrator_roles(config: &Config) -> Result<BTreeMap<String, String>, String> {
-    let client = native(config)?;
-    let authentication: Authentication = client
-        .get(
-            "Authentication",
-            Some(&["singleton"]),
-            &AUTHENTICATION_PROPERTIES,
-        )
-        .map_err(said)?
-        .into_iter()
-        .next()
-        .ok_or("Stalwart returned no object")?;
-    let admin = &authentication.default_admin_role_ids.0;
-    let user = &authentication.default_user_role_ids.0;
-    let mut properties: Vec<&str> = ROLE_PROPERTIES.to_vec();
-    properties.push("description");
-    // Every role of the server, also those of tenants and of other software.
-    // One this release cannot read is left out, and an administrator role
-    // that inherits from it is then not evaluated as one.
-    let (mut roles, mut descriptions) = (BTreeMap::new(), BTreeMap::new());
-    for object in client
-        .get::<Object>("Role", None, &properties)
-        .map_err(said)?
-    {
-        let description = object.get("description").and_then(Value::as_str);
-        let description = description.map(str::to_owned);
-        if let Ok(role) = serde_json::from_value::<Role>(Value::Object(object)) {
-            descriptions.insert(role.id.clone(), description);
-            roles.insert(role.id.clone(), role);
-        }
-    }
-    let mut result = BTreeMap::new();
-    for identifier in admin.difference(user) {
-        // A user who has this role and nothing else.
-        let account = Account {
-            kind: "User".to_owned(),
-            roles: AccountRoles::Custom {
-                role_ids: RoleIds(BTreeSet::from([identifier.clone()])),
-            },
-            permissions: Permissions::Inherit {},
-            member_tenant_id: None,
-        };
-        let rights = evaluate(&account, &roles, &authentication).map_err(said)?;
-        if ADMIN_PERMISSIONS
-            .iter()
-            .all(|name| rights.permissions.contains(*name))
-        {
-            let description = descriptions.get(identifier).cloned().flatten();
-            result.insert(
-                identifier.clone(),
-                description.unwrap_or_else(|| identifier.clone()),
-            );
-        }
-    }
-    Ok(result)
 }
 
 fn init(config: &Config, force: bool) -> Result<u8, String> {
