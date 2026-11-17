@@ -478,7 +478,7 @@ mod concurrency_tests;
 #[cfg(test)]
 mod failure_tests;
 #[cfg(test)]
-mod limit_tests;
+pub(crate) mod limit_tests;
 #[cfg(test)]
 mod outage_tests;
 #[cfg(test)]

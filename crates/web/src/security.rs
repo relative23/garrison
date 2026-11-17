@@ -201,12 +201,18 @@ impl Gate {
     /// it, and its client names why in the journal. A broker that failed
     /// inside is an internal error here too, so that the reference the page
     /// shows finds a line in this journal, while the broker's names the
-    /// cause.
+    /// cause; so is a request it could not read (400), where the web
+    /// service made the request alone: only a submission carries what the
+    /// user typed.
     pub fn ask(&self, request: &Request) -> ApiResult<Value> {
+        let ours = !matches!(request, Request::Submit { .. });
         match self.broker.call(request) {
             Ok(answer) => Ok(answer),
             Err(CallError::Unavailable(_)) => Err(ApiError::new(503, UNCHECKED)),
-            Err(CallError::Refused(error)) if error.status >= 500 && error.status != 503 => {
+            Err(CallError::Refused(error))
+                if (error.status >= 500 && error.status != 503)
+                    || (error.status == 400 && ours) =>
+            {
                 Err(ApiError::internal(&format!(
                     "the broker answered HTTP {}: {}",
                     error.status, error.message

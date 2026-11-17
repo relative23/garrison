@@ -83,6 +83,17 @@ pub(crate) fn unstated(directory: &Path) -> Arc<dyn Broker> {
     ))
 }
 
+/// A broker that answers each request that it cannot read it, as a broker of
+/// another release would.
+pub(crate) fn unreading(directory: &Path) -> Arc<dyn Broker> {
+    let line = b"{\"ok\": false, \"status\": 400, \"error\": \"Unknown broker operation\"}\n";
+    Arc::new(listening(
+        directory,
+        "unreading.sock",
+        Listening::Answers(line),
+    ))
+}
+
 /// A client whose requests are larger than the socket takes while the broker
 /// reads none, so that a request cannot be sent within the client's time.
 struct Oversized(BrokerClient);

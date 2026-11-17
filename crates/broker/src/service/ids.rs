@@ -26,7 +26,10 @@ pub fn is_job_id(text: &str) -> bool {
 /// A random version-4 UUID as 32 lowercase hex digits without dashes.
 pub(super) fn job_id() -> Result<String, BrokerError> {
     let mut bytes = [0_u8; 16];
-    getrandom::fill(&mut bytes).map_err(|_| refuse(500, "Internal broker error"))?;
+    getrandom::fill(&mut bytes).map_err(|error| {
+        log::error!("A maintenance job could not get an ID: no random numbers ({error})");
+        refuse(500, "Internal broker error")
+    })?;
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     Ok(hex::encode(&bytes))

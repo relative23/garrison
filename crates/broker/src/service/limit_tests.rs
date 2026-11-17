@@ -43,7 +43,7 @@ static JOURNAL: Journal = Journal(Mutex::new(Vec::new()));
 static KEPT: Once = Once::new();
 
 /// From now on the journal's lines are kept for the tests.
-pub(super) fn kept() {
+pub(crate) fn kept() {
     KEPT.call_once(|| {
         log::set_logger(&JOURNAL).unwrap();
         log::set_max_level(log::LevelFilter::Info);
@@ -51,7 +51,7 @@ pub(super) fn kept() {
 }
 
 /// The kept lines that begin with `start` and name `whose` budget.
-pub(super) fn kept_lines(start: &str, whose: &str) -> Vec<String> {
+pub(crate) fn kept_lines(start: &str, whose: &str) -> Vec<String> {
     JOURNAL
         .0
         .lock()

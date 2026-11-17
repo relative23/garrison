@@ -15,10 +15,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nix::sys::socket::getsockopt;
 use nix::sys::socket::sockopt::PeerCredentials;
@@ -26,6 +26,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::protocol::{BrokerError, MAX_REQUEST, Request, decode, read_line, refuse};
+use crate::quiet::Quiet;
 use crate::service::Broker;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -76,8 +77,28 @@ fn peer_allowed(stream: &UnixStream, allowed: &BTreeSet<u32>) -> bool {
         .is_ok_and(|credentials| allowed.contains(&credentials.uid()))
 }
 
+/// Say that the broker could not read a request, at once and then at most
+/// once a minute, with how many more there were. Only an admitted peer
+/// sends one, and the web service sends none such of this release: one of
+/// another release, or a client of another program, would.
+fn unreadable(said: &Mutex<Quiet>, error: &BrokerError) {
+    let more = said.lock().unwrap_or_else(PoisonError::into_inner).due(
+        &error.message,
+        "for",
+        Instant::now(),
+    );
+    if let Some(more) = more {
+        log::warn!(
+            "The broker could not read a request ({}): its peer sent what is no request of \
+             this release's protocol, as a web service of another release would; restart \
+             garrison-web and garrison-broker, so that both run this release{more}",
+            error.message
+        );
+    }
+}
+
 /// Serve one connection whose peer was admitted: answer one request.
-fn handle(broker: &Arc<Broker>, mut stream: UnixStream) {
+fn handle(broker: &Arc<Broker>, mut stream: UnixStream, said: &Mutex<Quiet>) {
     if stream.set_read_timeout(Some(TIMEOUT)).is_err()
         || stream.set_write_timeout(Some(TIMEOUT)).is_err()
     {
@@ -91,7 +112,10 @@ fn handle(broker: &Arc<Broker>, mut stream: UnixStream) {
         Err(_) => return, // The client went away.
     };
     let answer = match request {
-        Err(error) => failure(&error),
+        Err(error) => {
+            unreadable(said, &error);
+            failure(&error)
+        }
         Ok(request) => match catch_unwind(AssertUnwindSafe(|| dispatch(broker, &request))) {
             Ok(Ok(result)) => json!({"ok": true, "result": result}),
             Ok(Err(error)) => failure(&error),
@@ -156,6 +180,7 @@ fn serve(
     pause: &dyn Fn(Duration),
 ) {
     let taken = Arc::new(AtomicUsize::new(0));
+    let said = Arc::new(Mutex::new(Quiet::new()));
     let mut wait = FIRST_PAUSE;
     let (mut failing, mut full) = (false, false);
     let mut strangers: u64 = 0;
@@ -197,12 +222,12 @@ fn serve(
             continue;
         };
         full = false;
-        let broker = Arc::clone(broker);
+        let (broker, said) = (Arc::clone(broker), Arc::clone(&said));
         let started = thread::Builder::new()
             .name("broker-request".into())
             .spawn(move || {
                 let _place = place;
-                handle(&broker, stream);
+                handle(&broker, stream, &said);
             });
         if let Err(error) = started {
             log::error!("Could not handle a broker connection: {error}");
@@ -240,6 +265,7 @@ mod tests {
     use serde_json::Value;
 
     use crate::protocol::MAX_ANSWER;
+    use crate::service::limit_tests::{kept, kept_lines};
     use crate::service::tests::make;
 
     const CATALOG: &[u8] = b"{\"op\": \"catalog\", \"token\": \"admin-token\"}\n";
@@ -328,12 +354,37 @@ mod tests {
         let (mut client, server) = UnixStream::pair().unwrap();
         client.write_all(&vec![b'x'; MAX_REQUEST + 1]).unwrap();
         client.shutdown(std::net::Shutdown::Write).unwrap();
-        handle(&broker, server);
+        handle(&broker, server, &Mutex::new(Quiet::new()));
         let answer: Value = serde_json::from_slice(&read_line(&mut client, 4096).unwrap()).unwrap();
         assert_eq!(
             answer,
             json!({"ok": false, "status": 400, "error": "Invalid broker request"})
         );
+    }
+
+    /// A request the broker cannot read gets its answer, and the broker's
+    /// journal says so at once, but once a minute however many come.
+    #[test]
+    fn a_request_the_broker_cannot_read_is_said_in_its_journal() {
+        kept();
+        let broker = make(false).broker;
+        let said = Mutex::new(Quiet::new());
+
+        for _ in 0..3 {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            client
+                .write_all(b"{\"op\": \"shell\", \"token\": \"admin-token\"}\n")
+                .unwrap();
+            handle(&broker, server, &said);
+            let line = read_line(&mut client, 4096).unwrap();
+            let answer: Value = serde_json::from_slice(&line).unwrap();
+            assert_eq!(
+                answer,
+                json!({"ok": false, "status": 400, "error": "Unknown broker operation"})
+            );
+        }
+        let start = "WARN The broker could not read a request (Unknown broker operation)";
+        assert_eq!(kept_lines(start, "").len(), 1);
     }
 
     #[test]

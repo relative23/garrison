@@ -1187,6 +1187,14 @@ Notable changes for operators and users. The format follows
   checked, and nobody is signed out for it. An account removed while its
   user is signed in gets 403 from UserInfo first (measured on Stalwart
   1.1.0), so its session keeps that answer until its time ends.
+- **A request the broker cannot read is named in both journals.** The
+  broker answered such a request 400 without a line, and the web service
+  passed that 400 on, also to pages that know no such answer, such as the
+  status. The broker now writes "The broker could not read a request (…)"
+  at once and then at most once a minute, and the web service answers it
+  as an internal error with a reference, where it made the request alone;
+  a submission keeps the broker's 400 for what the user typed. A job that
+  gets no ID for want of random numbers has an error line too.
 - **A broker that gives no answer is worded alike everywhere, and the
   journal says why.** Where the broker gave no answer (stopped, its 16
   places taken, its socket gone), pages said "Authorization is temporarily

@@ -27,7 +27,7 @@ use garrison_testing::{credentials, policy_document, write_policy, write_private
 use garrison_web::security::Broker;
 use serde_json::{Value, json as value};
 use support::brokers::{
-    another, closing, failing, garbled, gone, late, ungranting, unsent, unstated,
+    another, closing, failing, garbled, gone, late, ungranting, unreading, unsent, unstated,
 };
 use support::rights::{
     Expected, at_stalwart, at_the_broker, ended, granting, identity, journal, kept, listed,
@@ -440,6 +440,12 @@ fn at_the_broker_cases() -> Vec<AtTheBroker> {
                 "The maintenance broker returned a malformed answer",
             )),
             "its answer could not be read",
+        ),
+        AtTheBroker(
+            "a request it cannot read",
+            unreading,
+            refused(400, "Unknown broker operation"),
+            "",
         ),
         AtTheBroker(
             "a refusal without a status",

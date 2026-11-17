@@ -14,7 +14,7 @@ use garrison_core::config::Database;
 use garrison_core::time;
 use garrison_ingest::store::{EventStore, Limits};
 use serde_json::{Value, json};
-use support::{ORIGIN, setup_with_cache, write_status};
+use support::{ORIGIN, refused, setup_with_cache, write_status};
 
 /// A route of the API with a value for each of its parameters.
 fn filled(template: &str) -> String {
@@ -37,6 +37,36 @@ fn body(template: &str) -> Option<Value> {
         })),
         _ => None,
     }
+}
+
+/// A request the broker cannot read (400) is the web service's own fault
+/// where the web service made the request alone: an internal error with a
+/// line under its reference. Only a submission carries what the user typed,
+/// such as a confirmation phrase that does not match, and the broker's 400
+/// reaches the user with its words.
+#[tokio::test]
+async fn a_broker_400_is_the_users_only_for_a_submission() {
+    let mut setup = setup_with_cache(Duration::from_secs(60));
+    let csrf = setup.client.sign_in("code-admin").await;
+    let phrase = "The confirmation phrase does not match";
+    setup.broker.set("admin-token", refused(400, phrase));
+    let headers = [("origin", ORIGIN), ("x-csrf-token", csrf.as_str())];
+    let submitted = setup
+        .client
+        .send(Method::POST, "/api/actions", &headers, body("/api/actions"))
+        .await;
+    assert_eq!(
+        (
+            submitted.status.as_u16(),
+            submitted.json()["detail"].clone()
+        ),
+        (400, json!(phrase))
+    );
+    let listed = setup.client.get("/api/actions").await;
+    assert_eq!(
+        (listed.status.as_u16(), listed.json()["detail"].clone()),
+        (500, json!("Internal error"))
+    );
 }
 
 /// A broker that gives no answer is one condition, worded alike whichever

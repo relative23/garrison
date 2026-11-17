@@ -18,6 +18,13 @@ pub(crate) struct Quiet {
 }
 
 impl Quiet {
+    pub(crate) const fn new() -> Self {
+        Quiet {
+            said: None,
+            since: BTreeMap::new(),
+        }
+    }
+
     /// Whether a line for `what` is due at `now`: then the end of that line,
     /// which says how many more came since the last one, each by what it
     /// was after `word`; `None` while the minute is not over, which counts
