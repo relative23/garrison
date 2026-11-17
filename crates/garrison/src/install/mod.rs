@@ -26,6 +26,8 @@ mod rollback;
 mod selinux;
 mod services;
 mod settle;
+#[cfg(test)]
+mod stand_in;
 mod state;
 mod system;
 mod toml_text;

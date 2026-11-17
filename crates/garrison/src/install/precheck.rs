@@ -168,6 +168,7 @@ pub(super) fn copies_fit(source: &Path, config: &Config, besides: &[(&Path, u64)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::install::stand_in::release;
 
     #[test]
     fn a_policy_goes_back_only_where_a_file_of_its_own_can_be() {
@@ -194,16 +195,6 @@ mod tests {
                 .unwrap_err()
                 .contains("does not exist")
         );
-    }
-
-    /// A release whose check-config runs `script` with its arguments.
-    fn release(script: &str) -> tempfile::TempDir {
-        let directory = tempfile::tempdir().unwrap();
-        fs::create_dir(directory.path().join("bin")).unwrap();
-        let binary = directory.path().join("bin/garrison");
-        fs::write(&binary, format!("#!/bin/sh\n{script}\n")).unwrap();
-        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
-        directory
     }
 
     /// Exit status 1 is the policy's alone, in every release: it does not
