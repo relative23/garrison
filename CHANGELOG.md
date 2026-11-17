@@ -909,7 +909,12 @@ Notable changes for operators and users. The format follows
   200th row's, so the card warned that the receipt was old while new runs
   came in, and nothing said that rows were left out. Every row is judged
   now; the table shows the last 200, and the card says how many rows the
-  receipt lists where there are more.
+  receipt lists where there are more. Where `rows` names a place that
+  holds no list, as where a job that failed early wrote no results, the
+  card was in order with no row judged; it is Unknown now and says so. A
+  row that is no JSON object was dropped without a word, so a failure
+  written as a text passed; the card now says how many rows were not read
+  and is Partial where it would be in order.
 - **A receipt's time is the same instant for every viewer.** A field or
   column of a receipt with `format = "datetime"` went out as the job wrote
   it, and a time written without its offset, such as `2026-11-17T03:00:00`,
@@ -932,7 +937,9 @@ Notable changes for operators and users. The format follows
   its integrity is not known, and the card is Partial beside a verified
   bundle and Unknown where none could be checked; a mismatch stays a
   failure and is named first. A registry that cannot be read is named with
-  why, where the card was Unknown without a word.
+  why, where the card was Unknown without a word. An entry without `plugins`,
+  or with an empty list, checked no bundle and was in order; it is Unknown
+  now and says that no plugin is named.
 - **The Maintenance page keeps following a job, and keeps its dialog.** One
   failed look at a started job ended the following for good, and the notice
   stayed at "Queued"; it now looks again, later each time, and says

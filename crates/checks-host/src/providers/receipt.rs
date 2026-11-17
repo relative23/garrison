@@ -143,20 +143,52 @@ impl Receipt {
         })
     }
 
-    /// The rows of a receipt that has them: every one, however many, as the
-    /// file is at most 1 MiB.
-    fn items(&self, document: &Value) -> Option<Vec<Value>> {
+    /// The place that `rows` names in the document, for a receipt with rows.
+    fn place<'a>(&self, document: &'a Value) -> Option<&'a Value> {
         let mut items = document;
         for part in self.rows.as_ref()? {
             items = items.get(part).unwrap_or(&Value::Null);
         }
-        let list = items.as_array()?;
+        Some(items)
+    }
+
+    /// The rows of a receipt that has them: every one, however many, as the
+    /// file is at most 1 MiB.
+    fn items(&self, document: &Value) -> Option<Vec<Value>> {
+        let list = self.place(document)?.as_array()?;
         Some(
             list.iter()
                 .filter(|item| item.is_object())
                 .cloned()
                 .collect(),
         )
+    }
+
+    /// What a receipt with rows says where they cannot all be read, and the
+    /// state it may have at most: Unknown where `rows` names no list, as
+    /// where a job that failed early wrote none, and Partial where rows are
+    /// no objects, which are not read.
+    fn unread_rows(&self, document: &Value) -> Option<(State, String)> {
+        let Some(list) = self.place(document)?.as_array() else {
+            let why = if self.rows.as_ref().is_some_and(Vec::is_empty) {
+                "The receipt is no list of rows."
+            } else {
+                "The receipt holds no list of rows where `rows` names one."
+            };
+            return Some((State::Unknown, why.to_owned()));
+        };
+        let (others, total) = (
+            list.iter().filter(|item| !item.is_object()).count(),
+            list.len(),
+        );
+        let finding = match others {
+            0 => return None,
+            1 => format!("1 of the receipt's {total} rows is no object and was not read."),
+            _ => {
+                format!("{others} of the receipt's {total} rows are no objects and were not read.")
+            }
+        };
+        Some((State::Partial, finding))
     }
 
     fn reported(&self, document: &Value, items: Option<&[Value]>) -> Option<Written> {
@@ -352,6 +384,13 @@ impl Provider for Receipt {
         if rows_fail {
             state = State::Failed;
             findings.push("At least one recorded result is not a success.".to_owned());
+        }
+        // Rows that cannot be read are no rows in order.
+        if let Some((at_most, finding)) = self.unread_rows(&document) {
+            if state == State::Ok {
+                state = at_most;
+            }
+            findings.push(finding);
         }
         if let Some(items) = items.as_ref().filter(|items| items.len() > MAX_ROWS) {
             findings.push(format!(

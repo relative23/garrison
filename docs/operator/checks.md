@@ -47,7 +47,7 @@ observation the checks report is in [observation ids](observations.md).
 | `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
 | `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning |
 | `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30), `verify_days` (0: not expected), `restore_days` (0), `path`, `modules` | What the backup tool reported of its repository; see below |
-| `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity: a bundle (`plugins/<id>.js`) that does not match the SHA-256 in `plugins/registry.json` is a failure. A plugin whose bundle cannot be checked, as one the registry does not list or lists twice, gives no hash for, or whose bundle is missing, a link, unreadable or larger than 2 MiB, is named with why; the card is then Partial, or Unknown where no bundle could be checked |
+| `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity: a bundle (`plugins/<id>.js`) that does not match the SHA-256 in `plugins/registry.json` is a failure. A plugin whose bundle cannot be checked, as one the registry does not list or lists twice, gives no hash for, or whose bundle is missing, a link, unreadable or larger than 2 MiB, is named with why; the card is then Partial, or Unknown where no bundle could be checked, as without `plugins`, which name the plugins to check |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
 | `version-command` | `component`, `command`, `pattern`, `modules` | Installed version from a command; it runs in the collector's sandbox, so a program that compiles code at run time (a JIT) fails there |
 | `reputation` | `hosts` (default: the mail hosts Stalwart names), `max_domains` (20, at most 100), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
@@ -446,7 +446,10 @@ makes its table, `ok_rows` is what every row must meet, and for a list
 `row_date` names each row's date, the newest of which is the receipt's. Every
 row is judged, however many; the table shows the last 200, where a job that
 appends a row for each run puts the newest, and the card says how many rows
-the receipt lists where there are more.
+the receipt lists where there are more. Where `rows` names no list, as where a
+job that failed early wrote none, the card is Unknown and says so; a row that
+is no JSON object is not read, and the card says how many and is Partial
+where it would be in order.
 
 Keys can be nested: `key = ["components", "stalwartlabs/stalwart", "installed"]`.
 Formats: `text`, `number`, `bytes`, `datetime`, `duration` (seconds), `boolean`, `url`.

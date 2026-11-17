@@ -298,12 +298,13 @@ impl Provider for Bulwark {
             ]);
         }
         // An integrity that is not known is no integrity in order: the card
-        // is Partial beside a bundle that was verified, Unknown without one.
+        // is Partial beside a bundle that was verified, Unknown without one,
+        // as where no plugin is named.
         let state = match &registry {
             Err(_) => State::Unknown,
             Ok(_) if !mismatched.is_empty() => State::Failed,
-            Ok(_) if unknown.is_empty() => State::Ok,
             Ok(_) if verified == 0 => State::Unknown,
+            Ok(_) if unknown.is_empty() => State::Ok,
             Ok(_) => State::Partial,
         };
         let mut findings: Vec<String> = registry
@@ -311,6 +312,9 @@ impl Provider for Bulwark {
             .map(|why| format!("No bundle's integrity is known: {why}."))
             .into_iter()
             .collect();
+        if self.plugins.is_empty() {
+            findings.push("No plugin is named in `plugins`, so no bundle is checked.".to_owned());
+        }
         // A mismatch first, as the notifications carry the first finding.
         findings.extend(mismatched);
         findings.extend(unknown);

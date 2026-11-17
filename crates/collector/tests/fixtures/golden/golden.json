@@ -973,6 +973,7 @@
      },
      "findings": [
       "At least one recorded result is not a success.",
+      "1 of the receipt's 5 rows is no object and was not read.",
       "No age limit is set (max_age_hours): this receipt stays in order however old it is."
      ],
      "value": {},
