@@ -1160,6 +1160,10 @@ Notable changes for operators and users. The format follows
   that is not its own, and failed a working installation with the advice to
   include `garrison.conf`. Every request of the client names such a port
   now, the sign-in check's and the notification channels' among them.
+- **`garrison doctor` no longer takes another application's answer at the
+  issuer for Stalwart refusing Garrison's sign-in client.** It names what
+  answered and says that the issuer's proxy must pass `/api/auth/client` and
+  `/api/auth` to Stalwart.
 
 ## [0.1.2] - 2026-11-13
 

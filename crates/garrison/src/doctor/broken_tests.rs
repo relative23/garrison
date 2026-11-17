@@ -70,7 +70,40 @@ fn origin_with_a_port() -> Broken {
     }
 }
 
-const HOSTS: [fn() -> Broken; 2] = [events_database_is_a_folder, origin_with_a_port];
+/// The issuer's name answers Garrison's question about its sign-in client
+/// with a web page, as a webmail on the same name may: that is no answer of
+/// Stalwart's, and setup, which registers the client, mends nothing there.
+fn issuer_answers_with_a_web_page() -> Broken {
+    let page = "<html><body>Welcome to our webmail</body></html>";
+    let server = serve_until(
+        vec![format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n{page}",
+            page.len()
+        )],
+        2036,
+        1,
+        1,
+    );
+    let roots = Arc::new(server.roots.clone());
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    config.deployment.issuer.clone_from(&server.url);
+    let found = vec![public::sign_in(&config, &roots)];
+    server.finish();
+    Broken {
+        host: "an issuer whose answer about the sign-in client is a web page",
+        found,
+        said: "sign-in client".into(),
+        fix: Some("/api/auth/client".into()),
+    }
+}
+
+const HOSTS: [fn() -> Broken; 3] = [
+    events_database_is_a_folder,
+    origin_with_a_port,
+    issuer_answers_with_a_web_page,
+];
 
 /// What is wrong with what doctor said on `broken`, if anything.
 fn fault(broken: &Broken) -> Option<String> {
