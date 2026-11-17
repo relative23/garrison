@@ -1,7 +1,8 @@
-//! A resolver's answer, as the DNS provider reads it: no input panics, what
-//! is read as a record is text of bounded length, and a name read from it is
-//! one that a question can carry, 253 octets at the most as written, and
-//! never empty: the root reads as `.`.
+//! A resolver's answer, as the DNS provider reads it: no input panics, no
+//! more records are read than the message holds, what is read as a record is
+//! text of bounded length, and a name read from it is one that a question
+//! can carry, 253 octets at the most as written, and never empty: the root
+//! reads as `.`.
 #![no_main]
 
 use garrison_collector::dns::{Answer, Kind, read};
@@ -24,7 +25,8 @@ fuzz_target!(|data: &[u8]| {
         Kind::Tlsa,
     ] {
         if let Ok(Some(Answer::Records(records))) = read(data, id, kind) {
-            assert!(records.len() <= 64);
+            // Each record takes 11 octets at least, after the header's 12.
+            assert!(12 + 11 * records.len() <= data.len(), "{kind:?}");
             for record in records {
                 assert!(record.len() <= 4 * data.len() + 64, "{kind:?}");
                 // A name comes last in these records, and holds no space.

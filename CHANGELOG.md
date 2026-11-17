@@ -653,6 +653,12 @@ Notable changes for operators and users. The format follows
   most, and left the others out without a word: the card was OK for what
   it had not probed. It now says how many endpoints there are and is
   Partial where it would be OK.
+- **A resolver's answer is read to its last record.** The DNS client read
+  the first 64 records of an answer and left the others without a word, so
+  an SPF policy that came after 64 other texts of a domain, such as
+  verification tokens, was "missing", a warning, and where the resolver
+  changes the order of the records, the card changed from run to run. Every
+  record of an answer is read now.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not

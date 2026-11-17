@@ -20,7 +20,6 @@ use std::time::{Duration, Instant};
 const TIMEOUT: Duration = Duration::from_secs(3);
 /// A name may follow this many pointers; more is a loop.
 const MOST_POINTERS: usize = 16;
-const MOST_ANSWERS: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -334,7 +333,11 @@ pub fn read(message: &[u8], id: u16, kind: Kind) -> Result<Option<Answer>, Error
         position = name_at(message, position).ok_or(Error::Malformed)?.1 + 4;
     }
     let mut records = Vec::new();
-    for _ in 0..answers.min(MOST_ANSWERS) {
+    // Every record is read: one that is left out could be the one asked
+    // for. Each takes at least 11 octets of the message, which is at most
+    // 64 KiB, so its own length bounds the work; a count beyond what it
+    // holds ends at its end as malformed.
+    for _ in 0..answers {
         position = name_at(message, position).ok_or(Error::Malformed)?.1;
         let found = number(message, position).ok_or(Error::Malformed)?;
         let length = usize::from(number(message, position + 8).ok_or(Error::Malformed)?);

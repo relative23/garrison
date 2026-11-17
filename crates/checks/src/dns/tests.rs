@@ -105,6 +105,23 @@ fn records_are_read_as_a_zone_file_writes_them() {
     );
 }
 
+/// An answer holds as many records as its length allows, and each is read:
+/// an apex with many TXT records, such as verification tokens beside its SPF
+/// policy, is read to its last record, so that a policy after the others is
+/// found as one before them is.
+#[test]
+fn every_record_of_an_answer_is_read() {
+    let mut records: Vec<(u16, Vec<u8>)> = (0..70)
+        .map(|number| (16, txt(&[&format!("token-{number}")])))
+        .collect();
+    records.push((16, txt(&["v=spf1 mx -all"])));
+    let Ok(Some(Answer::Records(read))) = asked(Kind::Txt, FINE, &records) else {
+        panic!("no records");
+    };
+    assert_eq!(read.len(), 71);
+    assert_eq!(read.last().map(String::as_str), Some("v=spf1 mx -all"));
+}
+
 #[test]
 fn what_a_resolver_says_instead_of_records() {
     assert_eq!(
