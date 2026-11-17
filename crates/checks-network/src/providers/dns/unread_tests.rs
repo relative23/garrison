@@ -1,8 +1,9 @@
 //! Where Stalwart did not give the collector's key its domains or its
 //! listeners, the checks that read them say why, each kind of failure in
 //! words of its own, and give the setup's advice only where it helps: for a
-//! key Stalwart refused, not for a Stalwart that did not answer or refused
-//! the key for its rate limit, which pass by themselves, nor for an answer
+//! key Stalwart refused, not for a Stalwart that could not be reached or
+//! failed on its side, which the client's words then name, or refused the
+//! key for its rate limit, which pass by themselves, nor for an answer
 //! this release does not read, which they name, pointing to the supported
 //! Stalwart releases.
 
@@ -15,7 +16,8 @@ use super::*;
 use crate::providers::{Reputation, Tls};
 use crate::testing::{Canned, config, table};
 
-/// What Stalwart answers a request it cannot or will not take: an outage, its
+/// What Stalwart answers a request it cannot or will not take: an outage,
+/// an error on its side (HTTP 5xx or 408, the JMAP error serverFail), its
 /// rate limit, a key it refuses, or a method it refuses the key; and answers
 /// this release does not read: no JSON, a status it does not expect, more
 /// than it reads, an error it does not expect for the method, such as one
@@ -30,6 +32,7 @@ fn failures() -> Vec<(&'static str, Option<String>)> {
         // Nothing listens at the address the configuration names.
         ("closed", None),
         ("503", Some(answer(503, ""))),
+        ("408", Some(answer(408, ""))),
         ("serverFail", method("serverFail")),
         ("429", Some(answer(429, ""))),
         ("403", Some(answer(403, ""))),
@@ -52,7 +55,11 @@ fn failures() -> Vec<(&'static str, Option<String>)> {
 /// words for what Stalwart was asked for, `what`; `besides` is what else
 /// mends it, after the setup's advice or the supported releases.
 fn said(framed: &str, what: &str, besides: &str) -> Vec<(&'static str, Vec<String>)> {
-    let unanswered = format!("Stalwart did not answer the collector's request for its {what}");
+    // Stalwart could not be reached or failed on its side: the client's
+    // words say how.
+    let unanswered = |how: &str| {
+        format!("Stalwart did not complete the collector's request for its {what} ({how})")
+    };
     let limited = format!(
         "Stalwart refused the collector's key for its rate limit (HTTP 429), so its {what} \
          could not be read"
@@ -74,9 +81,10 @@ fn said(framed: &str, what: &str, besides: &str) -> Vec<(&'static str, Vec<Strin
         "x:Domain/get"
     };
     let kinds = [
-        unanswered.clone(),
-        unanswered.clone(),
-        unanswered,
+        unanswered("Stalwart is unavailable"),
+        unanswered("Stalwart answered HTTP 503"),
+        unanswered("Stalwart answered HTTP 408"),
+        unanswered("Stalwart could not complete the request"),
         limited,
         refused.clone(),
         refused,
