@@ -393,13 +393,9 @@ fn a_check_that_uses_up_the_runs_time_costs_only_the_checks_after_it() {
         late.findings,
         ["Not run: the checks before it used up the time of this collection run."]
     );
-    assert_eq!(
-        snapshot.provider_errors,
-        ["late", "later"].map(|provider| ProviderError {
-            provider: provider.into(),
-            error: "not run".into()
-        })
-    );
+    // Not run is no failure: the Services page lists the providers that
+    // failed.
+    assert_eq!(snapshot.provider_errors, Vec::<ProviderError>::new());
     // The snapshot is stored, with what was found.
     let stored = rusqlite::Connection::open(config.database(Database::Status)).unwrap();
     assert_eq!(

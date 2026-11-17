@@ -396,13 +396,9 @@ pub fn collect_within(
     for (provider, named) in providers.iter().zip(Named::all(providers)) {
         let label = &named.label;
         // What is not begun in time is said, not waited for: the run ends
-        // with a snapshot of what was found.
+        // with a snapshot of what was found. Not run is no failure of it.
         if context.deadline.expired() {
             log::warn!("Provider {label} was not run: the run's time was used up");
-            errors.push(ProviderError {
-                provider: label.clone(),
-                error: "not run".to_owned(),
-            });
             let said = "Not run: the checks before it used up the time of this collection run.";
             observations.extend(stand_in(&context, &named, said.to_owned()));
             continue;
