@@ -14,7 +14,7 @@ use garrison_core::time;
 use garrison_testing::http::{json, serve};
 use garrison_testing::tls::serve_until;
 
-use super::{Finding, Level, files, host, policy, public};
+use super::{Finding, Level, files, host, milter, policy, public};
 
 /// A host broken in one way, and what doctor must say of it.
 struct Broken {
@@ -256,7 +256,59 @@ fn selinux_module_for_another_port() -> Broken {
     }
 }
 
-const HOSTS: [fn() -> Broken; 10] = [
+/// The macro milter moved to another port without setup: Stalwart's entry
+/// still asks the old one, where nothing answers.
+fn milter_on_another_port() -> Broken {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        garrison_milter::server::serve(
+            &listener,
+            garrison_milter::Settings {
+                max_bytes: 1024,
+                ..Default::default()
+            },
+        );
+    });
+    let old = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let stalwart = serve(vec![json(&serde_json::json!({"methodResponses": [[
+        "x:MtaMilter/get",
+        {"list": [{"id": "m", "host": "127.0.0.1", "port": old,
+            "enable": {"match": {}, "else": "true"}, "stages": {"data": true},
+            "tempFailOnError": true}]},
+        "0"
+    ]]}))]);
+    let directory = tempfile::tempdir().unwrap();
+    let text = format!(
+        "{}\n[milter]\nport = {port}\n",
+        garrison_testing::config_text(directory.path(), &stalwart.url)
+    );
+    let config = garrison_core::config::from_text(&text).unwrap();
+    let credentials = garrison_core::credentials::Credentials::new(&config.credentials_directory);
+    fs::create_dir_all(&config.credentials_directory).unwrap();
+    garrison_testing::write_private(
+        &credentials.path(&config.collector.native_key),
+        garrison_testing::NATIVE_KEY.as_bytes(),
+    );
+    garrison_testing::write_private(
+        &config.credentials_directory.join("stalwart-milter-id"),
+        b"m\n",
+    );
+    let found = milter::checks(&config, &credentials);
+    stalwart.requests();
+    Broken {
+        host: "the macro milter on another port than Stalwart's entry",
+        found,
+        said: format!("at 127.0.0.1:{old}"),
+        fix: Some("garrison stalwart setup".into()),
+    }
+}
+
+const HOSTS: [fn() -> Broken; 11] = [
     events_database_is_a_folder,
     origin_with_a_port,
     issuer_answers_with_a_web_page,
@@ -267,6 +319,7 @@ const HOSTS: [fn() -> Broken; 10] = [
     metrics_credential_as_user_and_password,
     dqs_key_of_two_words,
     selinux_module_for_another_port,
+    milter_on_another_port,
 ];
 
 /// What is wrong with what doctor said on `broken`, if anything.

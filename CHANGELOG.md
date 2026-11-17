@@ -1182,6 +1182,9 @@ Notable changes for operators and users. The format follows
 - **`garrison stalwart setup` leaves one entry for the macro filter in
   Stalwart**, also where its note of the entry is lost, and switches that
   entry on again where it was switched off.
+- **`garrison doctor` fails a macro filter entry in Stalwart that asks another
+  port than `[milter]` names**, as after a change of `port` without setup, with
+  which Stalwart defers all incoming mail.
 
 ## [0.1.2] - 2026-11-13
 

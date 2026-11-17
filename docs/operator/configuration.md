@@ -279,7 +279,8 @@ it takes the entry out of Stalwart first and stops the filter afterwards.
 Keep to that order. While Stalwart has the entry and the filter does not run,
 Stalwart defers all incoming mail (or takes it unscanned, with `"accept"`).
 For the same reason `garrison uninstall` refuses while the entry is there,
-and `garrison doctor` reports a filter that Stalwart asks in vain.
+and `garrison doctor`, which reads Stalwart's entry with the collector's API
+key, reports a filter that Stalwart asks in vain, also at an old `port`.
 
 What the filter finds: a VBA project in Word, Excel and PowerPoint files of
 the newer format (`.docm`, `.xlsm`, `.pptm`, also under another name such as
