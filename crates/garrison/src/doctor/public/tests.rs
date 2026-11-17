@@ -104,3 +104,97 @@ fn the_answer_about_the_sign_in_client_is_read_as_stalwart_gives_it() {
         }
     }
 }
+
+/// Stalwart names itself in its discovery document, as it names itself
+/// in every sign-in; doctor holds that name to `deployment.issuer` and
+/// names the setting that mends a difference, or why it could not ask.
+#[test]
+fn the_issuer_stalwart_names_itself_is_the_one_garrison_takes() {
+    use garrison_testing::http::{answer, json, serve};
+    let issuer_of = |response: String| {
+        let stalwart = serve(vec![response]);
+        let directory = tempfile::tempdir().unwrap();
+        let config = garrison_testing::config(directory.path(), &stalwart.url);
+        let found = issuer(&config);
+        stalwart.requests();
+        found
+    };
+    let same = issuer_of(json(
+        &serde_json::json!({"issuer": "https://mail.example.test"}),
+    ));
+    assert_eq!(
+        (same.level, same.what.as_str()),
+        (
+            Level::Ok,
+            "Stalwart names itself https://mail.example.test, as deployment.issuer does"
+        )
+    );
+    let other = issuer_of(json(
+        &serde_json::json!({"issuer": "https://other.example.test"}),
+    ));
+    assert_eq!(
+        (other.level, other.what.as_str()),
+        (
+            Level::Fail,
+            "Stalwart names itself https://other.example.test, but deployment.issuer is \
+             https://mail.example.test, so every sign-in fails at Garrison's callback"
+        )
+    );
+    assert_eq!(
+        other.fix.as_deref(),
+        Some(
+            "Set issuer = \"https://other.example.test\" under [deployment] and restart \
+             garrison-web, or make mail.example.test Stalwart's Default Hostname."
+        )
+    );
+    // A name garrison.toml would not keep as written: only Stalwart's side mends it.
+    let slashed = issuer_of(json(
+        &serde_json::json!({"issuer": "https://other.example.test/"}),
+    ));
+    assert_eq!(
+        slashed.fix.as_deref(),
+        Some("Make mail.example.test Stalwart's Default Hostname and reload its settings.")
+    );
+    for (response, why) in [
+        (answer(404, "{}"), "answered 404 without an issuer"),
+        (
+            json(&serde_json::json!({"issuers": []})),
+            "answered 200 without an issuer",
+        ),
+        (
+            answer(200, "<html></html>"),
+            "answered 200 without an issuer",
+        ),
+    ] {
+        let unread = issuer_of(response);
+        assert_eq!(unread.level, Level::Unknown, "{}", unread.line());
+        assert!(unread.what.contains(why), "{}", unread.what);
+        assert!(unread.what.ends_with(SUPPORTED), "{}", unread.what);
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let away = issuer(&garrison_testing::config(
+        directory.path(),
+        "http://127.0.0.1:9",
+    ));
+    assert_eq!(away.level, Level::Unknown);
+    assert!(
+        away.what.contains("Stalwart did not answer at"),
+        "{}",
+        away.what
+    );
+}
+
+#[test]
+fn an_issuer_is_kept_as_written_only_in_the_form_garrison_toml_keeps() {
+    for (text, kept) in [
+        ("https://mail.example.org", true),
+        ("https://mail.example.org:8443", true),
+        ("https://mail.example.org/", false),
+        ("https://mail.example.org:443", false),
+        ("https://Mail.example.org", false),
+        ("http://mail.example.org", false),
+        ("https://mail.example.org/realm", false),
+    ] {
+        assert_eq!(kept_as_written(text), kept, "{text}");
+    }
+}

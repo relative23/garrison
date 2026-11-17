@@ -1,16 +1,19 @@
 //! What visitors and Stalwart see from outside, asked from this host the way
 //! they would ask: Garrison's own host name over TLS, the sign-in at the
 //! issuer with the page it shows (examined as the `sign-in` check does), and
-//! Stalwart's public hosts, which must not serve its metrics.
+//! Stalwart's public hosts, which must not serve its metrics. And the issuer
+//! Stalwart names itself, asked of its own listener.
 
 use std::sync::Arc;
 
 use garrison_collector::providers::signin;
 use garrison_collector::providers::tls::probe;
 use garrison_core::config::Config;
+use garrison_core::json;
 use garrison_core::observations::State;
 use garrison_core::time;
-use garrison_stalwart::{oidc, sign_in_page};
+use garrison_stalwart::http::Request;
+use garrison_stalwart::{Error, SUPPORTED, oidc, sign_in_page};
 use rustls::RootCertStore;
 
 use super::Finding;
@@ -195,6 +198,88 @@ pub(super) fn sign_in(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
     }
 }
 
+/// As much of Stalwart's discovery document as doctor reads.
+const DISCOVERY_LIMIT: usize = 64 * 1024;
+
+/// Whether `text` is written as garrison.toml keeps an issuer, so that
+/// writing it there names the same: `https://host[:port]` in lower case,
+/// without a path, a trailing slash or port 443.
+fn kept_as_written(text: &str) -> bool {
+    text.strip_prefix("https://").is_some_and(|rest| {
+        !rest.is_empty()
+            && !rest.ends_with(":443")
+            && rest.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b".-:[]".contains(&byte)
+            })
+    })
+}
+
+/// The issuer Stalwart's discovery document at `url` names, or why there is
+/// none to compare.
+fn stated_issuer(url: &str) -> Result<String, String> {
+    let answer = Request::get(url)
+        .limit(DISCOVERY_LIMIT)
+        .send()
+        .map_err(|error| match error {
+            Error::Unavailable(why) => format!("Stalwart did not answer at {url} ({why})"),
+            Error::Limited(why) => format!("Stalwart's rate limit ({why}); ask again in a minute"),
+            Error::Unreadable(why)
+            | Error::Denied(why)
+            | Error::InvalidToken(why)
+            | Error::Misconfigured(why) => {
+                format!("{url}: {why}, which this release of Garrison does not read; {SUPPORTED}")
+            }
+        })?;
+    Some(answer.status)
+        .filter(|status| *status == 200)
+        .and_then(|_| json::parse(&answer.body, DISCOVERY_LIMIT).ok())
+        .and_then(|document| document.get("issuer")?.as_str().map(str::to_owned))
+        .filter(|issuer| issuer.len() <= 256 && issuer.bytes().all(|byte| byte.is_ascii_graphic()))
+        .ok_or_else(|| {
+            format!(
+                "{url} answered {} without an issuer this release of Garrison reads; {SUPPORTED}",
+                answer.status
+            )
+        })
+}
+
+/// The issuer Stalwart names itself, asked of its own listener: every
+/// sign-in comes back under that name (measured on 1.1.0: `https://` and
+/// its Default Hostname, whatever host was asked), and Garrison's callback
+/// takes only `deployment.issuer`.
+pub(super) fn issuer(config: &Config) -> Finding {
+    let configured = &config.deployment.issuer;
+    let url = format!(
+        "{}/.well-known/openid-configuration",
+        config.deployment.stalwart_url.trim_end_matches('/')
+    );
+    let stated = match stated_issuer(&url) {
+        Ok(stated) => stated,
+        Err(why) => return Finding::unknown(format!("which issuer Stalwart names itself: {why}")),
+    };
+    if stated == *configured {
+        return Finding::ok(format!(
+            "Stalwart names itself {stated}, as deployment.issuer does"
+        ));
+    }
+    let host = configured.strip_prefix("https://").unwrap_or(configured);
+    let fix = if kept_as_written(&stated) {
+        format!(
+            "Set issuer = \"{stated}\" under [deployment] and restart garrison-web, or make \
+             {host} Stalwart's Default Hostname."
+        )
+    } else {
+        format!("Make {host} Stalwart's Default Hostname and reload its settings.")
+    };
+    Finding::fail(
+        format!(
+            "Stalwart names itself {stated}, but deployment.issuer is {configured}, so every \
+             sign-in fails at Garrison's callback"
+        ),
+        fix,
+    )
+}
+
 /// Stalwart's sign-in page as a visitor's browser loads it, with the files it
 /// names; the `sign-in` check examines it the same way every few minutes.
 fn sign_in_page(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
@@ -213,6 +298,7 @@ pub(super) fn checks(config: &Config) -> Vec<Finding> {
     findings.extend(interface(config, &roots));
     findings.extend(metrics(config, &roots));
     findings.push(sign_in(config, &roots));
+    findings.push(issuer(config));
     findings.push(sign_in_page(config, &roots));
     findings
 }

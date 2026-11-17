@@ -39,7 +39,8 @@ then, as a visitor
 would, Garrison's certificate and answer under its own name and on the port
 `public_origin` names, that Stalwart's
 public hosts do not serve its metrics, that Stalwart knows Garrison's
-sign-in client, where the macro filter is switched on that it answers and
+sign-in client and names itself the `issuer` garrison.toml names (asked of
+Stalwart's own listener), where the macro filter is switched on that it answers and
 that Stalwart was told of it, and that the issuer's name shows Stalwart's own
 sign-in page with the scripts and style sheets it loads. For that it holds the page behind
 the public name against the page Stalwart serves itself, so the check is the

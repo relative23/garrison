@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use garrison_core::config::Database;
 use garrison_core::time;
+use garrison_testing::http::{json, serve};
 use garrison_testing::tls::serve_until;
 
 use super::{Finding, Level, host, public};
@@ -99,10 +100,29 @@ fn issuer_answers_with_a_web_page() -> Broken {
     }
 }
 
-const HOSTS: [fn() -> Broken; 3] = [
+/// Stalwart names itself another issuer than `deployment.issuer`, as after
+/// its Default Hostname changed: every sign-in comes back under that name.
+fn issuer_states_another_name() -> Broken {
+    let stalwart = serve(vec![json(&serde_json::json!({
+        "issuer": "https://other.example.test"
+    }))]);
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), &stalwart.url);
+    let found = vec![public::issuer(&config)];
+    stalwart.requests();
+    Broken {
+        host: "Stalwart naming itself another issuer than garrison.toml",
+        found,
+        said: "names itself https://other.example.test".into(),
+        fix: Some("issuer = \"https://other.example.test\"".into()),
+    }
+}
+
+const HOSTS: [fn() -> Broken; 4] = [
     events_database_is_a_folder,
     origin_with_a_port,
     issuer_answers_with_a_web_page,
+    issuer_states_another_name,
 ];
 
 /// What is wrong with what doctor said on `broken`, if anything.

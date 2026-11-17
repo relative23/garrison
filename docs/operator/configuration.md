@@ -26,7 +26,7 @@ either.
 | Key | Meaning |
 |---|---|
 | `public_origin` | `https://host` of Garrison's own host name, or `https://host:port` where nginx serves it on a port other than 443; users open `/admin/` on it. It must differ from the issuer and from `admin_url`'s origin. `garrison doctor` checks the certificate and Garrison's answer on that port. |
-| `issuer` | Stalwart's OAuth issuer (`https://host`). |
+| `issuer` | Stalwart's OAuth issuer (`https://host`): the name Stalwart gives itself, `https://` and its Default Hostname, under which it sends every sign-in back; `garrison doctor` compares the two. |
 | `stalwart_url` | Stalwart's HTTP listener, **loopback only** (e.g. `http://127.0.0.1:8080`). |
 | `admin_url` | Native Stalwart administration (default `<issuer>/admin/`). |
 | `links` | Extra header links, e.g. `{ webmail = "https://..." }`. |

@@ -1164,6 +1164,9 @@ Notable changes for operators and users. The format follows
   issuer for Stalwart refusing Garrison's sign-in client.** It names what
   answered and says that the issuer's proxy must pass `/api/auth/client` and
   `/api/auth` to Stalwart.
+- **`garrison doctor` fails an `issuer` that is not the name Stalwart gives
+  itself**, with which every sign-in fails at Garrison's callback, and says
+  what to set.
 
 ## [0.1.2] - 2026-11-13
 
