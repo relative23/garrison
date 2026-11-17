@@ -8,7 +8,6 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
-use garrison_broker::client::CallError;
 use garrison_broker::protocol::{Catalog, Request, Submitted};
 use garrison_broker::service::is_job_id;
 use garrison_broker::store::{self, JobView};
@@ -33,15 +32,11 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/api/actions/jobs/{job_id}", get(job))
 }
 
-/// The broker's answer as the type both sides of the socket share.
+/// The broker's answer as the type both sides of the socket share; what
+/// the broker refuses, or that it gives no answer, the gate words for every
+/// route alike.
 fn call<T: serde::de::DeserializeOwned>(app: &App, request: &Request) -> ApiResult<T> {
-    match app.gate.broker().call(request) {
-        Ok(answer) => typed(answer),
-        Err(CallError::Unavailable(_)) => {
-            Err(ApiError::new(503, "The maintenance broker is unavailable"))
-        }
-        Err(CallError::Refused(error)) => Err(ApiError::new(error.status, error.message)),
-    }
+    typed(app.gate.ask(request)?)
 }
 
 /// The maintenance actions the user may start, and recent jobs.

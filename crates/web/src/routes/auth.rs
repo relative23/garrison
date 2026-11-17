@@ -251,8 +251,9 @@ fn finish(
         Ok(grant) => grant,
         Err(error) => {
             log::warn!(
-                "Sign-in rejected by authorization (HTTP {})",
-                error.status.as_u16()
+                "Sign-in rejected by authorization (HTTP {}: {})",
+                error.status.as_u16(),
+                error.cause()
             );
             revoke(app, &token.access_token);
             // 401 and 403 are what Stalwart and the policy say of this user;

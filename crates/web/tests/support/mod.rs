@@ -4,6 +4,8 @@
 // Each test file uses a different part of this module.
 #![allow(dead_code)]
 
+pub(crate) mod rights;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;

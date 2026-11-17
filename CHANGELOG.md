@@ -1174,6 +1174,20 @@ Notable changes for operators and users. The format follows
   each of its requests. Such an account is now refused, as one without a
   profile is: its sign-in fails, a session it has ends, and the broker's
   journal names the reason.
+- **A broker that gives no answer is worded alike everywhere, and the
+  journal says why.** Where the broker gave no answer (stopped, its 16
+  places taken, its socket gone), pages said "Authorization is temporarily
+  unavailable", but the Maintenance page's requests "The maintenance broker
+  is unavailable", which the operations guide did not name, and no journal
+  said why. Every page now says "Authorization is temporarily unavailable",
+  and the web service's journal says "The broker gave the web service no
+  answer it can use" with why and the socket, at once and then at most once
+  a minute. A broker that failed inside ("Internal broker error") now shows
+  a reference that the web service's journal names, and a grant the web
+  service cannot read, or one of another account than the session's, gets a
+  line there too. The web service's line for a sign-in the rights check
+  rejected names the broker's words: "Sign-in rejected by authorization
+  (HTTP 503: Authorization is temporarily unavailable)".
 
 ## [0.1.2] - 2026-11-13
 

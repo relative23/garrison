@@ -78,6 +78,12 @@ impl ApiError {
             ..ApiError::new(500, "Internal error")
         }
     }
+
+    /// What failed, for the journal: the cause of an internal error, the
+    /// detail of any other.
+    pub fn cause(&self) -> &str {
+        self.cause.as_deref().unwrap_or(&self.detail)
+    }
 }
 
 impl IntoResponse for ApiError {

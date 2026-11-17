@@ -43,6 +43,9 @@ use flights::Flights;
 pub const SESSION_COOKIE: &str = "__Host-garrison_session";
 pub const STATE_COOKIE: &str = "__Host-garrison_login";
 const MAX_CACHED: usize = 1024;
+/// What every route answers where the user's rights cannot be checked just
+/// then: the broker gives no answer, or says so itself.
+pub const UNCHECKED: &str = "Authorization is temporarily unavailable";
 
 /// What the broker answers; tests use their own.
 pub trait Broker: Send + Sync {
@@ -192,25 +195,40 @@ impl Gate {
         self
     }
 
-    pub fn broker(&self) -> &dyn Broker {
-        self.broker.as_ref()
+    /// The broker's answer to `request`, in HTTP terms, for every route that
+    /// asks it. A refusal keeps its status and words; a broker that gives
+    /// no answer is the one condition [`UNCHECKED`], whichever route meets
+    /// it, and its client names why in the journal. A broker that failed
+    /// inside is an internal error here too, so that the reference the page
+    /// shows finds a line in this journal, while the broker's names the
+    /// cause.
+    pub fn ask(&self, request: &Request) -> ApiResult<Value> {
+        match self.broker.call(request) {
+            Ok(answer) => Ok(answer),
+            Err(CallError::Unavailable(_)) => Err(ApiError::new(503, UNCHECKED)),
+            Err(CallError::Refused(error)) if error.status >= 500 && error.status != 503 => {
+                Err(ApiError::internal(&format!(
+                    "the broker answered HTTP {}: {}",
+                    error.status, error.message
+                )))
+            }
+            Err(CallError::Refused(error)) => Err(ApiError::new(error.status, error.message)),
+        }
     }
 
-    /// Ask the broker; translate its answer into HTTP semantics.
+    /// Ask the broker for the grant of `token`'s user.
     pub fn grant_for(&self, token: &str) -> ApiResult<Grant> {
         let ids: BTreeSet<&str> = self.action_ids.iter().map(String::as_str).collect();
         let request = Request::Authorize {
             token: token.to_owned(),
         };
-        match self.broker.call(&request) {
-            Err(CallError::Unavailable(_)) => Err(ApiError::new(
-                503,
-                "Authorization is temporarily unavailable",
-            )),
-            Err(CallError::Refused(error)) => Err(ApiError::new(error.status, error.message)),
-            Ok(answer) => parse_grant(answer, &ids)
-                .map_err(|_| ApiError::new(502, "The broker returned an invalid authorization")),
-        }
+        parse_grant(self.ask(&request)?, &ids).map_err(|_| {
+            log::error!(
+                "The broker answered a check of a user's rights with no grant this web service \
+                 reads; restart garrison-web and garrison-broker, so that both run this release"
+            );
+            ApiError::new(502, "The broker returned an invalid authorization")
+        })
     }
 
     fn cached(&self) -> std::sync::MutexGuard<'_, HashMap<String, (Instant, Grant)>> {
@@ -286,6 +304,12 @@ impl Gate {
             }
         };
         if grant.subject != session.subject {
+            log::warn!(
+                "The session of account {} got a grant of account {}: its token names another \
+                 account at Stalwart now, so the session ends",
+                session.subject,
+                grant.subject
+            );
             let _ = self.end(session, true);
             return Err(ApiError::new(401, "Sign-in required"));
         }
