@@ -6,14 +6,15 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use rusqlite::Connection;
 use serde_json::Value;
 
-use super::{BOUNCED, DAY, KNOWN_DAYS, MAX_EVENTS, QUEUED, Read, Sender, Senders, USUAL_DAYS};
+use super::{BOUNCED, Cut, DAY, KNOWN_DAYS, QUEUED, Read, Sender, Senders, USUAL_DAYS};
 use crate::providers::history;
 
 #[derive(Default)]
 struct Sums {
     messages: u64,
     recipients: u64,
-    before: u64,
+    /// The recipients of each day before the last one, the day before it 1.
+    before: BTreeMap<i64, u64>,
     hours: BTreeMap<i64, u64>,
     clients: BTreeSet<String>,
     bounces: u64,
@@ -39,8 +40,9 @@ fn recipients(fields: &Value) -> u64 {
 }
 
 impl Senders {
-    /// Read the last 15 days of the history at `now`.
-    pub(super) fn read(db: &Connection, now: i64) -> rusqlite::Result<Read> {
+    /// Read the last 15 days of the history at `now`, the newest `most`
+    /// submissions of them and as many bounces.
+    pub(super) fn read(db: &Connection, now: i64, most: usize) -> rusqlite::Result<Read> {
         let since = now - (USUAL_DAYS + 1) * DAY;
         let today = now - DAY;
         // A day's volume is in order only over a history that holds the day.
@@ -57,22 +59,26 @@ impl Senders {
         let known = begins.map_or(0, |begins| (today - begins.max(since)) / DAY);
         let known = if unusual_unknown.is_some() { 0 } else { known };
         let mut sums: HashMap<String, Sums> = HashMap::new();
-        let limit = i64::try_from(MAX_EVENTS + 1).unwrap_or(i64::MAX);
+        let limit = i64::try_from(most + 1).unwrap_or(i64::MAX);
         let mut statement = db.prepare(
-            "SELECT created_at,fields FROM events WHERE type=?1 AND created_at>=?2 \
+            "SELECT seq,created_at,fields FROM events WHERE type=?1 AND created_at>=?2 \
              AND created_at<=?3 ORDER BY seq DESC LIMIT ?4",
         )?;
-        let mut truncated = false;
+        // The number of the oldest submission read, where there are more.
+        let mut left_below = None;
+        let mut oldest = None;
         let mut rows = statement.query((QUEUED, since, now, limit))?;
         let mut read = 0;
         while let Some(row) = rows.next()? {
-            if read == MAX_EVENTS {
-                truncated = true;
+            if read == most {
+                left_below = oldest;
                 break;
             }
             read += 1;
-            let at: i64 = row.get(0)?;
-            let text: String = row.get(1)?;
+            let seq: i64 = row.get(0)?;
+            oldest = Some(seq);
+            let at: i64 = row.get(1)?;
+            let text: String = row.get(2)?;
             let Ok(fields) = serde_json::from_str::<Value>(&text) else {
                 continue;
             };
@@ -89,13 +95,30 @@ impl Senders {
                     .clients
                     .extend(fields["remoteIp"].as_str().map(str::to_owned));
             } else {
-                entry.before += count;
+                *entry.before.entry((today - at - 1) / DAY + 1).or_default() += count;
             }
         }
         drop(rows);
+        let cut = match left_below {
+            Some(seq) => Some(Self::read_whole(db, (since, today, now), seq)?),
+            None => None,
+        }
+        // A cut that took no whole day the history holds took nothing of
+        // the usual volume.
+        .filter(|cut| !cut.last_day || cut.days < known);
+        // The usual volume is of whole days that the history holds and that
+        // were read.
+        let days = cut.as_ref().map_or(known, |cut| cut.days);
         let mut rows = statement.query((BOUNCED, today, now, limit))?;
+        let mut bounced = 0;
+        let mut bounces_cut = false;
         while let Some(row) = rows.next()? {
-            let text: String = row.get(1)?;
+            if bounced == most {
+                bounces_cut = true;
+                break;
+            }
+            bounced += 1;
+            let text: String = row.get(2)?;
             let sender = serde_json::from_str::<Value>(&text)
                 .ok()
                 .and_then(|fields| sender_address(&fields));
@@ -110,8 +133,10 @@ impl Senders {
                 address,
                 messages: sums.messages,
                 recipients: sums.recipients,
-                usual: (known >= KNOWN_DAYS)
-                    .then(|| sums.before / u64::try_from(known).unwrap_or(1).max(1)),
+                usual: (days >= KNOWN_DAYS).then(|| {
+                    let recipients: u64 = sums.before.range(1..=days).map(|(_, count)| count).sum();
+                    recipients / u64::try_from(days).unwrap_or(1).max(1)
+                }),
                 busiest_hour: sums.hours.values().copied().max().unwrap_or(0),
                 bounces: sums.bounces,
                 clients: sums.clients.len() as u64,
@@ -119,10 +144,43 @@ impl Senders {
             .collect();
         Ok(Read {
             senders,
-            truncated,
+            cut,
+            bounces_cut,
             problem: None,
             uncovered,
             unusual_unknown,
+        })
+    }
+
+    /// What of the 15 days `since` to `now`, the last day from `today`, was
+    /// read whole, where the submissions numbered below `seq` were not. The
+    /// history is read by its numbers, which batches that come late put out
+    /// of time's order, so the days read whole are those after the newest of
+    /// the submissions left.
+    fn read_whole(
+        db: &Connection,
+        (since, today, now): (i64, i64, i64),
+        seq: i64,
+    ) -> rusqlite::Result<Cut> {
+        let left: Option<i64> = db.query_row(
+            "SELECT MAX(created_at) FROM events WHERE type=?1 AND created_at>=?2 \
+             AND created_at<=?3 AND seq<?4",
+            (QUEUED, since, now, seq),
+            |row| row.get(0),
+        )?;
+        Ok(match left {
+            Some(newest) if newest >= today => Cut {
+                days: 0,
+                last_day: false,
+            },
+            Some(newest) => Cut {
+                days: ((today - newest - 1) / DAY).min(USUAL_DAYS),
+                last_day: true,
+            },
+            None => Cut {
+                days: USUAL_DAYS,
+                last_day: true,
+            },
         })
     }
 }

@@ -375,3 +375,106 @@ fn the_check_counts_by_sender_address_and_says_so() {
         observation.scope
     );
 }
+
+/// The card over `events`, written in that order, with at most `most`
+/// submissions and bounces read.
+fn read_at_most(events: &[Event], most: usize) -> Observation {
+    let provider = provider().reading_at_most(most);
+    observed(&provider, events, 20, &Remembered::default(), 0)
+}
+
+#[test]
+fn past_its_limit_a_reading_names_the_usual_volume_of_the_whole_days_it_read() {
+    // anna sends to 10 recipients on each of the 14 days before and to 60
+    // today: six times her usual, a warning, the history in time's order.
+    let mut events: Vec<Event> = (1..=USUAL_DAYS)
+        .rev()
+        .map(|day| queued("anna@example.test", day * DAY + 3600, 10, "192.0.2.1"))
+        .collect();
+    events.push(queued("anna@example.test", 600, 60, "192.0.2.1"));
+    let whole = read_at_most(&events, MAX_EVENTS);
+    assert_eq!(
+        (whole.state, whole.findings.clone()),
+        (
+            State::Warning,
+            vec![
+                "anna@example.test: 60 recipients in 24 hours, where 10 a day is usual.".to_owned()
+            ]
+        )
+    );
+    // Five read: today and the four days before it, the fifth left. The usual
+    // volume is that of the four, not of fourteen.
+    let cut = read_at_most(&events, 5);
+    assert_eq!(row(&cut, "anna@example.test")[3], json!(10));
+    assert_eq!(
+        (cut.state, cut.findings.clone()),
+        (
+            State::Warning,
+            vec![
+                "anna@example.test: 60 recipients in 24 hours, where 10 a day is usual.".to_owned(),
+                "More mail was handed in in these 15 days than is read: the usual volumes are \
+                 those of the 4 whole days before the last one that the newest 5 messages hold."
+                    .to_owned()
+            ]
+        )
+    );
+    // A batch that came late: the oldest days carry the highest numbers and
+    // are read first, so no whole day before the last one is read. No usual
+    // volume is named, and no ordinary day is made an outlier.
+    let mut late: Vec<Event> = (1..=USUAL_DAYS)
+        .map(|day| queued("anna@example.test", day * DAY + 3600, 10, "192.0.2.1"))
+        .collect();
+    late.push(queued("anna@example.test", 600, 60, "192.0.2.1"));
+    let cut = read_at_most(&late, 5);
+    assert_eq!(row(&cut, "anna@example.test")[3], Value::Null);
+    assert_eq!(
+        (cut.state, cut.findings),
+        (
+            State::Ok,
+            vec![
+                "More mail was handed in in these 15 days than is read: no usual volume is \
+                 named, since the newest 5 messages hold 0 whole days before the last one."
+                    .to_owned()
+            ]
+        )
+    );
+}
+
+#[test]
+fn a_last_day_or_bounces_past_the_limit_are_a_part() {
+    // Two messages today, one read: the day's figures are a part.
+    let events = [
+        queued("anna@example.test", 600, 3, "192.0.2.1"),
+        queued("anna@example.test", 500, 3, "192.0.2.1"),
+    ];
+    let cut = read_at_most(&events, 1);
+    assert_eq!(
+        (cut.state, cut.findings),
+        (
+            State::Partial,
+            vec![
+                "More mail was handed in during the last 24 hours than is read: the figures are \
+                 those of the newest 1 messages, and no usual volume is named."
+                    .to_owned()
+            ]
+        )
+    );
+    // One message, two bounces, one bounce read.
+    let events = [
+        queued("anna@example.test", 600, 3, "192.0.2.1"),
+        bounced("anna@example.test", 400),
+        bounced("anna@example.test", 300),
+    ];
+    let cut = read_at_most(&events, 1);
+    assert_eq!(
+        (cut.state, cut.findings),
+        (
+            State::Partial,
+            vec![
+                "More bounces came in the last 24 hours than are counted here, which counts \
+                  the newest 1."
+                    .to_owned()
+            ]
+        )
+    );
+}

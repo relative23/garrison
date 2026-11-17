@@ -233,6 +233,15 @@ Notable changes for operators and users. The format follows
   all of the week in one query, a card whose list read only the newest
   events says so and is Partial where it would be in order, and a list that
   shows its 20 busiest rows of more says how many there are.
+- **Past 200 000 submissions, an address's usual volume is that of the days
+  that were read.** The sending addresses check read the newest 200 000
+  submissions of its 15 days and divided what it read of the days before by
+  every day the history held, so each usual volume was too low and an
+  ordinary day could warn, naming the address; the card said only "More
+  mail was handed in than is counted here.". The usual volume is now that
+  of the whole days before the last one that were read, none is named where
+  fewer than three were, the card says how many, and a last day or bounces
+  past the limit make it Partial where it would be in order.
 - **The test messages' results are those of the listener and the mailbox
   configured.** After a change of `recipient`, `sender`, `host` or `port`,
   the Test messages card showed the results kept for the old ones under the

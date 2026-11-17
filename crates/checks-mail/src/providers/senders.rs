@@ -60,12 +60,26 @@ struct Sender {
     clients: u64,
 }
 
+/// Where more mail was handed in than is read, what of it was read whole.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+struct Cut {
+    /// The whole days before the last one that were read, which the usual
+    /// volumes are of.
+    days: i64,
+    /// Whether the last day was read whole.
+    last_day: bool,
+}
+
 /// What the status database keeps of the last reading.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 struct Read {
     senders: Vec<Sender>,
-    /// More events were recorded than were read.
-    truncated: bool,
+    /// Where more mail was handed in than is read.
+    #[serde(default)]
+    cut: Option<Cut>,
+    /// Whether more bounces came in the last day than are counted.
+    #[serde(default)]
+    bounces_cut: bool,
     problem: Option<String>,
     /// Why the history does not hold the last day, where it does not.
     #[serde(default)]
@@ -78,6 +92,8 @@ struct Read {
 #[derive(Debug)]
 pub struct Senders {
     modules: BTreeSet<ModuleId>,
+    /// The newest submissions, and bounces, that a reading takes.
+    most: usize,
     /// Below this many recipients in a day nothing counts as unusual.
     min_recipients: u64,
     /// So many times an address's usual volume is a warning.
@@ -101,11 +117,20 @@ impl Senders {
         };
         Ok(Senders {
             modules: options.modules(&["attacks"])?,
+            most: MAX_EVENTS,
             min_recipients: number("min_recipients", 50)?,
             factor: number("factor", 5)?,
             burst: number("burst", 100)?,
             bounces: number("bounces", 10)?,
         })
+    }
+
+    /// For tests: take at most `most` submissions and bounces in a reading.
+    #[cfg(test)]
+    #[must_use]
+    pub fn reading_at_most(mut self, most: usize) -> Self {
+        self.most = most;
+        self
     }
 
     /// Why an address's day is unusual; nothing where it is not.
@@ -145,7 +170,7 @@ impl Senders {
     }
 
     /// The last reading, or a new one where that is due: every ten minutes.
-    fn known(context: &Context<'_>) -> Kept<Read> {
+    fn known(context: &Context<'_>, most: usize) -> Kept<Read> {
         let problem = |problem: String| Read {
             problem: Some(problem),
             ..Read::default()
@@ -155,13 +180,78 @@ impl Senders {
             MEMORY,
             |_, _| EVERY,
             |_| match reading(&context.events_database, Duration::from_secs(2)) {
-                Ok(Some(db)) => Self::read(&db, context.now.as_second()).unwrap_or_else(|error| {
-                    problem(format!("the event history could not be read: {error}"))
-                }),
+                Ok(Some(db)) => {
+                    Self::read(&db, context.now.as_second(), most).unwrap_or_else(|error| {
+                        problem(format!("the event history could not be read: {error}"))
+                    })
+                }
                 Ok(None) => problem("no events are recorded yet".to_owned()),
                 Err(error) => problem(format!("the event history could not be opened: {error}")),
             },
         )
+    }
+}
+
+/// A number with a space between its thousands, as `200 000`.
+fn spaced(number: usize) -> String {
+    let digits = number.to_string();
+    let mut text = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            text.push(' ');
+        }
+        text.push(digit);
+    }
+    text
+}
+
+impl Senders {
+    /// Each address of `read` with why its day is unusual, with the limits as
+    /// configured now, also over a reading kept from before: what needs a
+    /// look first, then the busiest; names settle the rest.
+    fn judged<'a>(&self, read: &'a Read) -> Vec<(&'a Sender, Vec<String>)> {
+        let mut judged: Vec<(&Sender, Vec<String>)> = read
+            .senders
+            .iter()
+            .map(|sender| (sender, self.reasons(sender)))
+            .collect();
+        judged.sort_by(|(left, why), (right, other)| {
+            why.is_empty()
+                .cmp(&other.is_empty())
+                .then_with(|| right.recipients.cmp(&left.recipients))
+                .then_with(|| left.address.cmp(&right.address))
+        });
+        judged
+    }
+
+    /// What a reading that left mail out says of it.
+    fn cut_findings(&self, read: &Read) -> Vec<String> {
+        let most = spaced(self.most);
+        let mut findings = Vec::new();
+        match &read.cut {
+            Some(cut) if !cut.last_day => findings.push(format!(
+                "More mail was handed in during the last 24 hours than is read: the figures are \
+                 those of the newest {most} messages, and no usual volume is named."
+            )),
+            Some(cut) if cut.days < KNOWN_DAYS => findings.push(format!(
+                "More mail was handed in in these 15 days than is read: no usual volume is named, \
+                 since the newest {most} messages hold {} whole days before the last one.",
+                cut.days
+            )),
+            Some(cut) => findings.push(format!(
+                "More mail was handed in in these 15 days than is read: the usual volumes are those \
+                 of the {} whole days before the last one that the newest {most} messages hold.",
+                cut.days
+            )),
+            None => {}
+        }
+        if read.bounces_cut {
+            findings.push(format!(
+                "More bounces came in the last 24 hours than are counted here, which counts the \
+                 newest {most}."
+            ));
+        }
+        findings
     }
 }
 
@@ -175,21 +265,9 @@ impl Provider for Senders {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let kept = Self::known(context);
+        let kept = Self::known(context, self.most);
         let read = &kept.answer;
-        // The limits as configured now, also over a reading kept from before.
-        let mut judged: Vec<(&Sender, Vec<String>)> = read
-            .senders
-            .iter()
-            .map(|sender| (sender, self.reasons(sender)))
-            .collect();
-        // What needs a look first, then the busiest; names settle the rest.
-        judged.sort_by(|(left, why), (right, other)| {
-            why.is_empty()
-                .cmp(&other.is_empty())
-                .then_with(|| right.recipients.cmp(&left.recipients))
-                .then_with(|| left.address.cmp(&right.address))
-        });
+        let judged = self.judged(read);
         let unusual: Vec<&(&Sender, Vec<String>)> = judged
             .iter()
             .filter(|(_, reasons)| !reasons.is_empty())
@@ -210,6 +288,12 @@ impl Provider for Senders {
             (None, false) => State::Warning,
             // A quiet day only over a history that holds the day.
             (None, true) if read.uncovered.is_some() => State::Unknown,
+            // Nor over a day that was read in part.
+            (None, true)
+                if read.bounces_cut || read.cut.as_ref().is_some_and(|cut| !cut.last_day) =>
+            {
+                State::Partial
+            }
             (None, true) => State::Ok,
         };
         if let Some(reason) = read.uncovered.as_ref().filter(|_| read.problem.is_none()) {
@@ -221,9 +305,7 @@ impl Provider for Senders {
         if let Some(reason) = &read.unusual_unknown {
             findings.push(format!("No usual volume is named: {reason}."));
         }
-        if read.truncated {
-            findings.push("More mail was handed in than is counted here.".to_owned());
-        }
+        findings.extend(self.cut_findings(read));
         let column = |label: &str, format| Column {
             label: label.to_owned(),
             format,

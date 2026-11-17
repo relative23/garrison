@@ -132,6 +132,13 @@ did see stays a warning. Where events were lost in the 14 days before, no
 usual number is named until that window has passed, since an average over
 days that are missing would make an ordinary day look like an outlier.
 
+The check reads the newest 200 000 submissions of the 15 days, and as many
+bounces. Where there are more, the usual number is that of the whole days
+before the last one that were read, none is named where fewer than three
+were, and the card says so; where the last day itself was not read whole,
+or bounces were left, its figures are a part, and the card is Partial where
+it would be OK.
+
 ## `tls`
 
 Each endpoint is asked on this host with the host name as a browser or a mail
