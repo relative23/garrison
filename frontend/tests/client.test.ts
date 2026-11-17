@@ -72,10 +72,7 @@ describe("API client", () => {
   });
 
   it("does not sign out on other refusals, and says when a read is refused", async () => {
-    serve({
-      "GET actions": { status: 403, body: { detail: "Not permitted" } },
-      "GET session": { status: 403, body: { detail: "Garrison access is not authorized" } },
-    });
+    serve({ "GET actions": { status: 403, body: { detail: "Not permitted" } } });
     const signedOut = vi.fn();
     const refused = vi.fn();
     configure({ csrf: "", onUnauthorized: signedOut, onRefused: refused });
@@ -83,9 +80,19 @@ describe("API client", () => {
     expect(signedOut).not.toHaveBeenCalled();
     // The user's rights may have changed since the session was read.
     expect(refused).toHaveBeenCalledTimes(1);
-    // The session's own refusal is not followed by the same question again.
+  });
+
+  it("signs out when the session's own question is refused, which ended the session", async () => {
+    // The web service answers it 403 only where the policy refuses the user,
+    // and it ends that session then (docs/architecture/security.md).
+    serve({ "GET session": { status: 403, body: { detail: "Garrison access is not authorized" } } });
+    const signedOut = vi.fn();
+    const refused = vi.fn();
+    configure({ csrf: "", onUnauthorized: signedOut, onRefused: refused });
     await expect(api.session()).rejects.toMatchObject({ status: 403 });
-    expect(refused).toHaveBeenCalledTimes(1);
+    expect(signedOut).toHaveBeenCalledTimes(1);
+    // Not followed by the same question again, as a refused read is.
+    expect(refused).not.toHaveBeenCalled();
   });
 
   it("says when a write is refused, whose token may be another session's", async () => {

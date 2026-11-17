@@ -154,13 +154,17 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
   const [hadSession, setHadSession] = useState(current !== null);
   if (current && !hadSession) setHadSession(true);
 
-  // A session ends here when the server answers 401 and at a sign-out; at the
-  // end of its time the server's answer says so (SignedIn). The session is
-  // read again at once: another tab may have signed in since, which this one
-  // then takes.
+  // A session ends here when the server answers 401, or 403 to the session's
+  // own question, and at a sign-out; at the end of its time the server's
+  // answer says so (SignedIn). The session is read again then, once for each
+  // session: another tab may have signed in since, which this one then
+  // takes, and a session the server keeps refusing is not asked again.
+  const asked = useRef<string | null>(null);
   const end = useCallback(
     (csrf: string) => {
       setEnded(csrf);
+      if (asked.current === csrf) return;
+      asked.current = csrf;
       again();
     },
     [again],

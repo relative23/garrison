@@ -202,6 +202,13 @@ Notable changes for operators and users. The format follows
   same request again and starts no job twice, and the dialog then says
   where an earlier request had started it; a sign-out or a save can simply
   be repeated.
+- **A page ends its session when the server refuses it.** When the access
+  policy comes to refuse a signed-in user, as when the user's binding is
+  removed, the web service ends the session at its next request and
+  answers it 403. Where that request was the page's own question for its
+  session, as when a tab is shown again or another tab starts, the page
+  stayed signed in, its menu and data in view, until a later request was
+  refused, up to a minute later. It now says that the session has ended.
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",

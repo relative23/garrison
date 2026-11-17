@@ -4,7 +4,8 @@
 // session has ended. A change of rights reaches the menu with the next
 // refresh of the status, and the session read that brings it asks the broker
 // nothing: the preview's broker (examples/preview/fakes.rs) counts its
-// questions and lets the flows change the rights it grants.
+// questions and lets the flows change the rights it grants. A session whose
+// user the policy refuses ends on the page whose read of it is refused.
 
 /** Whether `wait` ends within `timeout` milliseconds. */
 const within = (wait) =>
@@ -109,5 +110,34 @@ export async function rightsChange(shared) {
   } finally {
     await grant(all);
     await timed.close();
+  }
+}
+
+/** A session the policy refuses at the read another tab's start brings
+ * about. The web service then ends the session and answers that read 403,
+ * and knows no such session after it; `page` stands in for that answer. */
+export async function refusedSession(shared, page) {
+  const { context, origin, at, expect, watch, failing } = shared;
+  at("a session the policy refuses");
+  await page.goto(`${origin}/admin/account`);
+  await page.waitForLoadState("networkidle");
+  let refused = false;
+  failing.add("403 /api/session");
+  await page.route("**/api/session", (route) => {
+    if (refused) return route.fulfill({ json: { session: null } });
+    refused = true;
+    return route.fulfill({ status: 403, json: { detail: "Garrison access is not authorized" } });
+  });
+  // A tab that starts says so, and this one reads its session again.
+  const other = await context.newPage();
+  watch(other);
+  try {
+    await other.goto(`${origin}/admin/services`);
+    const told = page.getByText("Your session has ended").waitFor({ timeout: 3000 });
+    expect(await within(told), "the page whose session the server refused says that the session has ended");
+  } finally {
+    await page.unroute("**/api/session");
+    failing.clear();
+    await other.close();
   }
 }

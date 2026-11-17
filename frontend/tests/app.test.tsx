@@ -384,6 +384,36 @@ describe("a sign-in or sign-out in another tab", () => {
     expect(await screen.findByRole("link", { name: "Sign in with Stalwart" })).toBeTruthy();
   });
 
+  it("ends the page when the server refuses the session's own question", async () => {
+    const server = serve(signedIn());
+    openApp("/admin/account");
+    expect(await screen.findByText("admin@example.test")).toBeTruthy();
+    // The policy now refuses the user: the web service ends the session at
+    // its next question and answers it 403, and knows no such session after.
+    let refused = false;
+    server.answer("GET session", () => {
+      if (refused) return { body: { session: null } };
+      refused = true;
+      return { status: 403, body: { detail: "Garrison access is not authorized" } };
+    });
+    shown();
+    expect(await screen.findByText(/Your session has ended/)).toBeTruthy();
+    expect(screen.queryByText("admin@example.test")).toBeNull();
+  });
+
+  it("asks no more about a session the server keeps refusing", async () => {
+    const server = serve(signedIn());
+    openApp("/admin/account");
+    expect(await screen.findByText("admin@example.test")).toBeTruthy();
+    server.answer("GET session", { status: 403, body: { detail: "Garrison access is not authorized" } });
+    shown();
+    expect(await screen.findByText(/Your session has ended/)).toBeTruthy();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    // The first read, the one refused, and the one after it that looks for a
+    // session another tab may have made: no more.
+    expect(server.requests("GET session")).toHaveLength(3);
+  });
+
   it("is not looked for at the cost of the page when the session cannot be read again", async () => {
     const server = serve(signedIn());
     openApp("/admin/account");

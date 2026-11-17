@@ -100,8 +100,15 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
     // empty notice.
     if (!detail) detail = i18n.t("common.answeredStatus", { status: response.status });
     if (response.status === 401) onUnauthorized();
-    // Not for the session's own question: it would ask again, and again.
-    if (response.status === 403 && path !== "session") onRefused();
+    // A refusal of the session's own question ended the session: the web
+    // service answers it so only where the policy refuses the user, and ends
+    // that session then (docs/architecture/security.md, failure behavior).
+    // Any other refusal has the session read again; the session's own does
+    // not, as that would ask again and again.
+    if (response.status === 403) {
+      if (path === "session") onUnauthorized();
+      else onRefused();
+    }
     throw new ApiError(response.status, detail, response.headers.get("x-request-id"));
   }
   return (await response.json()) as T;
