@@ -37,6 +37,8 @@ mod keys;
 use keys::{Condition, Key, Selected, date, key, lookup, selected};
 
 const MAX_DOCUMENT: usize = 1024 * 1024;
+/// The table of a list receipt shows this many rows, the last ones, where a
+/// job that appends a row for each run puts the newest. Every row is judged.
 const MAX_ROWS: usize = 200;
 const DEFAULT_SCOPE: &str = "Historical result reported by the job; not a current test.";
 
@@ -139,6 +141,8 @@ impl Receipt {
         })
     }
 
+    /// The rows of a receipt that has them: every one, however many, as the
+    /// file is at most 1 MiB.
     fn items(&self, document: &Value) -> Option<Vec<Value>> {
         let mut items = document;
         for part in self.rows.as_ref()? {
@@ -147,7 +151,6 @@ impl Receipt {
         let list = items.as_array()?;
         Some(
             list.iter()
-                .take(MAX_ROWS)
                 .filter(|item| item.is_object())
                 .cloned()
                 .collect(),
@@ -293,6 +296,12 @@ impl Provider for Receipt {
             state = State::Failed;
             findings.push("At least one recorded result is not a success.".to_owned());
         }
+        if let Some(items) = items.as_ref().filter(|items| items.len() > MAX_ROWS) {
+            findings.push(format!(
+                "The receipt lists {} rows; the table shows the last {MAX_ROWS}.",
+                items.len()
+            ));
+        }
         // Without a limit the receipt of a job that stopped running months
         // ago is as much in order as yesterday's: the card says so.
         if self.max_age_hours == 0 {
@@ -333,7 +342,8 @@ impl Provider for Receipt {
             .with_findings(findings)
             .with_max_age(900);
         if let Some(items) = &items {
-            observation = observation.with_table(self.table(items));
+            let shown = &items[items.len().saturating_sub(MAX_ROWS)..];
+            observation = observation.with_table(self.table(shown));
         }
         let mut report = Report::of(observation);
         if let Some(seconds) = age.filter(|_| trusted) {

@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::keys::format_of;
 use super::*;
-use crate::testing::{Canned, config, context, table};
+use crate::testing::{Canned, config, context, now, table};
 
 fn provider(text: &str) -> Receipt {
     Receipt::new(&table(text)).unwrap()
@@ -343,4 +343,42 @@ ok_when = {{ key = "result", equals = ["passed"] }}"#,
         );
         assert!(report.gauges.is_empty());
     }
+}
+
+/// A list receipt is judged by every row, however many: a row past the 200
+/// that its table shows counts, whether it fails or is the newest. The card
+/// says how many rows the table leaves out; it shows the last ones, where a
+/// job that appends a row for each run puts the newest.
+#[test]
+fn every_row_of_a_long_list_receipt_counts() {
+    // 250 runs an hour apart, the last at 11:00 on the tests' day and failed.
+    let rows: Vec<Value> = (0..250_i64)
+        .map(|run| {
+            let at = time::Timestamp::from_second(now().as_second() - 3600 * (250 - run));
+            json!({"run": run, "ok": run != 249, "date": time::isoformat(at.unwrap())})
+        })
+        .collect();
+    let observation = observe(
+        &Value::Array(rows),
+        "rows = []\nrow_date = \"date\"\nmax_age_hours = 2\n\
+         ok_rows = { key = \"ok\", equals = [true] }\n\
+         columns = [{ key = \"run\", label = \"Run\", format = \"number\" }]",
+    );
+    assert_eq!(
+        (observation.state, observation.findings.as_slice()),
+        (
+            State::Failed,
+            &[
+                "At least one recorded result is not a success.".to_owned(),
+                "The receipt lists 250 rows; the table shows the last 200.".to_owned()
+            ][..]
+        )
+    );
+    assert_eq!(
+        observation.fields[0].value,
+        json!("2026-10-29T11:00:00+00:00")
+    );
+    let table = observation.table.unwrap();
+    assert_eq!(table.rows.len(), 200);
+    assert_eq!(table.rows[0], [json!(50)]);
 }

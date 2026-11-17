@@ -903,6 +903,13 @@ Notable changes for operators and users. The format follows
   receipt of a job that stopped running long ago stayed in order with
   nothing to show it. Its card now carries a finding that no limit is set;
   set one for every job that runs on a schedule.
+- **Every row of a list receipt counts.** A receipt that lists results was
+  read to its 200th row: a row after it that was not a success left the
+  card in order, and for a list kept oldest first the newest date was the
+  200th row's, so the card warned that the receipt was old while new runs
+  came in, and nothing said that rows were left out. Every row is judged
+  now; the table shows the last 200, and the card says how many rows the
+  receipt lists where there are more.
 - **Signature files that are no longer updated are a warning.** The
   antivirus check called the signature databases in order as soon as one
   file existed, and showed the age of the daily one without judging it. A

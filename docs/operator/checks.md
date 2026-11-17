@@ -440,6 +440,14 @@ root (or to the collector's own user) and must not be writable by others, nor
 by its group unless that group is root. Otherwise the observation is Unknown.
 Let the job write it as root with mode `0644`.
 
+A receipt can list results, one row each: `rows = []` where the file itself
+is the list, or `rows = ["results"]` for a list under that key. `columns`
+makes its table, `ok_rows` is what every row must meet, and for a list
+`row_date` names each row's date, the newest of which is the receipt's. Every
+row is judged, however many; the table shows the last 200, where a job that
+appends a row for each run puts the newest, and the card says how many rows
+the receipt lists where there are more.
+
 Keys can be nested: `key = ["components", "stalwartlabs/stalwart", "installed"]`.
 Formats: `text`, `number`, `bytes`, `datetime`, `duration` (seconds), `boolean`, `url`.
 
