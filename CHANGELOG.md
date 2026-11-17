@@ -1143,6 +1143,10 @@ Notable changes for operators and users. The format follows
 - **An installation whose services ran is upgraded only with a configuration
   the new release loads and its access policy in place**, also where
   `broker.policy` lies outside `/etc/garrison`; otherwise nothing changes.
+- **An upgrade that was interrupted, also once `current` named the new
+  release, is finished by running it again**, with the same installer or
+  `garrison upgrade` and the same archive; it switches back where the new
+  release does not start.
 - **A stale event history no longer reads as a quiet mail server.** The
   mail-flow summaries and the sending accounts counted whatever the event
   history held and called it in order, also when the event receiver had not

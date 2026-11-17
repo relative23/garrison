@@ -176,9 +176,10 @@ plus the one a rollback restores; it removes the older ones. Backups you write
 with `garrison backup --to` are left alone; the `pre-restore-*` copies of a
 restore count among the installer's own.
 
-While one installer runs, a second one is refused. An installer that was
-interrupted, even killed, leaves nothing a later run cannot finish: run it
-again.
+While one installer runs, a second one is refused. An upgrade that was
+interrupted, even killed, is finished by running its installer again, or
+`garrison upgrade` with the same archive; `/opt/garrison/unfinished.json`
+notes what the installer began until a release runs again.
 
 To return to the previous release:
 
