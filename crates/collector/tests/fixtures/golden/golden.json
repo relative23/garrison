@@ -879,7 +879,7 @@
       },
       {
        "label": "Long text",
-       "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…",
        "format": "text"
       },
       {
@@ -973,6 +973,7 @@
      },
      "findings": [
       "At least one recorded result is not a success.",
+      "1 of the receipt's 5 rows is no object and was not read.",
       "No age limit is set (max_age_hours): this receipt stays in order however old it is."
      ],
      "value": {},
@@ -1172,7 +1173,10 @@
      ],
      "table": null,
      "findings": [
-      "The tampered bundle does not match its recorded hash."
+      "The tampered bundle does not match its recorded hash.",
+      "The integrity of the odd bundle is not known: plugins/registry.json records no SHA-256 of it.",
+      "The integrity of the twice bundle is not known: plugins/registry.json lists it 2 times.",
+      "The integrity of the absent bundle is not known: plugins/registry.json does not list it."
      ],
      "value": {},
      "maxAge": 900

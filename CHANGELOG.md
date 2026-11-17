@@ -8,6 +8,14 @@ Notable changes for operators and users. The format follows
 
 ### Upgrade notes
 
+- **`garrison check-config`, and with it the upgrade, refuses an option
+  that its check would not use.** Such as `disk_path` without the `disk`
+  check, a version `pattern` without a group, or a receipt's `columns`
+  without `rows`; the message names what mends it.
+- `expect = "idle"` or `max_age_hours` on a `systemd` timer, socket or path
+  unit is refused by `garrison check-config` now, and with it the upgrade,
+  before anything stops. Put them on the service the unit starts, such as
+  `backup.service` for `backup.timer`; check-config names it.
 - A zone of Spamhaus' Data Query Service written with its key in `lists`,
   such as `KEY.zen.dq.spamhaus.net`, keeps working, and `check-config`,
   the installer and `garrison doctor` warn of it: write the zone without
@@ -687,6 +695,29 @@ Notable changes for operators and users. The format follows
   read the installed kernels; loading a module stays out of its reach, as
   it holds no capability and may not make such a call. Where the kernels
   cannot be read, the card says so and is Unknown, never in order.
+- **A kernel update on Debian and Ubuntu counts as a pending update.** The
+  updates card asked apt what `apt-get upgrade` would install, which keeps
+  back every update that needs a package not installed yet, as each kernel
+  update with a new ABI does, security fixes included, and prints no line
+  for it: a host whose only pending security update was its kernel's
+  counted none and was in order (measured on Debian 13 and Ubuntu 24.04).
+  The card now asks what a full upgrade installs (`apt-get -s
+  dist-upgrade`) and counts each installed package it would update, by the
+  archive the update comes from, never by the package's name; a package it
+  installs new, such as the kernel's image, is part of the update that
+  needs it. A host whose apt has fetched no package lists, as a container
+  image leaves it, is Unknown and says so, where apt's "0 upgraded" made it
+  in order; once the lists are fetched it is asked again within five
+  minutes.
+- **A second kernel flavor is no kernel update.** The restart card took
+  every kernel in `/lib/modules` whose release sorts after the running
+  one's for an update of it, so a second flavor of the same release
+  installed beside it, Debian's `-cloud-amd64` beside `-amd64`, Ubuntu's
+  `-lowlatency` beside `-generic` or AlmaLinux's debug kernel (`+debug`),
+  made it call a restart due (names measured on each). It now holds only
+  the kernels of the running one's flavor against it; Debian's backports
+  kernel, `6.12.95+deb12-cloud-amd64` beside the stock
+  `6.1.0-56-cloud-amd64`, still counts as the update it is.
 - **`garrison doctor` names what makes each file.** For a missing access
   policy it said to run `garrison stalwart setup` or the installer, neither
   of which makes one; it now names `garrison access init`, and `garrison
@@ -762,6 +793,22 @@ Notable changes for operators and users. The format follows
   the unit it stands for ("Alias of"). A unit that
   systemd gives no answer for, and every unit while `systemctl` cannot be
   run, is Unknown and says why.
+- **A job's expectation on a systemd timer is refused.** `expect = "idle"`
+  and `max_age_hours` were taken on a timer, a socket or a path unit. A
+  stopped timer is inactive with a successful result (measured), which
+  "idle" takes for a job at rest, so a backup schedule that no longer fired
+  was in order, and `max_age_hours` did nothing on such a unit. `garrison
+  check-config`, and with it the installer before an upgrade, refuses both
+  there now and names the service to put them on.
+- **A job's card says that a run is under way.** systemd forgets when a
+  job's last run ended as soon as it starts the next one (measured), so a
+  job with `max_age_hours`, such as a backup, was Unknown with "No run since
+  the host started." for as long as it ran. Its card now says since when the
+  run is under way and holds that start to the limit. Where systemd
+  remembers no run, after a restart of the host or right after the run of a
+  job that no timer or other unit refers to, which systemd unloads with what
+  it knew of the run (measured), the card says so, where it said that the
+  job had not run.
 - **Only a blocklist's own answer is a listing.** Any address a resolver
   gave for a list's question counted as a listing, so a resolver that
   answers names that do not exist with an address of its own, as some
@@ -1186,11 +1233,57 @@ Notable changes for operators and users. The format follows
   receipt of a job that stopped running long ago stayed in order with
   nothing to show it. Its card now carries a finding that no limit is set;
   set one for every job that runs on a schedule.
+- **Every row of a list receipt counts.** A receipt that lists results was
+  read to its 200th row: a row after it that was not a success left the
+  card in order, and for a list kept oldest first the newest date was the
+  200th row's, so the card warned that the receipt was old while new runs
+  came in, and nothing said that rows were left out. Every row is judged
+  now; the table shows the last 200, and the card says how many rows the
+  receipt lists where there are more. Where `rows` names a place that
+  holds no list, as where a job that failed early wrote no results, the
+  card was in order with no row judged; it is Unknown now and says so. A
+  row that is no JSON object was dropped without a word, so a failure
+  written as a text passed; the card now says how many rows were not read
+  and is Partial where it would be in order.
+- **A cut on a host card says what it leaves out.** A receipt's text was
+  cut at 300 characters with nothing to show that the job wrote more, and
+  `ok_when` and `ok_rows` compared the cut text, so a longer value never
+  matched; the restart card named the first five packages that need a
+  restart and no more. A cut text now ends in "…", conditions compare the
+  whole text, and the restart card says how many more packages there are.
+- **A receipt the card cannot read says why, and what mends it.** The
+  card said "No readable receipt." whatever kept it from reading the file.
+  It now tells apart a file that the job has not written at the path, a
+  folder on the way that the collector's user may not search, a file it
+  may not open, as a job under umask 027 or 077 writes one (mode 0644 mends
+  it, as the documentation asks), a link, which is not followed, or no
+  plain file, and a file larger than 1024 KiB or no JSON object or list,
+  and names what mends each.
+- **A receipt's time is the same instant for every viewer.** A field or
+  column of a receipt with `format = "datetime"` went out as the job wrote
+  it, and a time written without its offset, such as `2026-11-17T03:00:00`,
+  was read in each viewer's own time zone, another instant for each, while
+  the receipt's own date refuses such a time. Such a text is now read as
+  the receipt's own date is, a time with its offset or a plain date as
+  00:00 UTC; any other text is not shown, and the card says which field or
+  column. Unix seconds stay as they were.
 - **Signature files that are no longer updated are a warning.** The
   antivirus check called the signature databases in order as soon as one
   file existed, and showed the age of the daily one without judging it. A
   daily database older than 48 hours is now a warning, and files without a
   daily database among them are Unknown.
+- **A webmail plugin whose bundle cannot be checked is named.** The
+  webmail plugins card stayed in order where a plugin's bundle integrity
+  was "unknown", as long as no other bundle mismatched: a plugin that
+  Bulwark's registry does not list or lists twice, one without a recorded
+  SHA-256, and one whose bundle is missing, a link, unreadable or larger
+  than 2 MiB, which is what such a check is for. Each is now named with why
+  its integrity is not known, and the card is Partial beside a verified
+  bundle and Unknown where none could be checked; a mismatch stays a
+  failure and is named first. A registry that cannot be read is named with
+  why, where the card was Unknown without a word. An entry without `plugins`,
+  or with an empty list, checked no bundle and was in order; it is Unknown
+  now and says that no plugin is named.
 - **The Maintenance page keeps following a job, and keeps its dialog.** One
   failed look at a started job ended the following for good, and the notice
   stayed at "Queued"; it now looks again, later each time, and says
@@ -1405,11 +1498,6 @@ Notable changes for operators and users. The format follows
   there is none, with the same words, and once that there is one again; and
   setup, for an exporter of another's, names the file its user name and
   password go into.
-- **A receipt's card names its file and what writes it.** It said "No
-  readable receipt." whether the file was missing or held no receipt, and
-  named neither. It now names the file and says that the job that writes it
-  has written none there, or, where the file is there, what a receipt must
-  be: a file, not a link, of at most 1024 KiB of JSON, an object or a list.
 - **An answer of Stalwart's that Garrison cannot read is no refusal.** An
   answer in a form this release does not read, as a Stalwart release it
   does not support yet may give after an upgrade (no JSON, an object it

@@ -254,7 +254,7 @@ units = [{{ unit = "backup.service", label = "Backup job", modules = ["backups"]
     assert_eq!(value_of(&unlimited, "Result"), &Value::Null);
     let limited = job(", max_age_hours = 30", never);
     assert_eq!(limited.state, State::Unknown);
-    assert_eq!(limited.findings, ["No run since the host started."]);
+    assert_eq!(limited.findings, [NO_RUN]);
     // Still running: the start is newer than the last end.
     let running = job(
         "",
@@ -275,3 +275,159 @@ units = [{{ unit = "backup.service", label = "Backup job", modules = ["backups"]
         );
     }
 }
+
+/// What `systemctl show` answered, with the collector's arguments, for a
+/// stopped and a waiting timer in a container of Debian 13 that runs
+/// systemd 257 (`systemd/show/`, measured 2026-11-17).
+const TIMER_STOPPED: &str = include_str!("systemd/show/debian-13-timer-stopped.txt");
+const TIMER_WAITING: &str = include_str!("systemd/show/debian-13-timer-waiting.txt");
+
+/// A timer, a socket or a path unit is active while it waits and inactive
+/// once stopped, and runs nothing of its own: `expect = "idle"`, which takes
+/// an inactive unit whose last result was a success for one at rest, called
+/// a stopped timer in order (measured: a stopped timer is inactive with
+/// Result success), and `max_age_hours` never applied to one. check-config
+/// refuses both there and names the service to put them on. A stopped
+/// timer that is expected active is Failed, a waiting one in order.
+#[test]
+fn a_job_expectation_on_a_unit_that_is_no_service_is_refused() {
+    for (unit, kind, extra) in [
+        ("backup.timer", "timer", "expect = \"idle\""),
+        (
+            "backup.timer",
+            "timer",
+            "expect = \"idle\", max_age_hours = 26",
+        ),
+        ("backup.timer", "timer", "max_age_hours = 26"),
+        ("backup.socket", "socket", "expect = \"idle\""),
+        ("backup.path", "path", "expect = \"idle\""),
+    ] {
+        let raw = format!(
+            "type = \"systemd\"\nunits = [{{ unit = \"{unit}\", label = \"Backup\", \
+             modules = [\"backups\"], {extra} }}]"
+        );
+        assert_eq!(
+            Systemd::new(&table(&raw)).map(|_| ()).unwrap_err().0,
+            format!(
+                "providers[systemd] unit {unit}: expect = \"idle\" and max_age_hours are for a \
+                 service that runs and ends, not for a {kind}; put them on the service the \
+                 {kind} starts, such as backup.service"
+            ),
+            "{unit} {extra}"
+        );
+    }
+    let schedule = r#"{ unit = "hostchk-job.timer", label = "Schedule", modules = ["backups"] }"#;
+    let stopped = observed(schedule, &Canned(TIMER_STOPPED.to_owned()));
+    assert_eq!(stopped[0].state, State::Failed);
+    let waiting = observed(schedule, &Canned(TIMER_WAITING.to_owned()));
+    assert_eq!(waiting[0].state, State::Ok);
+    assert_eq!(
+        value_of(&waiting[0], "Next run"),
+        &json!("2026-11-17T03:00:00+00:00")
+    );
+}
+
+/// What `systemctl show` answered, with the collector's arguments, for a
+/// one-shot job in containers of Debian 13 and `AlmaLinux` 10 that run
+/// systemd 257 (`systemd/show/`, measured 2026-11-17): while its second run
+/// was under way, two seconds after a run where no timer referred to it,
+/// after a run its timer kept it loaded for, and in its `ExecStartPost`.
+const DEBIAN_RUNNING: &str = include_str!("systemd/show/debian-13-job-while-it-runs.txt");
+const ALMA_RUNNING: &str = include_str!("systemd/show/almalinux-10-job-while-it-runs.txt");
+const DEBIAN_UNLOADED: &str =
+    include_str!("systemd/show/debian-13-job-unreferenced-after-a-run.txt");
+const ALMA_UNLOADED: &str =
+    include_str!("systemd/show/almalinux-10-job-unreferenced-after-a-run.txt");
+const DEBIAN_RAN: &str = include_str!("systemd/show/debian-13-job-after-a-run.txt");
+const DEBIAN_START_POST: &str = include_str!("systemd/show/debian-13-job-in-its-start-post.txt");
+
+/// The card of the measured job, `hostchk-job.service`, with `limit` added
+/// to its entry, as collected at `now`.
+fn the_job(limit: &str, answer: &str, now: &str) -> Observation {
+    let provider = Systemd::new(&table(&format!(
+        "type = \"systemd\"\nunits = [{{ unit = \"hostchk-job.service\", label = \"Job\", \
+         modules = [\"backups\"], expect = \"idle\"{limit} }}]"
+    )))
+    .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let config = config(directory.path());
+    let runner = Canned(answer.to_owned());
+    let context = crate::context::Context {
+        now: garrison_core::time::parse(now).unwrap(),
+        ..context(&config, &runner)
+    };
+    provider.collect(&context).unwrap().observations.remove(0)
+}
+
+/// systemd clears the end of a job's last run when it starts the next one,
+/// so while that runs nothing says when the last one ended: the card says
+/// since when the run is under way, and `max_age_hours` holds that start to
+/// the limit, as a run that began within it shows that the job still runs.
+#[test]
+fn a_run_under_way_says_since_when_and_holds_its_start_to_the_limit() {
+    for (answer, started) in [
+        (DEBIAN_RUNNING, "2026-11-17T00:24:47+00:00"),
+        (ALMA_RUNNING, "2026-11-17T00:26:00+00:00"),
+    ] {
+        let soon = the_job(", max_age_hours = 26", answer, "2026-11-17T00:30:00Z");
+        assert_eq!(
+            (soon.state, soon.findings.as_slice()),
+            (State::Ok, &[][..]),
+            "{started}"
+        );
+        assert_eq!(value_of(&soon, "Running since"), &json!(started));
+        assert_eq!(value_of(&soon, "Last run"), &Value::Null);
+        // A run that began longer ago than the limit has not ended within it.
+        let stuck = the_job(", max_age_hours = 26", answer, "2026-11-18T03:00:00Z");
+        assert_eq!(stuck.state, State::Warning, "{started}");
+        assert_eq!(
+            stuck.findings,
+            ["The run under way began more than 26 hours ago."]
+        );
+        let unlimited = the_job("", answer, "2026-11-18T03:00:00Z");
+        assert_eq!(unlimited.state, State::Ok, "{started}");
+        assert_eq!(value_of(&unlimited, "Running since"), &json!(started));
+    }
+    // In its ExecStartPost the job's main process has ended: that is its run.
+    let post = the_job(
+        ", max_age_hours = 26",
+        DEBIAN_START_POST,
+        "2026-11-17T00:30:00Z",
+    );
+    assert_eq!(post.state, State::Ok);
+    assert_eq!(
+        value_of(&post, "Last run"),
+        &json!("2026-11-17T00:25:19+00:00")
+    );
+    assert!(
+        post.fields
+            .iter()
+            .all(|field| field.label != "Running since")
+    );
+}
+
+/// systemd keeps a job's last run only while it keeps the job loaded: it
+/// forgets it when the host starts, and as soon as the run ends where no
+/// timer or other unit refers to the job, as for one started by hand or by
+/// cron (measured: two seconds after such a run both of its times were
+/// empty). The card is Unknown then and says that, not that no run was.
+#[test]
+fn a_job_whose_run_systemd_forgot_says_why_it_knows_none() {
+    for answer in [DEBIAN_UNLOADED, ALMA_UNLOADED] {
+        let forgotten = the_job(", max_age_hours = 26", answer, "2026-11-17T00:30:00Z");
+        assert_eq!(forgotten.state, State::Unknown);
+        assert_eq!(forgotten.findings, [NO_RUN]);
+    }
+    // One that its timer keeps loaded keeps its run.
+    let kept = the_job(", max_age_hours = 26", DEBIAN_RAN, "2026-11-17T00:30:00Z");
+    assert_eq!(kept.state, State::Ok);
+    assert_eq!(
+        value_of(&kept, "Last run"),
+        &json!("2026-11-17T00:24:47+00:00")
+    );
+}
+
+/// What a job's card says where systemd remembers no run of it.
+const NO_RUN: &str = "systemd remembers no finished run of this job: none since the host \
+                      started, or it unloaded the job after its last run, as it does where no \
+                      timer or other unit refers to the job.";

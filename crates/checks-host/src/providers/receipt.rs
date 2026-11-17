@@ -23,156 +23,47 @@ use std::path::PathBuf;
 
 use garrison_core::files::{changed_only_by_trusted, read_json_with_metadata};
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{
-    Column, Evidence, Field, Format, Observation, Required, State, Table,
-};
-use garrison_core::time::{self, Written};
-use serde_json::{Value, json};
+use garrison_core::observations::{Evidence, Observation, Required, State};
+use garrison_core::time::Written;
+use serde_json::Value;
 
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
-use crate::values::{from_toml, loosely_equal};
+
+mod keys;
+mod shown;
+
+use keys::{Condition, Key, Selected, date, key, lookup, selected};
 
 const MAX_DOCUMENT: usize = 1024 * 1024;
-const MAX_TEXT: usize = 300;
+/// The table of a list receipt shows this many rows, the last ones, where a
+/// job that appends a row for each run puts the newest. Every row is judged.
 const MAX_ROWS: usize = 200;
 const DEFAULT_SCOPE: &str = "Historical result reported by the job; not a current test.";
 
-/// A path into nested objects: one key or up to six.
-type Key = Vec<String>;
-
-fn key(value: Option<&toml::Value>, name: &str) -> Checked<Key> {
-    let valid = |part: &str| {
-        (1..=120).contains(&part.chars().count())
-            && part
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"_@/.:-".contains(&byte))
-    };
-    let parts: Option<Key> = match value {
-        Some(toml::Value::String(text)) => Some(vec![text.clone()]),
-        Some(toml::Value::Array(items)) if (1..=6).contains(&items.len()) => items
-            .iter()
-            .map(|item| item.as_str().map(str::to_owned))
-            .collect(),
-        _ => None,
-    };
-    match parts {
-        Some(parts) if parts.iter().all(|part| valid(part)) => Ok(parts),
-        _ => fail(format!("{name} must be a key or a list of keys")),
-    }
-}
-
-/// The value at `key`: scalars as they are (text truncated), lists by their length.
-fn lookup(document: &Value, key: &[String]) -> Value {
-    let mut current = document;
-    for part in key {
-        let Value::Object(map) = current else {
-            return Value::Null;
-        };
-        current = map.get(part).unwrap_or(&Value::Null);
-    }
-    match current {
-        Value::String(text) => Value::String(text.chars().take(MAX_TEXT).collect()),
-        Value::Array(items) => json!(items.len()),
-        Value::Object(_) => Value::Null,
-        scalar => scalar.clone(),
-    }
-}
-
-/// A timestamp with a zone, or a plain date taken as 00:00 UTC. A timestamp
-/// without a zone is ambiguous and therefore not accepted.
-fn date(value: &Value) -> Option<Written> {
-    let text = value.as_str()?;
-    let plain = text.len() == 10
-        && text.bytes().enumerate().all(|(index, byte)| match index {
-            4 | 7 => byte == b'-',
-            _ => byte.is_ascii_digit(),
-        });
-    if plain {
-        return time::parse_written(&format!("{text}T00:00:00+00:00"));
-    }
-    time::parse_written(text)
-}
-
-fn format_of(name: &str) -> Option<Format> {
-    Some(match name {
-        "text" => Format::Text,
-        "number" => Format::Number,
-        "bytes" => Format::Bytes,
-        "datetime" => Format::Datetime,
-        "duration" => Format::Duration,
-        "boolean" => Format::Boolean,
-        "url" => Format::Url,
-        _ => return None,
-    })
-}
-
-#[derive(Debug)]
-struct Selected {
-    key: Key,
-    label: String,
-    format: Format,
-}
-
-fn selected(options: &Options<'_>, list: &str) -> Checked<Vec<Selected>> {
-    let mut result = Vec::new();
-    for item in options.tables(list)? {
-        let label = item.get("label").and_then(toml::Value::as_str);
-        let format = match item.get("format") {
-            None => Some(Format::Text),
-            Some(value) => value.as_str().and_then(format_of),
-        };
-        let extra = item
-            .keys()
-            .any(|name| !["key", "label", "format"].contains(&name.as_str()));
-        let (Some(label), Some(format), false) = (label, format, extra) else {
-            return fail(format!(
-                "providers[{}].{list} entries need key, label, format",
-                options.kind
-            ));
-        };
-        let key = key(item.get("key"), &format!("{}.{list}.key", options.kind))?;
-        result.push(Selected {
-            key,
-            label: label.to_owned(),
-            format,
-        });
-    }
-    Ok(result)
-}
-
-/// `{ key = …, equals = […] }`: the value at `key` must equal one of `equals`.
-#[derive(Debug)]
-struct Condition {
-    key: Key,
-    equals: Vec<Value>,
-}
-
-impl Condition {
-    fn parse(value: Option<&toml::Value>, name: &str) -> Checked<Option<Self>> {
-        let Some(value) = value else {
-            return Ok(None);
-        };
-        let table = value.as_table().filter(|table| {
-            table.len() == 2 && table.contains_key("key") && table.contains_key("equals")
-        });
-        let Some(toml::Value::Array(equals)) = table.and_then(|table| table.get("equals")) else {
-            return fail(format!("providers[receipt].{name} needs key and equals"));
-        };
-        Ok(Some(Condition {
-            key: key(
-                table.and_then(|table| table.get("key")),
-                &format!("{name}.key"),
-            )?,
-            equals: equals.iter().map(from_toml).collect(),
-        }))
-    }
-
-    fn holds(&self, document: &Value) -> bool {
-        let value = lookup(document, &self.key);
-        self.equals
-            .iter()
-            .any(|allowed| loosely_equal(&value, allowed))
+/// Refuses the options that a receipt of this shape would not read.
+fn unused(options: &Options<'_>, rows: Option<&Key>) -> Checked<()> {
+    let found = |names: [&'static str; 3]| names.into_iter().find(|name| options.has(name));
+    match rows {
+        None => match found(["columns", "ok_rows", "row_date"]) {
+            Some(name) => fail(format!("providers[receipt].{name} needs rows")),
+            None => Ok(()),
+        },
+        Some(key) if !key.is_empty() && options.has("row_date") => fail(
+            "providers[receipt].row_date is only for rows = []; rows under a key take the \
+             receipt's date from date",
+        ),
+        Some(key) if !key.is_empty() => Ok(()),
+        Some(_) => match found(["fields", "ok_when", "date"]) {
+            Some(name) => fail(format!(
+                "providers[receipt].{name} reads an object, but rows = [] reads a list; use \
+                 columns, ok_rows and row_date"
+            )),
+            None if !options.has("row_date") => {
+                fail("providers[receipt] with rows = [] needs row_date, the key of each row's date")
+            }
+            None => Ok(()),
+        },
     }
 }
 
@@ -258,6 +149,7 @@ impl Receipt {
             Some(value) => Some(key(Some(value), "receipt.row_date")?),
             None => None,
         };
+        unused(&options, rows.as_ref())?;
         Ok(Receipt {
             id,
             title,
@@ -275,19 +167,52 @@ impl Receipt {
         })
     }
 
-    fn items(&self, document: &Value) -> Option<Vec<Value>> {
+    /// The place that `rows` names in the document, for a receipt with rows.
+    fn place<'a>(&self, document: &'a Value) -> Option<&'a Value> {
         let mut items = document;
         for part in self.rows.as_ref()? {
             items = items.get(part).unwrap_or(&Value::Null);
         }
-        let list = items.as_array()?;
+        Some(items)
+    }
+
+    /// The rows of a receipt that has them: every one, however many, as the
+    /// file is at most 1 MiB.
+    fn items(&self, document: &Value) -> Option<Vec<Value>> {
+        let list = self.place(document)?.as_array()?;
         Some(
             list.iter()
-                .take(MAX_ROWS)
                 .filter(|item| item.is_object())
                 .cloned()
                 .collect(),
         )
+    }
+
+    /// What a receipt with rows says where they cannot all be read, and the
+    /// state it may have at most: Unknown where `rows` names no list, as
+    /// where a job that failed early wrote none, and Partial where rows are
+    /// no objects, which are not read.
+    fn unread_rows(&self, document: &Value) -> Option<(State, String)> {
+        let Some(list) = self.place(document)?.as_array() else {
+            let why = if self.rows.as_ref().is_some_and(Vec::is_empty) {
+                "The receipt is no list of rows."
+            } else {
+                "The receipt holds no list of rows where `rows` names one."
+            };
+            return Some((State::Unknown, why.to_owned()));
+        };
+        let (others, total) = (
+            list.iter().filter(|item| !item.is_object()).count(),
+            list.len(),
+        );
+        let finding = match others {
+            0 => return None,
+            1 => format!("1 of the receipt's {total} rows is no object and was not read."),
+            _ => {
+                format!("{others} of the receipt's {total} rows are no objects and were not read.")
+            }
+        };
+        Some((State::Partial, finding))
     }
 
     fn reported(&self, document: &Value, items: Option<&[Value]>) -> Option<Written> {
@@ -304,28 +229,6 @@ impl Receipt {
             }
         }
         newest
-    }
-
-    fn table(&self, items: &[Value]) -> Table {
-        Table {
-            columns: self
-                .columns
-                .iter()
-                .map(|column| Column {
-                    label: column.label.clone(),
-                    format: column.format,
-                })
-                .collect(),
-            rows: items
-                .iter()
-                .map(|item| {
-                    self.columns
-                        .iter()
-                        .map(|column| lookup(item, &column.key))
-                        .collect()
-                })
-                .collect(),
-        }
     }
 }
 
@@ -364,18 +267,53 @@ impl Receipt {
         }
     }
 
-    /// Why there is no receipt to read: none at its path, which a job of
-    /// the operator's writes, or a file there that is no receipt.
+    /// Why there is no receipt to read, with what mends it: none at its
+    /// path, which a job of the operator's writes; a folder on the way that
+    /// the collector's user may not search; a file it may not open, as one
+    /// a job writes under umask 027 or 077; a link or no plain file; or a
+    /// file too large or no JSON object or list.
     fn unread(&self) -> String {
         let path = self.path.display();
-        if std::fs::symlink_metadata(&self.path).is_err() {
-            return format!("No receipt at {path}: the job that writes it has written none there.");
+        let denied = |error: &std::io::Error| error.kind() == std::io::ErrorKind::PermissionDenied;
+        match std::fs::symlink_metadata(&self.path) {
+            Err(error) if denied(&error) => {
+                // The deepest folder that can be looked at is the one that
+                // cannot be searched.
+                let folder = self
+                    .path
+                    .ancestors()
+                    .skip(1)
+                    .find(|folder| std::fs::symlink_metadata(folder).is_ok())
+                    .unwrap_or(&self.path)
+                    .display();
+                format!(
+                    "The receipt at {path} cannot be looked for: the collector's user may not \
+                     search the folder {folder}; let every user search it (chmod o+x {folder})."
+                )
+            }
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                format!("The receipt at {path} cannot be looked for: {error}.")
+            }
+            Err(_) => {
+                format!("No receipt at {path}: the job that writes it has written none there.")
+            }
+            Ok(metadata) if metadata.is_symlink() => format!(
+                "The receipt at {path} is a link, which is not followed: let the job write the \
+                 file there itself."
+            ),
+            Ok(metadata) if !metadata.is_file() => format!(
+                "The receipt at {path} is no plain file: let the job write it there as one."
+            ),
+            Ok(_) if std::fs::File::open(&self.path).is_err_and(|error| denied(&error)) => format!(
+                "The receipt at {path} is there, but the collector's user may not open it: let \
+                 the job write it with mode 0644 (chmod 0644 {path})."
+            ),
+            Ok(_) => format!(
+                "The receipt at {path} cannot be read: it must be at most {} KiB of JSON, an \
+                 object or a list.",
+                MAX_DOCUMENT / 1024
+            ),
         }
-        format!(
-            "The receipt at {path} cannot be read: it must be a file, not a link, of at most {} \
-             KiB of JSON, an object or a list.",
-            MAX_DOCUMENT / 1024
-        )
     }
 }
 
@@ -443,6 +381,24 @@ impl Provider for Receipt {
             state = State::Failed;
             findings.push("At least one recorded result is not a success.".to_owned());
         }
+        // Rows that cannot be read are no rows in order.
+        if let Some((at_most, finding)) = self.unread_rows(&document) {
+            if state == State::Ok {
+                state = at_most;
+            }
+            findings.push(finding);
+        }
+        if let Some(items) = items.as_ref().filter(|items| items.len() > MAX_ROWS) {
+            findings.push(format!(
+                "The receipt lists {} rows; the table shows the last {MAX_ROWS}.",
+                items.len()
+            ));
+        }
+        let fields = self.fields(&document, reported, &mut findings);
+        let table = items.as_ref().map(|items| {
+            let shown = &items[items.len().saturating_sub(MAX_ROWS)..];
+            self.table(shown, &mut findings)
+        });
         // Without a limit the receipt of a job that stopped running months
         // ago is as much in order as yesterday's: the card says so.
         if self.max_age_hours == 0 {
@@ -464,26 +420,12 @@ impl Provider for Receipt {
                 ),
             );
         }
-        let mut fields = vec![Field::new(
-            "Reported at",
-            reported.map(time::isoformat_written),
-            Format::Datetime,
-        )];
-        if document.is_object() {
-            fields.extend(self.fields.iter().map(|field| {
-                Field::new(
-                    field.label.clone(),
-                    lookup(&document, &field.key),
-                    field.format,
-                )
-            }));
-        }
         let mut observation = base(state)?
             .with_fields(fields)
             .with_findings(findings)
             .with_max_age(900);
-        if let Some(items) = &items {
-            observation = observation.with_table(self.table(items));
+        if let Some(table) = table {
+            observation = observation.with_table(table);
         }
         let mut report = Report::of(observation);
         if let Some(seconds) = age.filter(|_| trusted) {
@@ -497,3 +439,6 @@ impl Provider for Receipt {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod unread_tests;

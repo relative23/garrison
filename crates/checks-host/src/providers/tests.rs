@@ -1,6 +1,10 @@
+use std::path::Path;
+
+use garrison_core::hex;
 use garrison_core::observations::{Observation, State};
 use garrison_testing::http::{answer, serve};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use super::*;
 use crate::context::Provider;
@@ -162,4 +166,170 @@ fn host_resources_come_from_proc_files() {
         .observations
         .remove(0);
     assert_eq!(unknown.state, State::Unknown);
+}
+
+/// The webmail plugins card for the plugins `named` in a Bulwark folder at
+/// `directory`.
+fn plugins_card(directory: &Path, named: &str) -> Observation {
+    let raw = format!(
+        "admin_directory = \"{}\"\nplugins = [{named}]",
+        directory.display()
+    );
+    let provider = Bulwark::new(&table(&raw)).unwrap();
+    let (config, runner) = (config(directory), Canned(String::new()));
+    provider
+        .collect(&context(&config, &runner))
+        .unwrap()
+        .observations
+        .remove(0)
+}
+
+/// A Bulwark folder whose registry lists `rows`, with the bundles `files`.
+fn webmail(rows: &Value, files: &[(&str, &[u8])]) -> tempfile::TempDir {
+    let directory = tempfile::tempdir().unwrap();
+    let plugins = directory.path().join("plugins");
+    std::fs::create_dir_all(&plugins).unwrap();
+    for (name, content) in files {
+        std::fs::write(plugins.join(name), content).unwrap();
+    }
+    let registry = json!({ "plugins": rows });
+    std::fs::write(plugins.join("registry.json"), registry.to_string()).unwrap();
+    directory
+}
+
+/// A bundle and the registry's row that records its hash.
+fn recorded(id: &str, code: &[u8]) -> Value {
+    let hash = hex::encode(&Sha256::digest(code));
+    json!({"id": id, "version": "1.0.0", "enabled": true, "bundleHash": hash})
+}
+
+/// A registry's rows, the bundles beside it, and why the integrity of the
+/// one bundle named is not known.
+type Unchecked<'a> = (Value, Vec<(&'a str, &'a [u8])>, &'a str);
+
+/// Where a bundle's integrity cannot be checked, the card names the plugin
+/// and why: Partial beside a bundle that was verified, Unknown where none
+/// could be, and a mismatch first where one is found, as the notifications
+/// carry the first finding.
+#[test]
+fn a_bundle_whose_integrity_is_not_known_is_named_and_not_in_order() {
+    let code = b"bundle".as_slice();
+    let folder = webmail(&json!([recorded("spam", code)]), &[("spam.js", code)]);
+    let beside = plugins_card(folder.path(), "\"spam\", \"absent\"");
+    assert_eq!(
+        (beside.state, beside.findings.as_slice()),
+        (
+            State::Partial,
+            &[
+                "The integrity of the absent bundle is not known: plugins/registry.json does not \
+               list it."
+                    .to_owned()
+            ][..]
+        )
+    );
+    let large = vec![b'x'; 2 * 1024 * 1024 + 1];
+    let cases: [Unchecked<'_>; 4] = [
+        (
+            json!([recorded("spam", code), recorded("spam", code)]),
+            vec![("spam.js", code)],
+            "plugins/registry.json lists it 2 times",
+        ),
+        (
+            json!([{"id": "spam", "bundleHash": "not-a-hash"}]),
+            vec![("spam.js", code)],
+            "plugins/registry.json records no SHA-256 of it",
+        ),
+        (
+            json!([recorded("spam", code)]),
+            vec![],
+            "plugins/spam.js is missing",
+        ),
+        (
+            json!([recorded("spam", &large)]),
+            vec![("spam.js", large.as_slice())],
+            "plugins/spam.js is larger than 2 MiB",
+        ),
+    ];
+    for (rows, files, why) in cases {
+        let folder = webmail(&rows, &files);
+        let alone = plugins_card(folder.path(), "\"spam\"");
+        assert_eq!(
+            (alone.state, alone.findings.as_slice()),
+            (
+                State::Unknown,
+                &[format!(
+                    "The integrity of the spam bundle is not known: {why}."
+                )][..]
+            ),
+            "{why}"
+        );
+    }
+    // A bundle in place of a link is not followed; one this user may not
+    // read is named so, where its mode keeps the user out.
+    let folder = webmail(&json!([recorded("spam", code)]), &[("real.js", code)]);
+    let plugins = folder.path().join("plugins");
+    std::os::unix::fs::symlink(plugins.join("real.js"), plugins.join("spam.js")).unwrap();
+    assert_eq!(
+        plugins_card(folder.path(), "\"spam\"").findings,
+        [
+            "The integrity of the spam bundle is not known: plugins/spam.js is a link, which is \
+          not followed."
+        ]
+    );
+    let folder = webmail(&json!([recorded("spam", code)]), &[("spam.js", code)]);
+    let bundle = folder.path().join("plugins/spam.js");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bundle, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    if std::fs::read(&bundle).is_err() {
+        assert_eq!(
+            plugins_card(folder.path(), "\"spam\"").findings,
+            [
+                "The integrity of the spam bundle is not known: the collector may not read \
+              plugins/spam.js."
+            ]
+        );
+    }
+    // A mismatch comes first.
+    let folder = webmail(&json!([recorded("spam", code)]), &[("spam.js", b"changed")]);
+    let both = plugins_card(folder.path(), "\"absent\", \"spam\"");
+    assert_eq!(both.state, State::Failed);
+    assert_eq!(
+        both.findings,
+        [
+            "The spam bundle does not match its recorded hash.",
+            "The integrity of the absent bundle is not known: plugins/registry.json does not \
+             list it."
+        ]
+    );
+}
+
+/// A registry that cannot be read leaves every bundle unknown, and says why.
+#[test]
+fn a_plugin_registry_that_cannot_be_read_says_why() {
+    let missing = tempfile::tempdir().unwrap();
+    let card = plugins_card(missing.path(), "\"spam\"");
+    assert_eq!(
+        (card.state, card.findings.as_slice()),
+        (
+            State::Unknown,
+            &["No bundle's integrity is known: plugins/registry.json is missing.".to_owned()][..]
+        )
+    );
+    for (text, why) in [
+        ("{\"plugins\": ", "plugins/registry.json is no valid JSON"),
+        (
+            "{\"plugins\": 3}",
+            "plugins/registry.json holds no list of plugins",
+        ),
+    ] {
+        let folder = webmail(&json!([]), &[]);
+        std::fs::write(folder.path().join("plugins/registry.json"), text).unwrap();
+        assert_eq!(
+            plugins_card(folder.path(), "\"spam\"").findings,
+            [format!("No bundle's integrity is known: {why}.")],
+            "{text}"
+        );
+    }
 }

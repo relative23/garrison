@@ -40,6 +40,11 @@ impl VersionCommand {
         let Ok(pattern) = Regex::new(&pattern) else {
             return fail("providers[version-command].pattern must be a valid regular expression");
         };
+        if pattern.captures_len() < 2 {
+            return fail(
+                "providers[version-command].pattern needs a group, ( ), around the version",
+            );
+        }
         Ok(VersionCommand {
             component,
             command,

@@ -113,6 +113,9 @@ impl HostCare {
                 return fail("providers[host-care].firewall_units lists systemd units, each once");
             }
         };
+        if !checks.contains("disk") && options.has("disk_path") {
+            return fail("providers[host-care].disk_path needs the disk check");
+        }
         Ok(HostCare {
             root: options.path("root", Some("/"))?,
             disk_path: options.path("disk_path", Some("/"))?,
@@ -216,7 +219,7 @@ impl HostCare {
         let observation = self
             .observation(context, "updates", "System updates", state, &asked.source)?
             .with_scope(
-                "What the package manager would install, from the metadata the host has fetched; \
+                "What a full upgrade would install, from the metadata the host has fetched; \
                  asked again after a change to the packages or the metadata, otherwise every six hours.",
             )
             .with_fields(vec![

@@ -1,7 +1,10 @@
+use garrison_core::observations::Format;
+use garrison_core::time;
 use serde_json::json;
 
+use super::keys::format_of;
 use super::*;
-use crate::testing::{Canned, config, context, table};
+use crate::testing::{Canned, config, context, now, table};
 
 fn provider(text: &str) -> Receipt {
     Receipt::new(&table(text)).unwrap()
@@ -131,8 +134,8 @@ fn a_missing_receipt_is_unknown_not_failed() {
             (
                 State::Unknown,
                 vec![format!(
-                    "The receipt at {} cannot be read: it must be a file, not a link, of at most \
-                     1024 KiB of JSON, an object or a list.",
+                    "The receipt at {} cannot be read: it must be at most 1024 KiB of JSON, an \
+                     object or a list.",
                     path.display()
                 )]
             ),
@@ -154,9 +157,10 @@ fn lookups_follow_keys_and_summarize_lists() {
     let document = json!({"a": {"b": [1, 2, 3], "c": "x".repeat(400), "d": {"e": 1}}});
     let key = |parts: &[&str]| parts.iter().map(ToString::to_string).collect::<Vec<_>>();
     assert_eq!(lookup(&document, &key(&["a", "b"])), json!(3));
+    // A text past 300 characters is cut, and says so.
     assert_eq!(
-        lookup(&document, &key(&["a", "c"])).as_str().unwrap().len(),
-        300
+        lookup(&document, &key(&["a", "c"])),
+        json!(format!("{}…", "x".repeat(299)))
     );
     assert_eq!(lookup(&document, &key(&["a", "d"])), Value::Null);
     assert_eq!(
@@ -372,4 +376,104 @@ ok_when = {{ key = "result", equals = ["passed"] }}"#,
         );
         assert!(report.gauges.is_empty());
     }
+}
+
+/// A list receipt is judged by every row, however many: a row past the 200
+/// that its table shows counts, whether it fails or is the newest. The card
+/// says how many rows the table leaves out; it shows the last ones, where a
+/// job that appends a row for each run puts the newest.
+#[test]
+fn every_row_of_a_long_list_receipt_counts() {
+    // 250 runs an hour apart, the last at 11:00 on the tests' day and failed.
+    let rows: Vec<Value> = (0..250_i64)
+        .map(|run| {
+            let at = time::Timestamp::from_second(now().as_second() - 3600 * (250 - run));
+            json!({"run": run, "ok": run != 249, "date": time::isoformat(at.unwrap())})
+        })
+        .collect();
+    let observation = observe(
+        &Value::Array(rows),
+        "rows = []\nrow_date = \"date\"\nmax_age_hours = 2\n\
+         ok_rows = { key = \"ok\", equals = [true] }\n\
+         columns = [{ key = \"run\", label = \"Run\", format = \"number\" }]",
+    );
+    assert_eq!(
+        (observation.state, observation.findings.as_slice()),
+        (
+            State::Failed,
+            &[
+                "At least one recorded result is not a success.".to_owned(),
+                "The receipt lists 250 rows; the table shows the last 200.".to_owned()
+            ][..]
+        )
+    );
+    assert_eq!(
+        observation.fields[0].value,
+        json!("2026-10-29T11:00:00+00:00")
+    );
+    let table = observation.table.unwrap();
+    assert_eq!(table.rows.len(), 200);
+    assert_eq!(table.rows[0], [json!(50)]);
+}
+
+/// A `datetime` text is read as the receipt's own date is: a time with its
+/// offset, written out in full, or a plain date, as 00:00 UTC. A time
+/// without its offset, which every browser reads in its own time zone, and
+/// any other text are not shown, and the card says so; Unix seconds stay as
+/// they are.
+#[test]
+fn a_datetime_text_without_its_offset_is_not_shown() {
+    let document = json!({
+        "date": "2026-10-29T11:00:00Z",
+        "zoned": "2026-10-29T03:00:00+01:00",
+        "utc": "2026-10-29T02:00:00Z",
+        "day": "2026-10-28",
+        "naive": "2026-10-29T03:00:00",
+        "seconds": 1_793_000_000,
+        "runs": [{"at": "2026-10-29T03:00:00"}, {"at": "2026-10-29T03:00:00+00:00"}, {"at": "soon"}],
+    });
+    let entries: Vec<String> = ["zoned", "utc", "day", "naive", "seconds"]
+        .iter()
+        .map(|key| format!("{{ key = \"{key}\", label = \"{key}\", format = \"datetime\" }}"))
+        .collect();
+    let observation = observe(
+        &document,
+        &format!(
+            "max_age_hours = 30\nfields = [{}]\nrows = [\"runs\"]\n\
+             columns = [{{ key = \"at\", label = \"At\", format = \"datetime\" }}]",
+            entries.join(", ")
+        ),
+    );
+    let shown: Vec<(&str, &Value)> = observation.fields[1..]
+        .iter()
+        .map(|field| (field.label.as_str(), &field.value))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            ("zoned", &json!("2026-10-29T03:00:00+01:00")),
+            ("utc", &json!("2026-10-29T02:00:00+00:00")),
+            ("day", &json!("2026-10-28T00:00:00+00:00")),
+            ("naive", &Value::Null),
+            ("seconds", &json!(1_793_000_000)),
+        ]
+    );
+    assert_eq!(observation.state, State::Ok);
+    assert_eq!(
+        observation.findings,
+        [
+            "naive is not shown: \"2026-10-29T03:00:00\" is no time with its offset, such as \
+             2026-11-17T03:00:00Z.",
+            "The column At is not shown in 2 rows: they hold no time with its offset, such as \
+             2026-11-17T03:00:00Z."
+        ]
+    );
+    assert_eq!(
+        observation.table.unwrap().rows,
+        [
+            vec![Value::Null],
+            vec![json!("2026-10-29T03:00:00+00:00")],
+            vec![Value::Null]
+        ]
+    );
 }

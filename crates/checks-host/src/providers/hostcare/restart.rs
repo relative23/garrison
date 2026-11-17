@@ -31,15 +31,21 @@ impl HostCare {
         Ok(installed)
     }
 
-    /// The distribution's own marker, or a kernel newer than the one that runs.
+    /// The distribution's own marker, or a kernel newer than the one that
+    /// runs, of its flavor: another flavor beside it, such as a debug kernel,
+    /// is no update of it.
     pub(super) fn restart(&self, context: &Context<'_>) -> Made {
         let text = |path: &str| fs::read_to_string(self.root.join(path)).ok();
         let running = text("proc/sys/kernel/osrelease").map(|release| release.trim().to_owned());
         let kernels = self.kernels();
-        let newest = kernels
-            .as_ref()
-            .ok()
-            .and_then(|kernels| kernels.last().cloned());
+        let flavor = running.as_deref().map(reading::flavor);
+        let newest = kernels.as_ref().ok().and_then(|kernels| {
+            kernels
+                .iter()
+                .rev()
+                .find(|kernel| flavor.is_none_or(|flavor| reading::flavor(kernel) == flavor))
+                .cloned()
+        });
         let marked = self.root.join("run/reboot-required").exists();
         let (state, finding) = match (&running, &newest) {
             _ if marked => {
@@ -48,13 +54,12 @@ impl HostCare {
                     packages.lines().filter(|line| !line.is_empty()).collect();
                 names.sort_unstable();
                 names.dedup();
-                let because = if names.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        " ({})",
-                        names.iter().take(5).copied().collect::<Vec<_>>().join(", ")
-                    )
+                // Five are named; the finding says how many more there are.
+                let shown = names.iter().take(5).copied().collect::<Vec<_>>().join(", ");
+                let because = match names.len() {
+                    0 => String::new(),
+                    1..=5 => format!(" ({shown})"),
+                    count => format!(" ({shown} and {} more)", count - 5),
                 };
                 (
                     State::Warning,
@@ -87,7 +92,7 @@ impl HostCare {
         };
         Ok(self
             .observation(context, "restart", "Restart of the host", state, "/run/reboot-required, /lib/modules")?
-            .with_scope("The distribution's own marker where it writes one, and the installed kernels against the running one.")
+            .with_scope("The distribution's own marker where it writes one, and the installed kernels of the running one's flavor against it.")
             .with_fields(vec![
                 Field::text("Running kernel", running),
                 Field::text("Newest installed kernel", newest),

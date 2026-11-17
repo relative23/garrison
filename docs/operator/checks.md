@@ -38,7 +38,7 @@ observation the checks report is in [observation ids](observations.md).
 | `type` | Options | Shows |
 |---|---|---|
 | `host` | `disk_path`, `modules` | Memory, load, disk, uptime |
-| `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path`, `firewall_units`, `modules` | What the host needs from its operator; see below |
+| `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path` (with `disk`), `firewall_units`, `modules` | What the host needs from its operator; see below |
 | `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; an alias, such as `sshd.service`, shows the state of the unit it names and names that unit ("Alias of"). Timers show their schedule and next run. For one-shot jobs see below |
 | `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `max_domains` (20, at most 100), `modules` | Certificate validity per endpoint; see below |
 | `mail-flow` | `checks` (default: all of `spam`, `milter`, `authentication`, `tls`) | A week of the recorded events in numbers; see below |
@@ -47,9 +47,9 @@ observation the checks report is in [observation ids](observations.md).
 | `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
 | `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning, and where both are there the newer one counts, also for the dashboard's signature age |
 | `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30), `verify_days` (0: not expected), `restore_days` (0), `path`, `modules` | What the backup tool reported of its repository; see below |
-| `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity |
+| `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity: a bundle (`plugins/<id>.js`) that does not match the SHA-256 in `plugins/registry.json` is a failure. A plugin whose bundle cannot be checked, as one the registry does not list or lists twice, gives no hash for, or whose bundle is missing, a link, unreadable or larger than 2 MiB, is named with why; the card is then Partial, or Unknown where no bundle could be checked, as without `plugins`, which name the plugins to check |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
-| `version-command` | `component`, `command`, `pattern`, `modules` | Installed version from a command; it runs in the collector's sandbox, so a program that compiles code at run time (a JIT) fails there |
+| `version-command` | `component`, `command`, `pattern` (its first group, `( )`, is the version), `modules` | Installed version from a command; it runs in the collector's sandbox, so a program that compiles code at run time (a JIT) fails there |
 | `reputation` | `hosts` (default: the mail hosts Stalwart names), `max_domains` (20, at most 100), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
 | `senders` | `min_recipients` (50), `factor` (5), `burst` (100), `bounces` (10), `modules` | The sender addresses that send unusually much; see below |
 | `releases` | `products` (`garrison`, `stalwart`; default both) | Whether a newer release exists; see below |
@@ -62,9 +62,15 @@ observation the checks report is in [observation ids](observations.md).
 Five checks of the host itself. Each reads what the host already knows and
 changes nothing; one that cannot be made is Unknown.
 
-- `updates`: the updates the package manager would install, security updates
-  apart, which are a warning. It reads the metadata the host has fetched, so
-  it is as fresh as the host's own update job keeps it. It asks again within
+- `updates`: the updates a full upgrade would install, security updates
+  apart, which are a warning. On Debian and Ubuntu that is what `apt-get
+  dist-upgrade` installs: an update that needs a package not installed yet,
+  as each kernel update with a new ABI does, counts too, where plain `apt-get
+  upgrade` keeps it back. An update counts as a security update by the
+  archive it comes from. It reads the metadata the host has fetched, so it is
+  as fresh as the host's own update job keeps it; where apt has fetched no
+  package lists at all (`/var/lib/apt/lists`), as a container image leaves
+  it, the card is Unknown and says so. It asks again within
   five minutes once packages are installed or removed or new metadata is
   fetched, and otherwise every six hours. It reads `apt` (Debian, Ubuntu) and
   `dnf` 4 (the RHEL family, Amazon Linux); elsewhere it is Unknown. The
@@ -73,7 +79,13 @@ changes nothing; one that cannot be made is Unknown.
   names the repository.
 - `restart`: whether installed updates need a restart of the host. On every
   distribution a kernel installed in `/lib/modules` that is newer than the
-  one that runs is a warning. The check also reads `/run/reboot-required`,
+  one that runs, and of its flavor, is a warning. The flavor is the
+  release's name from its first hyphen before a letter on, such as `-amd64`,
+  `-cloud-amd64` or `-generic`, or else from its last plus on, such as
+  `+debug`: another flavor installed beside the running kernel, such as a
+  debug or cloud kernel, is no update of it and is not compared, while
+  Debian's backports kernel has the flavor of the stock kernel it updates.
+  The check also reads `/run/reboot-required`,
   the marker that packages of Debian and Ubuntu write where their update
   needs a restart, as Debian's dbus does, so that such an update shows too.
   The RHEL family, Fedora, Amazon Linux and openSUSE do not write it: there
@@ -271,6 +283,19 @@ shows it too.
 Use `expect = "idle"` for a job that runs and ends, such as a backup. The
 entry then shows when the job last ran, how it ended and how long it took, as
 systemd reports it. With `max_age_hours` it warns when the last run is older.
+While a run is under way, systemd has forgotten when the one before ended:
+the card says since when the run is under way, and `max_age_hours` holds that
+start to the limit. systemd also forgets a job's last run when the host
+starts, and as soon as the run has ended where no timer or other unit refers
+to the job, as for one started by hand or from cron; with `max_age_hours` the
+card is Unknown then and says so. Start such a job from a timer, or let it
+write a receipt.
+
+A job is a service. `garrison check-config` refuses `expect = "idle"` and
+`max_age_hours` on a timer, a socket or a path unit, which is active while it
+waits and inactive once it is stopped: put them on the service the timer
+starts, such as `backup.service` for `backup.timer`, and leave the timer at
+the default, `expect = "active"`, under which a stopped timer is Failed.
 
 ## `dns`
 
@@ -519,13 +544,34 @@ order, and the card says so in a finding.
 A receipt counts only if nobody else can have written it: it must belong to
 root (or to the collector's own user) and must not be writable by others, nor
 by its group unless that group is root. Otherwise the observation is Unknown.
-Let the job write it as root with mode `0644`. Where there is no file at
-`path`, the card names it and says that the job that writes it has written
-none there; where the file cannot be read, what a receipt must be: a file,
-not a link, of at most 1024 KiB of JSON, an object or a list.
+Let the job write it as root with mode `0644`. Where the card cannot read the
+receipt, it says why and what mends it: there is no file at `path`, which the
+job has not written; the collector's user may not search a folder on the way
+there (`chmod o+x` that folder) or may not open the file, as where a job
+under umask 027 or 077 writes it with mode 0640 or 0600 (mode `0644` mends
+it); it is a link, which is not followed, or no plain file; or it is larger
+than 1024 KiB or no JSON object or list.
+
+A receipt can list results, one row each: `rows = []` where the file itself
+is the list, or `rows = ["results"]` for a list under that key. `columns`
+makes its table and `ok_rows` is what every row must meet. A list needs
+`row_date`, the key of each row's date, the newest of which is the
+receipt's; `fields`, `ok_when` and `date` read an object. Every
+row is judged, however many; the table shows the last 200, where a job that
+appends a row for each run puts the newest, and the card says how many rows
+the receipt lists where there are more. Where `rows` names no list, as where a
+job that failed early wrote none, the card is Unknown and says so; a row that
+is no JSON object is not read, and the card says how many and is Partial
+where it would be in order.
 
 Keys can be nested: `key = ["components", "stalwartlabs/stalwart", "installed"]`.
 Formats: `text`, `number`, `bytes`, `datetime`, `duration` (seconds), `boolean`, `url`.
+A `datetime` is a time with its offset (`2026-11-17T03:00:00+01:00` or
+`2026-11-17T02:00:00Z`) or a plain date, taken as 00:00 UTC, as the receipt's
+own `date` is read, or Unix seconds. A time written without its offset is not
+shown, since every viewer would read it in their own time zone, and the card
+says which field or column. A text is shown up to 300 characters; one cut
+there ends in "…", and `ok_when` and `ok_rows` compare the whole text.
 
 ## Paths the collector cannot see
 

@@ -152,19 +152,33 @@ fn names(values: &BTreeMap<String, String>, unit: &str) -> bool {
             .is_some_and(|names| names.split_whitespace().any(|name| name == unit))
 }
 
-/// What systemd remembers of a job's last run since the host started, and
-/// what its age means for the job's state.
+/// What a job's card says where systemd remembers no finished run of it.
+const NO_RUN: &str = "systemd remembers no finished run of this job: none since the host \
+                      started, or it unloaded the job after its last run, as it does where no \
+                      timer or other unit refers to the job.";
+
+/// What systemd remembers of a job's last run, and what its age means for
+/// the job's state. systemd forgets the run when the host starts, and when
+/// it unloads a job that nothing refers to, once the run has ended; it
+/// clears the run's end when it starts the next one (measured, systemd 257),
+/// so while a run is under way its start is what is known of the job.
 fn last_run(
     unit: &Unit,
     values: &BTreeMap<String, String>,
     now: time::Timestamp,
     state: &mut State,
     findings: &mut Vec<String>,
-) -> [Field; 3] {
+) -> Vec<Field> {
     let get = |key: &str| values.get(key).map(String::as_str);
     let started = instant(get("ExecMainStartTimestamp").unwrap_or_default());
     let ended = instant(get("ExecMainExitTimestamp").unwrap_or_default())
         .filter(|ended| started.is_none_or(|started| *ended >= started));
+    let running = ended.is_none()
+        && matches!(
+            get("ActiveState"),
+            Some("activating" | "deactivating" | "reloading")
+        );
+    let since = started.filter(|_| running);
     let result = ended.map(|_| match (get("Result"), get("ExecMainStatus")) {
         (Some("success"), _) => "success".to_owned(),
         (Some(result), Some(status)) if !status.is_empty() => {
@@ -173,19 +187,25 @@ fn last_run(
         (result, _) => result.unwrap_or("unknown").to_owned(),
     });
     if let Some(hours) = unit.max_age_hours.filter(|_| *state == State::Ok) {
-        match ended.map(|ended| now.as_second() - ended.as_second()) {
-            Some(age) if age <= hours * 3600 => {}
-            Some(_) => {
-                *state = State::Warning;
-                findings.push(format!("The last run is older than {hours} hours."));
+        let within = |at: time::Timestamp| now.as_second() - at.as_second() <= hours * 3600;
+        let late = match (ended, since) {
+            (Some(ended), _) => {
+                (!within(ended)).then(|| format!("The last run is older than {hours} hours."))
             }
-            None => {
+            (None, Some(since)) => (!within(since))
+                .then(|| format!("The run under way began more than {hours} hours ago.")),
+            (None, None) => {
                 *state = State::Unknown;
-                findings.push("No run since the host started.".to_owned());
+                findings.push(NO_RUN.to_owned());
+                None
             }
+        };
+        if let Some(late) = late {
+            *state = State::Warning;
+            findings.push(late);
         }
     }
-    [
+    let mut fields = vec![
         Field::new("Last run", ended.map(time::isoformat), Format::Datetime),
         Field::text("Result", result),
         Field::new(
@@ -195,7 +215,31 @@ fn last_run(
                 .map(|(started, ended)| ended.as_second() - started.as_second()),
             Format::Duration,
         ),
-    ]
+    ];
+    if let Some(since) = since {
+        fields.push(Field::new(
+            "Running since",
+            time::isoformat(since),
+            Format::Datetime,
+        ));
+    }
+    fields
+}
+
+/// Why a job's expectation does not fit `unit`, where it does not: a job is
+/// a service that runs and ends. A timer, a socket or a path unit is active
+/// while it waits and inactive once stopped, with a successful result
+/// (measured), which "idle" would take for a job at rest, and it has no run
+/// of its own whose age could be held to a limit.
+fn no_job(unit: &str) -> Option<String> {
+    let (stem, kind) = unit.rsplit_once('.')?;
+    (kind != "service").then(|| {
+        format!(
+            "providers[systemd] unit {unit}: expect = \"idle\" and max_age_hours are for a \
+             service that runs and ends, not for a {kind}; put them on the service the {kind} \
+             starts, such as {stem}.service"
+        )
+    })
 }
 
 impl Systemd {
@@ -231,6 +275,11 @@ impl Systemd {
                     ));
                 }
             };
+            if (idle || item.contains_key("max_age_hours"))
+                && let Some(refused) = no_job(unit)
+            {
+                return fail(refused);
+            }
             let max_age_hours = match item.get("max_age_hours").map(toml::Value::as_integer) {
                 None => None,
                 Some(Some(hours)) if idle && (1..=8760).contains(&hours) => Some(hours),
@@ -417,65 +466,4 @@ impl Provider for Systemd {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// What `pattern` relies on: every pattern of this file compiles.
-    #[test]
-    fn the_patterns_compile() {
-        for found in [&TIMESTAMP, &CALENDAR, &INTERVAL, &SPAN] {
-            LazyLock::force(found);
-        }
-    }
-
-    fn properties(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-            .collect()
-    }
-
-    #[test]
-    fn states_follow_systemd_and_idle_jobs_may_rest() {
-        let loaded = |active: &str| properties(&[("LoadState", "loaded"), ("ActiveState", active)]);
-        for (values, idle, expected) in [
-            (properties(&[]), false, State::Unknown),
-            (
-                properties(&[("ActiveState", "active")]),
-                false,
-                State::Unknown,
-            ),
-            (
-                properties(&[("LoadState", "not-found"), ("ActiveState", "active")]),
-                false,
-                State::Failed,
-            ),
-            (loaded("failed"), true, State::Failed),
-            (loaded("active"), false, State::Ok),
-            (loaded("activating"), true, State::Ok),
-            (loaded("deactivating"), true, State::Ok),
-            (loaded("reloading"), false, State::Warning),
-            (loaded("inactive"), false, State::Failed),
-            (
-                properties(&[
-                    ("LoadState", "loaded"),
-                    ("ActiveState", "inactive"),
-                    ("Result", "success"),
-                ]),
-                true,
-                State::Ok,
-            ),
-            (
-                properties(&[
-                    ("LoadState", "loaded"),
-                    ("ActiveState", "inactive"),
-                    ("Result", "exit-code"),
-                ]),
-                true,
-                State::Failed,
-            ),
-        ] {
-            assert_eq!(classify(&values, idle), expected, "{values:?} idle={idle}");
-        }
-    }
-}
+mod tests;

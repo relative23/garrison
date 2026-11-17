@@ -12,6 +12,156 @@ use super::*;
 const APT: &str = "Inst zlib1g [1.3] (1.3+deb13u1 Debian-Security:13/stable-security [amd64])\n\
     Inst curl [8.14] (8.14+b1 Debian:13.2/stable [amd64])\n";
 
+/// What apt-get printed, simulating, to an unprivileged user, as the
+/// collector runs it, on Debian 13 and Ubuntu 24.04 with every update
+/// installed but the kernel's of two flavors (`apt/`, measured 2026-11-17).
+/// Each needs a package not installed yet, its image of the new ABI: plain
+/// `upgrade` keeps it back without an `Inst` line, `dist-upgrade` shows it.
+const KERNEL_ONLY: [(&str, &str, &str); 2] = [
+    (
+        "Debian 13",
+        include_str!("apt/debian-13-kernel-only-upgrade.txt"),
+        include_str!("apt/debian-13-kernel-only-dist-upgrade.txt"),
+    ),
+    (
+        "Ubuntu 24.04",
+        include_str!("apt/ubuntu-24.04-kernel-only-upgrade.txt"),
+        include_str!("apt/ubuntu-24.04-kernel-only-dist-upgrade.txt"),
+    ),
+];
+
+/// A package list as `apt-get update` keeps it, compressed as Debian's
+/// image has it.
+const LISTED: &str =
+    "var/lib/apt/lists/deb.debian.org_debian_dists_trixie_main_binary-amd64_Packages.lz4";
+
+/// A host with apt-get and the package lists its update job fetched a day
+/// before the tests' clock.
+fn apt_host(root: &Path) {
+    host(root, &[("usr/bin/apt-get", ""), (LISTED, "")]);
+    touched_folder(&root.join("var/lib/apt/lists"), -86_400);
+}
+
+/// The kernel update of Debian and Ubuntu needs a new package: a host whose
+/// only pending security update it is has one pending, never none.
+#[test]
+fn a_kernel_update_that_needs_a_new_package_is_a_pending_security_update() {
+    for (system, upgrade, dist_upgrade) in KERNEL_ONLY {
+        let root = tempfile::tempdir().unwrap();
+        apt_host(root.path());
+        let runner = Programs::new(vec![
+            ("apt-get -s -o Debug::NoLocking=true upgrade", 0, upgrade),
+            (
+                "apt-get -s -o Debug::NoLocking=true dist-upgrade",
+                0,
+                dist_upgrade,
+            ),
+        ]);
+        let provider = provider(root.path(), "\"updates\"");
+        let observation = checked(&provider, &runner, &Remembered::default(), 0);
+        assert_eq!(
+            (observation.state, observation.findings.as_slice()),
+            (
+                State::Warning,
+                &["2 security updates are pending.".to_owned()][..]
+            ),
+            "{system}"
+        );
+        assert_eq!(
+            field(&observation, "Security updates"),
+            &json!(2),
+            "{system}"
+        );
+        assert_eq!(field(&observation, "Other updates"), &json!(0), "{system}");
+    }
+}
+
+/// Every package a full upgrade updates counts once, by the archive it comes
+/// from; a package it installs new, as the image of a kernel with a new ABI
+/// or what that recommends, is part of the update that needs it. The host's
+/// language changes apt's sentences, not its `Inst` lines.
+#[test]
+fn every_update_of_a_full_upgrade_counts_by_its_archive() {
+    for (system, output, security) in [
+        (
+            "Debian 13",
+            include_str!("apt/debian-13-dist-upgrade.txt"),
+            3,
+        ),
+        (
+            "Debian 13 in German",
+            include_str!("apt/debian-13-dist-upgrade-de.txt"),
+            3,
+        ),
+        (
+            "Ubuntu 24.04",
+            include_str!("apt/ubuntu-24.04-dist-upgrade.txt"),
+            8,
+        ),
+    ] {
+        assert_eq!(
+            reading::apt(output),
+            Pending { security, other: 0 },
+            "{system}"
+        );
+    }
+}
+
+/// apt answers "0 upgraded" from package lists that were never fetched, as
+/// an image leaves them: the pending updates are not known then. Once the
+/// host's update job fetches them, they are asked about within five minutes.
+#[test]
+fn package_lists_that_were_never_fetched_leave_the_updates_unknown() {
+    let root = tempfile::tempdir().unwrap();
+    host(root.path(), &[("usr/bin/apt-get", "")]);
+    let lists = root.path().join("var/lib/apt/lists");
+    fs::create_dir_all(lists.join("partial")).unwrap();
+    let nothing = include_str!("apt/debian-13-no-lists-dist-upgrade.txt");
+    let runner = Programs::new(vec![("apt-get", 0, nothing)]);
+    let provider = provider(root.path(), "\"updates\"");
+    let memory = Remembered::default();
+    let unfetched = checked(&provider, &runner, &memory, 0);
+    assert_eq!(unfetched.state, State::Unknown);
+    assert_eq!(
+        unfetched.findings,
+        [
+            "The pending updates are not known: apt has no package lists in /var/lib/apt/lists; \
+             `apt-get update` fetches them, as the host's update job does."
+        ]
+    );
+    assert_eq!(runner.runs("apt-get"), 0);
+    // The update job fetches them a minute later.
+    host(root.path(), &[(LISTED, "")]);
+    touched_folder(&lists, 60);
+    let fetched = checked(&provider, &runner, &memory, ASK_SOONEST);
+    assert_eq!(runner.runs("apt-get"), 1);
+    assert_eq!(fetched.state, State::Ok);
+    // Lists this user may not read are not known either, and said so.
+    fs::set_permissions(&lists, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read_dir(&lists).is_err() {
+        let unread = checked(&provider, &runner, &Remembered::default(), 0);
+        assert_eq!(unread.state, State::Unknown);
+        assert!(
+            unread.findings[0].starts_with(
+                "The pending updates are not known: apt's package lists in /var/lib/apt/lists \
+                 cannot be read: "
+            ),
+            "{:?}",
+            unread.findings
+        );
+    }
+    fs::set_permissions(&lists, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// Gives a folder the modification time `at` seconds after the tests' clock.
+fn touched_folder(path: &Path, at: i64) {
+    let seconds = u64::try_from(now().as_second() + at).unwrap();
+    fs::File::open(path)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+        .unwrap();
+}
+
 /// Gives a file the modification time `at` seconds after the tests' clock.
 fn touched(path: &Path, at: i64) {
     let seconds = u64::try_from(now().as_second() + at).unwrap();
@@ -26,9 +176,9 @@ fn touched(path: &Path, at: i64) {
 #[test]
 fn pending_security_updates_are_a_warning_and_asked_for_every_six_hours() {
     let root = tempfile::tempdir().unwrap();
-    host(root.path(), &[("usr/bin/apt-get", "")]);
+    apt_host(root.path());
     let runner = Programs::new(vec![(
-        "apt-get -s -o Debug::NoLocking=true upgrade",
+        "apt-get -s -o Debug::NoLocking=true dist-upgrade",
         0,
         APT,
     )]);
@@ -40,7 +190,7 @@ fn pending_security_updates_are_a_warning_and_asked_for_every_six_hours() {
     assert_eq!(first.findings, ["1 security update is pending."]);
     assert_eq!(field(&first, "Security updates"), &json!(1));
     assert_eq!(field(&first, "Other updates"), &json!(1));
-    assert_eq!(first.source, "apt-get -s upgrade");
+    assert_eq!(first.source, "apt-get -s dist-upgrade");
     // A minute and nearly six hours later the answer is the kept one.
     for later in [60, ASK_EVERY - 1] {
         let kept = checked(&provider, &runner, &memory, later);
@@ -108,11 +258,21 @@ fn updates_that_cannot_be_read_are_unknown_and_asked_for_again_within_the_hour()
         ),
         (
             vec![("usr/bin/apt-get", "")],
+            vec![(
+                "apt-get",
+                0,
+                "0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n",
+            )],
+            "apt has no package lists in /var/lib/apt/lists; `apt-get update` fetches them, as \
+             the host's update job does",
+        ),
+        (
+            vec![("usr/bin/apt-get", ""), (LISTED, "")],
             vec![],
             "apt-get did not run: entity not found",
         ),
         (
-            vec![("usr/bin/apt-get", "")],
+            vec![("usr/bin/apt-get", ""), (LISTED, "")],
             vec![("apt-get", 100, "")],
             "apt-get could not work out the upgrade",
         ),
@@ -144,17 +304,12 @@ fn updates_that_cannot_be_read_are_unknown_and_asked_for_again_within_the_hour()
 #[test]
 fn installed_packages_are_asked_about_again_within_five_minutes() {
     let root = tempfile::tempdir().unwrap();
-    host(
-        root.path(),
-        &[
-            ("usr/bin/apt-get", ""),
-            ("var/lib/dpkg/status", "Package: curl\n"),
-        ],
-    );
+    apt_host(root.path());
+    host(root.path(), &[("var/lib/dpkg/status", "Package: curl\n")]);
     let status = root.path().join("var/lib/dpkg/status");
     touched(&status, -3600);
     let runner = Programs::new(vec![(
-        "apt-get -s -o Debug::NoLocking=true upgrade",
+        "apt-get -s -o Debug::NoLocking=true dist-upgrade",
         0,
         APT,
     )]);

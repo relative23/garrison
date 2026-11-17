@@ -1,13 +1,14 @@
 //! HTTP health probes and Bulwark webmail plugin observations.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+use std::{fs, io};
 
-use garrison_core::files::{read_bounded, read_json};
-use garrison_core::hex;
+use garrison_core::files::read_bounded;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
+use garrison_core::{hex, json};
 use garrison_stalwart::http::status_of;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -15,6 +16,8 @@ use sha2::{Digest, Sha256};
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
+/// Bulwark's list of its plugins, below its administration folder.
+const REGISTRY: &str = "plugins/registry.json";
 const MAX_REGISTRY: usize = 1024 * 1024;
 const MAX_BUNDLE: usize = 2 * 1024 * 1024;
 
@@ -146,24 +149,80 @@ impl Bulwark {
         Ok(Bulwark { base, plugins })
     }
 
-    fn integrity(&self, name: &str, expected: Option<&Value>) -> &'static str {
-        let Some(expected) = expected.and_then(Value::as_str).filter(|hash| {
-            hash.len() == 64
-                && hash
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        }) else {
-            return "unknown";
+    /// The plugins the registry lists, or why it cannot be read.
+    fn registry(&self) -> Result<Vec<Value>, String> {
+        let path = self.base.join(REGISTRY);
+        let data = read_bounded(&path, MAX_REGISTRY)
+            .map_err(|error| unread(REGISTRY, &path, &error, MAX_REGISTRY))?;
+        let registry =
+            json::parse(&data, MAX_REGISTRY).map_err(|_| format!("{REGISTRY} is no valid JSON"))?;
+        registry
+            .get("plugins")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or_else(|| format!("{REGISTRY} holds no list of plugins"))
+    }
+
+    /// The bundle of `name` against the hash that its row records.
+    fn integrity(&self, name: &str, row: &Value) -> Integrity {
+        let Some(expected) = row
+            .get("bundleHash")
+            .and_then(Value::as_str)
+            .filter(|hash| {
+                hash.len() == 64
+                    && hash
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+        else {
+            return Integrity::Unknown(format!("{REGISTRY} records no SHA-256 of it"));
         };
-        let path = self.base.join("plugins").join(format!("{name}.js"));
-        let Ok(code) = read_bounded(&path, MAX_BUNDLE) else {
-            return "unknown";
-        };
-        if hex::encode(&Sha256::digest(&code)) == expected {
-            "verified"
-        } else {
-            "mismatch"
+        let shown = format!("plugins/{name}.js");
+        let path = self.base.join(&shown);
+        match read_bounded(&path, MAX_BUNDLE) {
+            Ok(code) if hex::encode(&Sha256::digest(&code)) == expected => Integrity::Verified,
+            Ok(_) => Integrity::Mismatch,
+            Err(error) => Integrity::Unknown(unread(&shown, &path, &error, MAX_BUNDLE)),
         }
+    }
+}
+
+/// What the check of one plugin's bundle found.
+#[derive(Debug, PartialEq, Eq)]
+enum Integrity {
+    Verified,
+    Mismatch,
+    /// Not known, and why.
+    Unknown(String),
+}
+
+impl Integrity {
+    /// The word the card shows for it.
+    fn shown(&self) -> &'static str {
+        match self {
+            Integrity::Verified => "verified",
+            Integrity::Mismatch => "mismatch",
+            Integrity::Unknown(_) => "unknown",
+        }
+    }
+}
+
+/// Why a file below the administration folder could not be read: it is
+/// missing, a link, larger than it may be, kept from the collector, or the
+/// error says.
+fn unread(shown: &str, path: &Path, error: &io::Error, limit: usize) -> String {
+    match fs::symlink_metadata(path) {
+        Err(_) if error.kind() == io::ErrorKind::NotFound => format!("{shown} is missing"),
+        Ok(metadata) if metadata.is_symlink() => {
+            format!("{shown} is a link, which is not followed")
+        }
+        Ok(metadata) if metadata.is_file() && metadata.len() > limit as u64 => {
+            format!("{shown} is larger than {} MiB", limit / (1024 * 1024))
+        }
+        _ if error.kind() == io::ErrorKind::PermissionDenied => {
+            format!("the collector may not read {shown}")
+        }
+        _ => format!("{shown} cannot be read: {error}"),
     }
 }
 
@@ -185,34 +244,49 @@ impl Provider for Bulwark {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let registry_path = self.base.join("plugins/registry.json");
-        let registry = read_json(&registry_path, MAX_REGISTRY);
-        let rows = registry
-            .as_ref()
-            .and_then(|registry| registry.get("plugins"))
-            .and_then(Value::as_array);
-        let (mut fields, mut findings) = (Vec::new(), Vec::new());
+        let registry_path = self.base.join(REGISTRY);
+        let registry = self.registry();
+        let mut fields = Vec::new();
+        let (mut mismatched, mut unknown, mut verified) = (Vec::new(), Vec::new(), 0_usize);
         for name in &self.plugins {
-            let matches: Vec<&Value> = rows
-                .into_iter()
-                .flatten()
-                .filter(|row| row.get("id").and_then(Value::as_str) == Some(name))
-                .collect();
-            let row = if matches.len() == 1 {
-                matches[0]
-            } else {
-                &Value::Null
+            let (row, integrity) = match &registry {
+                Ok(rows) => {
+                    let matches: Vec<&Value> = rows
+                        .iter()
+                        .filter(|row| row.get("id").and_then(Value::as_str) == Some(name))
+                        .collect();
+                    match matches[..] {
+                        [row] => (row, self.integrity(name, row)),
+                        [] => (
+                            &Value::Null,
+                            Integrity::Unknown(format!("{REGISTRY} does not list it")),
+                        ),
+                        _ => (
+                            &Value::Null,
+                            Integrity::Unknown(format!(
+                                "{REGISTRY} lists it {} times",
+                                matches.len()
+                            )),
+                        ),
+                    }
+                }
+                // The registry's own finding says why.
+                Err(_) => (&Value::Null, Integrity::Unknown(String::new())),
             };
+            match &integrity {
+                Integrity::Verified => verified += 1,
+                Integrity::Mismatch => mismatched.push(format!(
+                    "The {name} bundle does not match its recorded hash."
+                )),
+                Integrity::Unknown(why) if registry.is_ok() => unknown.push(format!(
+                    "The integrity of the {name} bundle is not known: {why}."
+                )),
+                Integrity::Unknown(_) => {}
+            }
             let version = row
                 .get("version")
                 .and_then(Value::as_str)
                 .filter(|text| is_version(text));
-            let integrity = self.integrity(name, row.get("bundleHash"));
-            if integrity == "mismatch" {
-                findings.push(format!(
-                    "The {name} bundle does not match its recorded hash."
-                ));
-            }
             fields.extend([
                 Field::text(format!("{name}: version"), version),
                 Field::new(
@@ -220,14 +294,30 @@ impl Provider for Bulwark {
                     row.get("enabled").and_then(Value::as_bool),
                     Format::Boolean,
                 ),
-                Field::text(format!("{name}: bundle integrity"), integrity),
+                Field::text(format!("{name}: bundle integrity"), integrity.shown()),
             ]);
         }
-        let state = match (rows.is_some(), findings.is_empty()) {
-            (false, _) => State::Unknown,
-            (true, false) => State::Failed,
-            (true, true) => State::Ok,
+        // An integrity that is not known is no integrity in order: the card
+        // is Partial beside a bundle that was verified, Unknown without one,
+        // as where no plugin is named.
+        let state = match &registry {
+            Err(_) => State::Unknown,
+            Ok(_) if !mismatched.is_empty() => State::Failed,
+            Ok(_) if verified == 0 => State::Unknown,
+            Ok(_) if unknown.is_empty() => State::Ok,
+            Ok(_) => State::Partial,
         };
+        let mut findings: Vec<String> = registry
+            .err()
+            .map(|why| format!("No bundle's integrity is known: {why}."))
+            .into_iter()
+            .collect();
+        if self.plugins.is_empty() {
+            findings.push("No plugin is named in `plugins`, so no bundle is checked.".to_owned());
+        }
+        // A mismatch first, as the notifications carry the first finding.
+        findings.extend(mismatched);
+        findings.extend(unknown);
         let observation = Observation::new(Required {
             id: "bulwark.plugins",
             provider: self.name(),
@@ -285,12 +375,12 @@ mod tests {
     fn plugins(bundle: &[u8], hash: &str) -> (tempfile::TempDir, Observation) {
         let directory = tempfile::tempdir().unwrap();
         let plugins = directory.path().join("plugins");
-        std::fs::create_dir_all(&plugins).unwrap();
-        std::fs::write(plugins.join("spam.js"), bundle).unwrap();
+        fs::create_dir_all(&plugins).unwrap();
+        fs::write(plugins.join("spam.js"), bundle).unwrap();
         // Notes make the registry larger than a few KiB, as real ones are.
         let plugin = json!({"id": "spam", "version": "1.2.3", "enabled": true, "bundleHash": hash});
         let registry = json!({"plugins": [plugin], "notes": "x".repeat(64 * 1024)});
-        std::fs::write(plugins.join("registry.json"), registry.to_string()).unwrap();
+        fs::write(plugins.join("registry.json"), registry.to_string()).unwrap();
         let raw = format!(
             "admin_directory = \"{}\"\nplugins = [\"spam\"]",
             directory.path().display()
