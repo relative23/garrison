@@ -57,7 +57,8 @@ pub(super) fn ensure_metrics(
         secret,
     };
     let document = serde_json::to_string(&credential).map_err(|error| error.to_string())?;
-    atomic_write(&target, document.as_bytes(), 0o600).map_err(|error| error.to_string())?;
+    atomic_write(&target, document.as_bytes(), 0o600)
+        .map_err(|error| format!("Could not write {}: {error}", target.display()))?;
     Ok(format!(
         "enabled Prometheus exporter -> {}",
         target.display()

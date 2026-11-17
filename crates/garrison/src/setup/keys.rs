@@ -62,9 +62,8 @@ pub(super) fn ensure(
             replaced: Vec::new(),
         });
     }
-    // A new key first and its file next, since a key whose file is lost is
-    // useless. A running service keeps the old key until it restarts, so
-    // the old keys go after that (`remove`).
+    // A new key first and its file next. A running service keeps the old
+    // key until it restarts, so the old keys go after that (`remove`).
     let key = NewKey {
         description,
         rights: rights(),
@@ -75,7 +74,18 @@ pub(super) fn ensure(
         .map_err(|error| refused(&error, description))?;
     let new = created.created.get(NEW);
     let new = new.ok_or("Stalwart did not return the new API key secret")?;
-    write_secret(&target, &new.secret)?;
+    // A key whose secret is lost is of no use to anyone, so where its file
+    // cannot be written, the new key goes again.
+    if let Err(error) = write_secret(&target, &new.secret) {
+        let undone = admin.set("x:ApiKey/set", &Set::<()>::Destroy([new.id.as_str()]));
+        return Err(match undone {
+            Ok(()) => format!("{error}; the new API key was taken out of Stalwart again"),
+            Err(_) => format!(
+                "{error}; the new API key stays in Stalwart without its secret, and the next \
+                 run replaces it"
+            ),
+        });
+    }
     let done = if rotate && !existing.is_empty() {
         "replaced"
     } else {
@@ -264,6 +274,56 @@ mod tests {
         assert_eq!(
             refused("x:ApiKey/set: Stalwart is unavailable", "garrison broker"),
             "x:ApiKey/set: Stalwart is unavailable (Stalwart did not return the new API key secret)"
+        );
+    }
+
+    /// A key whose file cannot be written goes again, so that Stalwart keeps
+    /// no key whose secret nobody holds, and the error names the file.
+    #[test]
+    fn a_new_key_whose_file_cannot_be_written_goes_again() {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            return; // Root writes any folder.
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().join("credentials");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let listed = json(&json!({"methodResponses": [["x:ApiKey/get", {"list": []}, "0"]]}));
+        let made = json(&json!({"methodResponses": [["x:ApiKey/set",
+            {"created": {"new": {"id": "fresh", "secret": NEW}}}, "0"]]}));
+        let gone = json(&json!({"methodResponses": [["x:ApiKey/set",
+            {"destroyed": ["fresh"]}, "0"]]}));
+        let server = serve(vec![listed, made, gone]);
+        let admin = Admin {
+            url: format!("{}/jmap/", server.url),
+            authorization: "Bearer admin".to_owned(),
+        };
+        let networks = Enabled::of(["127.0.0.1/32"]);
+        let name = "collector-native-key";
+        let error = ensure(
+            &admin,
+            &folder,
+            name,
+            "garrison collector",
+            &["authenticate"],
+            &networks,
+            false,
+        )
+        .err()
+        .unwrap();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let requests = server.requests();
+        let target = folder.join(name);
+        assert!(
+            error.starts_with(&format!("Could not write {}: ", target.display()))
+                && error.ends_with("; the new API key was taken out of Stalwart again"),
+            "{error}"
+        );
+        assert!(
+            requests[2].contains(r#""destroy":["fresh"]"#),
+            "{}",
+            requests[2]
         );
     }
 

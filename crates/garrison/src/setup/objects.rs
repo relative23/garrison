@@ -212,6 +212,7 @@ pub(super) struct StoredKey {
 /// The secret of a key Stalwart just created; it is sent this once.
 #[derive(Deserialize)]
 pub(super) struct NewSecret {
+    pub(super) id: String,
     pub(super) secret: String,
 }
 

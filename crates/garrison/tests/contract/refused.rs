@@ -1,10 +1,13 @@
 //! What setup says where something refuses it, and that it leaves both
-//! places agreeing: the administrator refused.
+//! places agreeing: the administrator refused, and a credentials folder it
+//! cannot write.
 
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use garrison_testing::lab::{Lab, random_hex, unique};
-use garrison_testing::write_private;
+use garrison_testing::{config_text, write_private};
 use serde_json::json;
 
 use super::{Setup, forget, lab, text};
@@ -104,4 +107,63 @@ fn a_refused_administrator_is_said_as_such() {
             "{status}: exit {code:?}, {keys} keys of Garrison's: {said}"
         );
     }
+}
+
+/// Without root on an installed host, the credentials folder is root's:
+/// setup stops before it asks Stalwart for anything, names the folder and
+/// says to run it as root, where it once made a key in Stalwart and lost
+/// its secret ("Permission denied (os error 13)"). Shown with a folder of
+/// this user's that it may not write, and with root's own, where this user
+/// may not even look.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn setup_refuses_a_credentials_folder_it_cannot_write_before_stalwart_changes() {
+    if rustix::process::geteuid().is_root() {
+        println!("skipped: root may write any folder");
+        return;
+    }
+    let (_guard, lab) = lab();
+    let setup = Setup::new(&lab, "http://127.0.0.1:9/webhook");
+    let credentials = setup.directory.join("credentials");
+    forget(&lab, &credentials);
+    fs::create_dir(&credentials).unwrap();
+    fs::set_permissions(&credentials, fs::Permissions::from_mode(0o500)).unwrap();
+    let settings = setup.directory.join("garrison.toml");
+    let own = config_text(&setup.directory, &lab.url);
+    let named = format!("credentials_directory = \"{}\"", credentials.display());
+    let roots = own.replace(&named, "credentials_directory = \"/root\"");
+    let mut folders = vec![(own, credentials.display().to_string())];
+    if fs::metadata("/root").is_ok() && fs::read_dir("/root").is_err() {
+        folders.push((roots, "/root".to_owned()));
+    }
+    let mut outcomes = Vec::new();
+    for (configuration, folder) in folders {
+        fs::write(&settings, configuration).unwrap();
+        let output = setup.run(&[]);
+        outcomes.push((
+            folder,
+            output.status.code(),
+            text(&output),
+            garrisons_keys(&lab),
+        ));
+        // Only Stalwart's side: the folder is not this user's to empty.
+        forget(&lab, Path::new("/nonexistent"));
+    }
+    fs::set_permissions(&credentials, fs::Permissions::from_mode(0o700)).unwrap();
+    let wrong: Vec<String> = outcomes
+        .into_iter()
+        .filter(|(folder, code, said, keys)| {
+            let named = format!("Setup cannot write the credentials folder {folder}");
+            *code != Some(2)
+                || !said.contains(&named)
+                || !said.contains("Run it as root, as `sudo garrison stalwart setup`")
+                || *keys != 0
+        })
+        .map(|(folder, code, said, keys)| {
+            format!(
+                "{folder}: exit {code:?}, {keys} key(s) of Garrison's in Stalwart after it: {said}"
+            )
+        })
+        .collect();
+    assert_eq!(wrong, Vec::<String>::new());
 }

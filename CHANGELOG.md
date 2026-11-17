@@ -1012,6 +1012,17 @@ Notable changes for operators and users. The format follows
   or the API key; where Stalwart knows the credential but does not take it
   from this host's address (HTTP 403), as for an API key whose networks
   leave this host out, it says that. Setup changes nothing in either case.
+- **Setup without root stops before it changes anything.** Run without
+  `sudo` on an installed host, `garrison stalwart setup` could not read the
+  key files in `/etc/garrison/credentials`, which is root's, took them for
+  missing, made a new API key in Stalwart and failed to write it with
+  "Permission denied (os error 13)": the key stayed valid in Stalwart with
+  its secret lost, one more for each such run. Setup now checks, before it
+  asks for the administrator, that it can write the credentials folder;
+  where it cannot, it stops, names the folder and, without root, says to
+  run it as root and exits with 2. An error writing one of its files names
+  the file, and a new key whose file cannot be written, as on a full disk,
+  is taken out of Stalwart again.
   A user without Stalwart's administrator rights got as far as the first
   API key, whose permissions Stalwart does not let it grant, and setup
   named only Stalwart's refusal; it now says to run setup as an
