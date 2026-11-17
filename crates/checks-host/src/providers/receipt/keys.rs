@@ -34,20 +34,36 @@ pub(super) fn key(value: Option<&toml::Value>, name: &str) -> Checked<Key> {
     }
 }
 
-/// The value at `key`: scalars as they are (text truncated), lists by their length.
-pub(super) fn lookup(document: &Value, key: &[String]) -> Value {
+/// The value at `key` as it is written, or null.
+fn at<'a>(document: &'a Value, key: &[String]) -> &'a Value {
     let mut current = document;
     for part in key {
         let Value::Object(map) = current else {
-            return Value::Null;
+            return &Value::Null;
         };
         current = map.get(part).unwrap_or(&Value::Null);
     }
-    match current {
-        Value::String(text) => Value::String(text.chars().take(MAX_TEXT).collect()),
+    current
+}
+
+/// A value as a condition compares it: scalars as they are, a text whole,
+/// lists by their length.
+fn compared(value: &Value) -> Value {
+    match value {
         Value::Array(items) => json!(items.len()),
         Value::Object(_) => Value::Null,
         scalar => scalar.clone(),
+    }
+}
+
+/// The value at `key` as a card shows it: as it is compared, and a text of
+/// more than `MAX_TEXT` characters cut, with "…" in place of the rest.
+pub(super) fn lookup(document: &Value, key: &[String]) -> Value {
+    match at(document, key) {
+        Value::String(text) if text.chars().count() > MAX_TEXT => {
+            Value::String(text.chars().take(MAX_TEXT - 1).chain(['…']).collect())
+        }
+        value => compared(value),
     }
 }
 
@@ -155,7 +171,8 @@ impl Condition {
     }
 
     pub(super) fn holds(&self, document: &Value) -> bool {
-        let value = lookup(document, &self.key);
+        // The whole text counts, not the part a card shows.
+        let value = compared(at(document, &self.key));
         self.equals
             .iter()
             .any(|allowed| loosely_equal(&value, allowed))

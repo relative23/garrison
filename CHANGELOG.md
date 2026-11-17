@@ -915,6 +915,12 @@ Notable changes for operators and users. The format follows
   row that is no JSON object was dropped without a word, so a failure
   written as a text passed; the card now says how many rows were not read
   and is Partial where it would be in order.
+- **A cut on a host card says what it leaves out.** A receipt's text was
+  cut at 300 characters with nothing to show that the job wrote more, and
+  `ok_when` and `ok_rows` compared the cut text, so a longer value never
+  matched; the restart card named the first five packages that need a
+  restart and no more. A cut text now ends in "…", conditions compare the
+  whole text, and the restart card says how many more packages there are.
 - **A receipt the card cannot read says why, and what mends it.** The
   card said "No readable receipt." whatever kept it from reading the file.
   It now tells apart a file that the job has not written at the path, a

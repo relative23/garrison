@@ -54,13 +54,12 @@ impl HostCare {
                     packages.lines().filter(|line| !line.is_empty()).collect();
                 names.sort_unstable();
                 names.dedup();
-                let because = if names.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        " ({})",
-                        names.iter().take(5).copied().collect::<Vec<_>>().join(", ")
-                    )
+                // Five are named; the finding says how many more there are.
+                let shown = names.iter().take(5).copied().collect::<Vec<_>>().join(", ");
+                let because = match names.len() {
+                    0 => String::new(),
+                    1..=5 => format!(" ({shown})"),
+                    count => format!(" ({shown} and {} more)", count - 5),
                 };
                 (
                     State::Warning,

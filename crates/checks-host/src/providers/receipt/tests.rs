@@ -131,9 +131,10 @@ fn lookups_follow_keys_and_summarize_lists() {
     let document = json!({"a": {"b": [1, 2, 3], "c": "x".repeat(400), "d": {"e": 1}}});
     let key = |parts: &[&str]| parts.iter().map(ToString::to_string).collect::<Vec<_>>();
     assert_eq!(lookup(&document, &key(&["a", "b"])), json!(3));
+    // A text past 300 characters is cut, and says so.
     assert_eq!(
-        lookup(&document, &key(&["a", "c"])).as_str().unwrap().len(),
-        300
+        lookup(&document, &key(&["a", "c"])),
+        json!(format!("{}…", "x".repeat(299)))
     );
     assert_eq!(lookup(&document, &key(&["a", "d"])), Value::Null);
     assert_eq!(

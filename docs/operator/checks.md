@@ -463,7 +463,8 @@ A `datetime` is a time with its offset (`2026-11-17T03:00:00+01:00` or
 `2026-11-17T02:00:00Z`) or a plain date, taken as 00:00 UTC, as the receipt's
 own `date` is read, or Unix seconds. A time written without its offset is not
 shown, since every viewer would read it in their own time zone, and the card
-says which field or column.
+says which field or column. A text is shown up to 300 characters; one cut
+there ends in "…", and `ok_when` and `ok_rows` compare the whole text.
 
 ## Paths the collector cannot see
 
