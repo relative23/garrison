@@ -179,7 +179,10 @@ restore count among the installer's own.
 While one installer runs, a second one is refused. An upgrade that was
 interrupted, even killed, is finished by running its installer again, or
 `garrison upgrade` with the same archive; `/opt/garrison/unfinished.json`
-notes what the installer began until a release runs again.
+notes what the installer began until a release runs again. A rollback is
+finished by running it again; one that went back to a release from before this
+one is finished by the release it left, as its first line says: `sudo
+/opt/garrison/releases/<release>/bin/garrison install --rollback`.
 
 To return to the previous release:
 

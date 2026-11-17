@@ -1,9 +1,9 @@
 //! The record of a root command that has not finished, so that the same
-//! command run again finishes it: an upgrade that dies between two steps
-//! leaves links and a state that do not say what was under way.
-//! `/opt/garrison/unfinished.json`, root's alone, is written just before the
-//! services stop and removed once a release runs and the links name it and
-//! the one to roll back to.
+//! command run again finishes it: an upgrade or a rollback that dies
+//! between two steps leaves links and a state that do not say what was
+//! under way. `/opt/garrison/unfinished.json`, root's alone, is written just
+//! before the services stop and removed once a release runs and the links
+//! name it and the one to roll back to.
 
 use std::fs;
 use std::io::ErrorKind;
@@ -28,6 +28,13 @@ pub(super) enum Unfinished {
         to: PathBuf,
         previous: Option<PathBuf>,
         backup: PathBuf,
+    },
+    /// A rollback that leaves `from` for `to`; `previous` is what that link
+    /// names once it is done.
+    Rollback {
+        from: PathBuf,
+        to: PathBuf,
+        previous: Option<PathBuf>,
     },
 }
 
@@ -84,8 +91,10 @@ pub(super) fn upgrading_from() -> Option<PathBuf> {
     if !record.fits(base) {
         return None;
     }
-    let Unfinished::Upgrade { from, .. } = record;
-    Some(from)
+    match record {
+        Unfinished::Upgrade { from, .. } => Some(from),
+        Unfinished::Rollback { .. } => None,
+    }
 }
 
 pub(super) fn write(record: &Unfinished) -> Step {
@@ -148,6 +157,17 @@ impl Unfinished {
                     && (current == Some(from.as_path()) || current == Some(to.as_path()))
                     && (previous.as_deref() == Some(from.as_path()) || previous == *before)
             }
+            Self::Rollback {
+                from,
+                to,
+                previous: after,
+            } => {
+                to.is_dir()
+                    && (current == Some(from.as_path()) || current == Some(to.as_path()))
+                    && (previous.as_deref() == Some(from.as_path())
+                        || previous.as_deref() == Some(to.as_path())
+                        || previous == *after)
+            }
         }
     }
 
@@ -157,6 +177,9 @@ impl Unfinished {
             Self::Upgrade { from, to, .. } => {
                 format!("an upgrade from {} to {}", name(from), name(to))
             }
+            Self::Rollback { from, to, .. } => {
+                format!("a rollback from {} to {}", name(from), name(to))
+            }
         }
     }
 
@@ -164,6 +187,10 @@ impl Unfinished {
     pub(super) fn finish_first(&self) -> String {
         let how = match self {
             Self::Upgrade { to, .. } => format!("run the installer of {} again", name(to)),
+            Self::Rollback { from, .. } => format!(
+                "run `{} install --rollback`",
+                from.join("bin/garrison").display()
+            ),
         };
         format!(
             "An earlier run left {} unfinished; {how} to finish it. Nothing was changed.",
@@ -245,6 +272,21 @@ mod tests {
         let refused = read_in(base).unwrap_err();
         assert!(refused.contains("cannot be read"), "{refused}");
         assert!(path(base).exists());
+    }
+
+    #[test]
+    fn a_rollback_is_known_on_both_sides_of_its_switch() {
+        for (current, previous) in [("0.2", "0.1"), ("0.1", "0.1"), ("0.1", "0.2")] {
+            let directory = host(&["0.1", "0.2"], current, Some(previous));
+            let base = directory.path();
+            let record = Unfinished::Rollback {
+                from: release(base, "0.2"),
+                to: release(base, "0.1"),
+                previous: Some(release(base, "0.2")),
+            };
+            write_in(base, &record).unwrap();
+            assert_eq!(read_in(base).unwrap(), Some(record), "{current} {previous}");
+        }
     }
 
     #[test]

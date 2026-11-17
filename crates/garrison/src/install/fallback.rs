@@ -39,17 +39,21 @@ pub(super) struct Resumed {
 /// earlier run began goes on where this run installs that upgrade's release
 /// again and `current` already names it, since its state may already be the
 /// new release's; any other run first switches back to the release that
-/// ran, as after a failed start.
+/// ran, as after a failed start. Another unfinished command is to be
+/// finished first.
 pub(super) fn before_install(version: &str) -> Step<Option<Resumed>> {
     let Some(record) = unfinished::read()? else {
         return Ok(None);
     };
-    let Unfinished::Upgrade {
-        from,
-        to,
-        previous,
-        backup,
-    } = record;
+    let (from, to, previous, backup) = match record {
+        Unfinished::Upgrade {
+            from,
+            to,
+            previous,
+            backup,
+        } => (from, to, previous, backup),
+        other @ Unfinished::Rollback { .. } => return Err(other.finish_first()),
+    };
     let current = std::fs::canonicalize(Path::new(BASE).join("current")).ok();
     if current.as_deref() == Some(to.as_path()) && name(&to) == version {
         announce(&format!(

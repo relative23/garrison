@@ -3,6 +3,9 @@
 //!
 //! Every check comes before the services stop. Once they have stopped, any
 //! failure returns to the release that ran and starts it again.
+//!
+//! Run again after it was interrupted, a rollback goes on to where it was
+//! going; while an upgrade is unfinished, it undoes that (`unfinished.rs`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +15,7 @@ use rustix::fs::{Gid, Uid};
 
 use super::files::{Step, announce, io, lock, switch};
 use super::system::install_system_files;
+use super::unfinished::{self, Unfinished};
 use super::{
     BACKUPS, BASE, CONFIG, LAST, LOCK, cli, precheck, preflight, start, state, stop_services,
 };
@@ -84,10 +88,11 @@ fn restore_state(source: &Path, owner: (Uid, Gid), restored: &mut Vec<&'static s
     state::restore_all(source, &config, owner, restored)
 }
 
-/// Make `target` current and `current` previous, then start `target`.
+/// Make `target` current and `after` previous, or none where that is
+/// `target` itself, then start `target`.
 fn roll_back_to(
     target: &Path,
-    current: &Path,
+    after: Option<&Path>,
     source: Option<(&Path, (Uid, Gid))>,
     restored: &mut Vec<&'static str>,
 ) -> Step {
@@ -96,23 +101,65 @@ fn roll_back_to(
     }
     let base = Path::new(BASE);
     switch(&base.join("current"), target)?;
-    switch(&base.join("previous"), current)?;
+    roll_back_previous(after.filter(|after| *after != target))?;
     install_system_files(target)?;
     start(target)
+}
+
+/// Where a rollback goes: to `target`, leaving `left`, and what `previous`
+/// names once it is done.
+struct Plan {
+    target: PathBuf,
+    left: PathBuf,
+    after: Option<PathBuf>,
+}
+
+/// What the rollback returns to: an unfinished upgrade is undone, an
+/// unfinished rollback goes on; otherwise the release `previous` names.
+fn plan(base: &Path) -> Step<Plan> {
+    let current = io(
+        fs::canonicalize(base.join("current")),
+        &base.join("current"),
+    )?;
+    match unfinished::read()? {
+        Some(Unfinished::Upgrade { from, previous, .. }) => Ok(Plan {
+            target: from,
+            left: current,
+            after: previous,
+        }),
+        Some(Unfinished::Rollback { from, to, previous }) => Ok(Plan {
+            target: to,
+            left: from,
+            after: previous,
+        }),
+        None => {
+            let Ok(target) = fs::canonicalize(base.join("previous")) else {
+                return Err("There is no previous release to return to.".into());
+            };
+            if target == current {
+                return Err(format!(
+                    "There is no other release to return to: {BASE}/previous names the \
+                     running release."
+                ));
+            }
+            Ok(Plan {
+                target,
+                after: Some(current.clone()),
+                left: current,
+            })
+        }
+    }
 }
 
 pub(super) fn rollback(with_state: bool) -> Step {
     preflight()?;
     let _held = lock(Path::new(LOCK))?;
     let base = Path::new(BASE);
-    let previous = base.join("previous");
-    let Ok(target) = fs::canonicalize(&previous) else {
-        return Err("There is no previous release to return to.".into());
-    };
-    let current = io(
-        fs::canonicalize(base.join("current")),
-        &base.join("current"),
-    )?;
+    let Plan {
+        target,
+        left: current,
+        after,
+    } = plan(base)?;
     let name = target.file_name().unwrap_or_default().to_string_lossy();
     let source = if with_state {
         Some(restore_source(&name)?)
@@ -143,21 +190,44 @@ pub(super) fn rollback(with_state: bool) -> Step {
         Some(source) => Some((source.clone(), state_fits(&target, &source, comes_back)?)),
         None => None,
     };
+    // A release from before this one, which `current` then names, knows no
+    // record: this binary finishes the rollback.
+    let binary = std::env::current_exe().map_or_else(
+        |_| super::command::name(),
+        |binary| binary.display().to_string(),
+    );
+    announce(&format!(
+        "Rolling back to {name}; if this is interrupted, finish it with: {binary} install \
+         --rollback{}",
+        if with_state { " --restore-state" } else { "" }
+    ));
+    unfinished::write(&Unfinished::Rollback {
+        from: current.clone(),
+        to: target.clone(),
+        previous: after.clone(),
+    })?;
     stop_services();
     let restoring = source
         .as_ref()
         .map(|(source, owner)| (source.as_path(), *owner));
     let mut restored = Vec::new();
-    if let Err(error) = roll_back_to(&target, &current, restoring, &mut restored) {
+    if let Err(error) = roll_back_to(&target, after.as_deref(), restoring, &mut restored) {
         // Garrison is stopped now: back to the release that ran, and running.
         announce("Rollback failed; starting the release that ran before.");
         switch(&base.join("current"), &current)?;
-        switch(&previous, &target)?;
+        if target == current {
+            roll_back_previous(after.as_deref())?;
+        } else {
+            switch(&base.join("previous"), &target)?;
+        }
         install_system_files(&current)?;
         let outcome = if start(&current).is_ok() {
-            "the release that ran before is running again"
+            match unfinished::done() {
+                Ok(()) => "the release that ran before is running again".to_owned(),
+                Err(error) => format!("the release that ran before is running again, but {error}"),
+            }
         } else {
-            "the release that ran before did not start either"
+            "the release that ran before did not start either".to_owned()
         };
         // What went back stays: the release that ran runs on it now.
         let back = restoring.map_or_else(String::new, |(source, _)| {
@@ -167,7 +237,18 @@ pub(super) fn rollback(with_state: bool) -> Step {
             "The rollback failed ({error}); {outcome}.{back} See the journal."
         ));
     }
+    unfinished::done()?;
     announce(&format!("Rolled back to {name}."));
+    Ok(())
+}
+
+/// `previous` as `after` says, or none.
+fn roll_back_previous(after: Option<&Path>) -> Step {
+    let previous = Path::new(BASE).join("previous");
+    if let Some(after) = after {
+        return switch(&previous, after);
+    }
+    let _ = fs::remove_file(&previous);
     Ok(())
 }
 
