@@ -11,6 +11,7 @@ import { Input } from "../components/ui/input";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableHeadRow, TableRow } from "../components/ui/table";
 import { Trans, useTranslation } from "../i18n";
 import { dateTime, duration } from "../lib/format";
+import { after } from "../lib/timers";
 import { useResource } from "../lib/useResource";
 
 const TERMINAL = new Set(["succeeded", "failed", "uncertain"]);
@@ -128,23 +129,19 @@ export function Actions() {
   const failures = lost?.times ?? 0;
   useEffect(() => {
     if (!watched || TERMINAL.has(watched.status)) return undefined;
-    const timer = setTimeout(
-      () => {
-        api.job(watched.id).then(
-          (job) => {
-            setLost(null);
-            setWatched(job);
-          },
-          (reason: unknown) => {
-            const error = reason instanceof Error ? reason : new Error(String(reason));
-            setLost((before) => ({ error, times: (before?.times ?? 0) + 1 }));
-          },
-        );
-        reloadCatalog();
-      },
-      Math.min(LONGEST_POLL, POLL * 2 ** failures),
-    );
-    return () => clearTimeout(timer);
+    return after(Math.min(LONGEST_POLL, POLL * 2 ** failures), () => {
+      api.job(watched.id).then(
+        (job) => {
+          setLost(null);
+          setWatched(job);
+        },
+        (reason: unknown) => {
+          const error = reason instanceof Error ? reason : new Error(String(reason));
+          setLost((before) => ({ error, times: (before?.times ?? 0) + 1 }));
+        },
+      );
+      reloadCatalog();
+    });
   }, [watched, failures, reloadCatalog]);
   const follow = (job: Job, again: boolean) => {
     setLost(null);

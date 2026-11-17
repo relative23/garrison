@@ -46,6 +46,14 @@ const ONE_CLOCK = [
   { selector: "CallExpression[callee.name='Date']", message: CLOCK },
 ];
 
+// Timers are set through src/lib/timers.ts, which sets none for a delay a
+// browser would run at once.
+const TIMER = "Set timers through src/lib/timers.ts: a delay no timer can wait sets none there.";
+const ONE_TIMER = [
+  { selector: "CallExpression[callee.name=/^(setTimeout|setInterval)$/]", message: TIMER },
+  { selector: "CallExpression[callee.property.name=/^(setTimeout|setInterval)$/]", message: TIMER },
+];
+
 export default tseslint.config(
   { ignores: ["dist", "coverage", "node_modules", "src/api/schema.gen.ts"] },
   js.configs.recommended,
@@ -61,11 +69,14 @@ export default tseslint.config(
       "no-restricted-syntax": ["error", NO_HTML],
     },
   },
-  { files: ["src/**/*.ts"], rules: { "no-restricted-syntax": ["error", NO_HTML, ...ONE_CLOCK] } },
+  { files: ["src/**/*.ts"], rules: { "no-restricted-syntax": ["error", NO_HTML, ...ONE_CLOCK, ...ONE_TIMER] } },
   {
     files: ["src/**/*.tsx"],
-    rules: { "no-restricted-syntax": ["error", NO_HTML, NO_TRANS_VALUES, NO_DISABLED, ...NO_LITERAL_TEXT, ...ONE_CLOCK] },
+    rules: {
+      "no-restricted-syntax": ["error", NO_HTML, NO_TRANS_VALUES, NO_DISABLED, ...NO_LITERAL_TEXT, ...ONE_CLOCK, ...ONE_TIMER],
+    },
   },
-  // The one file that reads the browser's clocks.
-  { files: ["src/lib/clock.ts"], rules: { "no-restricted-syntax": ["error", NO_HTML] } },
+  // The one file that reads the browser's clocks, and the one that sets timers.
+  { files: ["src/lib/clock.ts"], rules: { "no-restricted-syntax": ["error", NO_HTML, ...ONE_TIMER] } },
+  { files: ["src/lib/timers.ts"], rules: { "no-restricted-syntax": ["error", NO_HTML, ...ONE_CLOCK] } },
 );

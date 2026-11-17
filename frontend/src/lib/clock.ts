@@ -17,8 +17,10 @@
 // the browser's clocks.
 import { useSyncExternalStore } from "react";
 
+import { every } from "./timers";
+
 /** How often the views that watch the time look at it again. */
-const STEP = 15_000;
+export const STEP = 15_000;
 
 /** A moment on the page's clock. Only the wait between two moments can be
  * read from it, never the browser's time of day. */
@@ -30,12 +32,6 @@ export class Instant {
   until(later: Instant): number {
     return Math.max(0, later.#monotonic - this.#monotonic, later.#wall - this.#wall);
   }
-
-  /** Whether `other` lies in the same step of both clocks as this moment. */
-  sameStep(other: Instant): boolean {
-    const step = (value: number) => Math.floor(value / STEP);
-    return step(this.#monotonic) === step(other.#monotonic) && step(this.#wall) === step(other.#wall);
-  }
 }
 
 /** Milliseconds the page has waited from `since` to `now`. */
@@ -44,26 +40,33 @@ export function elapsed(since: Instant, now: Instant = new Instant()): number {
 }
 
 const listeners = new Set<() => void>();
-let timer: ReturnType<typeof setInterval> | undefined;
+let stop: (() => void) | undefined;
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
-  timer ??= setInterval(() => listeners.forEach((each) => each()), STEP);
+  stop ??= every(STEP, () => listeners.forEach((each) => each()));
   return () => {
     listeners.delete(listener);
     if (listeners.size === 0) {
-      clearInterval(timer);
-      timer = undefined;
+      stop?.();
+      stop = undefined;
     }
   };
 }
 
-// The same moment until either clock reaches its next step, as a store's
-// snapshot must be: after a sleep the wall clock's step has moved on.
+// Steps are counted on the page's clock, so the first after a sleep counts
+// it; the same moment stands until the next step, as a snapshot must.
+const ORIGIN = new Instant();
+const stepOf = (moment: Instant) => Math.floor(ORIGIN.until(moment) / STEP);
 let shown = new Instant();
+let shownStep = stepOf(shown);
 function snapshot(): Instant {
   const now = new Instant();
-  if (!now.sameStep(shown)) shown = now;
+  const step = stepOf(now);
+  if (step !== shownStep) {
+    shown = now;
+    shownStep = step;
+  }
   return shown;
 }
 

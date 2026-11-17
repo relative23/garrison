@@ -1,6 +1,7 @@
 // What a page does with the browser's clocks, in the flows (flows.mjs): a
-// browser whose clock runs hours ahead of the host's or behind it, and a
-// computer that slept, whose wall clock moved on while the page's timers and
+// browser whose clock runs hours ahead of the host's or behind it, a session
+// answer without a time left that a timer can count, and a computer that
+// slept, whose wall clock moved on while the page's timers and
 // performance.now() did not. Playwright's clock does to a page what waking up
 // does to it: `setSystemTime` moves the wall clock alone, as a resume does on
 // Linux and macOS.
@@ -43,6 +44,41 @@ export async function skewed(shared) {
       );
     } finally {
       await other.close();
+    }
+  }
+}
+
+/** A session answered without its time left, as a release before this one
+ * answers it after a rollback, and with thirty days left, beyond what a
+ * browser's timer takes: the page still reads its session no oftener than
+ * once a second. */
+export async function untimed(shared) {
+  const { context, origin, at, expect, watch } = shared;
+  for (const [name, change] of [
+    ["none", (session) => delete session.expiresIn],
+    ["thirty days", (session) => (session.expiresIn = 30 * 86400)],
+  ]) {
+    at(`a session answer with a time left of ${name}`);
+    const page = await context.newPage();
+    watch(page);
+    const reads = [];
+    await page.route("**/api/session", async (route) => {
+      reads.push(Date.now());
+      const response = await route.fetch();
+      const body = await response.json();
+      if (body.session) change(body.session);
+      return route.fulfill({ response, json: body });
+    });
+    try {
+      await page.goto(`${origin}/admin/account`);
+      await page.waitForTimeout(3000);
+      const closest = Math.min(...reads.slice(1).map((time, index) => time - (reads[index] ?? 0)));
+      expect(
+        reads.length <= 4 && closest >= 900,
+        `the page reads its session no oftener than once a second (${reads.length} reads in 3 s)`,
+      );
+    } finally {
+      await page.close();
     }
   }
 }

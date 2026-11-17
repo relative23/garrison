@@ -8,14 +8,19 @@ import { Centered, SignIn } from "./components/SignIn";
 import { ErrorState, Loading } from "./components/Status";
 import { ViewBoundary } from "./components/ViewBoundary";
 import { useTranslation } from "./i18n";
-import { elapsed, usePageTime, type Instant } from "./lib/clock";
+import { elapsed, Instant, STEP, usePageTime } from "./lib/clock";
 import { AppContext, type AppState } from "./lib/context";
 import { redirect, useRoute } from "./lib/router";
 import { useCurrentStatus } from "./lib/staleness";
 import { announce, listen } from "./lib/tabs";
 import { applyTheme, useSystemDark } from "./lib/theme";
+import { after, delay } from "./lib/timers";
 import { useResource } from "./lib/useResource";
 import { ChunkView, isPage, moduleText, PAGE_VIEWS, PAGES, VIEWS } from "./modules/registry";
+
+/** The least time between two reads of the session, in seconds, whatever
+ * asks for them. */
+const SESSION_FLOOR = 1;
 
 /** A signed-in page's session as it was read, and how that read stands. */
 interface Reads {
@@ -54,18 +59,24 @@ function SignedIn({ reads, onEnded }: { reads: Reads; onEnded: (csrf: string) =>
 
   // Again when the system changes its own, which "system" follows.
   useEffect(() => applyTheme(session.preferences.theme, system), [session.preferences.theme, system]);
-  // The server ends the session when its time is up by the server's clock.
-  // The page counts down the time left at the answer on its own clock, and
-  // again at each step of it, which counts a sleep that a timer does not,
-  // and then asks: the answer says whether the session has ended. It never
-  // ends a session by the browser's clock, which may be another.
+  // The server ends the session by its own clock: the page counts down the
+  // time left it gave and then asks; the answer says whether it has ended.
   const now = usePageTime();
   const { receivedAt } = reads;
+  const asked = useRef<Instant | null>(null);
   useEffect(() => {
-    if (!receivedAt) return undefined;
-    const left = session.expiresIn * 1000 - elapsed(receivedAt);
-    const timer = setTimeout(again, Math.max(0, left));
-    return () => clearTimeout(timer);
+    // Without a time left that a timer can count, the read after each refresh
+    // of the status finds the end.
+    const given = delay(typeof session.expiresIn === "number" ? session.expiresIn * 1000 : null);
+    if (given === null || !receivedAt) return undefined;
+    const left = given - elapsed(receivedAt);
+    if (left > STEP) return undefined;
+    // At most once a step, so that no answer makes it ask again and again.
+    const since = (moment: Instant | null) => (moment ? elapsed(moment) : Number.POSITIVE_INFINITY);
+    return after(Math.max(0, left, STEP - since(receivedAt), STEP - since(asked.current)), () => {
+      asked.current = new Instant();
+      again();
+    });
   }, [receivedAt, session.expiresIn, again, now]);
 
   // Each refresh of the status had the user's rights checked a moment ago.
@@ -144,7 +155,7 @@ function SignedIn({ reads, onEnded }: { reads: Reads; onEnded: (csrf: string) =>
 export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionState }) {
   const { t } = useTranslation();
   const route = useRoute();
-  const session = useResource((signal) => api.session(signal), [], 0, initial);
+  const session = useResource((signal) => api.session(signal), [], 0, initial, SESSION_FLOOR);
   const again = session.reload;
   const signedIn = session.data?.session ?? null;
   // The session that ended in this tab, by its CSRF token, and whether this

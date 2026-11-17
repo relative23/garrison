@@ -109,6 +109,28 @@ describe("useResource", () => {
     expect(shown()).toBe("settled / fresh / no error");
   });
 
+  it("asks no sooner than its floor after the request before, and once for every reload asked meanwhile", async () => {
+    vi.useFakeTimers();
+    const { load, requests } = controlled();
+    function Floored() {
+      const resource = useResource((signal) => load("a", signal), [], 0, undefined, 1);
+      return <button onClick={resource.reload}>reload</button>;
+    }
+    render(<Floored />);
+    const reload = () => fireEvent.click(screen.getByRole("button", { name: "reload" }));
+    expect(requests).toHaveLength(1);
+    for (let times = 0; times < 5; times += 1) reload();
+    await act(async () => vi.advanceTimersByTimeAsync(999));
+    expect(requests).toHaveLength(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(requests).toHaveLength(2);
+    // Once the floor has passed, a reload asks at once.
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    reload();
+    await act(async () => undefined);
+    expect(requests).toHaveLength(3);
+  });
+
   it("asks for a new filter even when it started with an answer", async () => {
     const { load, requests } = controlled();
     const view = render(<Probe filter="a" load={load} initial="drawn" />);

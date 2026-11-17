@@ -301,7 +301,7 @@ describe("sign-out", () => {
   });
 
   it("shows the sign-in page when the session's time is up at the server", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers();
     const now = () => Math.floor(Date.now() / 1000);
     serve({ ...signedIn(), "GET session": until(now() + 60, now) });
     openApp();
@@ -408,7 +408,8 @@ describe("a sign-in or sign-out in another tab", () => {
     server.answer("GET session", { status: 403, body: { detail: "Garrison access is not authorized" } });
     shown();
     expect(await screen.findByText(/Your session has ended/)).toBeTruthy();
-    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    // The read after it waits until a second has passed since the one before.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1500)));
     // The first read, the one refused, and the one after it that looks for a
     // session another tab may have made: no more.
     expect(server.requests("GET session")).toHaveLength(3);

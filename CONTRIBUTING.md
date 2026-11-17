@@ -245,7 +245,9 @@ and a look at a job (with the page's clock moved on), and answers
 over HTTP/2, which carries no status text, through the proxy of
 `npm run measure`; it opens pages in a browser whose clock runs three hours
 ahead of the preview's, past the session's end, and three hours behind, and
-they must keep the session and give the server's ages; it lets the computer
+they must keep the session and give the server's ages; it answers the
+session without its time left and with thirty days left, and the page must
+read it no oftener than once a second; it lets the computer
 sleep for ten minutes, by moving the page's wall clock alone, as waking up
 does, and the checks must turn stale before the next refresh; it signs in as
 a viewer; it takes a module from the
