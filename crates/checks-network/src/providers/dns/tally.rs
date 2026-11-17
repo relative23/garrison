@@ -16,18 +16,28 @@ pub(super) struct Tally {
     pub(super) left: usize,
     /// The records that are not as Stalwart names them.
     pub(super) open: Vec<String>,
-    /// The needed records the resolver gave no answer for.
-    pub(super) unanswered: usize,
+    /// The records the resolver gave nothing usable for: each, why, and
+    /// whether mail depends on it.
+    pub(super) unread: Vec<(String, String, bool)>,
     /// The records not asked, as the run's time for its checks was over.
     pub(super) unasked: usize,
     /// What is said of the records whose name is no DNS name.
     pub(super) nameless: Vec<String>,
+    /// Whether the record for the domain's MTA-STS policy could not be
+    /// read, so that the policy was not checked.
+    pub(super) policy_unread: bool,
 }
 
 impl Tally {
-    /// What the verdict on `record` of the domain `name` adds, and whether
-    /// the record is not as Stalwart names it.
-    pub(super) fn counted(&mut self, name: &str, record: &Expected, verdict: Verdict) -> bool {
+    /// What the verdict on `record` of the domain `name` adds, with why the
+    /// resolver gave nothing usable where it did not.
+    pub(super) fn counted(
+        &mut self,
+        name: &str,
+        record: &Expected,
+        verdict: Verdict,
+        why: Option<&str>,
+    ) {
         let needed = needed(name, record);
         let counts = match verdict {
             Verdict::Missing => needed,
@@ -39,8 +49,13 @@ impl Tally {
                 record.kind == Kind::Tlsa
                     || needed && (record.kind == Kind::Mx || record.name.contains("._domainkey."))
             }
-            Verdict::Unanswered => {
-                self.unanswered += usize::from(needed);
+            // Not known to be in order, optional as it may be.
+            Verdict::Unanswered | Verdict::Unread => {
+                let label = format!("{} {}", record.kind.name(), record.name);
+                self.unread
+                    .push((label, why.unwrap_or_default().to_owned(), needed));
+                self.policy_unread |=
+                    record.kind == Kind::Txt && record.name == format!("_mta-sts.{name}");
                 false
             }
             Verdict::Unasked => {
@@ -61,15 +76,32 @@ impl Tally {
             self.open
                 .push(format!("{} {}", record.kind.name(), record.name));
         }
-        counts
+    }
+
+    /// What is said of the records the resolver gave nothing usable for:
+    /// those of one reason together, in the reason's words.
+    fn unread_said(&self) -> Vec<String> {
+        let mut reasons: Vec<(&str, Vec<&str>)> = Vec::new();
+        for (record, why, _) in &self.unread {
+            match reasons.iter_mut().find(|(known, _)| known == why) {
+                Some((_, records)) => records.push(record),
+                None => reasons.push((why, vec![record])),
+            }
+        }
+        reasons
+            .into_iter()
+            .map(|(why, records)| format!("{} could not be read: {why}.", records.join(", ")))
+            .collect()
     }
 }
 
 /// The state of a domain and what to say of it: the records that are not as
-/// Stalwart names them, those that were not asked, then what the MTA-STS
-/// policy leaves open. What was asked counts; what was not keeps the domain
-/// from being in order. A record whose name is no DNS name can never be
-/// published, so a needed one is not as Stalwart names it.
+/// Stalwart names them, those that could not be read or were not asked,
+/// then what the MTA-STS policy leaves open. What was asked and answered
+/// counts; what was not keeps the domain from being in order, optional as
+/// it may be: Unknown for a needed record, Partial for an optional one. A
+/// record whose name is no DNS name can never be published, so a needed one
+/// is not as Stalwart names it.
 pub(super) fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>) {
     let (mut state, mut findings) = if tally.records == 0 {
         (
@@ -84,21 +116,14 @@ pub(super) fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>
                 tally.open.join(", ")
             )],
         )
-    } else if tally.unanswered > 0 {
-        (
-            State::Unknown,
-            vec![format!(
-                "The resolver gave no answer for {} of the needed records.",
-                tally.unanswered
-            )],
-        )
-    } else if tally.unasked == tally.records {
+    } else if tally.unread.iter().any(|(_, _, needed)| *needed) || tally.unasked == tally.records {
         (State::Unknown, Vec::new())
-    } else if tally.unasked > 0 || tally.left > 0 {
+    } else if tally.unasked > 0 || tally.left > 0 || !tally.unread.is_empty() {
         (State::Partial, Vec::new())
     } else {
         (State::Ok, Vec::new())
     };
+    findings.extend(tally.unread_said());
     findings.extend(tally.nameless.iter().cloned());
     if tally.unasked > 0 && tally.unasked == tally.records {
         findings.push(format!("Not asked: {RUN_OVER}."));
@@ -120,6 +145,12 @@ pub(super) fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>
         findings.push(
             "A published TLSA record that is not the one of Stalwart's certificate makes \
              senders that check DANE refuse this server."
+                .to_owned(),
+        );
+    }
+    if tally.policy_unread {
+        findings.push(
+            "Its MTA-STS policy was not checked, since the record for it could not be read."
                 .to_owned(),
         );
     }

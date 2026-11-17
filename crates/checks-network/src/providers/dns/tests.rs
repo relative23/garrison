@@ -155,7 +155,7 @@ pub(super) fn collected(domains: &serde_json::Value, address: SocketAddr) -> Vec
 }
 
 /// Like [`collected`], with an MTA-STS policy served at `policy`.
-fn collected_with(
+pub(super) fn collected_with(
     domains: &serde_json::Value,
     address: SocketAddr,
     policy: Option<String>,
@@ -358,7 +358,10 @@ fn a_resolver_that_does_not_answer_and_a_stalwart_that_gives_no_domains_are_unkn
     assert_eq!(observations[0].state, State::Unknown);
     assert_eq!(
         observations[0].findings,
-        ["The resolver gave no answer for 1 of the needed records."]
+        [format!(
+            "MX example.test could not be read: the resolver {address} did not answer: no answer \
+             within 3 s."
+        )]
     );
     // A domain Stalwart names no records for, and no domain at all.
     let silent = UdpSocket::bind("127.0.0.1:0")

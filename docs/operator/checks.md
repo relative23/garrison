@@ -254,7 +254,14 @@ check asks the resolver for them and compares:
   asked: no server can publish it, so a needed one is a warning.
 
 The answers are those of this resolver at this moment; another resolver may
-still hold older ones. A resolver that does not answer once is not asked again
+still hold older ones. A record that the resolver answers with an error, such
+as SERVFAIL for a zone whose DNSSEC signatures expired, or with an answer
+that is malformed or cut off, says "not read" and why. A record that could
+not be read keeps the domain from being in order, optional as it may be: a
+needed one leaves it Unknown, an optional one, such as a TLSA record, Partial
+where it would be OK, and the card names the records and why; where the
+record for an MTA-STS policy could not be read, the policy is not checked,
+and the card says so. A resolver that does not answer once is not asked again
 in that run, and the records left say "no answer"; once the run's time for its
 checks is up, the records left say "not asked", and the domain is Partial, or
 Unknown where nothing was asked; an MTA-STS policy that is due is then fetched

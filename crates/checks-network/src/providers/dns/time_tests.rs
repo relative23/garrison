@@ -22,7 +22,10 @@ use crate::testing::{Canned, config, table};
 fn an_error_of_the_resolver_for_one_name_leaves_the_next_asked() {
     let zone_file = "example.test. IN MX 10 mail.example.test.\n\
                      example.test. IN TXT \"v=spf1 mx -all\"\n";
-    for code in [2, 5] {
+    for (code, words) in [
+        (2, "the resolver could not answer (SERVFAIL)"),
+        (5, "the resolver refused the question"),
+    ] {
         let zone = BTreeMap::from([(
             ("example.test".to_owned(), Kind::Txt.code()),
             vec![text("v=spf1 mx -all")],
@@ -43,7 +46,11 @@ fn an_error_of_the_resolver_for_one_name_leaves_the_next_asked() {
             .iter()
             .map(|row| &row[5])
             .collect();
-        assert_eq!(results, ["no answer", "published"], "error {code}");
+        assert_eq!(
+            results,
+            [format!("not read: {words}").as_str(), "published"],
+            "error {code}"
+        );
     }
 }
 

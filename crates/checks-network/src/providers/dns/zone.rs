@@ -103,8 +103,12 @@ pub(super) enum Verdict {
     /// Another record of the same purpose is published.
     Differs,
     Missing,
-    /// The resolver gave no answer.
+    /// The resolver gave no answer, to this question or to one before it in
+    /// the run, after which it is asked no more.
     Unanswered,
+    /// The resolver answered with nothing the check can use: an error code,
+    /// or an answer that is malformed or cut off.
+    Unread,
     /// The resolver was not asked: the run's time for its checks was over.
     Unasked,
     /// Its name is longer than DNS takes: no resolver can be asked it, and
@@ -119,6 +123,7 @@ impl Verdict {
             Verdict::Differs => "differs",
             Verdict::Missing => "missing",
             Verdict::Unanswered => "no answer",
+            Verdict::Unread => "not read",
             Verdict::Unasked => "not asked",
             Verdict::NoName => "no DNS name",
         }

@@ -671,6 +671,18 @@ Notable changes for operators and users. The format follows
   Resource temporarily unavailable (os error 11)", the system's words for
   a wait that ran out. They now say "… did not answer: no answer within
   3 s".
+- **A DNS record that could not be read is named, optional as it may be.**
+  Where the resolver answered a record's question with an error, such as
+  SERVFAIL for a zone whose DNSSEC signatures expired, or with an answer
+  that is malformed or cut off, the row said "no answer" and the card "The
+  resolver gave no answer for 1 of the needed records.", as for a resolver
+  that is silent; and for an optional record, such as a TLSA record or the
+  record of an MTA-STS policy, the card stayed OK, so that the TLSA record
+  and the policy were not checked without a word. The row now says "not
+  read" and why, the card names the records and why, and is Unknown for a
+  needed record and Partial for an optional one where it would be OK; where
+  the record for an MTA-STS policy could not be read, the card says that
+  the policy was not checked.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not

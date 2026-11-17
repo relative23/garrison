@@ -91,34 +91,37 @@ const RUN_OVER: &str = "the collection run's time was used up";
 /// one of them again, and one domain is not to take the others' time.
 const MOST_RECORDS: usize = 60;
 
-/// What the resolver answers for `record`, and what it found. A resolver
-/// that was silent once is not asked again in this run, for this domain or
-/// the next: each question would wait out its time, and the run has only so
-/// long. Once the run's time for its checks is over, nothing more is asked.
-/// A name that is no DNS name is never asked: that needs no resolver.
+/// What the resolver answers for `record`: the verdict, what it found, and
+/// why it gave nothing usable where it did not. A resolver that was silent
+/// once is not asked again in this run, for this domain or the next: each
+/// question would wait out its time, and the run has only so long; `silent`
+/// keeps why. Once the run's time for its checks is over, nothing more is
+/// asked. A name that is no DNS name is never asked: that needs no resolver.
 fn asked(
     context: &Context<'_>,
     resolver: SocketAddr,
     record: &Expected,
-    silent: &mut bool,
-) -> (Verdict, Vec<String>) {
+    silent: &mut Option<String>,
+) -> (Verdict, Vec<String>, Option<String>) {
     if !dns::is_name(&record.name) {
-        return (Verdict::NoName, Vec::new());
+        return (Verdict::NoName, Vec::new(), None);
     }
-    if *silent {
-        return (Verdict::Unanswered, Vec::new());
+    if let Some(why) = silent.as_ref() {
+        return (Verdict::Unanswered, Vec::new(), Some(why.clone()));
     }
     if context.deadline.expired() {
-        return (Verdict::Unasked, Vec::new());
+        return (Verdict::Unasked, Vec::new(), None);
     }
     match dns::ask(resolver, &record.name, record.kind) {
-        Ok(Answer::Records(found)) => (verdict(record, &found), found),
-        Ok(Answer::NoSuchName) => (Verdict::Missing, Vec::new()),
-        Err(error) => {
-            // An error for one name, such as SERVFAIL, is that name's.
-            *silent = matches!(error, dns::Error::NoAnswer { .. });
-            (Verdict::Unanswered, Vec::new())
+        Ok(Answer::Records(found)) => (verdict(record, &found), found, None),
+        Ok(Answer::NoSuchName) => (Verdict::Missing, Vec::new(), None),
+        Err(error @ dns::Error::NoAnswer { .. }) => {
+            let why = error.to_string();
+            *silent = Some(why.clone());
+            (Verdict::Unanswered, Vec::new(), Some(why))
         }
+        // An error for one name, such as SERVFAIL, is that name's.
+        Err(error) => (Verdict::Unread, Vec::new(), Some(error.to_string())),
     }
 }
 
@@ -176,14 +179,14 @@ impl Dns {
         .with_max_age(180))
     }
 
-    /// `silent` is whether the resolver has stopped being asked in this run
-    /// because it did not answer once.
+    /// `silent` says why the resolver has stopped being asked in this run,
+    /// where it did not answer once.
     fn domain(
         &self,
         context: &Context<'_>,
         resolver: SocketAddr,
         domain: &Domain,
-        silent: &mut bool,
+        silent: &mut Option<String>,
     ) -> Result<Observation, crate::context::ProviderError> {
         let name = plain(&domain.name);
         let records = expected(domain.dns_zone_file.as_deref().unwrap_or_default());
@@ -197,8 +200,13 @@ impl Dns {
             ..Tally::default()
         };
         for record in asked_for {
-            let (verdict, found) = asked(context, resolver, record, silent);
-            tally.counted(&name, record, verdict);
+            let (verdict, found, why) = asked(context, resolver, record, silent);
+            tally.counted(&name, record, verdict, why.as_deref());
+            // An answer that cannot be used says what it was.
+            let result = match (verdict, why) {
+                (Verdict::Unread, Some(why)) => format!("not read: {why}"),
+                _ => verdict.label().to_owned(),
+            };
             let short = |text: &str| text.chars().take(120).collect::<String>();
             rows.push(vec![
                 json!(record.name),
@@ -210,7 +218,7 @@ impl Dns {
                 }),
                 json!(short(&record.value)),
                 json!(short(&found.join(" | "))),
-                json!(verdict.label()),
+                json!(result),
             ]);
         }
         // A domain that publishes the record for an MTA-STS policy must have
@@ -296,7 +304,7 @@ impl Provider for Dns {
                 .push(self.unknown(context, "This host names no resolver in /etc/resolv.conf.")?);
             return Ok(report);
         };
-        let mut silent = false;
+        let mut silent = None;
         for domain in domains.iter().take(self.max_domains) {
             report
                 .observations
@@ -333,3 +341,5 @@ pub(crate) mod tests;
 mod time_tests;
 #[cfg(test)]
 mod unread_tests;
+#[cfg(test)]
+mod unusable_tests;
