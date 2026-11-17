@@ -13,6 +13,9 @@
 //! one. Then every database and the access policy go back as
 //! `--rollback --restore-state` puts them back, and the services start.
 //!
+//! Run again after it was interrupted, a restore makes no new copy and
+//! names the first run's (`unfinished.rs`).
+//!
 //! A backup holds no sessions and no credentials: users sign in again, and
 //! where `/etc/garrison/credentials` was lost as well, `garrison stalwart
 //! setup` makes new ones.
@@ -25,6 +28,7 @@ use garrison_core::time;
 
 use super::files::{Step, announce, io, lock};
 use super::requirements::{preflight, state_size};
+use super::unfinished::{self, Unfinished};
 use super::{BACKUPS, BASE, CONFIG, LOCK, cli, precheck, start, state, stop_services};
 
 /// The backup at `from`, if it is one that `garrison backup` wrote.
@@ -47,6 +51,12 @@ fn backup_at(from: &Path) -> Step<PathBuf> {
 fn restore(from: &Path) -> Step {
     preflight()?;
     let _held = lock(Path::new(LOCK))?;
+    // An interrupted restore's copy stays the state from before.
+    let earlier = match unfinished::read()? {
+        Some(Unfinished::Restore { kept, .. }) => Some(kept),
+        Some(record) => return Err(record.finish_first()),
+        None => None,
+    };
     let source = backup_at(from)?;
     let link = Path::new(BASE).join("current");
     let current = io(fs::canonicalize(&link), &link)?;
@@ -89,22 +99,26 @@ fn restore(from: &Path) -> Step {
             ));
         }
     }
-    // Each copy beside the database it replaces, and the state as it is.
-    precheck::copies_fit(&source, &config, &[(Path::new(BACKUPS), state_size())])?;
-    // What is there now, so that this restore can be taken back.
-    let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
-    let kept = Path::new(BACKUPS).join(format!("pre-restore-{stamp}"));
-    announce(&format!(
-        "Backing up the state as it is to {}",
-        kept.display()
-    ));
-    let backup = cli(&current, &["backup", "--to", &kept.display().to_string()])?;
-    if !backup.status.success() {
-        return Err(format!(
-            "The state as it is could not be backed up ({}); nothing was changed.",
-            String::from_utf8_lossy(&backup.stderr).trim()
-        ));
-    }
+    // Each copy beside the database it replaces, and the state as it is
+    // where this run copies it.
+    let copy_room = [(Path::new(BACKUPS), state_size())];
+    let besides: &[(&Path, u64)] = if earlier.is_some() { &[] } else { &copy_room };
+    precheck::copies_fit(&source, &config, besides)?;
+    let kept = match earlier {
+        Some(kept) => {
+            announce(&format!(
+                "An earlier restore did not finish; the state from before it is in {}.",
+                kept.display()
+            ));
+            kept
+        }
+        None => keep(&current)?,
+    };
+    // From here on, a run that is killed leaves a record for the next.
+    unfinished::write(&Unfinished::Restore {
+        source: source.clone(),
+        kept: kept.clone(),
+    })?;
     stop_services();
     let mut restored = Vec::new();
     let result = state::restore_all(&source, &config, owner, &mut restored);
@@ -112,6 +126,7 @@ fn restore(from: &Path) -> Step {
     let started = start(&current);
     match (result, started) {
         (Ok(()), Ok(())) => {
+            unfinished::done()?;
             announce(&format!(
                 "Restored the state from {place}; Garrison {name} is running. Users sign in \
                  again: a backup holds no sessions. The state from before is in {}.",
@@ -135,6 +150,25 @@ fn restore(from: &Path) -> Step {
             kept.display()
         )),
     }
+}
+
+/// What is there now, copied by `current`'s own backup, so that this restore
+/// can be taken back.
+fn keep(current: &Path) -> Step<PathBuf> {
+    let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
+    let kept = Path::new(BACKUPS).join(format!("pre-restore-{stamp}"));
+    announce(&format!(
+        "Backing up the state as it is to {}",
+        kept.display()
+    ));
+    let backup = cli(current, &["backup", "--to", &kept.display().to_string()])?;
+    if !backup.status.success() {
+        return Err(format!(
+            "The state as it is could not be backed up ({}); nothing was changed.",
+            String::from_utf8_lossy(&backup.stderr).trim()
+        ));
+    }
+    Ok(kept)
 }
 
 pub(crate) fn run_restore(from: &Path) -> u8 {

@@ -132,6 +132,7 @@ fn plan(base: &Path) -> Step<Plan> {
             left: from,
             after: previous,
         }),
+        Some(record @ Unfinished::Restore { .. }) => Err(record.finish_first()),
         None => {
             let Ok(target) = fs::canonicalize(base.join("previous")) else {
                 return Err("There is no previous release to return to.".into());

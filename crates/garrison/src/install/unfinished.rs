@@ -1,6 +1,6 @@
 //! The record of a root command that has not finished, so that the same
-//! command run again finishes it: an upgrade or a rollback that dies
-//! between two steps leaves links and a state that do not say what was
+//! command run again finishes it: an upgrade, a rollback or a restore that
+//! dies between two steps leaves links and a state that do not say what was
 //! under way. `/opt/garrison/unfinished.json`, root's alone, is written just
 //! before the services stop and removed once a release runs and the links
 //! name it and the one to roll back to.
@@ -36,6 +36,9 @@ pub(super) enum Unfinished {
         to: PathBuf,
         previous: Option<PathBuf>,
     },
+    /// A restore of the state in `source`; `kept` holds the state from
+    /// before it.
+    Restore { source: PathBuf, kept: PathBuf },
 }
 
 fn path(base: &Path) -> PathBuf {
@@ -93,7 +96,7 @@ pub(super) fn upgrading_from() -> Option<PathBuf> {
     }
     match record {
         Unfinished::Upgrade { from, .. } => Some(from),
-        Unfinished::Rollback { .. } => None,
+        _ => None,
     }
 }
 
@@ -168,6 +171,7 @@ impl Unfinished {
                         || previous.as_deref() == Some(to.as_path())
                         || previous == *after)
             }
+            Self::Restore { kept, .. } => kept.is_dir(),
         }
     }
 
@@ -180,6 +184,7 @@ impl Unfinished {
             Self::Rollback { from, to, .. } => {
                 format!("a rollback from {} to {}", name(from), name(to))
             }
+            Self::Restore { source, .. } => format!("a restore from {}", source.display()),
         }
     }
 
@@ -190,6 +195,11 @@ impl Unfinished {
             Self::Rollback { from, .. } => format!(
                 "run `{} install --rollback`",
                 from.join("bin/garrison").display()
+            ),
+            Self::Restore { source, .. } => format!(
+                "run `{} restore --from {}`",
+                super::command::name(),
+                source.display()
             ),
         };
         format!(
@@ -287,6 +297,21 @@ mod tests {
             write_in(base, &record).unwrap();
             assert_eq!(read_in(base).unwrap(), Some(record), "{current} {previous}");
         }
+    }
+
+    #[test]
+    fn a_restore_is_known_while_its_copy_is_there() {
+        let directory = host(&["0.1"], "0.1", None);
+        let base = directory.path();
+        let record = Unfinished::Restore {
+            source: base.join("source"),
+            kept: fs::canonicalize(base.join("backup")).unwrap(),
+        };
+        write_in(base, &record).unwrap();
+        assert_eq!(read_in(base).unwrap(), Some(record));
+        fs::remove_dir(base.join("backup")).unwrap();
+        assert_eq!(read_in(base).unwrap(), None);
+        assert!(!path(base).exists());
     }
 
     #[test]

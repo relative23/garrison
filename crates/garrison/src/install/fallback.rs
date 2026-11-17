@@ -52,7 +52,7 @@ pub(super) fn before_install(version: &str) -> Step<Option<Resumed>> {
             previous,
             backup,
         } => (from, to, previous, backup),
-        other @ Unfinished::Rollback { .. } => return Err(other.finish_first()),
+        other => return Err(other.finish_first()),
     };
     let current = std::fs::canonicalize(Path::new(BASE).join("current")).ok();
     if current.as_deref() == Some(to.as_path()) && name(&to) == version {

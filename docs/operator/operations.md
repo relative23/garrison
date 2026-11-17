@@ -95,6 +95,8 @@ through a link or into a folder that `broker.policy` names, removes a
 database that did not exist when the backup was made, and starts the
 services. What was recorded since the backup is in the `pre-restore-*` copy
 and no longer in Garrison; restore that copy to take the restore back.
+Run again after it was interrupted, a restore finishes and names its first
+run's copy as the state from before.
 
 A backup holds neither sessions nor credentials. After a restore everyone
 signs in again. On a new host, restore `/etc/garrison` from your host backup
