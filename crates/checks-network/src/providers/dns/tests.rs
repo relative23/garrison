@@ -6,6 +6,7 @@ use garrison_testing::http::{json as answer_json, serve};
 use super::stand_in::{guessable, host, resolver, text};
 use super::*;
 use crate::context::Context;
+use crate::dns::Kind;
 use crate::testing::{Canned, config, table};
 
 /// What Stalwart writes for a domain, shortened.

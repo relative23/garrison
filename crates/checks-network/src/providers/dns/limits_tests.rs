@@ -8,6 +8,7 @@ use std::fmt::Write as _;
 use super::stand_in::{host, resolver, text};
 use super::tests::collected;
 use super::*;
+use crate::dns::Kind;
 
 /// An apex with seventy verification tokens before its SPF policy: the
 /// policy is found, as it is where the answer holds it alone.

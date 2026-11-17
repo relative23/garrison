@@ -12,6 +12,7 @@ use serde_json::json;
 use super::stand_in::{host, resolver_after, resolver_erring, text};
 use super::tests::collected;
 use super::*;
+use crate::dns::Kind;
 use crate::testing::{Canned, config, table};
 
 /// An error of the resolver for one name, SERVFAIL or REFUSED, is that
