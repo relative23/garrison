@@ -239,6 +239,22 @@ mod tests {
         assert!(replace_in(&link, "web.sqlite", &copy, 0o600).is_err());
     }
 
+    /// The lock once its holder has given it up. The kernel lets it go when
+    /// every copy of the holder's descriptor is closed, and a child that
+    /// another test thread starts in that moment holds a copy until it runs
+    /// its program. The installer starts no thread of its own, and each of
+    /// its children runs its program at once, so only the tests wait here.
+    fn once_given_up(path: &Path) -> Step<File> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let taken = lock(path);
+            if taken.is_ok() || std::time::Instant::now() > deadline {
+                return taken;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
     #[test]
     fn one_installer_holds_the_lock_until_it_ends() {
         let directory = tempfile::tempdir().unwrap();
@@ -249,7 +265,7 @@ mod tests {
             "Another garrison install is already running; try again when it has finished."
         );
         drop(held);
-        assert!(lock(&path).is_ok());
+        assert!(once_given_up(&path).is_ok());
         // A lock file made by hand with a looser mode becomes the installer's own.
         let loose = directory.path().join("loose.lock");
         fs::write(&loose, "").unwrap();
