@@ -269,7 +269,7 @@ describe("sign-out", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Account" })).toBeTruthy();
   });
 
-  it("names the connection only where sign-out got no answer", async () => {
+  it("says, where sign-out got no answer, that the page does not know whether it ended", async () => {
     serve({
       ...signedIn(),
       "POST logout": () => {
@@ -278,7 +278,13 @@ describe("sign-out", () => {
     });
     openApp("/admin/account");
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
-    expect(await screen.findByText(/this browser is still signed in\. Check the connection and try again\./)).toBeTruthy();
+    // The request may have reached the server, which ended the session.
+    expect(
+      await screen.findByText(
+        "No readable answer came, so it is not known whether you were signed out. Check the connection and sign out again.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/still signed in/)).toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "Account" })).toBeTruthy();
   });
 

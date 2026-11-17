@@ -2,6 +2,7 @@
 // hiding a module from the menu neither revokes access nor stops any service.
 import { useState, type FormEvent, type ReactNode } from "react";
 
+import { ApiError } from "../api/client";
 import { Notice } from "../components/Status";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -91,8 +92,9 @@ export function Preferences() {
       await updatePreferences({ theme, hiddenModules: [...hidden].sort(), showSwitch });
       applyTheme(theme);
       setMessage({ tone: "info", text: t("preferences.saved") });
-    } catch {
-      setMessage({ tone: "error", text: t("preferences.notSaved") });
+    } catch (reason) {
+      // Without a readable answer the settings may have been saved all the same.
+      setMessage({ tone: "error", text: t(reason instanceof ApiError ? "preferences.notSaved" : "preferences.unanswered") });
     }
   };
   return (

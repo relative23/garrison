@@ -61,7 +61,13 @@ describe("maintenance actions", () => {
     renderView(<Actions />);
     await loaded();
     fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
-    expect(await screen.findByText("The request could not be sent.")).toBeTruthy();
+    // The request may have reached the broker, which started the job.
+    expect(
+      await screen.findByText(
+        "No readable answer came, so it is not known whether the job started. Start sends the same request again, which does not start a job twice.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/could not be sent/)).toBeNull();
     expect(dialogOpen()).toBe(true);
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
@@ -72,6 +78,18 @@ describe("maintenance actions", () => {
     expect(ids).toHaveLength(3);
     expect(ids[1]).toBe(ids[0]);
     expect(ids[2]).not.toBe(ids[0]);
+  });
+
+  it("say so when the broker finds that an earlier request started the job", async () => {
+    serve({
+      "GET actions": { body: catalog() },
+      "POST actions": { status: 202, body: { job: job(), replayed: true } },
+    });
+    renderView(<Actions />);
+    await loaded();
+    fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
+    const notice = (await screen.findByText("Job 01234567: Queued — Waiting to start")).closest("[role]");
+    expect(notice?.textContent).toContain("An earlier request had started this job; it was not started again.");
   });
 
   it("start once while a start is under way, and keep Start focusable meanwhile", async () => {

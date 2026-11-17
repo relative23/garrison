@@ -358,6 +358,23 @@ try {
   expect(await focused(start), "a start that failed leaves the focus on Start");
   await page.unroute("**/api/actions");
   failing.clear();
+  // A start whose answer is lost: the request may have started the job, and
+  // the page says that it does not know.
+  failing.add("no answer to POST /api/actions");
+  await page.route("**/api/actions", (route) => (route.request().method() === "POST" ? route.abort() : route.continue()));
+  await start.focus();
+  await page.keyboard.press("Enter");
+  const unknown = await dialog
+    .getByText(/^No readable answer came, so it is not known whether the job started\./)
+    .waitFor({ timeout: 3000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(unknown, "a start without an answer says that it is not known whether the job started");
+  expect(await focused(start), "a start without an answer leaves the focus on Start");
+  await page.unroute("**/api/actions");
+  failing.clear();
   const submitted = page.waitForResponse((response) => response.url().endsWith("/api/actions") && response.request().method() === "POST");
   await start.click();
   expect((await submitted).status() === 202, "a confirmed action is accepted");

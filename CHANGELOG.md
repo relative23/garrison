@@ -192,6 +192,16 @@ Notable changes for operators and users. The format follows
   the module's checks could not be read and why, that a refresh failed and
   of when the status is, or that the collector has produced none yet, as
   every page that shows checks does.
+- **A write without an answer no longer says what became of it.** Where
+  no readable answer came, as when the connection broke after the request
+  went out, the maintenance dialog said "The request could not be sent."
+  though the broker may have started the job, the account page said that
+  the browser was still signed in though the session may have ended, and
+  the settings said they could not be saved though they may have been.
+  Each now says that it is not known whether it was done. Start sends the
+  same request again and starts no job twice, and the dialog then says
+  where an earlier request had started it; a sign-out or a save can simply
+  be repeated.
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",

@@ -25,7 +25,7 @@ function isStatus(status: string): status is (typeof STATUS)[number] {
 }
 const TONES: Record<string, BadgeTone> = { succeeded: "ok", failed: "failed", uncertain: "warning" };
 
-function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job) => void }) {
+function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job, replayed: boolean) => void }) {
   // The native <dialog> traps focus and closes on Escape without injecting
   // styles, so the strict Content-Security-Policy stays intact.
   const { t } = useTranslation();
@@ -51,10 +51,12 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job) =>
     setError(null);
     try {
       const result = await api.submitAction({ action: action.id, requestId: requestId.current, confirmation: typed });
-      onDone(result.job);
+      onDone(result.job, result.replayed);
       dialog.current?.close();
     } catch (reason) {
-      setError(reason instanceof ApiError && reason.message ? reason.message : t("actions.notSent"));
+      // An answer says why the broker refused. Without a readable one the
+      // request may have reached it all the same and started the job.
+      setError(reason instanceof ApiError ? reason.message : t("actions.unanswered"));
     } finally {
       setBusy(false);
     }
@@ -114,6 +116,9 @@ export function Actions() {
   const catalog = useResource((signal) => api.actions(signal), [], 15);
   const reloadCatalog = catalog.reload;
   const [watched, setWatched] = useState<Job | null>(null);
+  // The job that an earlier request with the same ID had started, as the
+  // broker answers a request it has seen before.
+  const [replayed, setReplayed] = useState<string | null>(null);
   // Why the job's status could not be read, and how often in a row.
   const [lost, setLost] = useState<{ error: Error; times: number } | null>(null);
 
@@ -141,9 +146,10 @@ export function Actions() {
     );
     return () => clearTimeout(timer);
   }, [watched, failures, reloadCatalog]);
-  const follow = (job: Job) => {
+  const follow = (job: Job, again: boolean) => {
     setLost(null);
     setWatched(job);
+    setReplayed(again ? job.id : null);
   };
 
   // The notice needs no data: it stands first while the catalog loads, and the
@@ -172,7 +178,8 @@ export function Actions() {
       {catalog.error && <ErrorState tone="warning" lead={t("actions.refreshFailed")} error={catalog.error} retry={catalog.reload} />}
       {watched && (
         <Notice tone={watched.status === "failed" ? "error" : "info"} live>
-          {t("actions.job", { id: watched.id.slice(0, 8), status: label(watched.status), message: watched.message })}
+          <p>{t("actions.job", { id: watched.id.slice(0, 8), status: label(watched.status), message: watched.message })}</p>
+          {replayed === watched.id && <p>{t("actions.replayed")}</p>}
         </Notice>
       )}
       {watched && lost && (

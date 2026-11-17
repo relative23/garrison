@@ -239,8 +239,9 @@ and from the keyboard, searches the event history and pages through it from
 the keyboard, goes Back from a page the
 interface led to, opens the page search with Ctrl+K on a phone, saves
 settings, runs a maintenance action from the keyboard and signs out. It
-makes requests fail and checks what the pages say: a status refresh, a
-search and a look at a job (with the page's clock moved on), and answers
+makes requests fail and checks what the pages say: a start of an action
+that is refused and one whose answer is lost, a status refresh, a search
+and a look at a job (with the page's clock moved on), and answers
 over HTTP/2, which carries no status text, through the proxy of
 `npm run measure`; it opens pages in a browser whose clock runs three hours
 ahead of the preview's, past the session's end, and three hours behind, and
