@@ -52,6 +52,10 @@ struct Read {
     /// the mail is counted under "unknown" then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     domains_unread: Option<String>,
+    /// Whether the accounts were not asked for want of the collector's key:
+    /// the reading is made again in the first run that has one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    no_native_key: bool,
 }
 
 #[derive(Debug)]
@@ -143,9 +147,19 @@ impl Flow {
             .collect())
     }
 
-    /// The last reading, or a new one where that is due: every ten minutes.
+    /// The last reading, or a new one where that is due: every ten minutes,
+    /// and at once for one made without the collector's key where this run
+    /// has it.
     fn known(context: &Context<'_>) -> Kept<Read> {
-        cached(context, MEMORY, |_, _| EVERY, |_| Self::counted(context))
+        let keyed = context.native_key.is_some();
+        let wait = |_, read: &Read| {
+            if read.no_native_key && keyed {
+                0
+            } else {
+                EVERY
+            }
+        };
+        cached(context, MEMORY, wait, |_| Self::counted(context))
     }
 
     /// The week as the event history has it now.
@@ -171,6 +185,7 @@ impl Flow {
                         week,
                         problem: None,
                         domains_unread,
+                        no_native_key: context.native_key.is_none(),
                     },
                     Err(error) => problem(format!("the event history could not be read: {error}")),
                 }

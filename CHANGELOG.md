@@ -996,7 +996,12 @@ Notable changes for operators and users. The format follows
   the file nor the fix and was not so of every card. It now says once for
   each reason that the collector has no API key for Stalwart, with the
   file, why and what makes one, that every card that needs the key says
-  so, and once that it has the key again.
+  so, and once that it has the key again. The Blocklists and Reverse names
+  cards kept a reading made without the key for an hour, and the Spam and
+  ham by domain card for ten minutes, so that they said that setup was
+  needed after setup had made the key; the first run with a key reads them
+  again, as it does a reading made without the key of Spamhaus' Data Query
+  Service.
 - **An answer of Stalwart's that Garrison cannot read is no refusal.** An
   answer in a form this release does not read, as a Stalwart release it
   does not support yet may give after an upgrade (no JSON, an object it

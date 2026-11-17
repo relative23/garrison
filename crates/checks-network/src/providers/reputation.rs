@@ -85,6 +85,10 @@ struct Read {
     /// key were not asked, where the run had no key.
     #[serde(default)]
     keyless: Option<String>,
+    /// Whether Stalwart's mail hosts were not asked for want of the
+    /// collector's key: made again in the first run that has one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    no_native_key: bool,
     /// The mail hosts whose addresses of a kind could not be read, and why:
     /// an answer the check cannot use counts for that host alone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -295,28 +299,34 @@ impl Reputation {
                 MOST_ADDRESSES + more
             ));
         }
+        // A reading that was made has no problem, and had what key it needed.
         Ok(Read {
             hosts,
             addresses,
-            problem: None,
             rest,
             cut: silent.or_else(|| (cut || asker.cut).then(|| RUN_OVER.to_owned())),
             left_out,
             keyless,
             hosts_unread,
             lists_unasked: asker.slow,
+            ..Read::default()
         })
     }
 
     /// The last reading, or a new one where that is due: after six hours,
     /// after an hour where not everything could be asked or read, and at once for
-    /// one that an earlier release kept with a zone's key, and for one that
+    /// one that an earlier release kept with a zone's key, for one that
     /// had no key for the Data Query Service where this run has one, or
-    /// another reason to have none.
+    /// another reason to have none, and for one made without the
+    /// collector's key where this run has it.
     fn known(&self, context: &Context<'_>) -> Kept<Read> {
         let missing = dqs::missing(&context.dqs_key);
+        let keyed = context.native_key.is_some();
         let wait = |_, read: &Read| {
-            if read.names_a_key() || (read.keyless.is_some() && read.keyless != missing) {
+            if read.names_a_key()
+                || (read.keyless.is_some() && read.keyless != missing)
+                || (read.no_native_key && keyed)
+            {
                 0
             } else if read.problem.is_some()
                 || read.cut.is_some()
@@ -332,6 +342,8 @@ impl Reputation {
         cached(context, MEMORY, wait, |_| {
             self.read(context).unwrap_or_else(|problem| Read {
                 problem: Some(problem),
+                // Without hosts of its own it asks Stalwart for them.
+                no_native_key: self.hosts.is_empty() && !keyed,
                 ..Read::default()
             })
         })

@@ -159,7 +159,7 @@ minutes. They count; none of them is a verdict, except where it says so.
   went to, which Stalwart's accounts name. Where Stalwart did not give them
   to the collector's key, or the collector has no key for Stalwart, that
   mail is counted under "unknown", and the card by domain is Unknown and
-  says why.
+  says why; the first run with a key reads them at once.
 - `milter`: what Stalwart's milters said of the mail they were shown (a
   virus scanner's, Garrison's own macro filter), by day, on the Antivirus
   page. A milter that could not be reached since yesterday is a warning. A
@@ -284,7 +284,10 @@ other addresses, are asked as before, and the reading is asked again after
 an hour. A resolver that does not answer for a mail host's addresses is
 asked nothing more: what it answered before counts, both cards say that
 not every address was asked and why, or are Unknown where nothing could
-be, and the reading is asked again after an hour.
+be, and the reading is asked again after an hour. Without `hosts` the
+check needs the collector's API key for Stalwart to read the mail hosts;
+where it has none, both cards say so, and the first run with a key asks at
+once.
 
 - **Blocklists.** A listing is Failed and names the address and the list.
   IPv4 addresses are asked of `lists` (default `zen.spamhaus.org`,
