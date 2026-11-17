@@ -150,6 +150,14 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **After a computer slept, a page no longer shows its checks as current.**
+  A page counted the time it waited with the browser's monotonic clock,
+  which stops while a computer sleeps on Linux and macOS (measured in Chrome
+  and Firefox), so a page left open overnight showed its last status as
+  current, "OK" included, for up to a minute after waking, and a refresh
+  that failed then said that checks grown too old were marked stale while
+  none was. A page now counts the larger of the browser's two clocks, and
+  its checks turn stale within fifteen seconds of waking.
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",

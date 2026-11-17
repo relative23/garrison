@@ -241,7 +241,9 @@ settings, runs a maintenance action from the keyboard and signs out. It
 makes requests fail and checks what the pages say: a status refresh, a
 search and a look at a job (with the page's clock moved on), and answers
 over HTTP/2, which carries no status text, through the proxy of
-`npm run measure`; it signs in as a viewer; it takes a module from the
+`npm run measure`; it lets the computer sleep for ten minutes, by moving the
+page's wall clock alone, as waking up does, and the checks must turn stale
+before the next refresh; it signs in as a viewer; it takes a module from the
 profile and gives it back while a page is open, through the preview's broker
 (`crates/web/examples/preview/fakes.rs`), whose questions it counts: the menu
 must follow with the next refresh, at one question each; and in two tabs it

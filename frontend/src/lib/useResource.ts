@@ -2,13 +2,15 @@
 // that a newer load or an unmounted view has made obsolete.
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { Instant } from "./clock";
+
 export interface Resource<T> {
   data: T | null;
   error: Error | null;
   loading: boolean;
-  /** When `data` arrived, on the page's monotonic clock (`performance.now()`);
-   * null without data. A failed refresh keeps the data and this time. */
-  receivedAt: number | null;
+  /** When `data` arrived, on the page's clock (src/lib/clock.ts); null
+   * without data. A failed refresh keeps the data and this moment. */
+  receivedAt: Instant | null;
   reload: () => void;
 }
 
@@ -16,7 +18,7 @@ interface Settled<T> {
   request: string;
   data: T | null;
   error: Error | null;
-  receivedAt: number | null;
+  receivedAt: Instant | null;
 }
 
 /**
@@ -39,7 +41,7 @@ export function useResource<T>(
   const [settled, setSettled] = useState<Settled<T>>(() =>
     initial === undefined
       ? { request: "", data: null, error: null, receivedAt: null }
-      : { request, data: initial, error: null, receivedAt: performance.now() },
+      : { request, data: initial, error: null, receivedAt: new Instant() },
   );
   const answered = useRef(initial === undefined ? null : request);
 
@@ -55,7 +57,7 @@ export function useResource<T>(
     const controller = new AbortController();
     latest.current(controller.signal).then(
       (data) => {
-        if (!controller.signal.aborted) setSettled({ request, data, error: null, receivedAt: performance.now() });
+        if (!controller.signal.aborted) setSettled({ request, data, error: null, receivedAt: new Instant() });
       },
       (reason: unknown) => {
         if (controller.signal.aborted) return;
