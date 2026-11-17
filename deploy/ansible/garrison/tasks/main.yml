@@ -108,10 +108,14 @@
   failed_when: false
   when: garrison_stalwart_admin | length > 0
 
+# The release being installed, not the one in /opt/garrison/current: on an
+# upgrade that is still the release being replaced, whose setup may not
+# make a key where a file holds none (0.1.0 to 0.1.2 keep an empty file and
+# stop), and then the play would never install the one that does.
 - name: Stalwart is connected (the administrator goes in on standard input)
   ansible.builtin.command:
     argv:
-      - /opt/garrison/current/bin/garrison
+      - "/root/{{ garrison_name }}/bin/garrison"
       - stalwart
       - setup
       - --admin-credential
