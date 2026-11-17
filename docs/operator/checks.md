@@ -45,7 +45,7 @@ observation the checks report is in [observation ids](observations.md).
 | `stalwart` | `milter_host`, `milter_port`, `max_accounts` | Spam settings, classifier, milter, queue, mailbox storage, running version |
 | `prometheus` | `path` | Native counters and gauges for the dashboard |
 | `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
-| `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning |
+| `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning, and where both are there the newer one counts, also for the dashboard's signature age |
 | `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30), `verify_days` (0: not expected), `restore_days` (0), `path`, `modules` | What the backup tool reported of its repository; see below |
 | `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |

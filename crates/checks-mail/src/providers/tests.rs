@@ -57,6 +57,35 @@ fn clamav_policy_drift_is_a_finding() {
 }
 
 #[test]
+fn the_signature_age_gauge_is_that_of_the_newest_daily_database() {
+    use std::time::{Duration, SystemTime};
+    // An old full database beside the incremental one that updates keep
+    // current: the card judges the newer, and so must the dashboard.
+    let directory = tempfile::tempdir().unwrap();
+    let provider = Clamav::new(&table(&format!(
+        "type = \"clamav\"\nmilter_config = \"{0}/milter.conf\"\nclamd_config = \"{0}/scan.conf\"\ndatabase_directory = \"{0}\"",
+        directory.path().display()
+    )))
+    .unwrap();
+    let config = config(directory.path());
+    let runner = Canned(String::new());
+    let context = context(&config, &runner);
+    let checked = SystemTime::UNIX_EPOCH
+        + Duration::from_secs(u64::try_from(context.now.as_second()).unwrap());
+    for (name, hours) in [("daily.cvd", 100), ("daily.cld", 2)] {
+        let path = directory.path().join(name);
+        std::fs::write(&path, "signatures").unwrap();
+        let file = std::fs::File::options().write(true).open(path).unwrap();
+        file.set_modified(checked - Duration::from_secs(hours * 3600))
+            .unwrap();
+    }
+    let report = provider.collect(&context).unwrap();
+    assert_eq!(report.observations[1].state, State::Ok);
+    let age = report.gauges["signature_age_hours"];
+    assert!((age - 2.0).abs() < 1e-9, "{age}");
+}
+
+#[test]
 fn signatures_that_were_not_updated_for_two_days_are_a_warning() {
     use std::time::{Duration, SystemTime};
     let directory = tempfile::tempdir().unwrap();

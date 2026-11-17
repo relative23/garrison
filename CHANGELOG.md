@@ -182,6 +182,11 @@ Notable changes for operators and users. The format follows
   sent data without an end of line filled the collector's memory until
   systemd ended it, and the run with it. A line is now read up to 2 KiB,
   and such a reply is "the server's reply is too long".
+- **The dashboard's signature age is that of the database the card
+  judges.** Where an old `daily.cvd` lies beside the `daily.cld` that the
+  updates keep current, the Signature databases card judged the newer file
+  and the dashboard's "Signature age" showed the older one's, often days.
+  Both now take the newer daily database.
 - **On a phone, the menu takes the keyboard as it opens.** The menu stayed
   hidden while it slid in, so a Tab pressed in that moment passed it by.
   It is now shown as it opens, and hidden only once it has slid out.

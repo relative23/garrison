@@ -192,7 +192,12 @@ impl Clamav {
         .with_findings(findings))
     }
 
-    fn signatures(&self, context: &Context<'_>) -> Result<Observation, ProviderError> {
+    /// The card of the signature files, and the age in hours of the newest
+    /// daily database that it judges, which the dashboard's gauge shows.
+    fn signatures(
+        &self,
+        context: &Context<'_>,
+    ) -> Result<(Observation, Option<f64>), ProviderError> {
         let mut rows = Vec::new();
         // The newest daily database and its age in hours: the one file that
         // changes every day, and so the one that shows whether updates arrive.
@@ -243,7 +248,7 @@ impl Clamav {
             ),
             Some(_) => (State::Ok, None),
         };
-        Ok(Observation::new(Required {
+        let observation = Observation::new(Required {
             id: "clamav.signatures",
             provider: self.name(),
             title: "Signature databases",
@@ -264,7 +269,8 @@ impl Clamav {
             ],
             rows,
         })
-        .with_max_age(900))
+        .with_max_age(900);
+        Ok((observation, daily.map(|(_, hours)| hours)))
     }
 
     /// When Fangfrisch last checked this file, from its refresh log.
@@ -338,20 +344,7 @@ impl Provider for Clamav {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let signatures = self.signatures(context)?;
-        let daily = signatures
-            .table
-            .iter()
-            .flat_map(|table| &table.rows)
-            .find(|row| {
-                row[0]
-                    .as_str()
-                    .is_some_and(|name| name.starts_with("daily."))
-            });
-        let age = daily
-            .and_then(|row| row[2].as_str())
-            .and_then(time::parse)
-            .map(|modified| context.seconds_since(modified) / 3600.0);
+        let (signatures, age) = self.signatures(context)?;
         let mut report = Report {
             observations: vec![self.configuration(context)?, signatures],
             ..Report::default()
