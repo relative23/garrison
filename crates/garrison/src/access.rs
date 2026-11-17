@@ -202,9 +202,6 @@ fn init(config: &Config, force: bool) -> Result<u8, String> {
             return Ok(None);
         }
         let roles = administrator_roles(config)?;
-        if roles.is_empty() {
-            return Ok(Some(roles));
-        }
         let policy = Policy {
             profiles: default_profiles(config),
             role_bindings: roles
@@ -219,8 +216,14 @@ fn init(config: &Config, force: bool) -> Result<u8, String> {
     let Some(roles) = roles else {
         return exists();
     };
+    // The profiles are there for `bind-role`, which binds the role that the
+    // administrators have where none of Stalwart's qualifies.
     if roles.is_empty() {
-        say("No native administrator role with full administrative rights was found.");
+        complain(
+            "No native administrator role with full administrative rights was found, so the \
+             policy binds no role and nobody can sign in yet. Bind the role of your \
+             administrators: garrison access bind-role <role-id> --profile administrator",
+        );
         return Ok(1);
     }
     for (identifier, description) in &roles {

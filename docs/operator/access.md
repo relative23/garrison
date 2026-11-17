@@ -33,6 +33,12 @@ groups and tenant administrators get nothing by default. It writes the
 policy where `broker.policy` names it, and makes a folder there that is
 missing, root's with mode 755 as `/etc/garrison`.
 
+Where no role of Stalwart's has all five rights, as where its administrator
+role was changed or your administrators have a role of their own, `init`
+writes the profiles without a binding, says so and ends with 1: nobody can
+sign in until you bind your administrators' role with
+`garrison access bind-role <role-id> --profile administrator`.
+
 Profiles can only require `authenticate` and `sys*` permissions: those are the
 ones whose evaluation Garrison verifies against Stalwart in its contract tests.
 

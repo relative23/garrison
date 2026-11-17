@@ -159,7 +159,8 @@ sudo garrison access init
 
 This binds Stalwart's System Administrator role to Garrison's
 `administrator` profile. Other roles get nothing until you bind them; see
-[access.md](access.md).
+[access.md](access.md). Where it finds no role with all of an
+administrator's rights, it says so and how to bind yours.
 
 ## 5. Start
 

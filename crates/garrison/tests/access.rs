@@ -95,8 +95,12 @@ fn init_binds_only_roles_with_every_administrator_right() {
     assert!(text(&again.stdout).contains("exists; use --force to replace it"));
 }
 
+/// Where no role qualifies, as where the administrators' role lacks a right
+/// or is none of Stalwart's default administrator roles, init still writes
+/// the default profiles, binds no role, says so and how to bind one, and
+/// ends with 1; `bind-role` then binds the role the operator names.
 #[test]
-fn init_without_an_administrator_role_writes_nothing() {
+fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
     let authentication = json!({"id": "singleton", "defaultAdminRoleIds": names(&["weak"]),
                                 "defaultUserRoleIds": {}});
     let server = serve(vec![
@@ -105,12 +109,36 @@ fn init_without_an_administrator_role_writes_nothing() {
             "x:Role/get",
             &json!([role("weak", &["authenticate"], "Weak")]),
         ),
+        respond("x:Role/get", &json!([{"id": "admins"}])),
     ]);
     let directory = against(&server.url);
     let init = run(directory.path(), &["access", "init"]);
     assert_eq!(init.status.code(), Some(1), "{}", text(&init.stderr));
-    assert!(text(&init.stdout).contains("No native administrator role"));
-    assert!(!directory.path().join("policy.json").exists());
+    assert_eq!(
+        text(&init.stderr),
+        "No native administrator role with full administrative rights was found, so the \
+         policy binds no role and nobody can sign in yet. Bind the role of your \
+         administrators: garrison access bind-role <role-id> --profile administrator\n"
+    );
+    let written = policy(directory.path());
+    assert_eq!(written["roleBindings"], json!({}));
+    let profiles: Vec<&String> = written["profiles"].as_object().unwrap().keys().collect();
+    assert_eq!(profiles, ["administrator", "operator", "viewer"]);
+    let bound = run(
+        directory.path(),
+        &[
+            "access",
+            "bind-role",
+            "admins",
+            "--profile",
+            "administrator",
+        ],
+    );
+    assert_eq!(bound.status.code(), Some(0), "{}", text(&bound.stderr));
+    assert_eq!(
+        policy(directory.path())["roleBindings"],
+        json!({"admins": "administrator"})
+    );
     server.requests();
 }
 

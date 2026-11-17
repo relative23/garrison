@@ -401,6 +401,14 @@ Notable changes for operators and users. The format follows
   the folder, root's with mode 755 as `/etc/garrison` whatever the umask,
   so that the broker reaches the policy in it; the other commands say that
   the policy is missing and that `init` makes it.
+- **`garrison access init` leaves a way in where no role of Stalwart's
+  qualifies.** Where Stalwart's default administrator role lacked one of the
+  five rights the administrator profile requires, or the administrators had
+  a role of their own, `init` wrote nothing, and every other `garrison
+  access` command failed for want of a policy, so no command led to one. It
+  now writes the default profiles without a binding, says so on standard
+  error with the `garrison access bind-role` that binds the administrators'
+  role, and ends with 1.
 - **A backup's card shows that repository's check and restore alone.**
   `garrison backup-check` kept the last integrity check and test restore of
   the report before it, whatever repository or tool that report was of: a
