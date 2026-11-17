@@ -174,6 +174,11 @@ fn load(config: &Config) -> Result<Policy, String> {
     let path = &config.broker.policy;
     there(path)?;
     authority(config).policy().map_err(|error| {
+        // What keeps the policy from reading beside such actions comes
+        // first: `update` cannot mend it.
+        if let Err(other) = written(config) {
+            return other;
+        }
         let gone = gone(config);
         if gone.is_empty() {
             return said(error);
@@ -244,10 +249,10 @@ fn update(config: &Config) -> Result<u8, String> {
             say("The profiles have the actions garrison.toml names; nothing to change.");
             return Ok(0);
         }
+        save(config, folder, &policy)?;
         for change in &changes {
             say(change);
         }
-        save(config, folder, &policy)?;
         say(
             "Run the installer again now: it writes the polkit rule for these actions and \
              restarts the broker, which reads them only when it starts. Until then a broker \

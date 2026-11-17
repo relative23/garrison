@@ -80,6 +80,18 @@ fn update_gives_the_profiles_the_actions_as_garrison_toml_names_them() {
         "{}",
         text(&listed.stderr)
     );
+    // A save that fails says nothing of what it would have changed.
+    let pending = folder.join(".policy.json.pending");
+    std::fs::create_dir(&pending).unwrap();
+    let failed = run(folder, &["access", "update"]);
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(
+        !text(&failed.stdout).contains("Profile "),
+        "{}",
+        text(&failed.stdout)
+    );
+    std::fs::remove_dir(&pending).unwrap();
+    // It kept the policy as it was in a backup all the same.
     let kept = backups(folder);
     let updated = run(folder, &["access", "update"]);
     assert_eq!(updated.status.code(), Some(0), "{}", text(&updated.stderr));
@@ -111,4 +123,22 @@ fn update_gives_the_profiles_the_actions_as_garrison_toml_names_them() {
         "The profiles have the actions garrison.toml names; nothing to change.\n"
     );
     assert_eq!(backups(folder), kept + 1);
+}
+
+/// A policy that names an action garrison.toml no longer has and does not
+/// read for another reason as well is said to fail for that reason, which
+/// `update` cannot mend.
+#[test]
+fn the_reason_update_cannot_mend_comes_first() {
+    let directory = super::support::prepared();
+    let folder = directory.path();
+    let mut document = garrison_testing::policy_document();
+    document["profiles"]["administrator"]["actions"] = json!(["run_backup", "run_gone"]);
+    document["profiles"]["viewer"]["modules"] = json!(["dashboard", "nonsense"]);
+    garrison_testing::write_private(&folder.join("policy.json"), document.to_string().as_bytes());
+    let listed = run(folder, &["access", "list"]);
+    let said = text(&listed.stderr);
+    assert_eq!(listed.status.code(), Some(1));
+    assert!(said.contains("unknown modules"), "{said}");
+    assert!(!said.contains("no longer has"), "{said}");
 }
