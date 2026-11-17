@@ -19,6 +19,7 @@ mod fallback;
 mod files;
 mod housekeeping;
 mod milter;
+mod precheck;
 mod requirements;
 mod restore;
 mod rollback;
@@ -27,6 +28,7 @@ mod services;
 mod settle;
 mod state;
 mod system;
+mod toml_text;
 mod uninstall;
 mod verify;
 

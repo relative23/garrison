@@ -6,7 +6,9 @@
 //! ```
 //!
 //! Every check comes before the services stop: the directory is a backup,
-//! this release reads it, its copies are intact. The state as it is goes to
+//! this release reads it, its copies are intact, and this release's
+//! check-config takes today's configuration with the access policy that
+//! comes back (`precheck.rs`). The state as it is goes to
 //! `pre-restore-*` first, so that a restore can be taken back with another
 //! one. Then every database and the access policy go back as
 //! `--rollback --restore-state` puts them back, and the services start.
@@ -23,7 +25,7 @@ use garrison_core::time;
 
 use super::files::{Step, announce, io, lock};
 use super::requirements::preflight;
-use super::{BACKUPS, BASE, CONFIG, LOCK, cli, start, state, stop_services};
+use super::{BACKUPS, BASE, CONFIG, LOCK, cli, precheck, start, state, stop_services};
 
 /// The backup at `from`, if it is one that `garrison backup` wrote.
 fn backup_at(from: &Path) -> Step<PathBuf> {
@@ -67,6 +69,26 @@ fn restore(from: &Path) -> Step {
     let config = config::load(&settings)
         .map_err(|error| format!("Cannot load {}: {error}", settings.display()))?;
     let owner = state::policy_owner().map_err(|error| format!("{error} Nothing was changed."))?;
+    // The release that starts again takes today's configuration with the
+    // access policy that comes back, which the services still run without.
+    let comes_back = precheck::brings_policy(&source);
+    if let Err(said) = precheck::configuration(&current, comes_back)? {
+        return Err(format!(
+            "Garrison {name}'s check-config refuses {}; nothing was changed:\n{said}",
+            settings.display()
+        ));
+    }
+    if comes_back {
+        precheck::policy_place(&config)
+            .map_err(|refusal| format!("{refusal} Nothing was changed."))?;
+        if let Err(said) = precheck::policy_comes_back(&current, &source)? {
+            return Err(format!(
+                "The access policy in {place} does not suit {}, as Garrison {name}'s \
+                 check-config says; nothing was changed:\n{said}",
+                settings.display()
+            ));
+        }
+    }
     // What is there now, so that this restore can be taken back.
     let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
     let kept = Path::new(BACKUPS).join(format!("pre-restore-{stamp}"));

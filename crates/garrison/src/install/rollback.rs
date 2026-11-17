@@ -12,7 +12,9 @@ use rustix::fs::{Gid, Uid};
 
 use super::files::{Step, announce, io, lock, switch};
 use super::system::install_system_files;
-use super::{BACKUPS, BASE, CONFIG, LAST, LOCK, cli, preflight, start, state, stop_services};
+use super::{
+    BACKUPS, BASE, CONFIG, LAST, LOCK, cli, precheck, preflight, start, state, stop_services,
+};
 
 /// Whether this release will raise the schema of a database whose copy from
 /// before the upgrade is in `backup`. The release that ran before cannot read
@@ -44,6 +46,30 @@ fn restore_source(name: &str) -> Step<PathBuf> {
         Some(reason) => Err(format!("{reason} Nothing was changed.")),
         None => Ok(source),
     }
+}
+
+/// Before anything stops: the access policy that the state in `source`
+/// brings, where it brings one, goes where the broker reads it and suits
+/// today's configuration as `target` reads it. Returns the policy's owner.
+fn state_fits(target: &Path, source: &Path, comes_back: bool) -> Step<(Uid, Gid)> {
+    let refused = |reason: String| format!("{reason} Nothing was changed.");
+    let owner = state::policy_owner().map_err(refused)?;
+    if comes_back {
+        let settings = Path::new(CONFIG).join("garrison.toml");
+        let config = config::load(&settings)
+            .map_err(|error| refused(format!("Cannot load {}: {error}.", settings.display())))?;
+        precheck::policy_place(&config).map_err(refused)?;
+        if let Err(said) = precheck::policy_comes_back(target, source)? {
+            return Err(format!(
+                "The access policy from before the upgrade, in {}, does not suit {}, as {}'s \
+                 check-config says:\n{said}\nNothing was changed.",
+                source.display(),
+                settings.display(),
+                target.file_name().unwrap_or_default().to_string_lossy()
+            ));
+        }
+    }
+    Ok(owner)
 }
 
 /// Put the pre-upgrade copies of the databases and the policy back, the
@@ -81,16 +107,21 @@ pub(super) fn rollback(with_state: bool) -> Step {
         &base.join("current"),
     )?;
     let name = target.file_name().unwrap_or_default().to_string_lossy();
+    let source = if with_state {
+        Some(restore_source(&name)?)
+    } else {
+        None
+    };
     // The previous release must load today's configuration: a setting added
     // since, such as `modules`, would keep it from starting, and neither
     // --restore-state nor its self-check would notice before the switch.
-    let check = cli(&target, &["check-config"])?;
-    if !check.status.success() {
+    // Where the state brings its access policy, that one is judged instead.
+    let comes_back = source.as_deref().is_some_and(precheck::brings_policy);
+    if let Err(said) = precheck::configuration(&target, comes_back)? {
         return Err(format!(
-            "{name} cannot load {CONFIG}/garrison.toml:\n{}\n\
+            "{name} cannot load {CONFIG}/garrison.toml:\n{said}\n\
              Remove the settings {name} does not know, or put back the file from \
-             before the upgrade ({BACKUPS}/{LAST}/etc/garrison.toml), then roll back.",
-            String::from_utf8_lossy(&check.stderr).trim()
+             before the upgrade ({BACKUPS}/{LAST}/etc/garrison.toml), then roll back."
         ));
     }
     // After a schema change only the pre-upgrade copies suit the previous
@@ -101,12 +132,9 @@ pub(super) fn rollback(with_state: bool) -> Step {
              Roll back with --restore-state to return to the data from before the upgrade."
         ));
     }
-    let source = if with_state {
-        let owner =
-            state::policy_owner().map_err(|error| format!("{error} Nothing was changed."))?;
-        Some((restore_source(&name)?, owner))
-    } else {
-        None
+    let source = match source {
+        Some(source) => Some((source.clone(), state_fits(&target, &source, comes_back)?)),
+        None => None,
     };
     stop_services();
     let restoring = source

@@ -82,8 +82,11 @@ sudo garrison restore --from /path/to/restored/latest
 
 Before anything stops, the command checks that the directory is a backup
 (`backup.json`), that the running release reads it (a backup names the
-release that wrote it, and no release reads what a newer one wrote) and that
-its copies pass `self-check --state`. It then copies the state as it is to
+release that wrote it, and no release reads what a newer one wrote), that
+its copies pass `self-check --state`, and that the running release's
+`check-config` takes today's configuration with the access policy the
+backup brings, which must go where `broker.policy` names it. It then copies
+the state as it is to
 `/var/backups/garrison/pre-restore-*`, stops the services, puts every
 database back with its owner and mode and the access policy as a file of
 its own, root's and readable for the group `garrison-broker` alone, never
@@ -190,8 +193,10 @@ cannot load today's configuration, for example because of a `modules` line it
 does not know: remove that setting, or put back the file from before the
 upgrade (`/var/backups/garrison/last-pre-upgrade/etc/garrison.toml`). With
 `--restore-state` it first checks that the state from before the upgrade is
-there and that no release newer than the one it returns to wrote it
-(`backup.json` in a backup names the release); it then puts back every
+there, that no release newer than the one it returns to wrote it
+(`backup.json` in a backup names the release) and that the release it
+returns to takes today's configuration with the access policy from before
+the upgrade; it then puts back every
 database and the access policy and removes a database that did not exist
 when the backup was made. If a rollback fails after the services stopped, it
 starts the release that ran before.

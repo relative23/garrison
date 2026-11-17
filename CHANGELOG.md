@@ -1122,6 +1122,16 @@ Notable changes for operators and users. The format follows
   now goes back as a file of its own, made new as root's and readable for
   the group `garrison-broker` alone; a link or a folder that the setting
   names stays as it is, with what it points to or holds.
+- **`garrison restore` and `install --rollback --restore-state` check
+  before anything stops.** Both stopped Garrison and put the state back
+  before the configuration was checked: a backup whose access policy grants
+  an action that `garrison.toml` no longer has, or a setting that
+  `check-config` refuses and that was written since the services started,
+  such as a `receipt` under `/home`, left Garrison stopped on the restored
+  state, and a rollback's way back failed on the same policy. The release
+  that will start now runs its own `check-config` on today's configuration
+  with the policy that comes back, before anything stops, and a refusal
+  changes nothing.
 - **A stale event history no longer reads as a quiet mail server.** The
   mail-flow summaries and the sending accounts counted whatever the event
   history held and called it in order, also when the event receiver had not
