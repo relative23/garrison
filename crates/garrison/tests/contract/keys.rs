@@ -14,7 +14,8 @@ use super::{remove_afterwards, run, text};
 /// Without the gateway the keys are allowed from loopback only, which this
 /// host is not for the lab's Stalwart, just as for a Stalwart in a bridge
 /// network: setup says so instead of leaving keys that never work. A
-/// rotation that stops there removes the old keys all the same.
+/// rotation that stops there asks for the services' restart, removes the
+/// old keys all the same and names the run that finishes it.
 pub(super) fn refused_without_the_gateway(
     lab: &mut Lab,
     directory: &std::path::Path,
@@ -40,10 +41,11 @@ pub(super) fn refused_without_the_gateway(
     assert_eq!(code, Some(1), "{output}");
     assert!(output.contains(refused), "{output}");
     assert!(
-        output.contains(
-            "The API keys that new ones replaced were removed: restart garrison-ingest and \
-             garrison-broker once this is mended."
-        ),
+        output
+            .contains("Restart garrison-ingest and garrison-broker so they read the new secrets.")
+            && output.contains(
+                "with Compose). Run `garrison stalwart setup --rotate` again once this is mended."
+            ),
         "{output}"
     );
     let keys = lab.call("x:ApiKey/get", &json!({"ids": null}));

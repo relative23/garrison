@@ -208,7 +208,7 @@ pub(super) fn verify<'k>(
                      this host at an address the key does not allow. That happens when \
                      Stalwart runs in a Docker or Podman bridge network; run it in the host \
                      network instead (docker run --network host, or network_mode: host with \
-                     Compose), then run this again."
+                     Compose)"
                 ));
             }
             other => {

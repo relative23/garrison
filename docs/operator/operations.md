@@ -212,13 +212,10 @@ Rotate after anyone who should not have them may have seen the files in
 `/etc/garrison/credentials`, and from time to time.
 
 Run it as root, so that it can restart the services itself. If it stops
-with an error after it made the new keys, or cannot restart the services,
-the old keys are removed all the same, since someone may have seen them:
-once the cause is mended, run `sudo garrison stalwart setup` again, which
-restarts `garrison-ingest` and `garrison-broker` wherever they still hold
-other secrets than the files, or restart them yourself. Setup does that
-after every run, also where it made a key anew because Stalwart no longer
-had it.
+with an error after it made new keys, it still restarts `garrison-ingest`
+and `garrison-broker` and removes the old keys, since someone may have seen
+them: once the cause is mended, run `sudo garrison stalwart setup --rotate`
+again, as its message says, also after a run that was interrupted.
 
 ## Uninstall
 
