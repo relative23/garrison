@@ -60,7 +60,7 @@ fn named() -> BTreeMap<String, Vec<String>> {
 }
 
 /// Each card that names a missing file or credential says what makes it:
-/// the command that writes it, or the setup.
+/// the command that writes it, the job that does, or the setup.
 #[test]
 fn every_card_that_names_a_missing_file_or_credential_says_what_makes_it() {
     let found = named();
@@ -79,6 +79,12 @@ fn every_card_that_names_a_missing_file_or_credential_says_what_makes_it() {
                  `garrison stalwart setup`, which writes it while Stalwart's exporter is \
                  Garrison's or off; for an exporter of another's, write its user name and \
                  password into it as configuration.md says (collector.metrics_credential)."
+            )],
+        ),
+        (
+            "receipt.restore".to_owned(),
+            vec![format!(
+                "No receipt at {GONE}/path: the job that writes it has written none there."
             )],
         ),
     ]);

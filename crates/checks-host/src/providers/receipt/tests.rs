@@ -93,22 +93,52 @@ columns = [{{ key = "test", label = "Test" }}]"#,
     assert_eq!(observation.table.unwrap().rows.len(), 2);
 }
 
+/// A missing receipt is Unknown, never Failed, and the card names the file
+/// and what writes it; one that is there but no receipt says what a
+/// receipt must be.
 #[test]
 fn a_missing_receipt_is_unknown_not_failed() {
     let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("none.json");
     let receipt = provider(&format!(
         "type = \"receipt\"\nid = \"x\"\ntitle = \"X\"\npath = \"{}\"\nmodules = [\"backups\"]",
-        directory.path().join("none.json").display()
+        path.display()
     ));
     let config = config(directory.path());
     let runner = Canned(String::new());
-    let observation = receipt
-        .collect(&context(&config, &runner))
-        .unwrap()
-        .observations
-        .remove(0);
-    assert_eq!(observation.state, State::Unknown);
-    assert_eq!(observation.findings, ["No readable receipt."]);
+    let card = || {
+        let observation = receipt
+            .collect(&context(&config, &runner))
+            .unwrap()
+            .observations
+            .remove(0);
+        (observation.state, observation.findings)
+    };
+    assert_eq!(
+        card(),
+        (
+            State::Unknown,
+            vec![format!(
+                "No receipt at {}: the job that writes it has written none there.",
+                path.display()
+            )]
+        )
+    );
+    for written in ["", "not json", "\"a text\""] {
+        std::fs::write(&path, written).unwrap();
+        assert_eq!(
+            card(),
+            (
+                State::Unknown,
+                vec![format!(
+                    "The receipt at {} cannot be read: it must be a file, not a link, of at most \
+                     1024 KiB of JSON, an object or a list.",
+                    path.display()
+                )]
+            ),
+            "{written:?}"
+        );
+    }
 }
 
 #[test]

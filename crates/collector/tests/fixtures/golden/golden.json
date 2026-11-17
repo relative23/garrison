@@ -1039,7 +1039,7 @@
      "fields": [],
      "table": null,
      "findings": [
-      "No readable receipt."
+      "No receipt at @FIXTURES@/none.json: the job that writes it has written none there."
      ],
      "value": {},
      "maxAge": 300

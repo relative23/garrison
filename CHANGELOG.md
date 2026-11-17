@@ -1014,6 +1014,11 @@ Notable changes for operators and users. The format follows
   there is none, with the same words, and once that there is one again; and
   setup, for an exporter of another's, names the file its user name and
   password go into.
+- **A receipt's card names its file and what writes it.** It said "No
+  readable receipt." whether the file was missing or held no receipt, and
+  named neither. It now names the file and says that the job that writes it
+  has written none there, or, where the file is there, what a receipt must
+  be: a file, not a link, of at most 1024 KiB of JSON, an object or a list.
 - **An answer of Stalwart's that Garrison cannot read is no refusal.** An
   answer in a form this release does not read, as a Stalwart release it
   does not support yet may give after an upgrade (no JSON, an object it

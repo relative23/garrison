@@ -363,6 +363,20 @@ impl Receipt {
             Some(_) => None,
         }
     }
+
+    /// Why there is no receipt to read: none at its path, which a job of
+    /// the operator's writes, or a file there that is no receipt.
+    fn unread(&self) -> String {
+        let path = self.path.display();
+        if std::fs::symlink_metadata(&self.path).is_err() {
+            return format!("No receipt at {path}: the job that writes it has written none there.");
+        }
+        format!(
+            "The receipt at {path} cannot be read: it must be a file, not a link, of at most {} \
+             KiB of JSON, an object or a list.",
+            MAX_DOCUMENT / 1024
+        )
+    }
 }
 
 impl Provider for Receipt {
@@ -399,7 +413,7 @@ impl Provider for Receipt {
             .map(|observation| observation.with_scope(self.scope.clone()))
         };
         let Some((document, metadata)) = read else {
-            let unknown = base(State::Unknown)?.with_findings(vec!["No readable receipt.".into()]);
+            let unknown = base(State::Unknown)?.with_findings(vec![self.unread()]);
             return Ok(Report::of(unknown));
         };
         // A result that someone else could have written is not evidence.

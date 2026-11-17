@@ -415,7 +415,10 @@ order, and the card says so in a finding.
 A receipt counts only if nobody else can have written it: it must belong to
 root (or to the collector's own user) and must not be writable by others, nor
 by its group unless that group is root. Otherwise the observation is Unknown.
-Let the job write it as root with mode `0644`.
+Let the job write it as root with mode `0644`. Where there is no file at
+`path`, the card names it and says that the job that writes it has written
+none there; where the file cannot be read, what a receipt must be: a file,
+not a link, of at most 1024 KiB of JSON, an object or a list.
 
 Keys can be nested: `key = ["components", "stalwartlabs/stalwart", "installed"]`.
 Formats: `text`, `number`, `bytes`, `datetime`, `duration` (seconds), `boolean`, `url`.
