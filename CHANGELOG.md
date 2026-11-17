@@ -1147,6 +1147,12 @@ Notable changes for operators and users. The format follows
   Stalwart event recorded yet" with the advice about the webhook. It now says
   that when the last event arrived is not known, with the database and why,
   as it does for the status database.
+- **`garrison doctor` checks the certificate on the port `public_origin`
+  names.** It probed port 443 of the name whatever the origin's port, so
+  for `https://host:8443` it failed a working installation where nothing,
+  or another server with a certificate of its own, answers on 443, or it
+  judged that other certificate and never warned that the one on 8443 ends.
+  It now probes the origin's port and names it.
 
 ## [0.1.2] - 2026-11-13
 

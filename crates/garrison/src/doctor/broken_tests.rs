@@ -6,10 +6,13 @@
 //! that mends it, or, where it could not look, why.
 
 use std::fs;
+use std::sync::Arc;
 
 use garrison_core::config::Database;
+use garrison_core::time;
+use garrison_testing::tls::serve_until;
 
-use super::{Finding, Level, host};
+use super::{Finding, Level, host, public};
 
 /// A host broken in one way, and what doctor must say of it.
 struct Broken {
@@ -38,49 +41,79 @@ fn events_database_is_a_folder() -> Broken {
     }
 }
 
-const HOSTS: [fn() -> Broken; 1] = [events_database_is_a_folder];
+/// The day `days` from now, as a test certificate's end takes it.
+fn days_ahead(days: i64) -> (i32, u8, u8) {
+    let then = time::now() + time::SignedDuration::from_hours(24 * days);
+    let day = then.strftime("%Y %m %d").to_string();
+    let parts: Vec<&str> = day.split(' ').collect();
+    (
+        parts[0].parse().unwrap(),
+        parts[1].parse().unwrap(),
+        parts[2].parse().unwrap(),
+    )
+}
+
+/// Garrison's own name on a port of its own, `https://host:port`, whose
+/// certificate ends in a few days: doctor must probe that port, whatever
+/// listens on 443 of the name.
+fn origin_with_a_port() -> Broken {
+    let (year, month, day) = days_ahead(5);
+    let server = serve_until(vec![String::new()], year, month, day);
+    let roots = Arc::new(server.roots.clone());
+    let found = vec![public::certificate(&server.url, &roots)];
+    server.finish();
+    Broken {
+        host: "public_origin with a port, its certificate ending in five days",
+        found,
+        said: "expires in".into(),
+        fix: Some("renewal".into()),
+    }
+}
+
+const HOSTS: [fn() -> Broken; 2] = [events_database_is_a_folder, origin_with_a_port];
+
+/// What is wrong with what doctor said on `broken`, if anything.
+fn fault(broken: &Broken) -> Option<String> {
+    let lines: Vec<String> = broken.found.iter().map(Finding::line).collect();
+    let Some(finding) = broken
+        .found
+        .iter()
+        .find(|finding| finding.what.contains(&broken.said))
+    else {
+        return Some(format!(
+            "{}: no line says {:?}:\n{}",
+            broken.host,
+            broken.said,
+            lines.join("\n")
+        ));
+    };
+    if finding.level == Level::Ok {
+        return Some(format!("{}: {}", broken.host, finding.line()));
+    }
+    match &broken.fix {
+        Some(fix)
+            if !finding
+                .fix
+                .as_deref()
+                .is_some_and(|text| text.contains(fix.as_str())) =>
+        {
+            Some(format!(
+                "{}: the fix does not name {fix:?}:\n{}",
+                broken.host,
+                finding.line()
+            ))
+        }
+        None if finding.level != Level::Unknown => Some(format!(
+            "{}: a check that could not look is unknown:\n{}",
+            broken.host,
+            finding.line()
+        )),
+        _ => None,
+    }
+}
 
 #[test]
 fn on_a_broken_host_no_check_says_ok_of_what_is_broken() {
-    for host in HOSTS {
-        let broken = host();
-        let lines: Vec<String> = broken.found.iter().map(Finding::line).collect();
-        let finding = broken
-            .found
-            .iter()
-            .find(|finding| finding.what.contains(&broken.said))
-            .unwrap_or_else(|| {
-                panic!(
-                    "{}: no line says {:?}:\n{}",
-                    broken.host,
-                    broken.said,
-                    lines.join("\n")
-                )
-            });
-        assert_ne!(
-            finding.level,
-            Level::Ok,
-            "{}: {}",
-            broken.host,
-            finding.line()
-        );
-        match &broken.fix {
-            Some(fix) => assert!(
-                finding
-                    .fix
-                    .as_deref()
-                    .is_some_and(|text| text.contains(fix.as_str())),
-                "{}: the fix does not name {fix:?}: {}",
-                broken.host,
-                finding.line()
-            ),
-            None => assert_eq!(
-                finding.level,
-                Level::Unknown,
-                "{}: {}",
-                broken.host,
-                finding.line()
-            ),
-        }
-    }
+    let faults: Vec<String> = HOSTS.iter().filter_map(|host| fault(&host())).collect();
+    assert_eq!(faults, Vec::<String>::new(), "{}", faults.join("\n\n"));
 }

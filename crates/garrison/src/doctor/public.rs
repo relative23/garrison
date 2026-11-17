@@ -19,30 +19,48 @@ use garrison_collector::fetch::{get, origin, roots};
 /// Fewer days than this before the certificate expires earn a warning.
 const WARN_DAYS: i64 = 14;
 
-fn host(origin: &str) -> &str {
-    let host = origin.split_once("://").map_or(origin, |(_, rest)| rest);
-    host.rsplit_once(':')
-        .filter(|(_, port)| port.chars().all(|character| character.is_ascii_digit()))
-        .map_or(host, |(host, _)| host)
+/// The host and the port of an origin: `https://host` is port 443, and an
+/// IPv6 address is named without its brackets.
+fn authority(origin: &str) -> (&str, u16) {
+    let rest = origin.split_once("://").map_or(origin, |(_, rest)| rest);
+    let (host, port) = match rest.strip_prefix('[') {
+        Some(bracketed) => bracketed
+            .split_once(']')
+            .map_or((bracketed, ""), |(host, after)| {
+                (host, after.trim_start_matches(':'))
+            }),
+        None => rest.rsplit_once(':').unwrap_or((rest, "")),
+    };
+    (host, port.parse().unwrap_or(443))
 }
 
-fn certificate(origin: &str, roots: &Arc<RootCertStore>) -> Finding {
-    let name = host(origin);
-    match probe(name, 443, name, false, roots, time::now()) {
+/// The certificate a visitor's browser meets under Garrison's own name, on
+/// the port `public_origin` names.
+pub(super) fn certificate(origin: &str, roots: &Arc<RootCertStore>) -> Finding {
+    let (name, port) = authority(origin);
+    let shown = if port == 443 {
+        name.to_owned()
+    } else {
+        format!("{name}:{port}")
+    };
+    match probe(name, port, name, false, roots, time::now()) {
         Ok(probed) if probed.days < 0 => Finding::fail(
-            format!("the certificate of {name} expired on {}", probed.expires_at),
+            format!(
+                "the certificate of {shown} expired on {}",
+                probed.expires_at
+            ),
             "Renew it (certbot renew) and reload nginx.",
         ),
         Ok(probed) if probed.days < WARN_DAYS => Finding::warn(
-            format!("the certificate of {name} expires in {} days", probed.days),
+            format!("the certificate of {shown} expires in {} days", probed.days),
             "Check that certificate renewal runs.",
         ),
         Ok(probed) => Finding::ok(format!(
-            "{name} presents a trusted certificate for {} more days ({})",
+            "{shown} presents a trusted certificate for {} more days ({})",
             probed.days, probed.protocol
         )),
         Err(failure) => Finding::fail(
-            format!("TLS to {name}: {}", failure.0),
+            format!("TLS to {shown}: {}", failure.0),
             "Check DNS, the certificate and the nginx server block for this name.",
         ),
     }
@@ -185,9 +203,22 @@ mod tests {
         assert!(!visitor_answer(502, r#"{"session":null}"#));
     }
 
+    /// The certificate is probed where the origin names it: its host, on its
+    /// port, 443 where it names none.
     #[test]
-    fn the_host_of_an_origin() {
-        assert_eq!(host("https://mail.example.org:8443"), "mail.example.org");
-        assert_eq!(host("https://mail.example.org"), "mail.example.org");
+    fn the_host_and_the_port_of_an_origin() {
+        assert_eq!(
+            authority("https://garrison.example.org:8443"),
+            ("garrison.example.org", 8443)
+        );
+        assert_eq!(
+            authority("https://garrison.example.org"),
+            ("garrison.example.org", 443)
+        );
+        assert_eq!(
+            authority("https://[2001:db8::1]:8443"),
+            ("2001:db8::1", 8443)
+        );
+        assert_eq!(authority("https://[2001:db8::1]"), ("2001:db8::1", 443));
     }
 }
