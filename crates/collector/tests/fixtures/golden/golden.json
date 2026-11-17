@@ -765,7 +765,7 @@
       },
       {
        "label": "Alert for encrypted content",
-       "value": null,
+       "value": true,
        "format": "boolean"
       }
      ],

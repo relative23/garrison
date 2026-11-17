@@ -390,6 +390,26 @@ project has inside a document). It must be refused. Switch this on together
 with [`[milter]`](configuration.md#milter) and `on_macro = "reject"`; a filter that only
 marks takes the document, and the check then reports that nothing refused it.
 
+## `clamav`
+
+The card "Antivirus configuration" reads clamav-milter's file
+(`milter_config`) and clamd's (`clamd_config`) as ClamAV reads them. It
+holds clamav-milter's `OnInfected` against `expect_on_infected` (default
+`Reject`) and `OnFail` against `expect_on_fail` (default `Defer`); one that
+differs is a warning. A directive the file does not set counts with
+clamav-milter's own default, `Quarantine` for an infected message and
+`Defer` for a failure, so a file without `OnInfected` warns unless
+`expect_on_infected` is `Quarantine`. A value counts in any case; of a
+directive set twice the first counts, as ClamAV takes it, and the card says
+so; every `ClamdSocket` counts, since clamav-milter takes turns with them. A
+value clamav-milter does not take there, a typo or `Quarantine` and
+`Blackhole` for `OnFail`, is a warning: clamav-milter does not start with
+such a file. A file that cannot be read is named with why, and the card is
+Unknown; a policy that was read stays a warning where only clamd's file
+cannot be read. `garrison check-config` takes for `expect_on_infected` only
+`Accept`, `Reject`, `Defer`, `Blackhole` and `Quarantine`, and for
+`expect_on_fail` only the first three.
+
 ## `receipt`
 
 An example:

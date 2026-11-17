@@ -18,11 +18,13 @@ use garrison_core::sqlite::reading;
 use garrison_core::time;
 use serde_json::json;
 
-use super::directives::directives;
+use super::directives;
 use crate::context::{Collected, Context, HostPath, Provider, ProviderError, Report, Use};
 use crate::options::{Checked, Options, fail};
+use policy::{ON_FAIL, ON_INFECTED};
 
-const ACTIONS: [&str; 5] = ["Accept", "Reject", "Defer", "Blackhole", "Quarantine"];
+mod policy;
+
 const DEFAULT_SIGNATURES: [&str; 6] = [
     "main.cvd",
     "main.cld",
@@ -32,7 +34,7 @@ const DEFAULT_SIGNATURES: [&str; 6] = [
     "bytecode.cld",
 ];
 
-type Directives = BTreeMap<String, Option<String>>;
+type Directives = BTreeMap<String, Vec<String>>;
 
 /// `25M` and friends in bytes.
 fn size(value: Option<&str>) -> Option<u64> {
@@ -62,8 +64,10 @@ fn yes(value: Option<&str>) -> Option<bool> {
     }
 }
 
+/// The value `ClamAV` takes of a directive: the first, where the file sets it
+/// more than once.
 fn get<'a>(values: Option<&'a Directives>, key: &str) -> Option<&'a str> {
-    values?.get(key)?.as_deref()
+    values?.get(key)?.first().map(String::as_str)
 }
 
 #[derive(Debug)]
@@ -73,8 +77,8 @@ pub struct Clamav {
     database: PathBuf,
     signatures: Vec<String>,
     fangfrisch: Option<PathBuf>,
-    expect_on_infected: String,
-    expect_on_fail: String,
+    expect_on_infected: &'static str,
+    expect_on_fail: &'static str,
 }
 
 /// The daily signature database is older than this only where updates no
@@ -129,35 +133,49 @@ impl Clamav {
             } else {
                 None
             },
-            expect_on_infected: options.text("expect_on_infected", Some("Reject"))?,
-            expect_on_fail: options.text("expect_on_fail", Some("Defer"))?,
+            expect_on_infected: ON_INFECTED.expected(&options, "Reject")?,
+            expect_on_fail: ON_FAIL.expected(&options, "Defer")?,
         })
     }
 
+    /// The card of the policy and limits the two files set. A policy that
+    /// was read stays what it is where the scanner's file could not be read;
+    /// only "in order" needs both.
     fn configuration(&self, context: &Context<'_>) -> Result<Observation, ProviderError> {
-        let milter = directives(&self.milter_config);
-        let clamd = directives(&self.clamd_config);
-        let (m, c) = (milter.as_ref(), clamd.as_ref());
-        let action = |key: &str| get(m, key).filter(|value| ACTIONS.contains(value));
-        let (infected, failure) = (action("OnInfected"), action("OnFail"));
-        let mut findings = Vec::new();
-        if let Some(infected) = infected.filter(|value| *value != self.expect_on_infected) {
-            findings.push(format!(
-                "Detected malware is handled with {infected}, not {}.",
-                self.expect_on_infected
-            ));
-        }
-        if let Some(failure) = failure.filter(|value| *value != self.expect_on_fail) {
-            findings.push(format!(
-                "Scanner failures are handled with {failure}, not {}.",
-                self.expect_on_fail
-            ));
-        }
-        let state = match (m.is_some() && c.is_some(), findings.is_empty()) {
-            (false, _) => State::Unknown,
-            (true, false) => State::Warning,
-            (true, true) => State::Ok,
+        let milter = directives::values(&self.milter_config);
+        let clamd = directives::values(&self.clamd_config);
+        let (m, c) = (milter.as_ref().ok(), clamd.as_ref().ok());
+        // Each finding with whether it needs a look.
+        let mut findings: Vec<(bool, String)> = Vec::new();
+        let mut action = |policy: &policy::Policy, expected: &str| {
+            let values = m?.get(policy.key).map_or(&[][..], Vec::as_slice);
+            let judged = policy.judged(values, expected, &self.milter_config);
+            findings.extend(judged.findings);
+            judged.action
         };
+        let infected = action(&ON_INFECTED, self.expect_on_infected);
+        let failure = action(&ON_FAIL, self.expect_on_fail);
+        for (path, read) in [(&self.milter_config, &milter), (&self.clamd_config, &clamd)] {
+            if let Err(why) = read {
+                findings.push((
+                    false,
+                    format!("{} could not be read: {why}.", path.display()),
+                ));
+            }
+        }
+        let state = if m.is_none() {
+            State::Unknown
+        } else if findings.iter().any(|(look, _)| *look) {
+            State::Warning
+        } else if c.is_none() {
+            State::Unknown
+        } else {
+            State::Ok
+        };
+        // clamav-milter takes turns with every scanner it is given.
+        let scanners = m
+            .and_then(|values| values.get("ClamdSocket"))
+            .map(|sockets| sockets.join(", "));
         let bytes =
             |label: &str, values, key| Field::new(label, size(get(values, key)), Format::Bytes);
         let flag = |label: &str, key| Field::new(label, yes(get(c, key)), Format::Boolean);
@@ -180,7 +198,7 @@ impl Clamav {
             Field::text("Detected malware", infected),
             Field::text("Scanner failure", failure),
             Field::text("Milter socket", get(m, "MilterSocket")),
-            Field::text("Scanner socket", get(m, "ClamdSocket")),
+            Field::text("Scanner socket", scanners),
             bytes("Milter file limit", m, "MaxFileSize"),
             bytes("Scanner stream limit", c, "StreamMaxLength"),
             bytes("Scanner file limit", c, "MaxFileSize"),
@@ -189,7 +207,7 @@ impl Clamav {
             flag("Alert when limits are exceeded", "AlertExceedsMax"),
             flag("Alert for encrypted content", "AlertEncrypted"),
         ])
-        .with_findings(findings))
+        .with_findings(findings.into_iter().map(|(_, finding)| finding).collect()))
     }
 
     /// The card of the signature files, and the age in hours of the newest
@@ -391,7 +409,21 @@ mod tests {
         let clamav = Clamav::new(&table(&raw)).unwrap();
         let (config, runner) = (config(directory.path()), Canned(String::new()));
         let unknown = clamav.configuration(&context(&config, &runner)).unwrap();
-        assert_eq!((unknown.state, unknown.findings.len()), (State::Unknown, 0));
+        assert_eq!(
+            (unknown.state, unknown.findings),
+            (
+                State::Unknown,
+                vec![format!(
+                    "{} could not be read: No such file or directory (os error 2).",
+                    missing.display()
+                )]
+            )
+        );
+        // What was seen of the policy stays what it is.
+        std::fs::write(&milter, "OnInfected Accept\n").unwrap();
+        let drift = clamav.configuration(&context(&config, &runner)).unwrap();
+        assert_eq!(drift.state, State::Warning, "{:?}", drift.findings);
+        std::fs::write(&milter, "OnInfected Reject\nOnFail Defer\n").unwrap();
         std::fs::write(&missing, "MaxFileSize 25M\n").unwrap();
         let known = clamav.configuration(&context(&config, &runner)).unwrap();
         assert_eq!(known.state, State::Ok);

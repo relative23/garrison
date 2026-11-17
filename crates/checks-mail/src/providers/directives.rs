@@ -2,7 +2,11 @@
 //!
 //! Each line is split into words like a POSIX shell does, with comments: quotes
 //! group words, a backslash escapes outside single quotes and `#` starts a
-//! comment outside quotes. A repeated directive is ambiguous and has no value.
+//! comment outside quotes. `ClamAV` takes the first of the lines that set one
+//! directive (clamconf 1.4.3 and 1.4.6, for clamav-milter.conf and clamd.conf),
+//! but every line of one it takes several of, such as `ClamdSocket`: [`values`]
+//! gives every value in the file's order, and [`directives`], for what needs a
+//! value nobody could doubt, none for a directive set twice.
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -10,29 +14,50 @@ use std::path::Path;
 
 const MAX_FILE: usize = 65536;
 
-/// The directives of a file, or `None` if it cannot be read or split.
-/// A directive that appears twice maps to `None`.
-pub fn directives(path: &Path) -> Option<BTreeMap<String, Option<String>>> {
-    let file = std::fs::File::open(path).ok()?;
+/// Every directive of a file with its values in the order of the file, or why
+/// the file cannot be read or split, in words for a finding.
+pub fn values(path: &Path) -> Result<BTreeMap<String, Vec<String>>, String> {
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
     let mut data = Vec::new();
-    file.take(MAX_FILE as u64 + 1).read_to_end(&mut data).ok()?;
+    file.take(MAX_FILE as u64 + 1)
+        .read_to_end(&mut data)
+        .map_err(|error| error.to_string())?;
     if data.len() > MAX_FILE {
-        return None;
+        return Err(format!("it is larger than {} KiB", MAX_FILE / 1024));
     }
-    let text = String::from_utf8(data).ok()?;
-    let mut result: BTreeMap<String, Option<String>> = BTreeMap::new();
-    for line in text.lines() {
-        let words = split(line)?;
+    let text = String::from_utf8(data).map_err(|_| "it is not UTF-8 text".to_owned())?;
+    let mut result: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (number, line) in text.lines().enumerate() {
+        let words = split(line).ok_or_else(|| {
+            format!(
+                "line {} opens a quote it does not close, or ends in a backslash",
+                number + 1
+            )
+        })?;
         let Some((key, rest)) = words.split_first() else {
             continue;
         };
-        let value = rest.join(" ");
-        result
-            .entry(key.clone())
-            .and_modify(|existing| *existing = None)
-            .or_insert(Some(value));
+        result.entry(key.clone()).or_default().push(rest.join(" "));
     }
-    Some(result)
+    Ok(result)
+}
+
+/// The directives of a file, or `None` if it cannot be read or split.
+/// A directive that appears twice maps to `None`.
+pub fn directives(path: &Path) -> Option<BTreeMap<String, Option<String>>> {
+    let values = values(path).ok()?;
+    Some(
+        values
+            .into_iter()
+            .map(|(key, values)| {
+                let value = match <[String; 1]>::try_from(values) {
+                    Ok([value]) => Some(value),
+                    Err(_) => None,
+                };
+                (key, value)
+            })
+            .collect(),
+    )
 }
 
 /// POSIX shell-like word splitting with comments; `None` for an unclosed quote

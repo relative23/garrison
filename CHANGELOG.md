@@ -28,6 +28,12 @@ Notable changes for operators and users. The format follows
   stops. Keep it where the collector sees it, or show it the place
   read-only with a drop-in, as
   [checks](docs/operator/checks.md#paths-the-collector-cannot-see) shows.
+- An `expect_on_infected` or `expect_on_fail` of the `clamav` check that
+  clamav-milter does not take there is refused by `garrison check-config`
+  now, and with it the upgrade, before anything stops. Such a value never
+  matched a file, so the card warned of it in every run: write one of
+  `Accept`, `Reject`, `Defer`, `Blackhole` and `Quarantine`, for
+  `expect_on_fail` one of the first three, in any case.
 
 ### Added
 
@@ -187,6 +193,18 @@ Notable changes for operators and users. The format follows
   updates keep current, the Signature databases card judged the newer file
   and the dashboard's "Signature age" showed the older one's, often days.
   Both now take the newer daily database.
+- **The antivirus configuration card reads clamav-milter's file as
+  clamav-milter does.** A file that set no `OnInfected`, as the sample file
+  of the RHEL family's package, one that set it twice or in lower case, and
+  one with a value clamav-milter does not take, left the card in order,
+  while the milter quarantined (its default), did what the first line said,
+  or did not start at all. The card now counts a directive the file does
+  not set with clamav-milter's default, Quarantine for an infected message
+  and Defer for a failure, takes a value in any case and the first of two
+  lines, as clamav-milter 1.4 does, and warns of a value it does not take,
+  with which it does not start. The scanner's limits show the first value
+  too, every scanner socket is listed, and a file that cannot be read is
+  named with why. See [checks](docs/operator/checks.md#clamav).
 - **On a phone, the menu takes the keyboard as it opens.** The menu stayed
   hidden while it slid in, so a Tab pressed in that moment passed it by.
   It is now shown as it opens, and hidden only once it has slid out.
