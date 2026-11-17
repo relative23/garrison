@@ -4,48 +4,17 @@
 //! and once that it has it again.
 
 use std::os::unix::fs::PermissionsExt;
-use std::sync::{Mutex, Once, PoisonError};
-use std::thread::{self, ThreadId};
 
 use super::*;
 use crate::testing::{Canned, now};
 
-/// The lines the collection runs of this test binary write, by the thread
-/// that wrote them, since tests run side by side.
-struct Journal(Mutex<Vec<(ThreadId, String)>>);
-
-impl log::Log for Journal {
-    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-        true
-    }
-
-    fn log(&self, record: &log::Record<'_>) {
-        let line = format!("{} {}", record.level(), record.args());
-        if record.target() == "garrison_collector::run" {
-            let mut lines = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            lines.push((thread::current().id(), line));
-        }
-    }
-
-    fn flush(&self) {}
-}
-
-static JOURNAL: Journal = Journal(Mutex::new(Vec::new()));
-static KEPT: Once = Once::new();
-
-/// The lines this thread's runs wrote since the last call that `about`
-/// takes.
+/// The lines this thread's runs wrote of themselves since the last call
+/// that `about` takes.
 fn said(about: impl Fn(&str) -> bool) -> Vec<String> {
-    KEPT.call_once(|| {
-        log::set_logger(&JOURNAL).unwrap();
-        log::set_max_level(log::LevelFilter::Info);
-    });
-    let me = thread::current().id();
-    let mut lines = JOURNAL.0.lock().unwrap_or_else(PoisonError::into_inner);
-    let (mine, others): (Vec<_>, Vec<_>) = lines.drain(..).partition(|(thread, _)| *thread == me);
-    *lines = others;
-    mine.into_iter()
-        .map(|(_, line)| line)
+    crate::journal::lines()
+        .into_iter()
+        .filter(|line| line.target == "garrison_collector::run")
+        .map(|line| line.text)
         .filter(|line| about(line))
         .collect()
 }

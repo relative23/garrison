@@ -129,18 +129,17 @@ fn named_in_file(path: &Path) -> std::io::Result<bool> {
     }
 }
 
-/// The rows of `table` whose `text` holds a key, each with its masked text.
-fn keyed(
-    db: &Connection,
-    table: &str,
-    id: &str,
-    text: &str,
-) -> rusqlite::Result<Vec<(String, String)>> {
+/// The rows of `table` whose `text` holds a key, each by its rowid with its
+/// masked text. A value the collector never writes, bytes or text that is
+/// no UTF-8, is read as text all the same, so that no key stays in it.
+fn keyed(db: &Connection, table: &str, text: &str) -> rusqlite::Result<Vec<(i64, String)>> {
     let mut statement = db.prepare(&format!(
-        "SELECT CAST({id} AS TEXT), {text} FROM {table} WHERE {text} LIKE ?1"
+        "SELECT rowid, CAST({text} AS BLOB) FROM {table} WHERE {text} LIKE ?1"
     ))?;
     let rows = statement.query_map([format!("%{SERVICE}%")], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        let bytes: Option<Vec<u8>> = row.get(1)?;
+        let text = String::from_utf8_lossy(&bytes.unwrap_or_default()).into_owned();
+        Ok((row.get(0)?, text))
     })?;
     let mut found = Vec::new();
     for row in rows {
@@ -157,9 +156,10 @@ fn keyed(
 /// service, and is to be rebuilt now: not within a day of a rebuild that did
 /// not finish. `now` is the run's time.
 pub(super) fn due(db: &Connection, path: &Path, now: i64) -> Result<bool, SqliteError> {
+    // A value of another type is no value, but one is there.
     let recalled = |key: &str| {
         db.query_row("SELECT value FROM memory WHERE key = ?1", [key], |row| {
-            row.get::<_, String>(0)
+            Ok(super::as_written::<String>(row.get_ref(0)?))
         })
         .optional()
     };
@@ -167,10 +167,11 @@ pub(super) fn due(db: &Connection, path: &Path, now: i64) -> Result<bool, Sqlite
     // A rebuild dated ahead of the clock, as after the clock went back, is
     // no reason to wait.
     let waiting = recalled(BEGAN)?
+        .flatten()
         .and_then(|began| began.parse::<i64>().ok())
         .is_some_and(|began| (0..AGAIN_AFTER).contains(&now.saturating_sub(began)));
-    let keyed = !keyed(db, "memory", "key", "value")?.is_empty()
-        || !keyed(db, "snapshots", "id", "document")?.is_empty();
+    let keyed = !keyed(db, "memory", "value")?.is_empty()
+        || !keyed(db, "snapshots", "document")?.is_empty();
     if !keyed && (looked || !named_in_file(path)?) {
         if !looked {
             note(db, LOOKED, "1")?;
@@ -242,21 +243,21 @@ fn rebuilt(
 /// masked afterwards, the copy's own pages would keep it. The masking holds
 /// readers off only while it writes these rows.
 fn masked_rows(db: &mut Connection) -> Result<usize, Unfinished> {
-    let memory = keyed(db, "memory", "key", "value")?;
-    let snapshots = keyed(db, "snapshots", "id", "document")?;
+    let memory = keyed(db, "memory", "value")?;
+    let snapshots = keyed(db, "snapshots", "document")?;
     // What the masking frees is overwritten with zeros.
     db.pragma_update(None, "secure_delete", true)?;
     let transaction = db.transaction()?;
-    for (key, value) in &memory {
+    for (row, value) in &memory {
         transaction.execute(
-            "UPDATE memory SET value = ?1 WHERE key = ?2",
-            params![value, key],
+            "UPDATE memory SET value = ?1 WHERE rowid = ?2",
+            params![value, row],
         )?;
     }
-    for (id, document) in &snapshots {
+    for (row, document) in &snapshots {
         transaction.execute(
-            "UPDATE snapshots SET document = ?1 WHERE id = CAST(?2 AS INTEGER)",
-            params![document, id],
+            "UPDATE snapshots SET document = ?1 WHERE rowid = ?2",
+            params![document, row],
         )?;
     }
     transaction.commit()?;

@@ -9,6 +9,7 @@ use rusqlite::{Connection, params};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
+use super::as_written;
 use crate::values::float;
 
 /// The history periods the interface offers: seconds and buckets.
@@ -82,7 +83,8 @@ fn bucket_limits(seconds: i64, buckets: usize) -> Vec<i64> {
 }
 
 /// The names of all series, in order. Each step asks the primary key for the
-/// next name, so the samples themselves are not read.
+/// next name, so the samples themselves are not read. A name that is no
+/// text, which the collector never writes, names no series.
 fn series(db: &Connection) -> rusqlite::Result<Vec<String>> {
     let mut statement = db.prepare(
         "WITH RECURSIVE series(name) AS (\
@@ -92,15 +94,44 @@ fn series(db: &Connection) -> rusqlite::Result<Vec<String>> {
            FROM series WHERE series.name IS NOT NULL) \
          SELECT name FROM series WHERE name IS NOT NULL",
     )?;
-    statement.query_map([], |row| row.get(0))?.collect()
+    let names = statement.query_map([], |row| Ok(as_written::<String>(row.get_ref(0)?)))?;
+    names.filter_map(Result::transpose).collect()
 }
 
-/// The minutes a sample stands for, as SQL. A reader may meet a database the
-/// collector has not migrated yet, for a moment after an upgrade: there every
-/// sample is one minute.
-fn weight(db: &Connection) -> rusqlite::Result<&'static str> {
+/// How samples are read, as SQL.
+struct Samples {
+    /// The minutes a sample stands for.
+    weight: &'static str,
+    /// Which rows are samples: one the collector never writes, with a time,
+    /// a value or minutes of another type, or more minutes than a thinned
+    /// step holds, is none, so it costs only itself (thinning.rs reads them
+    /// by the same rule).
+    sample: &'static str,
+    /// The same of the columns the index on the time holds, for the
+    /// coverage, which reads it alone.
+    covered: &'static str,
+}
+
+/// How the samples of `db` are read. A reader may meet a database the
+/// collector has not migrated yet, for a moment after an upgrade: there
+/// every sample is one minute.
+fn samples(db: &Connection) -> rusqlite::Result<Samples> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    Ok(if version >= 2 { "minutes" } else { "1" })
+    Ok(if version >= 2 {
+        Samples {
+            weight: "minutes",
+            sample: "typeof(ts) = 'integer' AND typeof(value) IN ('integer', 'real') \
+                     AND typeof(minutes) = 'integer' AND minutes BETWEEN 1 AND 10",
+            covered: "typeof(ts) = 'integer' AND typeof(minutes) = 'integer' \
+                      AND minutes BETWEEN 1 AND 10",
+        }
+    } else {
+        Samples {
+            weight: "1",
+            sample: "typeof(ts) = 'integer' AND typeof(value) IN ('integer', 'real')",
+            covered: "typeof(ts) = 'integer'",
+        }
+    })
 }
 
 /// Samples in buckets: gauges are averaged over their minutes, increases are
@@ -131,18 +162,22 @@ pub fn history(
         })
         .collect();
     let limits = bucket_limits(seconds, buckets);
-    // `weight` is one of two fixed words, never text from outside.
-    let weight = weight(db)?;
+    // Fixed words, never text from outside.
+    let Samples {
+        weight,
+        sample,
+        covered,
+    } = samples(db)?;
     let mut bucket = db.prepare(&format!(
         "SELECT sum(value * {weight}) FILTER (WHERE kind = 'gauge') \
                 / sum({weight}) FILTER (WHERE kind = 'gauge'), \
                 sum(value) FILTER (WHERE kind = 'increase') \
-         FROM samples WHERE name = ? AND ts >= ? AND ts < ?"
+         FROM samples WHERE name = ? AND ts >= ? AND ts < ? AND {sample}"
     ))?;
-    let mut newest = db.prepare(
+    let mut newest = db.prepare(&format!(
         "SELECT value FROM samples WHERE name = ? AND kind = 'gauge' AND ts >= ? AND ts < ? \
-         ORDER BY ts DESC LIMIT 1",
-    )?;
+         AND {sample} ORDER BY ts DESC LIMIT 1"
+    ))?;
     let mut totals: Map<String, Value> = Map::new();
     let mut latest = Map::new();
     let mut names: Vec<String> = Vec::new();
@@ -187,7 +222,8 @@ pub fn history(
     let (first, last, minutes): (Option<i64>, Option<i64>, i64) = db.query_row(
         &format!(
             "SELECT min(ts), max(ts), coalesce(sum(held), 0) FROM \
-             (SELECT ts, max({weight}) AS held FROM samples WHERE ts >= ? AND ts < ? GROUP BY ts)"
+             (SELECT ts, max({weight}) AS held FROM samples \
+              WHERE ts >= ? AND ts < ? AND {covered} GROUP BY ts)"
         ),
         [start, end],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),

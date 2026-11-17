@@ -308,3 +308,54 @@ fn a_snapshot_dated_at_no_time_leaves_the_stop_unknown() {
         assert!(!host.marker().exists());
     }
 }
+
+/// A snapshot dated with text, bytes or a fraction, which the collector
+/// never writes, gives no time: the watch judges by the snapshots dated with
+/// a number, and where none is, whether the collector runs is not known. The
+/// look never fails on it, and nobody is told either way; `garrison doctor`
+/// gets the reason.
+#[test]
+fn a_snapshot_dated_with_no_number_gives_no_time() {
+    let channel = channel("http://127.0.0.1:9");
+    let host = Host::new(Some(60), Some(&channel));
+    let db = Connection::open(host.database()).unwrap();
+    db.execute(
+        "INSERT INTO snapshots(collected_at, document) VALUES('no number', '{}')",
+        [],
+    )
+    .unwrap();
+    assert_eq!(host.look(Ok(Some(channel.clone()))), Ok(Outcome::Running));
+    assert_eq!(last_run(&host.database()), Ok(Some(now().as_second() - 60)));
+    for value in ["'no number'", "x'00ff'", "1.5"] {
+        db.execute(&format!("UPDATE snapshots SET collected_at = {value}"), [])
+            .unwrap();
+        assert_eq!(
+            host.look(Ok(Some(channel.clone()))),
+            Ok(Outcome::NotKnown),
+            "{value}"
+        );
+        assert_eq!(
+            last_run(&host.database()),
+            Err("no snapshot in it is dated with a number".to_owned())
+        );
+    }
+    assert!(!host.marker().exists());
+}
+
+/// Channels a run left in a form that is no text are none: without a
+/// configuration that loads, the watch goes on as with no channel.
+#[test]
+fn channels_left_as_no_text_are_none() {
+    let server = serve(Vec::new());
+    let host = Host::new(Some(3600), Some(&channel(&server.url)));
+    let db = Connection::open(host.database()).unwrap();
+    db.execute("UPDATE memory SET value = x'00ff' WHERE key = ?", [CHANNEL])
+        .unwrap();
+    drop(db);
+    assert_eq!(
+        recorded(&host.database()).unwrap().channels,
+        Channels::default()
+    );
+    assert_eq!(host.look(Err(())), Ok(Outcome::Stopped));
+    assert_eq!(server.requests().len(), 0);
+}

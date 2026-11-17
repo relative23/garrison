@@ -51,9 +51,10 @@ pub fn remember(memory: &dyn Memory, channels: &Channels) {
 pub enum Outcome {
     /// No run has ever finished: nothing to compare with.
     NeverRan,
-    /// The newest snapshot is dated at a time that is none, as in a damaged
-    /// or hand-edited status database: whether the collector runs is not
-    /// known, and nobody is told either way.
+    /// The newest snapshot is dated at a time that is none, or no snapshot
+    /// is dated with a number, as in a damaged or hand-edited status
+    /// database: whether the collector runs is not known, and nobody is told
+    /// either way.
     NotKnown,
     Running,
     /// Stopped; the channels know, or there is none to tell.
@@ -86,16 +87,36 @@ pub struct Watch<'a> {
 /// What the status database says of the collector.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Recorded {
-    /// When the last run finished.
-    last: Option<i64>,
+    /// When the last run finished, where a run did.
+    last: Option<Finished>,
     /// The channels that run left.
     channels: Channels,
 }
 
-/// When the newest snapshot was written: when the last run finished.
-fn finished(db: &Connection) -> rusqlite::Result<Option<i64>> {
-    db.query_row("SELECT MAX(collected_at) FROM snapshots", [], |row| {
-        row.get(0)
+/// When the last run finished, as the snapshots say it.
+#[derive(Debug, PartialEq, Eq)]
+enum Finished {
+    /// The newest of the snapshots dated with a number, a Unix second.
+    At(i64),
+    /// There are snapshots, but none is dated with a number, as in a
+    /// damaged or hand-edited status database: when is not known.
+    NoTime,
+}
+
+/// When the newest snapshot was written: when the last run finished. What
+/// the database holds is data: a snapshot dated with text, bytes or a
+/// fraction, which the collector never writes, gives no time.
+fn finished(db: &Connection) -> rusqlite::Result<Option<Finished>> {
+    let (newest, all): (Option<i64>, i64) = db.query_row(
+        "SELECT MAX(collected_at) FILTER (WHERE typeof(collected_at) = 'integer'), count(*) \
+         FROM snapshots",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok(match (newest, all) {
+        (Some(at), _) => Some(Finished::At(at)),
+        (None, 0) => None,
+        (None, _) => Some(Finished::NoTime),
     })
 }
 
@@ -106,7 +127,11 @@ pub fn last_run(database: &Path) -> Result<Option<i64>, String> {
     let Some(reader) = sqlite::reading(database, BUDGET).map_err(|error| error.to_string())? else {
         return Ok(None);
     };
-    finished(&reader).map_err(|error| error.to_string())
+    match finished(&reader).map_err(|error| error.to_string())? {
+        None => Ok(None),
+        Some(Finished::At(at)) => Ok(Some(at)),
+        Some(Finished::NoTime) => Err("no snapshot in it is dated with a number".to_owned()),
+    }
 }
 
 /// Whether a collector whose last run finished at `last` has stopped by
@@ -124,12 +149,14 @@ fn recorded(database: &Path) -> Result<Recorded, String> {
         return Ok(Recorded::default());
     };
     let last = finished(&reader).map_err(|error| error.to_string())?;
+    // Channels left in a form that is no text are none.
     let channel: Option<String> = reader
         .query_row("SELECT value FROM memory WHERE key=?", [CHANNEL], |row| {
-            row.get(0)
+            Ok(crate::store::as_written(row.get_ref(0)?))
         })
         .optional()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())?
+        .flatten();
     Ok(Recorded {
         last,
         channels: channel
@@ -147,8 +174,10 @@ impl Watch<'_> {
     /// that did not go out: the next look tries again.
     pub fn look(&self) -> Result<Outcome, String> {
         let recorded = recorded(self.database)?;
-        let Some(last) = recorded.last else {
-            return Ok(Outcome::NeverRan);
+        let last = match recorded.last {
+            None => return Ok(Outcome::NeverRan),
+            Some(Finished::NoTime) => return Ok(Outcome::NotKnown),
+            Some(Finished::At(last)) => last,
         };
         let channels = match &self.configured {
             Ok(channels) => channels.clone(),

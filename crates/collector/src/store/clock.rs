@@ -45,10 +45,12 @@ fn when(second: i64) -> Option<i64> {
 fn recall(transaction: &Transaction<'_>, key: &str) -> rusqlite::Result<Option<i64>> {
     let text: Option<String> = transaction
         .query_row("SELECT value FROM memory WHERE key = ?", [key], |row| {
-            row.get(0)
+            Ok(super::as_written(row.get_ref(0)?))
         })
-        .optional()?;
-    // A value that does not read is as good as none.
+        .optional()?
+        .flatten();
+    // A value that does not read, as no text or no number, is as good as
+    // none.
     Ok(text.and_then(|text| text.parse().ok()))
 }
 

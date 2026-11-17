@@ -490,6 +490,22 @@ Notable changes for operators and users. The format follows
   until GitHub answered again, or call the running release the newest for
   as long as GitHub gave no answer; while none comes, the card now says
   that GitHub has not answered since an earlier run and is not in order.
+- **A value of another kind in the status database no longer stops the
+  collector, the watch or the charts.** A value the collector never
+  writes, in a status database that was edited by hand or damaged, such as
+  text where a time or a counter's reading belongs, bytes where text does,
+  or text that is no UTF-8, made every collection run fail before it
+  stored its snapshot, the watch over the collector stop with an error and
+  tell nobody, the metric history fail every request, or the thinning of
+  the history and the clearing of a key of Spamhaus' Data Query Service
+  warn in every run without getting on. Each such value now costs only
+  itself: a snapshot so dated gives no time, and where no snapshot gives
+  one, the watch and `garrison doctor` say that when the collector last
+  ran is not known; a counter's reading so stored counts no interval; a
+  sample so stored is left out of the history and its thinning, as is one
+  that says it holds more minutes than a step of ten; and a value of the
+  collector's memory that is no text is said once in its journal and taken
+  out.
 - **A time that is none in the event history no longer stops a check or a
   page.** The event receiver's heartbeat at a time no clock gives, in a
   history that was edited by hand or damaged, made the checks that read the
