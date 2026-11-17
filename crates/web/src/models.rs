@@ -89,6 +89,10 @@ pub struct SessionInfo {
     pub csrf: String,
     /// The second the session ends, since the epoch.
     pub expires_at: i64,
+    /// Seconds from this answer to the session's end, by the server's clock.
+    /// A page counts them down on its own clock and then asks again: the
+    /// browser's clock may be another than the server's.
+    pub expires_in: i64,
     pub modules: Vec<ModuleInfo>,
     pub actions: Vec<String>,
     pub profiles: Vec<String>,

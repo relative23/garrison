@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use axum::http::{Method, StatusCode};
 use garrison_core::config::Database;
+use garrison_core::time;
 use serde_json::{Value, json};
 use support::{ORIGIN, setup, write_status};
 
@@ -47,6 +48,22 @@ async fn modules_are_enforced_on_the_server() {
             json!({"detail": "This Garrison module is not authorized"})
         );
     }
+}
+
+#[tokio::test]
+async fn a_session_says_how_long_it_has_left_by_the_servers_clock() {
+    let mut setup = setup();
+    setup.client.sign_in("code-admin").await;
+    let asked = time::now().as_second();
+    let session = setup.client.get(&api("session")).await.json()["session"].clone();
+    let answered = time::now().as_second();
+    let ends = session["expiresAt"].as_i64().unwrap();
+    let left = session["expiresIn"].as_i64().unwrap();
+    // From the answer's second to the end: a page counts that down on its
+    // own clock, never comparing `expiresAt` with it.
+    assert!((ends - answered..=ends - asked).contains(&left), "{left}");
+    // Thirty minutes by default, from the sign-in a moment ago.
+    assert!((30 * 60 - 5..=30 * 60).contains(&left), "{left}");
 }
 
 fn observation(id: &str, modules: &[&str]) -> Value {

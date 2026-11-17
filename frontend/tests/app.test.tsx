@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 
-import { coverage, metrics, observation, session, status } from "./support/fixtures";
+import { coverage, metrics, NOW, observation, session, status } from "./support/fixtures";
 import { openApp } from "./support/render";
 import { serve } from "./support/server";
 
@@ -288,14 +288,41 @@ describe("sign-out", () => {
     expect(await screen.findByText(/Your session has ended/)).toBeTruthy();
   });
 
-  it("shows the sign-in page when the session expires", async () => {
+  /** The web service's answer to the session's question while the server's
+   * clock is `serverNow()`: the session until `end`, then none. */
+  const until = (end: number, serverNow: () => number) => () => ({
+    body: { session: serverNow() < end ? session({ expiresAt: end, expiresIn: end - serverNow() }) : null },
+  });
+
+  it("shows the sign-in page when the session's time is up at the server", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const expiresAt = Math.floor(Date.now() / 1000) + 60;
-    serve({ ...signedIn(), "GET session": { body: { session: session({ expiresAt }) } } });
+    const now = () => Math.floor(Date.now() / 1000);
+    serve({ ...signedIn(), "GET session": until(now() + 60, now) });
     openApp();
     await act(async () => vi.advanceTimersByTimeAsync(1000));
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeTruthy();
     await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(screen.getByText(/Your session has ended/)).toBeTruthy();
+  });
+
+  it("keeps a session the server keeps, though the browser's clock is past its end", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    // The browser's clock runs two hours ahead of the server's; the session
+    // has half an hour left by the server's.
+    const ahead = 2 * 3600;
+    vi.setSystemTime((NOW + ahead) * 1000);
+    const serverNow = () => Math.floor(Date.now() / 1000) - ahead;
+    serve({ ...signedIn(), "GET session": until(NOW + 1800, serverNow) });
+    openApp();
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.queryByText(/Your session has ended/)).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeTruthy();
+    // Shortly before its end by the server's clock it is still there, and
+    // ends when the server ends it.
+    await act(async () => vi.advanceTimersByTimeAsync(1780_000));
+    expect(screen.queryByText(/Your session has ended/)).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
     expect(screen.getByText(/Your session has ended/)).toBeTruthy();
   });
 });

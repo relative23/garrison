@@ -44,6 +44,7 @@ export function session(overrides: Partial<SessionInfo> = {}, modules: string[] 
     email: "admin@example.test",
     csrf: "csrf-token",
     expiresAt: NOW + 3600,
+    expiresIn: 3600,
     modules: modules.map((id) => ({ id, label: id, description: "" })),
     actions: [],
     profiles: ["administrator"],

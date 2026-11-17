@@ -8,6 +8,7 @@ import { Centered, SignIn } from "./components/SignIn";
 import { ErrorState, Loading } from "./components/Status";
 import { ViewBoundary } from "./components/ViewBoundary";
 import { useTranslation } from "./i18n";
+import { elapsed, usePageTime, type Instant } from "./lib/clock";
 import { AppContext, type AppState } from "./lib/context";
 import { redirect, useRoute } from "./lib/router";
 import { useCurrentStatus } from "./lib/staleness";
@@ -19,6 +20,8 @@ import { ChunkView, isPage, moduleText, PAGE_VIEWS, PAGES, VIEWS } from "./modul
 /** A signed-in page's session as it was read, and how that read stands. */
 interface Reads {
   current: SessionInfo;
+  /** When `current` arrived, on the page's clock. */
+  receivedAt: Instant | null;
   /** Whether `current` answers the read asked last, not one asked before it. */
   latest: boolean;
   /** Whether the read asked last failed; `current` is then the one before. */
@@ -51,12 +54,19 @@ function SignedIn({ reads, onEnded }: { reads: Reads; onEnded: (csrf: string) =>
 
   // Again when the system changes its own, which "system" follows.
   useEffect(() => applyTheme(session.preferences.theme, system), [session.preferences.theme, system]);
+  // The server ends the session when its time is up by the server's clock.
+  // The page counts down the time left at the answer on its own clock, and
+  // again at each step of it, which counts a sleep that a timer does not,
+  // and then asks: the answer says whether the session has ended. It never
+  // ends a session by the browser's clock, which may be another.
+  const now = usePageTime();
+  const { receivedAt } = reads;
   useEffect(() => {
-    // The server ends the session at expiresAt; say so then.
-    const remaining = session.expiresAt * 1000 - Date.now();
-    const timer = setTimeout(() => onEnded(session.csrf), Math.max(0, remaining));
+    if (!receivedAt) return undefined;
+    const left = session.expiresIn * 1000 - elapsed(receivedAt);
+    const timer = setTimeout(again, Math.max(0, left));
     return () => clearTimeout(timer);
-  }, [session.expiresAt, session.csrf, onEnded]);
+  }, [receivedAt, session.expiresIn, again, now]);
 
   // Each refresh of the status had the user's rights checked a moment ago.
   // The session read right after it is answered from that same check, which
@@ -144,9 +154,10 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
   const [hadSession, setHadSession] = useState(current !== null);
   if (current && !hadSession) setHadSession(true);
 
-  // A session ends here when the server answers 401, when its time is up and
-  // at a sign-out. The session is read again at once: another tab may have
-  // signed in since, which this one then takes.
+  // A session ends here when the server answers 401 and at a sign-out; at the
+  // end of its time the server's answer says so (SignedIn). The session is
+  // read again at once: another tab may have signed in since, which this one
+  // then takes.
   const end = useCallback(
     (csrf: string) => {
       setEnded(csrf);
@@ -196,7 +207,7 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
   // Another session, with its own token, gets a page of its own; the same
   // session read again keeps the page and takes what changed in it.
   if (current) {
-    const reads = { current, latest: !session.loading, failed: session.error !== null, again };
+    const reads = { current, receivedAt: session.receivedAt, latest: !session.loading, failed: session.error !== null, again };
     content = <SignedIn key={current.csrf} reads={reads} onEnded={end} />;
   }
   // The session this tab showed has ended, here or in another tab.

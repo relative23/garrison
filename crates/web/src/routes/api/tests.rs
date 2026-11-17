@@ -62,6 +62,19 @@ fn a_document_serde_json_would_read_as_another_is_refused() {
     assert!(body::<Preferences>(&json, smuggled).is_err());
 }
 
+#[test]
+fn a_session_says_how_long_it_has_left_by_the_servers_clock() {
+    let at = time::parse("2026-10-29T12:00:00+00:00").unwrap();
+    let ends = at.as_second() + 1800;
+    let after = |micros: i64| at + time::SignedDuration::from_micros(micros);
+    assert_eq!(time_left(ends, at), 1800);
+    // A begun second counts whole: the page asks no earlier than the session
+    // ends, which it does once the second of `expires_at` has begun.
+    assert_eq!(time_left(ends, after(500_000)), 1800);
+    assert_eq!(time_left(ends, after(1_799_999_999)), 1);
+    assert_eq!(time_left(ends, after(1_800_000_000)), 0);
+}
+
 /// An observation checked at `at`; without `max_age` it keeps the default.
 fn checked(at: &str, max_age: Option<u32>) -> observations::Observation {
     let observation = observations::Observation::new(observations::Required {

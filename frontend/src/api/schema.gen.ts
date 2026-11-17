@@ -701,6 +701,13 @@ export interface components {
              * @description The second the session ends, since the epoch.
              */
             expiresAt: number;
+            /**
+             * Format: int64
+             * @description Seconds from this answer to the session's end, by the server's clock.
+             *     A page counts them down on its own clock and then asks again: the
+             *     browser's clock may be another than the server's.
+             */
+            expiresIn: number;
             links: components["schemas"]["Links"];
             modules: components["schemas"]["ModuleInfo"][];
             preferences: components["schemas"]["Preferences"];

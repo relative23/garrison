@@ -2,16 +2,18 @@
 // an answer arrived, for instance. The browser's time of day may run hours
 // ahead of the host's or behind it, and may be set while the page is open, so
 // it is never compared with a time the server sent. A check's age and
-// staleness, and how long ago the last events arrived, are the server's
-// figures at its answer plus the time the page has waited since
-// (src/lib/staleness.ts, src/components/Events.tsx).
+// staleness, how long ago the last events arrived and how long a session has
+// left are the server's figures at its answer plus or minus the time the
+// page has waited since (src/lib/staleness.ts, src/components/Events.tsx,
+// src/App.tsx).
 //
 // The wait is the larger of what the browser's two clocks counted. The
 // monotonic one, performance.now(), is not set with the wall clock, but on
 // Linux and macOS it stops while the computer sleeps, as its timers do; the
 // wall clock counts the sleep but may be set back or ahead. The larger misses
 // no sleep and no clock set back. A wall clock set ahead counts as time
-// waited: a check turns stale sooner, never later.
+// waited: a check turns stale sooner, or the page asks for its session
+// sooner, never later.
 import { useSyncExternalStore } from "react";
 
 /** How often the views that watch the time look at it again. */

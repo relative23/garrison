@@ -1367,6 +1367,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "expiresIn": {
+            "description": "Seconds from this answer to the session's end, by the server's clock.\nA page counts them down on its own clock and then asks again: the\nbrowser's clock may be another than the server's.",
+            "format": "int64",
+            "type": "integer"
+          },
           "links": {
             "$ref": "#/components/schemas/Links"
           },
@@ -1394,6 +1399,7 @@
           "email",
           "csrf",
           "expiresAt",
+          "expiresIn",
           "modules",
           "actions",
           "profiles",

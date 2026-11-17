@@ -166,6 +166,15 @@ Notable changes for operators and users. The format follows
   just now" of a webhook silent for hours. Both now count on from the age
   the server gives in its answer; the coverage answer of the API carries
   it in the new field `lastBatchAge`.
+- **A session ends when the server ends it, whatever the browser's clock
+  says.** A page ended its session by comparing the session's end, a time
+  of the host's, with the browser's own clock: a browser ahead of the host
+  by ten minutes said "Your session has ended" ten minutes early, and one
+  ahead by more than a session lasts, 30 minutes by default, ended every
+  sign-in at once, while the server kept the session. A page now counts
+  down the time the session has left, which the session's answer of the
+  API gives in the new field `expiresIn`, and then asks the server, whose
+  answer says whether the session has ended.
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",
