@@ -566,6 +566,15 @@ Notable changes for operators and users. The format follows
   was in order, and `max_age_hours` did nothing on such a unit. `garrison
   check-config`, and with it the installer before an upgrade, refuses both
   there now and names the service to put them on.
+- **A job's card says that a run is under way.** systemd forgets when a
+  job's last run ended as soon as it starts the next one (measured), so a
+  job with `max_age_hours`, such as a backup, was Unknown with "No run since
+  the host started." for as long as it ran. Its card now says since when the
+  run is under way and holds that start to the limit. Where systemd
+  remembers no run, after a restart of the host or right after the run of a
+  job that no timer or other unit refers to, which systemd unloads with what
+  it knew of the run (measured), the card says so, where it said that the
+  job had not run.
 - **Only a blocklist's own answer is a listing.** Any address a resolver
   gave for a list's question counted as a listing, so a resolver that
   answers names that do not exist with an address of its own, as some

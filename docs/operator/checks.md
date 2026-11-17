@@ -245,6 +245,13 @@ too.
 Use `expect = "idle"` for a job that runs and ends, such as a backup. The
 entry then shows when the job last ran, how it ended and how long it took, as
 systemd reports it. With `max_age_hours` it warns when the last run is older.
+While a run is under way, systemd has forgotten when the one before ended:
+the card says since when the run is under way, and `max_age_hours` holds that
+start to the limit. systemd also forgets a job's last run when the host
+starts, and as soon as the run has ended where no timer or other unit refers
+to the job, as for one started by hand or from cron; with `max_age_hours` the
+card is Unknown then and says so. Start such a job from a timer, or let it
+write a receipt.
 
 A job is a service. `garrison check-config` refuses `expect = "idle"` and
 `max_age_hours` on a timer, a socket or a path unit, which is active while it

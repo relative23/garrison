@@ -1,0 +1,9 @@
+Result=success
+ExecMainStartTimestamp=Tue 2026-11-17 00:24:45 UTC
+ExecMainExitTimestamp=Tue 2026-11-17 00:24:47 UTC
+ExecMainStatus=0
+Id=hostchk-job.service
+Names=hostchk-job.service
+LoadState=loaded
+ActiveState=inactive
+SubState=dead
