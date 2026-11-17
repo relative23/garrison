@@ -76,3 +76,37 @@ fn records_after_the_first_sixty_are_named_and_keep_the_card_from_being_in_order
     );
     assert_eq!(mx_hosts(&expected(&zone_file)), ["mail.example.test"]);
 }
+
+/// A cell of the table shows 120 characters at the most: a longer text,
+/// such as a DKIM key, ends there in "…", so that it does not read as the
+/// whole of it. The record is held against what is found as a whole.
+#[test]
+fn a_text_longer_than_a_cell_ends_in_an_ellipsis() {
+    let key = format!("v=DKIM1; k=rsa; p={}", "A".repeat(200));
+    let zone_file = format!(
+        "example.test. IN MX 10 mail.example.test.\n\
+         s1._domainkey.example.test. IN TXT \"{key}\"\n"
+    );
+    let zone = BTreeMap::from([
+        (
+            ("example.test".to_owned(), Kind::Mx.code()),
+            vec![host(&[0, 10], "mail.example.test")],
+        ),
+        (
+            ("s1._domainkey.example.test".to_owned(), Kind::Txt.code()),
+            vec![text(&key)],
+        ),
+    ]);
+    let (address, handle) = resolver(zone, None, 2);
+    let observations = collected(
+        &json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+        address,
+    );
+    handle.join().unwrap();
+    let row = &observations[0].table.as_ref().unwrap().rows[1];
+    let cut: String = key.chars().take(120).chain(['…']).collect();
+    assert_eq!(
+        (&row[3], &row[4], &row[5]),
+        (&json!(cut), &json!(cut), &json!("published"))
+    );
+}

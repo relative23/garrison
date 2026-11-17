@@ -92,6 +92,18 @@ pub(super) fn mail_hosts(
     Ok((hosts, rest))
 }
 
+/// A text as a cell of the card's table shows it: 120 characters at the
+/// most, and where it is longer, those and "…", so that it does not read as
+/// the whole of it.
+fn cell(text: &str) -> String {
+    const MOST: usize = 120;
+    if text.chars().count() <= MOST {
+        text.to_owned()
+    } else {
+        text.chars().take(MOST).chain(['…']).collect()
+    }
+}
+
 /// Why records were not asked.
 const RUN_OVER: &str = "the collection run's time was used up";
 /// So many of a domain's records are asked at the most: each run asks every
@@ -227,7 +239,6 @@ impl Dns {
                 (Verdict::Unread, Some(why)) => format!("not read: {why}"),
                 _ => verdict.label().to_owned(),
             };
-            let short = |text: &str| text.chars().take(120).collect::<String>();
             rows.push(vec![
                 json!(record.name),
                 json!(record.kind.name()),
@@ -236,8 +247,8 @@ impl Dns {
                 } else {
                     "optional"
                 }),
-                json!(short(&record.value)),
-                json!(short(&found.join(" | "))),
+                json!(cell(&record.value)),
+                json!(cell(&found.join(" | "))),
                 json!(result),
             ]);
         }

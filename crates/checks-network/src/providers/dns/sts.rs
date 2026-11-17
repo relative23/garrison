@@ -206,7 +206,7 @@ pub(super) fn checked(
         json!("policy"),
         json!("optional"),
         json!(format!("mx {}", hosts.join(", "))),
-        json!(stated.chars().take(120).collect::<String>()),
+        json!(super::cell(&stated)),
         json!(result),
     ];
     (row, outcome)

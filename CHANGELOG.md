@@ -735,6 +735,10 @@ Notable changes for operators and users. The format follows
   lines came later was said to leave the mail host out. The client now
   says where it cut, and such a policy counts as one that cannot be read,
   with that reason.
+- **A long text on the DNS records card ends in "…".** The table showed
+  the first 120 characters of a record, such as a DKIM key, as if they were
+  all of it; a longer one now ends in "…" there. The record is held against
+  what was found as a whole, as before.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not
