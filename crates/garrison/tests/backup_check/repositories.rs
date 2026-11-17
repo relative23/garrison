@@ -114,4 +114,18 @@ fn a_repository_named_in_a_file_is_known_by_that_file() {
         "{}",
         text(&other.stderr)
     );
+    // An empty RESTIC_REPOSITORY is none, as restic takes it (0.18.1): the
+    // repository is the file's.
+    let empty = tools.run_with(
+        &["restic", "--report", to],
+        &[
+            ("RESTIC_REPOSITORY", ""),
+            ("RESTIC_REPOSITORY_FILE", "/etc/restic/archive"),
+        ],
+    );
+    assert_eq!(empty.status.code(), Some(0), "{}", text(&empty.stderr));
+    assert_eq!(
+        read(&report)["repository"],
+        "(named in /etc/restic/archive)"
+    );
 }

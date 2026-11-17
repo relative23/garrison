@@ -221,7 +221,8 @@ fn last_report(path: &Path) -> Option<Report> {
 /// The repository as restic reads it from the file its environment names,
 /// where it names it so: two repositories named so differ by their files.
 fn named_in_file(tool: Tool) -> Option<String> {
-    let file = std::env::var_os("RESTIC_REPOSITORY_FILE").filter(|_| tool == Tool::Restic)?;
+    let file = std::env::var_os("RESTIC_REPOSITORY_FILE")
+        .filter(|file| tool == Tool::Restic && !file.is_empty())?;
     Some(format!("(named in {})", Path::new(&file).display()))
 }
 
@@ -259,10 +260,15 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
     } else {
         "BORG_REPO"
     };
+    // An empty variable names nothing, as the tools take it.
     let known = asked
         .repo
         .clone()
-        .or_else(|| std::env::var(variable).ok())
+        .or_else(|| {
+            std::env::var(variable)
+                .ok()
+                .filter(|named| !named.is_empty())
+        })
         .or_else(|| named_in_file(tool));
     let repository = Repository {
         tool,

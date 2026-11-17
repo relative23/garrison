@@ -392,7 +392,8 @@ Notable changes for operators and users. The format follows
   says why, and the card says that none has been reported where one is
   expected. A repository that restic reads from the file
   `RESTIC_REPOSITORY_FILE` names is named by that file, so that two named so
-  are told apart.
+  are told apart, also beside an empty `RESTIC_REPOSITORY`, which restic
+  takes for none.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year
