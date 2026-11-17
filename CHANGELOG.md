@@ -1032,8 +1032,9 @@ Notable changes for operators and users. The format follows
   was unavailable and Stalwart's observations Unknown, which named neither
   the file nor the fix and was not so of every card. It now says once for
   each reason that the collector has no API key for Stalwart, with the
-  file, why and what makes one, that every card that needs the key says
-  so, and once that it has the key again. The Blocklists and Reverse names
+  file, why and what makes one, that each card that needs the key says
+  so when its check next reads Stalwart, and once that it has the key
+  again. The Blocklists and Reverse names
   cards kept a reading made without the key for an hour, and the Spam and
   ham by domain card for ten minutes, so that they said that setup was
   needed after setup had made the key; the first run with a key reads them

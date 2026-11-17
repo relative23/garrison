@@ -44,7 +44,8 @@ fn configured(config: &Config, source: &SecretSource) -> PathBuf {
 /// The collector's API key for Stalwart, read anew for each run. Where it
 /// has none, the journal says why, with the file and what makes a key,
 /// once for each reason, since the runs come every minute; and once that
-/// it has the key again. The cards that need the key say so themselves.
+/// it has the key again. A card that needs the key says so when its check
+/// next reads Stalwart, which a check that keeps its reading does later.
 pub(super) fn native_key(
     config: &Config,
     credentials: &Credentials,
@@ -64,8 +65,8 @@ pub(super) fn native_key(
                 credentials.path(source).display()
             ),
             Err(error) => log::warn!(
-                "The collector has no API key for Stalwart: {error}{}. Every card that needs it \
-                 says so until then.",
+                "The collector has no API key for Stalwart: {error}{}. Each card that needs it \
+                 says so when its check next reads Stalwart.",
                 made_by_setup(error)
             ),
         }

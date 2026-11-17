@@ -50,7 +50,8 @@ fn the_journal_says_once_for_each_reason_why_the_collector_has_no_key() {
     let no_key = |why: &str| {
         vec![format!(
             "WARN The collector has no API key for Stalwart: {why}: {}; run `garrison stalwart \
-             setup`, which makes it. Every card that needs it says so until then.",
+             setup`, which makes it. Each card that needs it says so when its check next reads \
+             Stalwart.",
             key.display()
         )]
     };
