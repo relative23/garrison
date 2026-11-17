@@ -1179,6 +1179,9 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` fails an SELinux module loaded for another port than
   `web.port`**, with which nginx answers 502, and names the installer, which
   loads it for the port.
+- **`garrison stalwart setup` leaves one entry for the macro filter in
+  Stalwart**, also where its note of the entry is lost, and switches that
+  entry on again where it was switched off.
 
 ## [0.1.2] - 2026-11-13
 
