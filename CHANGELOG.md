@@ -158,9 +158,9 @@ Notable changes for operators and users. The format follows
   read either. The scan now undoes quoted-printable for any message that
   carries its escape, reads the white space a base64 line may carry, and so
   finds the document or marks it unscanned, as it already did for the plain
-  encodings. A body a conforming mail program would not write — uuencode, or
-  base64 interrupted by characters outside its alphabet — is a named limit
-  the filter shares with the virus scanner it complements (see
+  encodings. A body encoded as a conforming mail program would not encode it
+  (uuencode, or base64 interrupted by characters outside its alphabet) is a
+  named limit the filter shares with the virus scanner it complements (see
   [configuration](docs/operator/configuration.md#milter)).
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
