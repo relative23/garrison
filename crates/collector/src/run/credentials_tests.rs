@@ -160,3 +160,54 @@ fn a_scrape_credential_is_written_as_it_is_read_and_never_shows_its_secret() {
         r#"ScrapeCredential { username: "scraper", .. }"#
     );
 }
+
+/// A file that other users may read, or that is larger than 16 KiB, says
+/// so, and the first what makes it private: the scrape credential's and the
+/// key's alike.
+#[test]
+fn a_file_that_cannot_be_read_says_why() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = crate::testing::config(directory.path());
+    config.collector.dqs_key = Some(SecretSource::Credential("spamhaus-dqs-key".into()));
+    let credentials = Credentials::new(&config.credentials_directory);
+    let memory = crate::testing::Remembered::default();
+    let metrics = config.credentials_directory.join("metrics-credential");
+    let key = config.credentials_directory.join("spamhaus-dqs-key");
+    let open = |file: &Path, data: &str| {
+        private(file, data);
+        fs::set_permissions(file, fs::Permissions::from_mode(0o644)).unwrap();
+    };
+    let private_again = |file: &Path| {
+        format!(
+            "{0} may be read by other users; make it root's with mode 600: chown root {0} && \
+             chmod 600 {0}",
+            file.display()
+        )
+    };
+    open(&metrics, r#"{"username": "scraper", "secret": "s3cret"}"#);
+    open(&key, "abcdefghijklmnopqrstuvwxyz");
+    assert_eq!(
+        metrics_credential(&config, &credentials, &memory),
+        Scrape::Missing(private_again(&metrics))
+    );
+    assert_eq!(
+        dqs_key(&config, &credentials),
+        DqsKey::Missing(private_again(&key))
+    );
+    let large = "x".repeat(16385);
+    private(&metrics, &large);
+    private(&key, &large);
+    assert_eq!(
+        metrics_credential(&config, &credentials, &memory),
+        Scrape::Missing(format!("{} is larger than 16 KiB", metrics.display()))
+    );
+    assert_eq!(
+        dqs_key(&config, &credentials),
+        DqsKey::Missing(format!(
+            "{} is larger than 16 KiB; write the key of Spamhaus' Data Query Service into it",
+            key.display()
+        ))
+    );
+}

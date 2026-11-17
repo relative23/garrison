@@ -106,6 +106,17 @@ fn the_journal_says_once_for_each_reason_why_the_collector_has_no_scrape_credent
     private(&file, "{\"username\": \"scraper\"\n");
     assert_eq!(run(), none("holds no credential"));
     assert_eq!(run(), Vec::<String>::new());
+    // Open to other users: what makes it private, and not setup.
+    private(&file, r#"{"username": "scraper", "secret": "s3cret"}"#);
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(
+        run(),
+        [format!(
+            "WARN The collector has no scrape credential for Stalwart's exporter: {0} may be \
+             read by other users; make it root's with mode 600: chown root {0} && chmod 600 {0}.",
+            file.display()
+        )]
+    );
     private(&file, r#"{"username": "scraper", "secret": "s3cret"}"#);
     assert_eq!(
         run(),

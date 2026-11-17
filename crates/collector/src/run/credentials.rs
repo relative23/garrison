@@ -3,7 +3,7 @@
 //! Spamhaus' Data Query Service, with what the journal says of them.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use garrison_core::config::Config;
 use garrison_core::credentials::{Credentials, SecretSource, made_by_setup};
@@ -100,6 +100,22 @@ impl ScrapeCredential {
     }
 }
 
+/// Why a secret's file that cannot be read gives none, in words that hold
+/// nothing of it, and what makes it private where other users may read it.
+fn unread(error: &ProtectedFileError, file: &Path) -> (&'static str, Option<String>) {
+    match error {
+        ProtectedFileError::NotPrivate(_) | ProtectedFileError::TooOpen(_) => (
+            "may be read by other users",
+            Some(format!(
+                "make it root's with mode 600: chown root {0} && chmod 600 {0}",
+                file.display()
+            )),
+        ),
+        ProtectedFileError::TooLarge(_) => ("is larger than 16 KiB", None),
+        _ => ("cannot be read", None),
+    }
+}
+
 /// The scrape credential of Stalwart's metrics exporter from its file,
 /// read anew for each run as the collector's key is. Why there is none
 /// names the file, never what it holds; the exporter's card says it with
@@ -120,24 +136,30 @@ pub(super) fn metrics_credential(
     let held = read
         .as_deref()
         .map(|data| (data.trim_ascii().is_empty(), ScrapeCredential::read(data)));
-    let (scrape, said) = match held {
-        Ok((true, _)) => (Scrape::Missing(missing("is empty")), String::new()),
+    // Setup's fix mends every reason but a file others may read.
+    let setup = format!(" {SCRAPE_FIX}");
+    let (scrape, said, fix) = match held {
+        Ok((true, _)) => (Scrape::Missing(missing("is empty")), String::new(), setup),
         Ok((false, Some(ScrapeCredential { username, secret }))) => {
-            (Scrape::Credential(username, secret), String::new())
+            (Scrape::Credential(username, secret), String::new(), setup)
         }
         Ok((false, None)) => (
             Scrape::Missing(missing("holds no credential")),
             missing("holds no credential"),
+            setup,
         ),
-        Err(_) => (
-            Scrape::Missing(missing("cannot be read")),
-            missing("cannot be read"),
-        ),
+        Err(error) => match unread(error, &file) {
+            (what, None) => (Scrape::Missing(missing(what)), missing(what), setup),
+            (what, Some(mend)) => {
+                let why = format!("{}; {mend}", missing(what));
+                (Scrape::Missing(why.clone()), why, String::new())
+            }
+        },
     };
     if news(memory, SCRAPE_SAID, &said) {
         match (&scrape, said.is_empty()) {
             (_, false) => log::warn!(
-                "The collector has no scrape credential for Stalwart's exporter: {said}. {SCRAPE_FIX}"
+                "The collector has no scrape credential for Stalwart's exporter: {said}.{fix}"
             ),
             (Scrape::Credential(..), true) => {
                 log::info!(
@@ -175,6 +197,9 @@ pub(super) fn dqs_key(config: &Config, credentials: &Credentials) -> DqsKey {
             missing("holds no such key, one word of letters and digits")
         }
         Ok(None) => missing("is empty"),
-        Err(_) => missing("cannot be read"),
+        Err(error) => match unread(&error, &file) {
+            (what, None) => missing(what),
+            (what, Some(mend)) => DqsKey::Missing(format!("{} {what}; {mend}", file.display())),
+        },
     }
 }
