@@ -1196,6 +1196,14 @@ Notable changes for operators and users. The format follows
   It now goes back to the sign-in page with the reason `internal` and the
   reference under which the web service's journal names the cause, and the
   login cookie goes.
+- **A sign-in refused at its callback says why in the journal.** A
+  callback that named another issuer than `deployment.issuer`, as where
+  Stalwart names itself under another URL than garrison.toml, or none, or
+  that carried no code or one too long, failed every sign-in without a line
+  in any journal, though the operations guide sends the operator to the web
+  service's. The journal now says "Sign-in rejected at the callback (…)"
+  with which, naming the issuer the callback named and the one configured,
+  never the code.
 
 ## [0.1.2] - 2026-11-13
 

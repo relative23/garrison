@@ -35,6 +35,9 @@ use crate::store::{NewSession, random_token};
 
 const STATE_SECONDS: u64 = 600;
 const MAX_CODE: usize = 4096;
+/// How much of an issuer the callback names the journal repeats: anyone who
+/// can start a sign-in writes it.
+const MAX_SHOWN: usize = 200;
 
 pub fn challenge(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
@@ -254,11 +257,25 @@ fn finish(
     params: &HashMap<String, String>,
 ) -> ApiResult<Result<(String, u64), Ended>> {
     let code = params.get("code").map_or("", String::as_str);
-    let issuer = params.get("iss").map(String::as_str);
-    let valid = issuer == Some(app.config.deployment.issuer.as_str())
-        && !code.is_empty()
-        && code.chars().count() <= MAX_CODE;
-    if !valid {
+    let configured = app.config.deployment.issuer.as_str();
+    // What kept the callback from the code exchange, for the journal, which
+    // repeats the issuer it names, quoted, but never its code.
+    let refused = match params.get("iss").map(String::as_str) {
+        None => Some(format!(
+            "it names no issuer, where deployment.issuer is {configured}"
+        )),
+        Some(issuer) if issuer != configured => Some(format!(
+            "it names the issuer {:?}, where deployment.issuer is {configured}",
+            issuer.chars().take(MAX_SHOWN).collect::<String>()
+        )),
+        Some(_) if code.is_empty() => Some("it carries no code".to_owned()),
+        Some(_) if code.chars().count() > MAX_CODE => {
+            Some(format!("its code is longer than {MAX_CODE} characters"))
+        }
+        Some(_) => None,
+    };
+    if let Some(why) = refused {
+        log::warn!("Sign-in rejected at the callback ({why})");
         return Ok(Err(Ended::Failed));
     }
     let address = visitor.client_ip();
