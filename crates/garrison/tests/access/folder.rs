@@ -1,8 +1,52 @@
-//! The policy's folder: every error of a file in it names that file.
+//! The policy's folder: `init` makes it where it is missing, and every
+//! error of a file in it names that file.
 
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::path::Path;
 
-use super::support::{prepared, run, text};
+use garrison_testing::http::serve;
+use serde_json::json;
+
+use super::support::{against, names, prepared, respond, run, text};
+use super::{ADMINISTRATOR_RIGHTS, role};
+
+/// garrison.toml in `directory` with `broker.policy` at `policy`.
+fn policy_at(directory: &Path, policy: &Path) {
+    let settings = directory.join("garrison.toml");
+    let written = std::fs::read_to_string(&settings).unwrap();
+    let default = format!("policy = \"{}\"", directory.join("policy.json").display());
+    assert!(written.contains(&default), "{written}");
+    let moved = written.replace(&default, &format!("policy = \"{}\"", policy.display()));
+    std::fs::write(&settings, moved).unwrap();
+}
+
+/// `broker.policy` in a folder that is not made yet, as doctor then says to
+/// run `garrison access init`: init makes the folders, readable for the
+/// broker as /etc/garrison is, and the policy in them.
+#[test]
+fn init_makes_the_folder_that_garrison_toml_names_for_the_policy() {
+    let authentication = json!({"id": "singleton", "defaultAdminRoleIds": names(&["admin"]),
+                                "defaultUserRoleIds": {}});
+    let server = serve(vec![
+        respond("x:Authentication/get", &json!([authentication])),
+        respond(
+            "x:Role/get",
+            &json!([role("admin", &ADMINISTRATOR_RIGHTS, "Administrators")]),
+        ),
+    ]);
+    let directory = against(&server.url);
+    let policy = directory.path().join("policies/mail/access.json");
+    policy_at(directory.path(), &policy);
+    let init = run(directory.path(), &["access", "init"]);
+    assert_eq!(init.status.code(), Some(0), "{}", text(&init.stderr));
+    for folder in ["policies", "policies/mail"] {
+        let made = std::fs::metadata(directory.path().join(folder)).unwrap();
+        assert_eq!(made.mode() & 0o7777, 0o755, "{folder}");
+    }
+    assert_eq!(std::fs::metadata(&policy).unwrap().mode() & 0o777, 0o640);
+    assert!(text(&init.stdout).contains(&format!("Saved {}", policy.display())));
+    server.requests();
+}
 
 /// What `garrison access` cannot do in the policy's folder is said with the
 /// file it could not make or change, never as the system's error alone.

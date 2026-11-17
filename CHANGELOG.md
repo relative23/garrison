@@ -394,6 +394,13 @@ Notable changes for operators and users. The format follows
   for the broker's group before it takes the policy's place. Each error
   names the file it is about, where it named none, and says so where the
   command was run without root; a save names the backup it kept.
+- **`garrison access init` makes the policy's folder.** Where
+  `broker.policy` named a folder that was not made yet, `garrison doctor`
+  said to run `garrison access init`, which asked Stalwart for its roles and
+  then failed with "No such file or directory (os error 2)". It now makes
+  the folder, root's with mode 755 as `/etc/garrison` whatever the umask,
+  so that the broker reaches the policy in it; the other commands say that
+  the policy is missing and that `init` makes it.
 - **A backup's card shows that repository's check and restore alone.**
   `garrison backup-check` kept the last integrity check and test restore of
   the report before it, whatever repository or tool that report was of: a

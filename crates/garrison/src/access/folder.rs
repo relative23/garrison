@@ -14,7 +14,7 @@ use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
 use garrison_core::time;
-use rustix::fs::{AtFlags, FlockOperation, Gid, Mode, OFlags, Uid};
+use rustix::fs::{AtFlags, CWD, FlockOperation, Gid, Mode, OFlags, Uid};
 use rustix::io::Errno;
 
 /// What is at the policy's name.
@@ -53,8 +53,8 @@ const FOLDER: OFlags = OFlags::RDONLY
     .union(OFlags::CLOEXEC);
 
 impl Folder {
-    /// The folder of `policy`.
-    pub(super) fn open(policy: &Path) -> Result<Folder, String> {
+    /// The folder of `policy`; made where `make` and it is missing.
+    pub(super) fn open(policy: &Path, make: bool) -> Result<Folder, String> {
         let (Some(name), Some(parent)) = (policy.file_name(), policy.parent()) else {
             return Err(format!("broker.policy names no file: {}", policy.display()));
         };
@@ -63,13 +63,17 @@ impl Folder {
         } else {
             parent.to_owned()
         };
-        let descriptor = rustix::fs::open(&path, FOLDER, Mode::empty()).map_err(|error| {
-            if error == Errno::NOENT {
-                missing(policy)
-            } else {
-                failed(&path, error)
-            }
-        })?;
+        let descriptor = if make {
+            made(&path)?
+        } else {
+            rustix::fs::open(&path, FOLDER, Mode::empty()).map_err(|error| {
+                if error == Errno::NOENT {
+                    missing(policy)
+                } else {
+                    failed(&path, error)
+                }
+            })?
+        };
         Ok(Folder {
             descriptor,
             path,
@@ -281,4 +285,46 @@ pub(super) fn missing(policy: &Path) -> String {
         "The access policy {} is missing: `garrison access init` makes it.",
         policy.display()
     )
+}
+
+/// The folder `path`, with every folder up to it that is missing made as
+/// /etc/garrison is: the command's user's, with mode 755 whatever the umask,
+/// so that the broker reaches the policy in it. A folder that is made is
+/// reached from the one it is made in, never through a link put in its place.
+fn made(path: &Path) -> Result<OwnedFd, String> {
+    let mut absent = Vec::new();
+    let mut existing = path;
+    loop {
+        match std::fs::symlink_metadata(existing) {
+            Ok(_) => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                absent.push(existing);
+                existing = match existing.parent() {
+                    Some(parent) if !parent.as_os_str().is_empty() => parent,
+                    _ => Path::new("."),
+                };
+            }
+            Err(error) => return Err(failed(existing, error)),
+        }
+    }
+    let mut folder = rustix::fs::openat(CWD, existing, FOLDER, Mode::empty())
+        .map_err(|error| failed(existing, error))?;
+    let shared = Mode::from_raw_mode(0o755);
+    for path in absent.into_iter().rev() {
+        let name = path.file_name().unwrap_or_default();
+        let made = rustix::fs::mkdirat(&folder, name, shared);
+        if let Err(error) = made
+            && error != Errno::EXIST
+        {
+            return Err(failed(path, error));
+        }
+        let next = rustix::fs::openat(&folder, name, FOLDER | OFlags::NOFOLLOW, Mode::empty())
+            .map_err(|error| failed(path, error))?;
+        // One that someone else made meanwhile keeps its mode.
+        if made.is_ok() {
+            rustix::fs::fchmod(&next, shared).map_err(|error| failed(path, error))?;
+        }
+        folder = next;
+    }
+    Ok(folder)
 }

@@ -29,7 +29,9 @@ profile is.
 | `administrator` | all | all | authenticate, sysAccountUpdate, sysDomainUpdate, sysRoleUpdate, sysActionCreate |
 
 and binds Stalwart's System Administrator role to `administrator`. Users,
-groups and tenant administrators get nothing by default.
+groups and tenant administrators get nothing by default. It writes the
+policy where `broker.policy` names it, and makes a folder there that is
+missing, root's with mode 755 as `/etc/garrison`.
 
 Profiles can only require `authenticate` and `sys*` permissions: those are the
 ones whose evaluation Garrison verifies against Stalwart in its contract tests.

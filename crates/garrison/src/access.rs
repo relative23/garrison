@@ -121,12 +121,14 @@ fn save(config: &Config, folder: &Folder, policy: &Policy) -> Result<(), String>
     Ok(())
 }
 
-/// Hold `<policy>.lock` while the policy is read and written.
+/// Hold `<policy>.lock` while the policy is read and written; with `make`,
+/// in a folder made where it is missing.
 fn locked<T>(
     config: &Config,
+    make: bool,
     work: impl FnOnce(&Folder) -> Result<T, String>,
 ) -> Result<T, String> {
-    let folder = Folder::open(&config.broker.policy)?;
+    let folder = Folder::open(&config.broker.policy, make)?;
     let _held = folder.lock()?;
     work(&folder)
 }
@@ -195,7 +197,7 @@ fn init(config: &Config, force: bool) -> Result<u8, String> {
     }
     // Under the lock, so that nothing that came meanwhile is replaced
     // without --force, and before Stalwart is asked.
-    let roles = locked(config, |folder| {
+    let roles = locked(config, true, |folder| {
         if !force && matches!(folder.current()?, Current::File(_)) {
             return Ok(None);
         }
@@ -257,7 +259,7 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
             say(&pretty(&load(config)?.to_document()));
             Ok(0)
         }
-        Command::BindRole { role, profile } => locked(config, |folder| {
+        Command::BindRole { role, profile } => locked(config, false, |folder| {
             let mut policy = load(config)?;
             if !policy.profiles.contains_key(profile) {
                 let known: Vec<&str> = policy.profiles.keys().map(String::as_str).collect();
@@ -274,7 +276,7 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
             policy.role_bindings.insert(role.clone(), profile.clone());
             save(config, folder, &policy).map(|()| 0)
         }),
-        Command::UnbindRole { role } => locked(config, |folder| {
+        Command::UnbindRole { role } => locked(config, false, |folder| {
             let mut policy = load(config)?;
             policy.role_bindings.remove(role);
             save(config, folder, &policy).map(|()| 0)
@@ -284,7 +286,7 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
                 say("Invalid subject");
                 return Ok(1);
             }
-            locked(config, |folder| {
+            locked(config, false, |folder| {
                 let mut policy = load(config)?;
                 if *undo {
                     policy.denied.remove(subject);
