@@ -10,8 +10,11 @@
 # hides, which doctor names, and follows a policy kept elsewhere, but
 # leaves a folder named as the policy as it is. Beside
 # the installer: a collector that stops is reported, a collection run beside
-# one under way collects nothing, and setup after a rotation that failed
-# restarts the services that hold the old secrets.
+# one under way collects nothing, setup after a rotation that failed
+# restarts the services that hold the old secrets, and root's other
+# commands take what they find on the host as it is (a test restore's
+# leftovers, links beside the access policy, a folder made for it, actions
+# added and taken out).
 #
 #   [DISTRO=debian-13] [SCENARIOS="refusals failed_start"] \
 #       scripts/acceptance-failures.sh \
@@ -72,6 +75,9 @@ upgraded() {
 # The scenarios of the configuration the installer checks.
 # shellcheck source=scripts/acceptance-failures-config.sh
 . "$(dirname "$0")/acceptance-failures-config.sh"
+# The scenarios of root's commands beside the installer.
+# shellcheck source=scripts/acceptance-failures-commands.sh
+. "$(dirname "$0")/acceptance-failures-commands.sh"
 
 scenario_refusals() {
     step "Refusals change nothing"
@@ -403,7 +409,7 @@ new=$(inside 'cat /root/release/VERSION')
 running "installed" "$old"
 for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check failed_start crash_loop migrated_then_failed concurrent \
     interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere unwritten \
-    rotation collect_beside}; do
+    rotation collect_beside restore_leftovers access_links access_folder access_actions}; do
     "scenario_$scenario"
 done
 
