@@ -987,7 +987,10 @@ Notable changes for operators and users. The format follows
   replaces in Stalwart and has the receiver and the broker read the new
   one. Both called an empty key file one of "an invalid format"; they now
   say that it is empty and that `garrison stalwart setup` makes the key,
-  as they do for a missing file and one that holds no key.
+  as they do for a missing file and one that holds no key. `garrison
+  doctor`, which called such a file private and in order, fails it, names
+  the service it leaves without a key and the setup that makes one; the
+  files that may be empty, such as `metrics-credential`, stay in order.
 - **An answer of Stalwart's that Garrison cannot read is no refusal.** An
   answer in a form this release does not read, as a Stalwart release it
   does not support yet may give after an upgrade (no JSON, an object it

@@ -76,7 +76,7 @@ fn each_file_names_what_makes_it_and_what_keeps_it_private() {
     fs::create_dir_all(&config.broker.policy).unwrap();
     let key = config.credentials_directory.join("broker-native-key");
     fs::create_dir_all(&config.credentials_directory).unwrap();
-    fs::write(&key, "key").unwrap();
+    fs::write(&key, garrison_testing::NATIVE_KEY).unwrap();
     let present = files(&config);
     assert_eq!(
         fix(&present, "the access policy is a link or a folder"),
@@ -107,6 +107,46 @@ fn starting<'a>(findings: &'a [Finding], what: &str) -> &'a Finding {
         .iter()
         .find(|finding| finding.what.starts_with(what))
         .unwrap_or_else(|| panic!("no finding {what}: {findings:?}"))
+}
+
+/// A key file that is empty, or holds something other than a key, gives
+/// the service that reads it none, as a missing one does: doctor fails it
+/// with the setup that makes the key. One that holds a key is judged by
+/// owner and mode, which a test cannot give a file unless it runs as root.
+#[test]
+fn a_key_file_that_holds_no_key_fails_with_what_makes_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    fs::create_dir_all(&config.credentials_directory).unwrap();
+    for (name, unit) in [
+        ("webhook-signature-key", "garrison-ingest.service"),
+        ("collector-native-key", "garrison-collect.service"),
+        ("broker-native-key", "garrison-broker.service"),
+    ] {
+        let path = config.credentials_directory.join(name);
+        for (written, lacks) in [
+            ("", "is empty"),
+            ("\n", "is empty"),
+            ("short\n", "holds something other than a key"),
+        ] {
+            garrison_testing::write_private(&path, written.as_bytes());
+            let found = files(&config);
+            let finding = starting(&found, &format!("{name} "));
+            assert_eq!(
+                (finding.level, finding.what.as_str(), finding.fix.as_deref()),
+                (
+                    Level::Fail,
+                    format!("{name} {lacks}, so {unit} has no key: {}", path.display()).as_str(),
+                    Some("Run `garrison stalwart setup`, which makes it.")
+                ),
+                "{name} {written:?}"
+            );
+        }
+        garrison_testing::write_private(&path, garrison_testing::NATIVE_KEY.as_bytes());
+        let found = files(&config);
+        let kept = starting(&found, &format!("{} is not root-owned", path.display()));
+        assert_eq!(kept.level, Level::Fail, "{name}");
+    }
 }
 
 /// systemd starts no unit whose credential file is missing. A file that

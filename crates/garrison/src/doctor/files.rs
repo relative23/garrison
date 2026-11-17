@@ -3,12 +3,14 @@
 //! load every credential (`LoadCredential=`), and systemd starts none of
 //! them without its file, so each must be there; a file that may be empty,
 //! which means none, is in order empty unless the configuration reads it.
+//! A key setup writes is no key empty, as missing.
 
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use garrison_core::config::Config;
+use garrison_core::files::{self as protected, Form, Holds};
 
 use super::{Finding, Level};
 use crate::units;
@@ -65,6 +67,33 @@ fn private(path: &Path, file: &Private<'_>) -> Finding {
             file.kept.clone(),
         )
     }
+}
+
+/// A key setup writes, which its service reads with every start or check.
+/// An empty file, or one that holds something other than a key, gives that
+/// service none, as a missing file does, and setup makes a key there; one
+/// that holds a key is judged by owner and mode.
+fn key(path: &Path, file: &Private<'_>) -> Finding {
+    let held = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => protected::holds(path, Form::Token),
+        // Missing, a link or a folder: said as of every private file.
+        _ => return private(path, file),
+    };
+    let lacks = match held {
+        Ok(Holds::Secret) => return private(path, file),
+        Ok(Holds::Nothing) => "is empty",
+        Ok(Holds::Other) => "holds something other than a key",
+        Err(_) => "cannot be read",
+    };
+    Finding::fail(
+        format!(
+            "{} {lacks}, so {} has no key: {}",
+            file.what,
+            loaders(file.what),
+            path.display()
+        ),
+        format!("Run `{}`, which makes it.", file.made_by),
+    )
 }
 
 /// What of the configuration reads the file `name` and so needs it filled,
@@ -194,7 +223,7 @@ pub(super) fn files(config: &Config) -> Vec<Finding> {
                 path.display()
             ),
         };
-        findings.push(private(&path, &credential));
+        findings.push(key(&path, &credential));
     }
     // The installer keeps these, empty where nothing needs them.
     for name in units::COLLECTOR_FILES
