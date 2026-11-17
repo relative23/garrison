@@ -32,6 +32,32 @@ fn a_megabyte_of_noise_is_scanned_in_time() {
     assert!(began.elapsed() < in_time(), "{:?}", began.elapsed());
 }
 
+#[test]
+fn a_message_whose_every_line_opens_the_gate_ends_in_time() {
+    // Each line decodes to text that again names an encoding, so the gate
+    // opens level after level; the depth bound and the budget stop it in
+    // time, and with no document in it the answer is clean.
+    let mut message = b"Content-Transfer-Encoding: base64\r\n\r\n".to_vec();
+    while message.len() < 1024 * 1024 {
+        // base64 of "Content-Transfer-Encoding: base64".
+        message.extend_from_slice(b"Q29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogYmFzZTY0\r\n");
+    }
+    let began = Instant::now();
+    let _ = macros(&message);
+    assert!(began.elapsed() < in_time(), "{:?}", began.elapsed());
+}
+
+#[test]
+fn the_decode_budget_caps_what_is_read() {
+    // The budget is a multiple of the message's size; once it is spent the
+    // message was not scanned completely.
+    let mut work = Work::new(None, 100);
+    assert!(work.may_decode(1000));
+    assert!(work.may_decode(600));
+    assert!(!work.may_decode(1));
+    assert_eq!(work.gap, Some(Gap::Budget));
+}
+
 /// Local file headers, deflated and written as a stream (no size), whose
 /// extra fields all end where the headers end: each one's data is everything
 /// that follows them. What follows is deflate that takes input and gives

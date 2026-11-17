@@ -174,7 +174,7 @@ pub fn macros_until(message: &[u8], until: Instant) -> Outcome {
 }
 
 fn scan(message: &[u8], until: Option<Instant>) -> Outcome {
-    let mut work = Work::new(until);
+    let mut work = Work::new(until, message.len());
     match (candidates(message, &mut work), work.gap) {
         (Some(found), _) => Outcome::Macros(found),
         (None, Some(gap)) => Outcome::Incomplete(gap),
@@ -187,34 +187,13 @@ fn scan(message: &[u8], until: Option<Instant>) -> Outcome {
 /// written: structure may make an answer more exact, never more lenient.
 fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
     // The message as it stands: a document in the clear, any encoding's bytes
-    // that happen to be literal, the archives in them.
+    // that happen to be literal, the archives in them, and a message file in
+    // an archive, which `scanned` reads as a message of its own.
     if let Some(found) = work.scanned(message, DEPTH) {
         return Some(found);
     }
-    // The base64 of the whole message, read on each of the four grids a run
-    // of symbols can sit on: wherever a base64 body stands, and whatever junk,
-    // fake boundary or header surrounds it, one phase holds its bytes whole.
-    // One phase is decoded, scanned and given up before the next.
-    let symbols = base64_stream::count(message);
-    for phase in 0..base64_stream::PHASES {
-        if work.late() {
-            return None;
-        }
-        if let Some(found) =
-            work.scanned(&base64_stream::decode_phase(message, phase, symbols), DEPTH)
-        {
-            return Some(found);
-        }
-    }
-    // Quoted-printable, undone over the whole message: the one escape is `=`,
-    // and a message without it decodes to itself, which was scanned already.
-    if contains(message, b"=")
-        && let Some(found) = work.scanned(&unquoted(message), DEPTH)
-    {
-        return Some(found);
-    }
-    // uuencode, in a `begin … end` block wherever it stands.
-    if let Some(found) = work.scanned_uuencoded(message) {
+    // The message's transfer encodings, undone over the whole of it.
+    if let Some(found) = work.decode_encodings(message) {
         return Some(found);
     }
     // The one thing a header can still decide, and only to make the answer
@@ -224,12 +203,98 @@ fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
     None
 }
 
+impl Work {
+    /// Undo the message's transfer encodings over the whole of it, reading no
+    /// structure: the base64 on each of the four grids a run of symbols can
+    /// sit on (so a base64 body anywhere comes out whole in one phase,
+    /// whatever junk, boundary or header surrounds it), the quoted-printable,
+    /// and the uuencode blocks. Each decoded stream is scanned for a document
+    /// and, where it is itself a message with a nested encoding, read again.
+    fn decode_encodings(&mut self, data: &[u8]) -> Option<Found> {
+        let symbols = base64_stream::count(data);
+        for phase in 0..base64_stream::PHASES {
+            if self.late() {
+                return None;
+            }
+            let stream = base64_stream::decode_phase(data, phase, symbols);
+            if !self.may_decode(stream.len()) {
+                return None;
+            }
+            if let Some(found) = self.scanned_deep(&stream) {
+                return Some(found);
+            }
+        }
+        if contains(data, b"=") {
+            let undone = unquoted(data);
+            if !self.may_decode(undone.len()) {
+                return None;
+            }
+            if let Some(found) = self.scanned(&undone, DEPTH) {
+                return Some(found);
+            }
+            // Read the result as a nested message only where undoing
+            // quoted-printable truly decoded a body (it shrank by a quarter or
+            // more, as `=XX` triplets become one byte). A message that only
+            // carries a base64 body has little to undo, so its result is the
+            // message itself; reading that again would read its own headers,
+            // level after level.
+            if undone.len() * 4 < data.len() * 3
+                && let Some(found) = self.nested(&undone)
+            {
+                return Some(found);
+            }
+        }
+        self.scanned_uuencoded(data)
+    }
+
+    /// Scan a decoded stream for a document (marks and archives), and, where
+    /// it is itself a message with a nested transfer encoding, read that too.
+    pub(super) fn scanned_deep(&mut self, stream: &[u8]) -> Option<Found> {
+        if let Some(found) = self.scanned(stream, DEPTH) {
+            return Some(found);
+        }
+        self.nested(stream)
+    }
+
+    /// Follow a nested transfer encoding, but only where `data` itself says it
+    /// is there: a client decodes a body a second time only because the inner
+    /// message's headers name a `Content-Transfer-Encoding` or a uuencode
+    /// block begins. Noise does not hold that name by chance, so ordinary mail
+    /// is not read again. Below the depth the scan follows, such a message is
+    /// incomplete, never clean.
+    pub(super) fn nested(&mut self, data: &[u8]) -> Option<Found> {
+        if !declares_encoding(data) {
+            return None;
+        }
+        if self.encodings == 0 {
+            self.gap.get_or_insert(Gap::Encoding);
+            return None;
+        }
+        self.encodings -= 1;
+        let found = self.decode_encodings(data);
+        self.encodings += 1;
+        found
+    }
+}
+
+/// Whether `data` is a message that names a transfer encoding of its own: the
+/// header name in the clear (the only way a client would read it, any case),
+/// or a uuencode block's `begin` line.
+fn declares_encoding(data: &[u8]) -> bool {
+    const NAME: &[u8] = b"content-transfer-encoding";
+    data.windows(NAME.len())
+        .any(|window| window[0].eq_ignore_ascii_case(&NAME[0]) && window.eq_ignore_ascii_case(NAME))
+        || uu::next_begin(data, 0).is_some()
+}
+
 #[cfg(test)]
 mod bounds_tests;
 #[cfg(test)]
 mod encoding_tests;
 #[cfg(test)]
 mod incomplete_tests;
+#[cfg(test)]
+mod nested_tests;
 #[cfg(test)]
 mod parts_tests;
 #[cfg(test)]

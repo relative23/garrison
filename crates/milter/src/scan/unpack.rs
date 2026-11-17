@@ -41,12 +41,27 @@ enum End {
     Late,
 }
 
+/// How many levels of transfer encoding are followed below the top message
+/// (a body inside a base64 or uuencode body, as a base64-encoded forwarded
+/// message carries its own base64 attachment). Three levels in all, as zip
+/// archives are followed three deep.
+pub(super) const ENCODINGS: usize = 2;
+/// A sender can put the mark of a nested encoding into every phase's output
+/// at every level and force the recursion to branch; the bytes decoded over
+/// all levels are bounded by this multiple of the message's size. Honest
+/// nesting three levels deep decodes up to about eight times (measured).
+const DECODE_BUDGET: usize = 16;
+
 /// What one scan may still do, and what it had to leave out.
 pub(super) struct Work {
     /// What may still be unpacked, of all files together.
     budget: usize,
     /// How many packed files may still be opened.
     entries: usize,
+    /// How many bytes the scan may still decode, over all encoding levels.
+    decoded: usize,
+    /// How many more levels of transfer encoding may be followed.
+    pub(super) encodings: usize,
     until: Option<Instant>,
     /// The first thing the scan could not look at.
     pub(super) gap: Option<Gap>,
@@ -54,13 +69,28 @@ pub(super) struct Work {
 }
 
 impl Work {
-    pub(super) fn new(until: Option<Instant>) -> Self {
+    pub(super) fn new(until: Option<Instant>, message_bytes: usize) -> Self {
         Work {
             budget: 4 * UNPACKED,
             entries: ENTRIES,
+            decoded: DECODE_BUDGET.saturating_mul(message_bytes),
+            encodings: ENCODINGS,
             until,
             gap: None,
             inflater: Decompress::new(false),
+        }
+    }
+
+    /// Whether `bytes` more may be decoded. Once the budget is spent, the
+    /// message was not scanned completely.
+    pub(super) fn may_decode(&mut self, bytes: usize) -> bool {
+        if bytes > self.decoded {
+            self.decoded = 0;
+            self.gap.get_or_insert(Gap::Budget);
+            false
+        } else {
+            self.decoded -= bytes;
+            true
         }
     }
 
@@ -170,7 +200,12 @@ impl Work {
             }
             End::Whole | End::Spent | End::Broken => {}
         }
-        self.scanned(&unpacked, depth - 1)
+        // An unpacked entry may itself be a message with a transfer-encoded
+        // body (a message file stored in a zip): read it as one too.
+        if let Some(found) = self.scanned(&unpacked, depth - 1) {
+            return Some(found);
+        }
+        self.nested(&unpacked)
     }
 
     /// One deflated file: at most `limit` bytes of it, how much of `packed`

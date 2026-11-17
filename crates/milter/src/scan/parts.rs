@@ -12,7 +12,7 @@
 //! The line helpers here are shared with [`super::uu`].
 
 use super::unpack::Work;
-use super::{DEPTH, Found, Gap, uu};
+use super::{Found, Gap, uu};
 
 impl Work {
     /// Decode and scan every uuencode block in the message. A block that
@@ -24,7 +24,10 @@ impl Work {
             match uu::decode(&message[begin..]) {
                 Some((decoded, whole, consumed)) => {
                     at = begin + consumed;
-                    if let Some(found) = self.scanned(&decoded, DEPTH) {
+                    if !self.may_decode(decoded.len()) {
+                        return None;
+                    }
+                    if let Some(found) = self.scanned_deep(&decoded) {
                         return Some(found);
                     }
                     if !whole {
