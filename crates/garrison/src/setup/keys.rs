@@ -15,8 +15,15 @@ use super::objects::{
 };
 use super::{Admin, write_secret};
 
-/// The key files, as the broker and the collector read them.
-const KEYS: [&str; 2] = ["broker-native-key", "collector-native-key"];
+/// One of the keys: its file, as the broker or the collector reads it, its
+/// description in Stalwart, what it may do, and whether a running service
+/// holds it, which must start again to read a new one.
+pub(super) struct Key {
+    pub(super) file: &'static str,
+    pub(super) description: &'static str,
+    pub(super) permissions: &'static [&'static str],
+    pub(super) held: bool,
+}
 
 /// Whether the file at `path` holds a key as the service that reads it
 /// takes one. An empty file, one of a line end alone and one that holds
@@ -37,13 +44,11 @@ pub(super) struct Ensured {
 pub(super) fn ensure(
     admin: &Admin,
     directory: &Path,
-    name: &str,
-    description: &str,
-    permissions: &[&str],
+    key: &Key,
     networks: &Enabled,
     rotate: bool,
 ) -> Result<Ensured, String> {
-    let target = directory.join(name);
+    let (target, description) = (directory.join(key.file), key.description);
     let existing: Vec<StoredKey> = admin
         .list::<StoredKey>("ApiKey")?
         .into_iter()
@@ -51,7 +56,7 @@ pub(super) fn ensure(
         .collect();
     let rights = || KeyRights {
         permissions: KeyPermissions::Replace {
-            permissions: Enabled::of(permissions.iter().copied()),
+            permissions: Enabled::of(key.permissions.iter().copied()),
         },
         allowed_ips: networks,
     };
@@ -64,13 +69,13 @@ pub(super) fn ensure(
     }
     // A new key first and its file next. A running service keeps the old
     // key until it restarts, so the old keys go after that (`remove`).
-    let key = NewKey {
+    let new_key = NewKey {
         description,
         rights: rights(),
         expires_at: None,
     };
     let created: Created<NewSecret> = admin
-        .call("x:ApiKey/set", &Set::create(key))
+        .call("x:ApiKey/set", &Set::create(new_key))
         .map_err(|error| refused(&error, description))?;
     let new = created.created.get(NEW);
     let new = new.ok_or("Stalwart did not return the new API key secret")?;
@@ -120,18 +125,27 @@ pub(super) fn remove(admin: &Admin, replaced: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Each key opens a JMAP session from this host, as the services will use it.
-/// Stalwart refuses a key outside the networks it allows; in a container's
+/// Each key opens a JMAP session from this host, as the services will use
+/// it; what is returned are the keys that Stalwart does not know. It answers
+/// such a key 401, as after the credentials directory was put back from a
+/// copy older than the last rotation, and a key it knows from an address the
+/// key does not allow 403 (measured on Stalwart 1.1.0). In a container's
 /// bridge network Stalwart sees this host as the bridge's gateway, not as
-/// 127.0.0.1, and then every key fails. That is said here, at setup, rather
-/// than found later in the collector's results.
-pub(super) fn verify(config: &Config, directory: &Path) -> Result<String, String> {
+/// 127.0.0.1, and then every key is refused. That is said here, at setup,
+/// rather than found later in the collector's results.
+pub(super) fn verify<'k>(
+    config: &Config,
+    directory: &Path,
+    keys: &[&'k Key],
+) -> Result<Vec<&'k Key>, String> {
     let url = format!("{}/jmap/session", config.deployment.stalwart_url);
-    for name in KEYS {
+    let mut unknown = Vec::new();
+    for key in keys {
+        let name = key.file;
         // As the services read it, so that what is tried is what they use.
-        let key = files::read_secret(&directory.join(name), Privacy::Owned)
+        let secret = files::read_secret(&directory.join(name), Privacy::Owned)
             .map_err(|error| format!("{name}: {error}"))?;
-        let authorization = format!("Bearer {key}");
+        let authorization = format!("Bearer {secret}");
         let status = Request::get(&url)
             .header("Authorization", &authorization)
             .timeout(Duration::from_secs(30))
@@ -139,13 +153,14 @@ pub(super) fn verify(config: &Config, directory: &Path) -> Result<String, String
             .map_err(|error| format!("Trying {name}: {error}"))?;
         match status {
             200 => {}
-            401 | 403 => {
+            401 => unknown.push(*key),
+            403 => {
                 return Err(format!(
-                    "Stalwart refuses the API key in {name} from this host (HTTP {status}): \
-                     it sees this host at an address the key does not allow. That happens when \
+                    "Stalwart refuses the API key in {name} from this host (HTTP 403): it sees \
+                     this host at an address the key does not allow. That happens when \
                      Stalwart runs in a Docker or Podman bridge network; run it in the host \
-                     network instead (docker run --network host, or network_mode: host \
-                     with Compose), then run this again."
+                     network instead (docker run --network host, or network_mode: host with \
+                     Compose), then run this again."
                 ));
             }
             other => {
@@ -155,7 +170,7 @@ pub(super) fn verify(config: &Config, directory: &Path) -> Result<String, String
             }
         }
     }
-    Ok("Stalwart accepts both API keys from this host".into())
+    Ok(unknown)
 }
 
 /// A network as `address/prefix`; the host part must be zero.
@@ -184,13 +199,21 @@ pub(super) fn network(text: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use garrison_testing::http::{json, serve};
+    use std::os::unix::fs::PermissionsExt;
+
+    use garrison_testing::http::{answer, json, serve};
     use serde_json::json;
 
     use super::*;
 
     const OLD: &str = "the-key-stalwart-has-0123456789";
     const NEW: &str = "the-key-stalwart-made-0123456789";
+    const COLLECTOR: Key = Key {
+        file: "collector-native-key",
+        description: "garrison collector",
+        permissions: &["authenticate"],
+        held: false,
+    };
 
     /// What `ensure` does for the collector's key with the file holding
     /// `written`, while Stalwart still has a key of that description: the
@@ -198,7 +221,7 @@ mod tests {
     /// it asked Stalwart for a new key.
     fn ensured(written: &str) -> (String, Vec<String>, String, bool) {
         let directory = tempfile::tempdir().unwrap();
-        let file = directory.path().join("collector-native-key");
+        let file = directory.path().join(COLLECTOR.file);
         garrison_testing::write_private(&file, written.as_bytes());
         let listed = json(&json!({"methodResponses": [["x:ApiKey/get",
             {"list": [{"id": "old", "description": "garrison collector"}]}, "0"]]}));
@@ -210,16 +233,7 @@ mod tests {
             authorization: "Bearer admin".to_owned(),
         };
         let networks = Enabled::of(["127.0.0.1/32"]);
-        let done = ensure(
-            &admin,
-            directory.path(),
-            "collector-native-key",
-            "garrison collector",
-            &["authenticate"],
-            &networks,
-            false,
-        )
-        .unwrap();
+        let done = ensure(&admin, directory.path(), &COLLECTOR, &networks, false).unwrap();
         let requests = server.requests();
         let step = done
             .step
@@ -262,26 +276,10 @@ mod tests {
         );
     }
 
-    /// A user without administrator rights may read the keys, its own, but
-    /// not make Garrison's: setup says to run it as an administrator.
-    #[test]
-    fn an_account_that_may_not_grant_the_permissions_is_told_so() {
-        let refusal = r#"x:ApiKey/set: {"new":{"description":"You are not authorized to grant permissions: sysRoleGet","type":"forbidden"}}"#;
-        assert!(refused(refusal, "garrison broker").starts_with(
-            "Stalwart refused the administrator the API key 'garrison broker', since it may \
-                 not grant the key's permissions: run setup as an administrator who holds them"
-        ));
-        assert_eq!(
-            refused("x:ApiKey/set: Stalwart is unavailable", "garrison broker"),
-            "x:ApiKey/set: Stalwart is unavailable (Stalwart did not return the new API key secret)"
-        );
-    }
-
     /// A key whose file cannot be written goes again, so that Stalwart keeps
     /// no key whose secret nobody holds, and the error names the file.
     #[test]
     fn a_new_key_whose_file_cannot_be_written_goes_again() {
-        use std::os::unix::fs::PermissionsExt;
         if rustix::process::geteuid().is_root() {
             return; // Root writes any folder.
         }
@@ -300,21 +298,12 @@ mod tests {
             authorization: "Bearer admin".to_owned(),
         };
         let networks = Enabled::of(["127.0.0.1/32"]);
-        let name = "collector-native-key";
-        let error = ensure(
-            &admin,
-            &folder,
-            name,
-            "garrison collector",
-            &["authenticate"],
-            &networks,
-            false,
-        )
-        .err()
-        .unwrap();
+        let error = ensure(&admin, &folder, &COLLECTOR, &networks, false)
+            .err()
+            .unwrap();
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
         let requests = server.requests();
-        let target = folder.join(name);
+        let target = folder.join(COLLECTOR.file);
         assert!(
             error.starts_with(&format!("Could not write {}: ", target.display()))
                 && error.ends_with("; the new API key was taken out of Stalwart again"),
@@ -324,6 +313,58 @@ mod tests {
             requests[2].contains(r#""destroy":["fresh"]"#),
             "{}",
             requests[2]
+        );
+    }
+
+    /// What `verify` makes of Stalwart's answer to the collector's key.
+    fn tried(status: u16) -> Result<Vec<&'static str>, String> {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join(COLLECTOR.file);
+        garrison_testing::write_private(&file, format!("{OLD}\n").as_bytes());
+        let server = serve(vec![answer(status, "{}")]);
+        let config = garrison_testing::config(directory.path(), &server.url);
+        let tried = verify(&config, directory.path(), &[&COLLECTOR]);
+        let requests = server.requests();
+        assert!(requests[0].contains(&format!("Bearer {OLD}")));
+        tried.map(|unknown| unknown.iter().map(|key| key.file).collect())
+    }
+
+    /// Stalwart answers a key it does not know 401 and one it knows from an
+    /// address the key does not allow 403 (measured): the first is a key to
+    /// make anew, the second a bridge network.
+    #[test]
+    fn a_key_stalwart_does_not_know_is_told_from_one_it_refuses_here() {
+        assert_eq!(tried(200), Ok(Vec::new()));
+        assert_eq!(tried(401), Ok(vec!["collector-native-key"]));
+        let bridge = tried(403).unwrap_err();
+        assert!(
+            bridge.starts_with(
+                "Stalwart refuses the API key in collector-native-key from this host (HTTP \
+                 403): it sees this host at an address the key does not allow."
+            ),
+            "{bridge}"
+        );
+        assert_eq!(
+            tried(404),
+            Err(
+                "Trying collector-native-key: Stalwart answered HTTP 404 for its JMAP session"
+                    .to_owned()
+            )
+        );
+    }
+
+    /// A user without administrator rights may read the keys, its own, but
+    /// not make Garrison's: setup says to run it as an administrator.
+    #[test]
+    fn an_account_that_may_not_grant_the_permissions_is_told_so() {
+        let refusal = r#"x:ApiKey/set: {"new":{"description":"You are not authorized to grant permissions: sysRoleGet","type":"forbidden"}}"#;
+        assert!(refused(refusal, "garrison broker").starts_with(
+            "Stalwart refused the administrator the API key 'garrison broker', since it may \
+                 not grant the key's permissions: run setup as an administrator who holds them"
+        ));
+        assert_eq!(
+            refused("x:ApiKey/set: Stalwart is unavailable", "garrison broker"),
+            "x:ApiKey/set: Stalwart is unavailable (Stalwart did not return the new API key secret)"
         );
     }
 

@@ -135,7 +135,7 @@ fn secrets(credentials: &std::path::Path) -> std::collections::BTreeMap<String, 
 
 /// The status of the JMAP session of Stalwart at `url` for an API key: 200
 /// or 401.
-fn key_status(url: &str, key: &str) -> u16 {
+pub(super) fn key_status(url: &str, key: &str) -> u16 {
     let answer = ureq::get(format!("{url}/jmap/session"))
         .header("Authorization", &format!("Bearer {}", key.trim()))
         .call();

@@ -1,6 +1,6 @@
 //! What setup says where something refuses it, and that it leaves both
-//! places agreeing: the administrator refused, and a credentials folder it
-//! cannot write.
+//! places agreeing: the administrator refused, a credentials folder it
+//! cannot write, and key files whose secrets Stalwart no longer knows.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -10,6 +10,7 @@ use garrison_testing::lab::{Lab, random_hex, unique};
 use garrison_testing::{config_text, write_private};
 use serde_json::json;
 
+use super::together::{Capture, assert_together};
 use super::{Setup, forget, lab, text};
 
 /// The keys in the lab described as Garrison's.
@@ -166,4 +167,52 @@ fn setup_refuses_a_credentials_folder_it_cannot_write_before_stalwart_changes() 
         })
         .collect();
     assert_eq!(wrong, Vec::<String>::new());
+}
+
+/// The credentials folder put back from a copy older than the last rotation,
+/// as after the restore onto a new host that operations.md describes: its
+/// keys are ones Stalwart no longer has. Stalwart answers such a key 401 and
+/// a key it knows from an address the key does not allow 403, so a plain run
+/// makes the keys anew, instead of naming a bridge network, and gives the
+/// webhook and the exporter the folder's secrets.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn key_files_stalwart_no_longer_knows_get_new_keys() {
+    let (_guard, lab) = lab();
+    let capture = Capture::start();
+    let setup = Setup::new(&lab, &capture.url);
+    let credentials = setup.directory.join("credentials");
+    forget(&lab, &credentials);
+    let first = setup.run(&[]);
+    assert_eq!(first.status.code(), Some(0), "{}", text(&first));
+    let copy = setup.directory.join("copy");
+    fs::create_dir(&copy).unwrap();
+    for entry in fs::read_dir(&credentials).unwrap() {
+        let entry = entry.unwrap();
+        fs::copy(entry.path(), copy.join(entry.file_name())).unwrap();
+    }
+    let rotated = setup.run(&["--rotate"]);
+    assert_eq!(rotated.status.code(), Some(0), "{}", text(&rotated));
+    for entry in fs::read_dir(&copy).unwrap() {
+        let entry = entry.unwrap();
+        fs::copy(entry.path(), credentials.join(entry.file_name())).unwrap();
+    }
+    let output = setup.run(&[]);
+    let said = text(&output);
+    assert_eq!(output.status.code(), Some(0), "{said}");
+    for name in ["broker-native-key", "collector-native-key"] {
+        assert!(
+            said.contains(&format!(
+                "Stalwart did not know the API key in {}; made a new one",
+                credentials.join(name).display()
+            )),
+            "{said}"
+        );
+    }
+    assert!(
+        said.contains("Restart garrison-ingest and garrison-broker"),
+        "{said}"
+    );
+    assert_together(&lab, &credentials, &setup.gateway, &capture, "restored");
+    forget(&lab, &credentials);
 }

@@ -1032,6 +1032,18 @@ Notable changes for operators and users. The format follows
   Stalwart the file's credential on every run where the exporter is
   Garrison's or off, as it gives the webhook its file's key, and says
   "updated Prometheus exporter (credential unchanged)".
+- **Setup makes new keys where Stalwart no longer knows those of the
+  files.** Where `/etc/garrison/credentials` was put back from a copy older
+  than the last `--rotate`, as after a restore onto a new host, or
+  Stalwart's data from an older backup, `garrison stalwart setup` kept the
+  files' keys, said "secret unchanged" and stopped at trying them, with
+  advice about a container bridge network that did not apply. Stalwart
+  answers a key it does not know with HTTP 401 and a key it knows, from an
+  address the key does not allow, with 403. Setup now makes a key anew
+  where Stalwart answers 401, says "Stalwart did not know the API key in
+  FILE; made a new one", removes the key of that description that nobody
+  held and has the broker read the new one; the advice about a bridge
+  network comes for 403 alone.
   A user without Stalwart's administrator rights got as far as the first
   API key, whose permissions Stalwart does not let it grant, and setup
   named only Stalwart's refusal; it now says to run setup as an

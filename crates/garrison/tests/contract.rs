@@ -31,6 +31,10 @@ mod clients;
 mod keys;
 #[path = "contract/refused.rs"]
 mod refused;
+#[path = "contract/together.rs"]
+mod together;
+#[path = "contract/wire.rs"]
+mod wire;
 
 /// The tests of this target share Garrison's objects in the lab, one key
 /// of each description and one webhook, so they run one at a time.

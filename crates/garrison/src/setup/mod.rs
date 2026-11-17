@@ -37,6 +37,7 @@ use serde::{Deserialize, Serialize};
 use crate::say;
 use administrator::Source;
 use exporter::ensure_metrics;
+use keys::Key;
 use objects::{Action, Enabled, OAuthClient, Refused, Set, StoredClient};
 use restart::restart;
 use webhook::ensure_webhook;
@@ -55,6 +56,18 @@ const BROKER_PERMISSIONS: [&str; 4] = [
     "sysRoleGet",
     "sysAuthenticationGet",
 ];
+const BROKER: Key = Key {
+    file: "broker-native-key",
+    description: "garrison broker",
+    permissions: &BROKER_PERMISSIONS,
+    held: true,
+};
+const COLLECTOR: Key = Key {
+    file: "collector-native-key",
+    description: "garrison collector",
+    permissions: &COLLECTOR_PERMISSIONS,
+    held: false,
+};
 const LOOPBACK: [&str; 2] = ["127.0.0.1/32", "::1/128"];
 const MAX_ANSWER: usize = 4 * 1024 * 1024;
 
@@ -337,26 +350,10 @@ fn configure(
     replaced: &mut Vec<String>,
 ) -> Result<(), String> {
     let (directory, rotate) = (&config.credentials_directory, asked.rotate);
-    let fresh = rotate || restart::unheld(directory);
-    let broker = keys::ensure(
-        admin,
-        directory,
-        "broker-native-key",
-        "garrison broker",
-        &BROKER_PERMISSIONS,
-        networks,
-        rotate,
-    )?;
+    let mut fresh = rotate || restart::unheld(directory);
+    let broker = keys::ensure(admin, directory, &BROKER, networks, rotate)?;
     replaced.extend(broker.replaced);
-    let collector = keys::ensure(
-        admin,
-        directory,
-        "collector-native-key",
-        "garrison collector",
-        &COLLECTOR_PERMISSIONS,
-        networks,
-        rotate,
-    )?;
+    let collector = keys::ensure(admin, directory, &COLLECTOR, networks, rotate)?;
     replaced.extend(collector.replaced);
     let mut steps = vec![
         broker.step,
@@ -375,7 +372,7 @@ fn configure(
     if let Some(step) = milter::retire(config) {
         say(&format!("- {step}"));
     }
-    say(&format!("- {}", keys::verify(config, directory)?));
+    fresh |= tried(admin, config, networks, replaced)?;
     // Also a service that still holds what a rotation that failed, or a new
     // key for one Stalwart no longer had, replaced in its file.
     if fresh || restart::stale(directory) {
@@ -384,6 +381,38 @@ fn configure(
         say("Settings reloaded.");
     }
     Ok(())
+}
+
+/// Both keys tried from this host, as the services will use them; whether
+/// a key that a running service holds was made anew. A key that Stalwart
+/// does not know, as after the credentials directory was put back from a
+/// copy older than the last rotation, is made anew, once.
+fn tried(
+    admin: &Admin,
+    config: &Config,
+    networks: &Enabled,
+    replaced: &mut Vec<String>,
+) -> Result<bool, String> {
+    let directory = &config.credentials_directory;
+    let unknown = keys::verify(config, directory, &[&BROKER, &COLLECTOR])?;
+    let mut renewed = false;
+    for key in &unknown {
+        let made = keys::ensure(admin, directory, key, networks, true)?;
+        replaced.extend(made.replaced);
+        renewed |= key.held;
+        say(&format!(
+            "- Stalwart did not know the API key in {}; made a new one",
+            directory.join(key.file).display()
+        ));
+    }
+    if let Some(key) = keys::verify(config, directory, &unknown)?.first() {
+        return Err(format!(
+            "Stalwart does not take the API key it just made in {} (HTTP 401)",
+            key.file
+        ));
+    }
+    say("- Stalwart accepts both API keys from this host");
+    Ok(renewed)
 }
 
 pub(crate) fn run(config: &Config, command: &Command) -> u8 {
