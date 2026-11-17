@@ -377,3 +377,46 @@ fn the_expected_actions_are_ones_clamav_milter_takes() {
         assert_eq!(clamav(wrong).unwrap_err().0, words, "{wrong}");
     }
 }
+
+#[test]
+fn the_refresh_log_keeps_only_the_files_the_card_lists() {
+    // Whoever writes Fangfrisch's database can fill its log with names: only
+    // the listed files' rows are kept, each with its first time.
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("fangfrisch.sqlite");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("CREATE TABLE refreshlog(path TEXT, updated TEXT); BEGIN;")
+        .unwrap();
+    let row = |name: &str, updated: &str| {
+        let path = format!("/var/lib/clamav/{name}");
+        db.execute(
+            "INSERT INTO refreshlog VALUES(?, ?)",
+            [path.as_str(), updated],
+        )
+        .unwrap();
+    };
+    for index in 0..5_000 {
+        row(&format!("other-{index}.ndb"), "2026-10-29 06:00:00");
+    }
+    row("junk.ndb", "2026-10-29 05:00:00");
+    row("junk.ndb", "2026-10-29 07:00:00");
+    row("phish.ndb", "2026-10-28 06:00:00");
+    db.execute_batch("COMMIT").unwrap();
+    let listed = ["junk.ndb", "phish.ndb", "daily.cld"].map(str::to_owned);
+    let log = clamav::refresh_log(&path, &listed).unwrap();
+    assert_eq!(
+        log,
+        std::collections::BTreeMap::from([
+            (
+                "junk.ndb".to_owned(),
+                "2026-10-29T05:00:00+00:00".to_owned()
+            ),
+            (
+                "phish.ndb".to_owned(),
+                "2026-10-28T06:00:00+00:00".to_owned()
+            ),
+        ]),
+        "{} names kept",
+        log.len()
+    );
+}

@@ -216,7 +216,10 @@ impl Clamav {
         &self,
         context: &Context<'_>,
     ) -> Result<(Observation, Option<f64>), ProviderError> {
-        let log = self.fangfrisch.as_deref().map(refresh_log);
+        let log = self
+            .fangfrisch
+            .as_deref()
+            .map(|path| refresh_log(path, &self.signatures));
         let checked = log.as_ref().and_then(|read| read.as_ref().ok());
         let mut rows = Vec::new();
         // The newest daily database and its age in hours: the one file that
@@ -312,10 +315,14 @@ impl Clamav {
     }
 }
 
-/// When Fangfrisch last checked each file, by the file's name, from the whole
-/// refresh log of its database at `path`, which the reader's time bounds; or
-/// why it could not be read.
-fn refresh_log(path: &Path) -> Result<BTreeMap<String, String>, String> {
+/// When Fangfrisch last checked each of the files `listed`, by the file's
+/// name, from the refresh log of its database at `path`; or why it could not
+/// be read. The reader's time bounds the scan, and the names kept are the
+/// listed ones, whatever the log's writer put there.
+pub(super) fn refresh_log(
+    path: &Path,
+    listed: &[String],
+) -> Result<BTreeMap<String, String>, String> {
     let text = |error: rusqlite::Error| error.to_string();
     let db = reading(path, Duration::from_secs(2))
         .map_err(|error| error.to_string())?
@@ -330,7 +337,10 @@ fn refresh_log(path: &Path) -> Result<BTreeMap<String, String>, String> {
         let updated = sql_text(row.get::<_, rusqlite::types::Value>(1).map_err(text)?);
         // Fangfrisch writes UTC without saying so.
         let checked = time::parse_naive_utc(&updated).or_else(|| time::parse(&updated));
-        let name = Path::new(&path).file_name().and_then(|file| file.to_str());
+        let name = Path::new(&path)
+            .file_name()
+            .and_then(|file| file.to_str())
+            .filter(|name| listed.iter().any(|file| file == name));
         if let (Some(name), Some(checked)) = (name, checked) {
             found
                 .entry(name.to_owned())
