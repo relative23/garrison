@@ -690,6 +690,18 @@ Notable changes for operators and users. The format follows
   run's time left unasked, as after a policy taken from within the hour,
   the card stayed Unknown or Partial, which sends no notification. It is a
   warning in either case now.
+- **A blocklist that gives no verdict keeps the Blocklists card from being
+  OK.** A list that refused this resolver, as Spamhaus refuses public ones,
+  answered with an error or did not answer at all, showed only in its row:
+  where another list gave a verdict, the card was OK without a finding, also
+  where no list judged an address at all, as the IPv6 address that only
+  Spamhaus is asked about by default, and the reading was kept for six
+  hours. The card now names each list that gave no verdict, the addresses
+  and why, and an address no list judged, is Partial where it would be OK,
+  and the reading is asked again after an hour. The addresses after a
+  list's question that got no usable answer said "the list did not answer
+  before", also where it had answered with an error; they now say that the
+  list was not asked again and after which address.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not

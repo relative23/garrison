@@ -67,7 +67,7 @@ pub(super) fn said(
             let said = match asked(zone, &context.dqs_key) {
                 Ok(name) => asker.list(&name, address),
                 Err(why) => {
-                    let said = Said::Unanswered(format!("not asked: {why}"));
+                    let said = Said::Unasked(why.clone());
                     *keyless = Some(why);
                     said
                 }

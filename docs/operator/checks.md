@@ -304,8 +304,14 @@ once.
   `bl.spamcop.net`, `psbl.surriel.com`, `bl.mailspike.net`), IPv6 addresses
   of `lists_ipv6` (default `zen.spamhaus.org`): a listing of the IPv6 address
   is the one that is overlooked. A listing is an answer within
-  127.0.0.0/8, where lists give theirs. A list that gives no verdict is shown
-  as such and is no listing. Spamhaus gives none to public resolvers, such as
+  127.0.0.0/8, where lists give theirs. A list that gives no verdict is no
+  listing, and no clean result either: the card names the list, the
+  addresses and why, names an address that no list judged, and is Partial
+  where it would be OK, or Unknown where no list gave a verdict at all; such
+  a reading is asked again after an hour. A list whose question got no
+  usable answer, as an error of the resolver or none at all, is not asked
+  about the addresses after it in that reading, and their rows say so.
+  Spamhaus gives none to public resolvers, such as
   those of a hosting provider, nor after too many questions; a resolver of
   your own on the host gets one. An answer outside 127.0.0.0/8 comes from a
   resolver that answers names that do not exist with an address of its own:

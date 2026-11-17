@@ -20,8 +20,13 @@ pub(super) enum Said {
     /// Listed, with the list's answer, such as `127.0.0.2`.
     Listed(String),
     Clear,
-    /// No verdict, and why.
+    /// No verdict, and why: the list was asked and its answer gave none,
+    /// or it was not asked again after a question that got no usable
+    /// answer.
     Unanswered(String),
+    /// Not asked, and why: the run's or the lists' time was over, or the
+    /// run had no key for the list. The cards say so beside the rows.
+    Unasked(String),
 }
 
 /// A list's answer for an address it was asked about.

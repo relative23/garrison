@@ -107,6 +107,18 @@ impl Read {
         self.addresses.iter().any(|asked| asked.unread.is_some())
     }
 
+    /// Whether a list that was asked gave no verdict about an address: the
+    /// blocklists card cannot be in order then, and the next reading may
+    /// get one.
+    fn no_verdict(&self) -> bool {
+        self.addresses.iter().any(|asked| {
+            asked
+                .lists
+                .iter()
+                .any(|(_, said)| matches!(said, Said::Unanswered(_)))
+        })
+    }
+
     /// Whether an address of the mail hosts was neither asked nor counted:
     /// then neither card can be in order.
     fn incomplete(&self) -> bool {
@@ -314,7 +326,8 @@ impl Reputation {
     }
 
     /// The last reading, or a new one where that is due: after six hours,
-    /// after an hour where not everything could be asked or read, and at once for
+    /// after an hour where not everything could be asked or read, as where
+    /// a list gave no verdict, and at once for
     /// one that an earlier release kept with a zone's key, for one that
     /// had no key for the Data Query Service where this run has one, or
     /// another reason to have none, and for one made without the
@@ -332,6 +345,7 @@ impl Reputation {
                 || read.cut.is_some()
                 || read.lists_unasked
                 || read.reverse_unread()
+                || read.no_verdict()
                 || !read.hosts_unread.is_empty()
             {
                 AGAIN
@@ -414,3 +428,5 @@ mod silence_tests;
 mod tests;
 #[cfg(test)]
 mod time_tests;
+#[cfg(test)]
+mod verdicts_tests;

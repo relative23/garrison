@@ -65,12 +65,22 @@ fn once_the_runs_time_is_up_the_resolver_is_asked_nothing_more() {
         ]
     );
     // The IPv6 address was never looked up. What was asked is in order, so
-    // the cards are Partial, never Ok, and say why.
+    // the cards are Partial, never Ok, and say why; the list that did not
+    // answer is named.
     assert_eq!(
         (blocklists.state, reverse.state),
         (State::Partial, State::Partial)
     );
-    assert_eq!(blocklists.findings, [RUN_OVER]);
+    assert_eq!(
+        blocklists.findings,
+        [
+            format!(
+                "bl.spamcop.net gave no verdict for 203.0.113.5: the resolver {resolver} did not \
+                 answer: no answer within 3 s."
+            ),
+            RUN_OVER.to_owned(),
+        ]
+    );
     assert_eq!(reverse.findings, [RUN_OVER]);
     // Such a reading is asked again after an hour, not after six.
     assert_dated(&blocklists, 0, AGAIN);
