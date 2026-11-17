@@ -11,13 +11,124 @@
 // Helpers fail the test by panicking, like the test itself.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::path::PathBuf;
 use std::process::{Command, Output};
-use std::sync::{Arc, Mutex};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use clients::{
+    assert_foreign_client_kept, assert_sign_in_check, oauth_client, register_foreign_client,
+};
 use garrison_testing::lab::Lab;
-use garrison_testing::relay::relay;
 use garrison_testing::{config_text, write_private};
+use keys::{refused_without_the_gateway, rotate};
 use serde_json::json;
+
+// The parts of this test in files of their own; `tests/contract/` is no
+// target of its own, so cargo builds them only into this one.
+#[path = "contract/clients.rs"]
+mod clients;
+#[path = "contract/keys.rs"]
+mod keys;
+#[path = "contract/refused.rs"]
+mod refused;
+#[path = "contract/stopper.rs"]
+mod stopper;
+#[path = "contract/stops.rs"]
+mod stops;
+#[path = "contract/together.rs"]
+mod together;
+#[path = "contract/wire.rs"]
+mod wire;
+
+/// The tests of this target share Garrison's objects in the lab, one key
+/// of each description and one webhook, so they run one at a time.
+static LAB: Mutex<()> = Mutex::new(());
+
+/// The lab, for this test alone while the guard lives.
+fn lab() -> (MutexGuard<'static, ()>, Lab) {
+    let guard = LAB.lock().unwrap_or_else(PoisonError::into_inner);
+    (guard, Lab::from_environment())
+}
+
+/// Garrison's keys, webhook and sign-in client out of the lab, and the
+/// files out of `credentials`, as before a first setup.
+fn forget(lab: &Lab, credentials: &std::path::Path) {
+    for kind in ["ApiKey", "WebHook", "OAuthClient"] {
+        let list = lab.call(&format!("x:{kind}/get"), &json!({"ids": null}));
+        for item in list["list"].as_array().unwrap() {
+            let ours = match kind {
+                "ApiKey" => item["description"]
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("garrison ")),
+                "OAuthClient" => item["clientId"] == "https://admin.example.test/oauth-client.json",
+                _ => item["httpHeaders"]["X-Garrison"] == "events",
+            };
+            if ours {
+                lab.call(&format!("x:{kind}/set"), &json!({"destroy": [item["id"]]}));
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(credentials);
+}
+
+/// A configuration in a folder of its own and the lab's administrator in a
+/// file, for setup runs whose webhook delivers to `webhook`; the keys also
+/// allow the lab's gateway.
+struct Setup {
+    _folder: tempfile::TempDir,
+    directory: PathBuf,
+    credential: String,
+    webhook: String,
+    gateway: String,
+}
+
+impl Setup {
+    fn new(lab: &Lab, webhook: &str) -> Setup {
+        let folder = tempfile::tempdir().unwrap();
+        let directory = folder.path().to_owned();
+        let settings = config_text(&directory, &lab.url);
+        std::fs::write(directory.join("garrison.toml"), settings).unwrap();
+        let admin = std::env::var("GARRISON_LAB_ADMIN").unwrap();
+        let (user, secret) = admin.split_once(':').unwrap();
+        let credential = directory.join("admin.json");
+        let document = json!({"username": user, "secret": secret}).to_string();
+        write_private(&credential, document.as_bytes());
+        Setup {
+            _folder: folder,
+            credential: credential.to_str().unwrap().to_owned(),
+            webhook: webhook.to_owned(),
+            gateway: format!(
+                "{}/32",
+                std::env::var("GARRISON_LAB_CALLBACK_HOST").unwrap()
+            ),
+            directory,
+        }
+    }
+
+    /// `stalwart setup` with this administrator, webhook and gateway, then `more`.
+    fn arguments(&self, more: &[&str]) -> Vec<String> {
+        let base = [
+            "stalwart",
+            "setup",
+            "--admin-credential",
+            &self.credential,
+            "--webhook-url",
+            &self.webhook,
+            "--allow-network",
+            &self.gateway,
+        ];
+        base.iter()
+            .chain(more)
+            .map(|&word| word.to_owned())
+            .collect()
+    }
+
+    fn run(&self, more: &[&str]) -> Output {
+        let arguments = self.arguments(more);
+        let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+        run(&self.directory, &arguments)
+    }
+}
 
 fn run(directory: &std::path::Path, arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_garrison"))
@@ -40,10 +151,11 @@ fn text(output: &Output) -> String {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn setup_is_idempotent_and_access_init_finds_the_administrators() {
-    let mut lab = Lab::from_environment();
+    let (_guard, mut lab) = lab();
     let admin = std::env::var("GARRISON_LAB_ADMIN").unwrap();
     let (user, secret) = admin.split_once(':').unwrap();
     let directory = tempfile::tempdir().unwrap();
+    forget(&lab, &directory.path().join("credentials"));
     std::fs::write(
         directory.path().join("garrison.toml"),
         config_text(directory.path(), &lab.url),
@@ -254,217 +366,6 @@ fn macro_filter(lab: &mut Lab, directory: &std::path::Path, credential: &str, ga
     lab.created.retain(|(_, known)| *known != id);
     assert_eq!(entries(lab).len(), before);
     assert!(!note.exists());
-}
-
-/// Without the gateway the keys are allowed from loopback only, which this
-/// host is not for the lab's Stalwart, just as for a Stalwart in a bridge
-/// network: setup says so instead of leaving keys that never work. A
-/// rotation that stops there removes the old keys all the same.
-fn refused_without_the_gateway(lab: &mut Lab, directory: &std::path::Path, credential: &str) {
-    let setup = |more: &[&str]| {
-        let base = ["stalwart", "setup", "--admin-credential", credential];
-        let rest = [
-            "--webhook-url",
-            "http://127.0.0.1:9/webhook",
-            "--skip-metrics",
-        ];
-        let output = run(directory, &[&base[..], &rest, more].concat());
-        (output.status.code(), text(&output))
-    };
-    let (code, output) = setup(&[]);
-    assert_eq!(code, Some(1), "{output}");
-    let refused = "Stalwart refuses the API key in broker-native-key from this host";
-    assert!(output.contains(refused), "{output}");
-    lab.created.retain(|(kind, _)| kind != "ApiKey");
-    let (code, output) = setup(&["--rotate"]);
-    remove_afterwards(lab);
-    assert_eq!(code, Some(1), "{output}");
-    assert!(output.contains(refused), "{output}");
-    assert!(
-        output.contains(
-            "The API keys that new ones replaced were removed: restart garrison-ingest and \
-             garrison-broker once this is mended."
-        ),
-        "{output}"
-    );
-    let keys = lab.call("x:ApiKey/get", &json!({"ids": null}));
-    for description in ["garrison broker", "garrison collector"] {
-        let named = keys["list"].as_array().unwrap().iter();
-        assert_eq!(
-            named
-                .filter(|key| key["description"] == description)
-                .count(),
-            1
-        );
-    }
-}
-
-/// `--rotate` writes new secrets everywhere. The old keys still work while
-/// setup tries the new ones, the last thing it does before it restarts the
-/// services that hold the old ones, and stop working once it is done.
-fn rotate(lab: &mut Lab, directory: &std::path::Path, credential: &str, gateway: &str) {
-    let credentials = directory.join("credentials");
-    let before = secrets(&credentials);
-    // Setup reaches Stalwart through a relay that asks Stalwart about the
-    // old broker key each time setup tries a key.
-    let tried = Arc::new(Mutex::new(Vec::new()));
-    let relayed = {
-        let (url, old, tried) = (
-            lab.url.clone(),
-            before["broker-native-key"].clone(),
-            Arc::clone(&tried),
-        );
-        relay(&lab.url, "GET /jmap/session ", move || {
-            tried.lock().unwrap().push(key_status(&url, &old));
-        })
-    };
-    let settings = directory.join("garrison.toml");
-    std::fs::write(&settings, config_text(directory, &relayed)).unwrap();
-    // The rotation removes the old keys itself; the new ones are recorded below.
-    lab.created.retain(|(kind, _)| kind != "ApiKey");
-    let rotated = run(
-        directory,
-        &[
-            "stalwart",
-            "setup",
-            "--admin-credential",
-            credential,
-            "--webhook-url",
-            "http://127.0.0.1:9/webhook",
-            "--allow-network",
-            gateway,
-            "--skip-metrics",
-            "--rotate",
-        ],
-    );
-    std::fs::write(&settings, config_text(directory, &lab.url)).unwrap();
-    remove_afterwards(lab);
-    assert_eq!(rotated.status.code(), Some(0), "{}", text(&rotated));
-    for key in ["garrison broker", "garrison collector"] {
-        assert!(
-            text(&rotated).contains(&format!("- replaced API key '{key}'")),
-            "{}",
-            text(&rotated)
-        );
-    }
-    let after = secrets(&credentials);
-    for (name, old) in &before {
-        assert_ne!(&after[name], old, "{name} kept its secret");
-    }
-    // A broker that still held the old key could check rights all along.
-    assert_eq!(*tried.lock().unwrap(), [200, 200], "{}", text(&rotated));
-    assert_eq!(key_status(&lab.url, &before["broker-native-key"]), 401);
-    assert_eq!(key_status(&lab.url, &after["broker-native-key"]), 200);
-}
-
-/// The secrets `stalwart setup` wrote, by file name.
-fn secrets(credentials: &std::path::Path) -> std::collections::BTreeMap<String, String> {
-    [
-        "broker-native-key",
-        "collector-native-key",
-        "webhook-signature-key",
-    ]
-    .into_iter()
-    .map(|name| {
-        (
-            name.to_owned(),
-            std::fs::read_to_string(credentials.join(name)).unwrap(),
-        )
-    })
-    .collect()
-}
-
-/// The status of the JMAP session of Stalwart at `url` for an API key: 200
-/// or 401.
-fn key_status(url: &str, key: &str) -> u16 {
-    let answer = ureq::get(format!("{url}/jmap/session"))
-        .header("Authorization", &format!("Bearer {}", key.trim()))
-        .call();
-    match answer {
-        Ok(answer) => answer.status().as_u16(),
-        Err(ureq::Error::StatusCode(code)) => code,
-        Err(error) => panic!("{error}"),
-    }
-}
-
-/// Stalwart's answer to doctor's sign-in check (doctor/public.rs): a sign-in
-/// request with a fixed state and code challenge, with or without Garrison's
-/// callback.
-fn sign_in_answer(lab: &Lab, client: &str, callback: Option<&str>) -> serde_json::Value {
-    let mut request = ureq::get(format!("{}/api/auth/client", lab.url)).query("client_id", client);
-    if let Some(callback) = callback {
-        request = request.query("redirect_uri", callback);
-    }
-    let mut answer = request
-        .query("response_type", "code")
-        .query("scope", "openid")
-        .query("state", "garrison-doctor-0123456789abcdef")
-        .query(
-            "code_challenge",
-            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-        )
-        .query("code_challenge_method", "S256")
-        .call()
-        .unwrap();
-    serde_json::from_str(&answer.body_mut().read_to_string().unwrap()).unwrap()
-}
-
-/// Stalwart names a registered client only for a request with its callback;
-/// without one it answers with an error, which once made doctor report a
-/// registered client as unknown.
-fn assert_sign_in_check(lab: &Lab, client: &str) {
-    let callback = "https://admin.example.test/auth/callback";
-    let answer = sign_in_answer(lab, client, Some(callback));
-    assert_eq!(answer["verified"], true, "{answer}");
-    assert_eq!(answer["name"], "Garrison", "{answer}");
-    let answer = sign_in_answer(lab, client, None);
-    assert_eq!(answer["error"], "invalid_request", "{answer}");
-}
-
-/// Another application's client at Stalwart's own origin.
-const FOREIGN: &str = "https://mail.example.test/oauth-client.json";
-
-fn register_foreign_client(lab: &Lab) {
-    lab.call(
-        "x:OAuthClient/set",
-        &json!({"create": {"o": {"clientId": FOREIGN, "description": "Another application",
-            "redirectUris": {}, "postLogoutRedirectUris": {}, "scopes": {}}}}),
-    );
-}
-
-fn assert_foreign_client_kept(lab: &Lab) {
-    let clients = lab.call("x:OAuthClient/get", &json!({"ids": null}));
-    assert!(
-        clients["list"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["clientId"] == FOREIGN),
-        "{clients:?}"
-    );
-}
-
-/// The one OAuth client with this client ID, registered for sign-in only: no
-/// service such as mail, no grant but the authorization code, back only to
-/// its callback.
-fn oauth_client(lab: &Lab, client: &str) -> serde_json::Value {
-    let list = lab.call("x:OAuthClient/get", &json!({"ids": null}));
-    let mut matching = list["list"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|item| item["clientId"] == client);
-    let found = matching
-        .next()
-        .unwrap_or_else(|| panic!("no OAuth client {client}"));
-    assert!(matching.next().is_none(), "two OAuth clients {client}");
-    assert_eq!(
-        found["redirectUris"],
-        json!({"https://admin.example.test/auth/callback": true})
-    );
-    assert_eq!(found["scopes"], json!({}));
-    assert_eq!(found["grantTypes"], json!({"authorizationCode": true}));
-    found.clone()
 }
 
 /// Remove what setup created when the test ends, so the lab stays reusable.

@@ -40,3 +40,32 @@ fn an_answer_this_release_does_not_read_is_said_as_one() {
     }
     server.requests();
 }
+
+/// Stalwart answers a wrong password, an unknown user and an API key it
+/// does not know 401 (measured on Stalwart 1.1.0): setup says that the
+/// administrator was refused and what to check, where it said
+/// "x:ApiKey/get: HTTP 401". A credential it knows from an address it does
+/// not take it from is answered 403.
+#[test]
+fn a_refused_administrator_is_said_as_such() {
+    let server = serve(vec![answer(401, "{}"), answer(403, "{}")]);
+    let admin = Admin {
+        url: format!("{}/jmap/", server.url),
+        authorization: "Basic eDp5".to_owned(),
+    };
+    let said = || {
+        admin
+            .call::<_, IgnoredAny>("x:ApiKey/get", &json!({}))
+            .unwrap_err()
+    };
+    assert_eq!(
+        said(),
+        "Stalwart refused the administrator (HTTP 401): check the user name and the password, \
+         or the API key."
+    );
+    assert!(
+        said()
+            .starts_with("Stalwart refused the administrator from this host's address (HTTP 403)"),
+    );
+    server.requests();
+}

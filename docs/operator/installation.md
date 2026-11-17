@@ -143,7 +143,9 @@ This creates, and on repeated runs updates:
 - where the configuration has a `[milter]` section, the macro filter's entry
   among Stalwart's milters (step 10).
 
-All secrets go to `/etc/garrison/credentials/` (mode 0600).
+All secrets go to `/etc/garrison/credentials/` (mode 0600), which is root's:
+run setup as root. Where it cannot write there, it stops before it asks for
+the administrator, and nothing is changed.
 
 At the end it tries both keys from this host. Stalwart in Docker or Podman
 must use the host network (`--network host`, or `network_mode: host` with
@@ -427,8 +429,8 @@ Nothing asks a question unless standard input and standard output are both a
 terminal, so the same steps run from cloud-init, Ansible or a shell script.
 Every command exits with 0 on success and 1 on failure, with the reason on
 standard error; 2 means it was called wrongly or found no usable
-configuration. Run without root, `doctor` and `setup` exit with 2, and
-`install`, `upgrade`, `restore` and `uninstall` with 1.
+configuration. Run without root, `doctor`, `setup` and `stalwart setup` exit
+with 2, and `install`, `upgrade`, `restore` and `uninstall` with 1.
 
 ```sh
 tar xzf garrison-<version>-<arch>.tar.gz

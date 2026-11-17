@@ -93,7 +93,9 @@ and no longer in Garrison; restore that copy to take the restore back.
 A backup holds neither sessions nor credentials. After a restore everyone
 signs in again. On a new host, restore `/etc/garrison` from your host backup
 first; where `/etc/garrison/credentials` is lost, `garrison stalwart setup`
-makes new keys in Stalwart and here, before or after the restore.
+makes new keys in Stalwart and here, before or after the restore. It also
+makes new ones where Stalwart no longer knows the keys of the files, as
+where that backup is older than the last `--rotate`.
 
 Your own backup of the mail data is watched in another way: where it is a
 restic or borg repository, `garrison backup-check` reports its newest
@@ -210,13 +212,10 @@ Rotate after anyone who should not have them may have seen the files in
 `/etc/garrison/credentials`, and from time to time.
 
 Run it as root, so that it can restart the services itself. If it stops
-with an error after it made the new keys, or cannot restart the services,
-the old keys are removed all the same, since someone may have seen them:
-once the cause is mended, run `sudo garrison stalwart setup` again, which
-restarts `garrison-ingest` and `garrison-broker` wherever they still hold
-other secrets than the files, or restart them yourself. Setup does that
-after every run, also where it made a key anew because Stalwart no longer
-had it.
+with an error after it made new keys, it still restarts `garrison-ingest`
+and `garrison-broker` and removes the old keys, since someone may have seen
+them: once the cause is mended, run `sudo garrison stalwart setup --rotate`
+again, as its message says, also after a run that was interrupted.
 
 ## Uninstall
 
@@ -288,6 +287,8 @@ Stalwart WebUI if you no longer need them.
 | `nginx -t` says `unknown directive "http2"` | nginx before 1.25.1 knows only `listen 443 ssl http2;`. `garrison nginx` writes the form your nginx reads. |
 | The browser says that Garrison's page redirects too many times | `public_origin` names a port other than 443, and nginx passes the host name without the port: an include of your own with `proxy_set_header Host $host;`. Garrison's include passes the host as the browser sent it (`$http_host`); write it anew: `sudo sh -c 'garrison nginx --snippet > /etc/nginx/snippets/garrison.conf' && sudo nginx -t && sudo systemctl reload nginx`. |
 | The installer says polkit or systemd is too old | Garrison needs systemd 247 and polkit 0.106 or newer, with JavaScript rules: Debian 12, Ubuntu 24.04, the RHEL 9 family or newer. Ubuntu 22.04 and Debian 11 ship polkit 0.105. |
-| `stalwart setup` says Stalwart refuses an API key | Stalwart sees this host at another address than 127.0.0.1, as in a Docker or Podman bridge network. Run Stalwart in the host network (`--network host`, Compose `network_mode: host`) and run `stalwart setup` again. |
+| `stalwart setup` says Stalwart refuses an API key | Stalwart answered HTTP 403: it knows the key but sees this host at another address than 127.0.0.1, as in a Docker or Podman bridge network. Run Stalwart in the host network (`--network host`, Compose `network_mode: host`) and run `stalwart setup` again. A key Stalwart does not know at all (HTTP 401), as where `/etc/garrison/credentials` was put back from a copy older than the last rotation, setup makes anew by itself and says so. |
+| `stalwart setup` says it cannot write the credentials folder | It writes the keys Stalwart makes to `/etc/garrison/credentials`, which is root's: run it as root, with `sudo`. It stopped before it asked for the administrator and changed nothing. Run as root, it names the reason, such as a file system mounted read-only. |
+| `stalwart setup` says Stalwart refused the administrator | HTTP 401: Stalwart does not know the user name and password, or the API key, that setup was given; check them and run it again. HTTP 403: Stalwart knows the credential but does not take it from this host's address, as for an API key whose networks leave this host out, or for an address it blocked after failed sign-ins (see "Sign-in fails"). Setup changed nothing. Where it says that Stalwart refused the administrator an API key, setup was given an account without Stalwart's administrator rights: run it as an administrator. |
 | The installer says how many MiB it needs | The release and a backup as large as the databases must fit; free space where it says, then run it again. Nothing was changed. |
 | `garrison upgrade` refuses a signature | The archive or its `.minisig` changed after signing, belongs to another release, or was signed with a key the installed release does not trust. Download both again from the release page. |

@@ -14,9 +14,13 @@
 //! root-only file (see `administrator`), never from the command line.
 //! Existing objects are matched by their description (the OAuth client by its
 //! client ID); foreign objects are not touched.
+//!
+//! A secret's file holds what Stalwart uses: a new API key's at once, the
+//! webhook's new key and a new scrape credential after Stalwart has
+//! reloaded its settings, which is when it takes them. So the next run
+//! brings both places together wherever a run stopped.
 
-use std::os::unix::fs::DirBuilderExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use base64::Engine;
@@ -24,7 +28,6 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use clap::Subcommand;
 use garrison_collector::providers::stalwart::REQUIRED_PERMISSIONS as COLLECTOR_PERMISSIONS;
 use garrison_core::config::Config;
-use garrison_core::files::atomic_write;
 use garrison_core::json;
 use garrison_stalwart::http::Request;
 use garrison_stalwart::jmap::{Answers, Calls, Get, Got, Problem};
@@ -35,12 +38,14 @@ use serde::{Deserialize, Serialize};
 use crate::say;
 use administrator::Source;
 use exporter::ensure_metrics;
-use objects::{Action, Enabled, OAuthClient, Refused, Set, StoredClient};
-use restart::restart;
+use folder::{writable, write_secret};
+use keys::Key;
+use objects::{Action, Enabled, In, Listed, OAuthClient, Refused, Set, StoredClient};
 use webhook::ensure_webhook;
 
 mod administrator;
 mod exporter;
+mod folder;
 mod keys;
 mod milter;
 mod objects;
@@ -53,6 +58,18 @@ const BROKER_PERMISSIONS: [&str; 4] = [
     "sysRoleGet",
     "sysAuthenticationGet",
 ];
+const BROKER: Key = Key {
+    file: "broker-native-key",
+    description: "garrison broker",
+    permissions: &BROKER_PERMISSIONS,
+    held: true,
+};
+const COLLECTOR: Key = Key {
+    file: "collector-native-key",
+    description: "garrison collector",
+    permissions: &COLLECTOR_PERMISSIONS,
+    held: false,
+};
 const LOOPBACK: [&str; 2] = ["127.0.0.1/32", "::1/128"];
 const MAX_ANSWER: usize = 4 * 1024 * 1024;
 
@@ -128,8 +145,29 @@ impl Admin {
                 | Error::Denied(why)
                 | Error::Misconfigured(why) => format!("{method}: {why}"),
             })?;
-        if answer.status != 200 {
-            return Err(format!("{method}: HTTP {}", answer.status));
+        match answer.status {
+            200 => {}
+            // A wrong password, an unknown user and an API key Stalwart does
+            // not know (measured on Stalwart 1.1.0).
+            401 => {
+                return Err(
+                    "Stalwart refused the administrator (HTTP 401): check the user name \
+                            and the password, or the API key."
+                        .into(),
+                );
+            }
+            // A credential Stalwart knows, from an address it does not take
+            // it from: an API key's networks, or a block of the address.
+            403 => {
+                return Err(
+                    "Stalwart refused the administrator from this host's address (HTTP \
+                            403): its API key may not allow that address, or Stalwart blocked \
+                            the address after failed sign-ins, which operations.md (\"Sign-in \
+                            fails\") says how to lift."
+                        .into(),
+                );
+            }
+            status => return Err(format!("{method}: HTTP {status}")),
         }
         let document = json::parse(&answer.body, MAX_ANSWER)
             .map_err(|error| unreadable(method, &error.to_string()))?;
@@ -160,6 +198,40 @@ impl Admin {
         self.call::<_, IgnoredAny>(method, arguments).map(drop)
     }
 
+    /// Every object of a kind in `account`, or in the administrator's own
+    /// where that is `None`, and which account it is.
+    fn list_in<T: DeserializeOwned>(
+        &self,
+        kind: &str,
+        account: Option<&str>,
+    ) -> Result<Listed<T>, String> {
+        let all = In {
+            account,
+            arguments: Get {
+                ids: None,
+                properties: None,
+            },
+        };
+        self.call(&format!("x:{kind}/get"), &all)
+    }
+
+    /// A `/set` method on the objects of `account`, or on the
+    /// administrator's own where that is `None`.
+    fn set_in<T: Serialize>(
+        &self,
+        method: &str,
+        account: Option<&str>,
+        arguments: &Set<'_, T>,
+    ) -> Result<(), String> {
+        let arguments = In { account, arguments };
+        self.call::<_, IgnoredAny>(method, &arguments).map(drop)
+    }
+
+    /// Where a key opens its JMAP session.
+    fn session_url(&self) -> String {
+        format!("{}session", self.url)
+    }
+
     /// Every object of a kind, read as far as `T` names its fields.
     fn list<T: DeserializeOwned>(&self, kind: &str) -> Result<Vec<T>, String> {
         let all = Get {
@@ -176,10 +248,6 @@ impl Admin {
 /// Stalwart releases are named, since no run of setup mends it.
 fn unreadable(method: &str, what: &str) -> String {
     format!("{method}: {what}, which this release of Garrison does not read; {SUPPORTED}")
-}
-
-fn write_secret(path: &Path, value: &str) -> Result<(), String> {
-    atomic_write(path, format!("{value}\n").as_bytes(), 0o600).map_err(|error| error.to_string())
 }
 
 /// Register Garrison as an OAuth client of Stalwart.
@@ -222,110 +290,139 @@ struct Asked<'a> {
     rotate: bool,
 }
 
-fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<u8, String> {
+/// What a run has done so far, kept also where it fails on the way: the
+/// keys that new ones replace, and whether it wrote anew a secret that a
+/// running service holds, which Stalwart uses by then.
+#[derive(Default)]
+struct Done {
+    replaced: Vec<keys::Replaced>,
+    renewed: bool,
+}
+
+fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), String> {
     milter::prepare(config)?;
     let admin = Admin::new(config, source.authorization()?);
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&config.credentials_directory)
-        .map_err(|error| error.to_string())?;
     // Keys work only from these networks: loopback, and for test setups such as
     // the contract lab's Docker bridge whatever --allow-network adds.
     let mut networks = Enabled::of(LOOPBACK);
     for text in asked.allowed {
         networks.insert(keys::network(text)?);
     }
-    let mut replaced = Vec::new();
-    let configured = configure(&admin, config, asked, &networks, &mut replaced);
-    // The keys that new ones replaced go last: the services that held them
-    // have restarted with the new ones by now. After a failure they go all
-    // the same, since keys are replaced because someone may have seen them.
-    let removed = keys::remove(&admin, &replaced);
-    match (configured, removed) {
-        (Ok(()), Ok(())) => {}
-        (Ok(()), Err(also)) => {
-            return Err(format!(
-                "The API keys that new ones replaced could not be removed: {also}. Run this \
-                 again with --rotate."
-            ));
-        }
-        (Err(error), Ok(())) if replaced.is_empty() => return Err(error),
-        (Err(error), Ok(())) => {
-            return Err(format!(
-                "{error}. The API keys that new ones replaced were removed: restart \
-                 garrison-ingest and garrison-broker once this is mended."
-            ));
-        }
-        (Err(error), Err(also)) => {
-            return Err(format!(
-                "{error}. The API keys that new ones replaced could not be removed either: {also}"
-            ));
-        }
+    let mut done = Done::default();
+    let configured = configure(&admin, config, asked, &networks, &mut done);
+    // Before the replaced keys go, also after a failure: the broker would
+    // otherwise be left with a key that is gone.
+    let stale = || configured.is_ok() && restart::stale(&config.credentials_directory);
+    let restarted = (done.renewed || stale()).then(restart::restart);
+    match (&configured, restarted) {
+        (Ok(()), None) => say("Settings reloaded."),
+        (Ok(()), Some(line)) => say(&format!("Settings reloaded. {line}")),
+        (Err(_), Some(line)) => say(line),
+        (Err(_), None) => {}
     }
-    source.finish();
-    Ok(0)
+    // After a failure they go all the same, since keys are replaced
+    // because someone may have seen them.
+    let removed = keys::remove(&admin, &done.replaced);
+    let again = if asked.rotate {
+        "Run `garrison stalwart setup --rotate` again once this is mended"
+    } else {
+        "Run `garrison stalwart setup` again once this is mended"
+    };
+    match (configured, removed) {
+        (Ok(()), Ok(())) => {
+            source.finish();
+            Ok(())
+        }
+        (Ok(()), Err(also)) => Err(format!(
+            "The API keys that new ones replaced could not be removed: {also}. {again}, which \
+             removes them."
+        )),
+        (Err(error), Err(_)) if !done.replaced.is_empty() => Err(format!(
+            "{}. {again}, which also removes the API keys that new ones replaced.",
+            error.trim_end_matches('.')
+        )),
+        (Err(error), _) => Err(format!("{}. {again}.", error.trim_end_matches('.'))),
+    }
 }
 
 /// Everything setup makes in Stalwart and here but the removal of the keys
-/// that new ones replace, whose ids go to `replaced`: the keys, the
-/// webhook, the sign-in client, the exporter and the macro filter's entry,
-/// then the new keys tried from this host and the services that hold
-/// secrets restarted.
+/// that new ones replace, which go to `done` with what it wrote anew: the
+/// keys, the webhook, the sign-in client, the exporter and the macro
+/// filter's entry; then Stalwart reloads its settings, the files of the
+/// secrets it takes then are written, and the keys are tried from this host.
 fn configure(
     admin: &Admin,
     config: &Config,
     asked: &Asked<'_>,
     networks: &Enabled,
-    replaced: &mut Vec<String>,
+    done: &mut Done,
 ) -> Result<(), String> {
     let (directory, rotate) = (&config.credentials_directory, asked.rotate);
-    let fresh = rotate || restart::unheld(directory);
-    let broker = keys::ensure(
-        admin,
-        directory,
-        "broker-native-key",
-        "garrison broker",
-        &BROKER_PERMISSIONS,
-        networks,
-        rotate,
-    )?;
-    replaced.extend(broker.replaced);
-    let collector = keys::ensure(
-        admin,
-        directory,
-        "collector-native-key",
-        "garrison collector",
-        &COLLECTOR_PERMISSIONS,
-        networks,
-        rotate,
-    )?;
-    replaced.extend(collector.replaced);
+    let broker = keys::ensure(admin, directory, &BROKER, networks, rotate)?;
+    done.replaced.extend(broker.replaced);
+    done.renewed |= broker.made;
+    let collector = keys::ensure(admin, directory, &COLLECTOR, networks, rotate)?;
+    done.replaced.extend(collector.replaced);
+    let webhook = ensure_webhook(admin, config, directory, asked.webhook_url, rotate)?;
     let mut steps = vec![
         broker.step,
         collector.step,
-        ensure_webhook(admin, config, directory, asked.webhook_url, rotate)?,
+        webhook.step,
         ensure_oauth_client(admin, config)?,
     ];
+    let mut credential = None;
     if !asked.skip_metrics {
-        steps.push(ensure_metrics(admin, directory, rotate)?);
+        let exported = ensure_metrics(admin, directory, rotate)?;
+        steps.push(exported.step);
+        credential = exported.new_credential;
     }
     steps.extend(milter::ensure(admin, config, directory)?);
     admin.set("x:Action/set", &Set::create(Action::ReloadSettings))?;
+    // Stalwart signs with the webhook's new key and takes the new scrape
+    // credential from now on, so their files follow.
+    if let Some(key) = &webhook.new_key {
+        write_secret(&directory.join(webhook::KEY_FILE), key)?;
+        done.renewed = true;
+    }
+    if let Some(document) = &credential {
+        exporter::keep(directory, document)?;
+    }
     for step in &steps {
         say(&format!("- {step}"));
     }
     if let Some(step) = milter::retire(config) {
         say(&format!("- {step}"));
     }
-    say(&format!("- {}", keys::verify(config, directory)?));
-    // Also a service that still holds what a rotation that failed, or a new
-    // key for one Stalwart no longer had, replaced in its file.
-    if fresh || restart::stale(directory) {
-        restart();
-    } else {
-        say("Settings reloaded.");
+    tried(admin, config, networks, done)
+}
+
+/// Both keys tried from this host, as the services will use them. A key
+/// that Stalwart does not know, as after the credentials directory was put
+/// back from a copy older than the last rotation, is made anew, once.
+fn tried(
+    admin: &Admin,
+    config: &Config,
+    networks: &Enabled,
+    done: &mut Done,
+) -> Result<(), String> {
+    let directory = &config.credentials_directory;
+    let unknown = keys::verify(config, directory, &[&BROKER, &COLLECTOR])?;
+    for key in &unknown {
+        let made = keys::ensure(admin, directory, key, networks, true)?;
+        done.replaced.extend(made.replaced);
+        done.renewed |= key.held;
+        say(&format!(
+            "- Stalwart did not know the API key in {}; made a new one",
+            directory.join(key.file).display()
+        ));
     }
+    if let Some(key) = keys::verify(config, directory, &unknown)?.first() {
+        return Err(format!(
+            "Stalwart does not take the API key it just made in {} (HTTP 401)",
+            key.file
+        ));
+    }
+    say("- Stalwart accepts both API keys from this host");
     Ok(())
 }
 
@@ -344,16 +441,23 @@ pub(crate) fn run(config: &Config, command: &Command) -> u8 {
             return 2;
         }
     };
+    if let Err((code, message)) = writable(&config.credentials_directory) {
+        crate::complain(&message);
+        return code;
+    }
     let asked = Asked {
         skip_metrics: *skip_metrics,
         webhook_url: webhook_url.as_deref(),
         allowed: allow_network,
         rotate: *rotate,
     };
-    setup(config, &source, &asked).unwrap_or_else(|error| {
-        crate::complain(&error);
-        1
-    })
+    match setup(config, &source, &asked) {
+        Ok(()) => 0,
+        Err(error) => {
+            crate::complain(&error);
+            1
+        }
+    }
 }
 
 #[cfg(test)]

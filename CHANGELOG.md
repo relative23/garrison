@@ -1330,6 +1330,69 @@ Notable changes for operators and users. The format follows
   Service. The Ansible role ran setup only where the broker's key file was
   missing; it now runs it where any of the three key files is missing or
   empty, and a run with every key in place still changes nothing.
+- **Setup says that Stalwart refused the administrator.** A wrong
+  password, an unknown user or an API key that Stalwart does not know made
+  `garrison stalwart setup` end with "x:ApiKey/get: HTTP 401", which named
+  neither the administrator nor what to check. It now says that Stalwart
+  refused the administrator and to check the user name and the password,
+  or the API key; where Stalwart knows the credential but does not take it
+  from this host's address (HTTP 403), as for an API key whose networks
+  leave this host out, it says that. Setup changes nothing in either case.
+  A user without Stalwart's administrator rights got as far as the first
+  API key, whose permissions Stalwart does not let it grant, and setup
+  named only Stalwart's refusal; it now says to run setup as an
+  administrator who holds them.
+- **Setup without root stops before it changes anything.** Run without
+  `sudo` on an installed host, `garrison stalwart setup` could not read the
+  key files in `/etc/garrison/credentials`, which is root's, took them for
+  missing, made a new API key in Stalwart and failed to write it with
+  "Permission denied (os error 13)": the key stayed valid in Stalwart with
+  its secret lost, one more for each such run. Setup now checks, before it
+  asks for the administrator, that it can write the credentials folder;
+  where it cannot, it stops, names the folder and, without root, says to
+  run it as root and exits with 2. An error writing one of its files names
+  the file, and a new key whose file cannot be written, as on a full disk,
+  is taken out of Stalwart again.
+- **Setup gives Stalwart's exporter the credential its file holds.** Where
+  a run of `garrison stalwart setup` stopped after Stalwart's exporter took
+  a new scrape credential and before its file did, as when the run was
+  interrupted or Stalwart's answer was lost, every later run said
+  "Prometheus exporter already configured" and left the two apart: Stalwart
+  refused the collector's scrape until a `--rotate`. Setup now gives
+  Stalwart the file's credential on every run where the exporter is
+  Garrison's or off, as it gives the webhook its file's key, and says
+  "updated Prometheus exporter (credential unchanged)".
+- **Setup makes new keys where Stalwart no longer knows those of the
+  files.** Where `/etc/garrison/credentials` was put back from a copy older
+  than the last `--rotate`, as after a restore onto a new host, or
+  Stalwart's data from an older backup, `garrison stalwart setup` kept the
+  files' keys, said "secret unchanged" and stopped at trying them, with
+  advice about a container bridge network that did not apply. Stalwart
+  answers a key it does not know with HTTP 401 and a key it knows, from an
+  address the key does not allow, with 403. Setup now makes a key anew
+  where Stalwart answers 401, says "Stalwart did not know the API key in
+  FILE; made a new one", removes the key of that description that nobody
+  held and has the broker read the new one; the advice about a bridge
+  network comes for 403 alone.
+- **A plain setup replaces the keys that a stopped rotation left side by
+  side.** A `garrison stalwart setup --rotate` interrupted after it made a
+  new key, or whose removal of the old keys failed too, left two keys of
+  one description in Stalwart. A plain run then updated the first one
+  listed, said "secret unchanged" and kept the other valid for good, and
+  where the old key was listed first, it gave a new permission or network
+  to that key and not to the file's. Stalwart holds at most five API keys
+  for the administrator's account, so such keys piled up until a rotation
+  could make none ("You have exceeded your quota of 5 API keys."), the next
+  run included. Stalwart shows no key's secret, so no run can tell which
+  key a file holds: where Stalwart has more than one key of a description,
+  a plain run now makes one anew and removes them all, and where the quota
+  leaves the new key no room beside the old ones, these go first.
+- **A failed `garrison stalwart setup` no longer leaves the broker or the
+  receiver with a key that Stalwart no longer takes.** Its message names
+  the run that mends it.
+- **Setup run as another administrator keeps, or with `--rotate`
+  removes, the API keys the one before made.** They stayed valid, also
+  after a rotation.
 - **The metrics exporter's card says what makes the credential it lacks.**
   It said "No scrape credential is configured." where the file was empty,
   held no credential or could not be read, and named neither the file nor
