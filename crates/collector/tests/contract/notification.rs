@@ -231,3 +231,72 @@ fn a_password_with_spaces_read_from_its_file_signs_the_account_in() {
         std::thread::sleep(Duration::from_secs(1));
     }
 }
+
+/// A TLS session with the lab's submission listener, whose certificate the
+/// lab made itself.
+fn session(smtp: &str) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(AnyCertificate(provider)))
+        .with_no_client_auth();
+    let server = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+    let connection = rustls::ClientConnection::new(std::sync::Arc::new(config), server).unwrap();
+    let stream = std::net::TcpStream::connect((smtp, 465)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .unwrap();
+    rustls::StreamOwned::new(connection, stream)
+}
+
+/// An installation whose public origin names a port greets Stalwart with
+/// its host alone and names its message by it, and Stalwart takes it.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn stalwart_takes_a_notification_of_an_origin_with_a_port() {
+    use garrison_collector::notify::Secret;
+    use garrison_collector::notify::mail::{Mail, message, submit_over};
+
+    let _guard = one_at_a_time();
+    let lab = Lab::from_environment();
+    let smtp = std::env::var("GARRISON_LAB_SMTP").expect("GARRISON_LAB_SMTP");
+    let admin = std::env::var("GARRISON_LAB_ADMIN").expect("GARRISON_LAB_ADMIN");
+    let (user, password) = admin.split_once(':').expect("user:password");
+    let mail = Mail {
+        host: smtp.clone(),
+        port: 465,
+        user: user.to_owned(),
+        password: Secret::Text(password.to_owned()),
+        from: user.to_owned(),
+        to: user.to_owned(),
+    };
+    let host = format!("garrison-{}.example.org", random_hex(4));
+    // As the channels name the host of `https://HOST:8443`.
+    let name = format!("{host}:8443");
+    let text = message(
+        &mail,
+        &name,
+        &format!("Garrison on {name}: 1 failed"),
+        "Failed: Local full backup: The last run failed.\n",
+        time::now(),
+    );
+    submit_over(session(&smtp), &mail, &name, &text).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let ids: Vec<String> = delivered(&lab)
+            .into_iter()
+            .map(|(id, _)| id)
+            .filter(|id| id.contains(&host))
+            .collect();
+        if ids.iter().any(|id| id.ends_with(&format!("@{host}"))) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no notification named by {host} alone was delivered: {ids:?}"
+        );
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
