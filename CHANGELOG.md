@@ -1012,6 +1012,10 @@ Notable changes for operators and users. The format follows
   or the API key; where Stalwart knows the credential but does not take it
   from this host's address (HTTP 403), as for an API key whose networks
   leave this host out, it says that. Setup changes nothing in either case.
+  A user without Stalwart's administrator rights got as far as the first
+  API key, whose permissions Stalwart does not let it grant, and setup
+  named only Stalwart's refusal; it now says to run setup as an
+  administrator who holds them.
 - **Setup without root stops before it changes anything.** Run without
   `sudo` on an installed host, `garrison stalwart setup` could not read the
   key files in `/etc/garrison/credentials`, which is root's, took them for
@@ -1057,10 +1061,6 @@ Notable changes for operators and users. The format follows
   key a file holds: where Stalwart has more than one key of a description,
   a plain run now makes one anew and removes them all, and where the quota
   leaves the new key no room beside the old ones, these go first.
-  A user without Stalwart's administrator rights got as far as the first
-  API key, whose permissions Stalwart does not let it grant, and setup
-  named only Stalwart's refusal; it now says to run setup as an
-  administrator who holds them.
 - **The metrics exporter's card says what makes the credential it lacks.**
   It said "No scrape credential is configured." where the file was empty,
   held no credential or could not be read, and named neither the file nor
