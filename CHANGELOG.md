@@ -42,6 +42,10 @@ Notable changes for operators and users. The format follows
   matched a file, so the card warned of it in every run: write one of
   `Accept`, `Reject`, `Defer`, `Blackhole` and `Quarantine`, for
   `expect_on_fail` one of the first three, in any case.
+- A notification address with a query right after its server, such as
+  `https://hooks.example.org?key=…`, on which nothing ever went out, is
+  refused by `check-config`, and with it the upgrade. Write
+  `https://hooks.example.org/?key=…`.
 
 ### Added
 
@@ -399,6 +403,10 @@ Notable changes for operators and users. The format follows
   Alerts page, in the journal and by `garrison notify-test`; for a webhook
   that carries its key in its address, that was the key. Such an error now
   names the server only.
+- **A channel's name and errors show only its server, also for an address
+  with its key right after the server**, which put the key on the Alerts
+  page and in the journal, even when kept in a file. Such an address is
+  now refused, without the key.
 - **A state that a page does not know no longer stops it or reads as OK.**
   A page opened before an upgrade that brings a new state of a check failed
   on such a state and showed its error instead of its checks, and the
@@ -768,6 +776,22 @@ Notable changes for operators and users. The format follows
   until GitHub answered again, or call the running release the newest for
   as long as GitHub gave no answer; while none comes, the card now says
   that GitHub has not answered since an earlier run and is not in order.
+- **A value of another kind in the status database no longer stops the
+  collector, the watch or the charts.** A value the collector never
+  writes, in a status database that was edited by hand or damaged, such as
+  text where a time or a counter's reading belongs, bytes where text does,
+  or text that is no UTF-8, made every collection run fail before it
+  stored its snapshot, the watch over the collector stop with an error and
+  tell nobody, the metric history fail every request, or the thinning of
+  the history and the clearing of a key of Spamhaus' Data Query Service
+  warn in every run without getting on. Each such value now costs only
+  itself: a snapshot so dated gives no time, and where no snapshot gives
+  one, the watch and `garrison doctor` say that when the collector last
+  ran is not known; a counter's reading so stored counts no interval; a
+  sample so stored is left out of the history and its thinning, as is one
+  that says it holds more minutes than a step of ten; and a value of the
+  collector's memory that is no text is said once in its journal and taken
+  out.
 - **A time that is none in the event history no longer stops a check or a
   page.** The event receiver's heartbeat at a time no clock gives, in a
   history that was edited by hand or damaged, made the checks that read the
@@ -1237,6 +1261,19 @@ Notable changes for operators and users. The format follows
   Alerts page called the channels in order as soon as they were named.
   Their check is now Unknown until the first notification has gone out;
   `garrison notify-test` shows at once whether a message arrives.
+- **The channels' check judges the channels configured now.** A
+  notification that a channel did not take kept the check Failed with
+  "The last notification did not go out" until another notification went
+  out, which on a quiet host may be weeks later, also after that channel was
+  taken out of `[notifications]`, and it came back when a channel was named
+  again after all had been taken out. What a notification did is now kept
+  for each channel by the name the page shows, with the notification's time,
+  "The notification of … did not go out: …": a channel taken out, or named
+  otherwise, such as at another server, is no longer judged by it, and a
+  channel named since the last notification is Unknown, not in order, until
+  one has gone out on it. `garrison notify-test` shows whether a message
+  goes out now and does not change the check. What a release before this one
+  kept is read as before, without a time.
 - **A release list that stops answering is said.** While GitHub gave no
   answer, the release checks kept the last release it had named without a
   word. They now say since when no answer came, and after three days "the
@@ -1431,8 +1468,9 @@ Notable changes for operators and users. The format follows
   was unavailable and Stalwart's observations Unknown, which named neither
   the file nor the fix and was not so of every card. It now says once for
   each reason that the collector has no API key for Stalwart, with the
-  file, why and what makes one, that every card that needs the key says
-  so, and once that it has the key again. The Blocklists and Reverse names
+  file, why and what makes one, that each card that needs the key says
+  so when its check next reads Stalwart, and once that it has the key
+  again. The Blocklists and Reverse names
   cards kept a reading made without the key for an hour, and the Spam and
   ham by domain card for ten minutes, so that they said that setup was
   needed after setup had made the key; the first run with a key reads them

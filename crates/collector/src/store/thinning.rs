@@ -28,7 +28,10 @@ const KEPT: &str = "store.thinned-to";
 /// One sample per series and step for the samples of `?1..?2`. A name stored
 /// as a gauge and as a counter within one step keeps its increases, as the
 /// history shows them. The step's own first minute, if it has a sample, takes
-/// the result; the other minutes go after.
+/// the result; the other minutes go after. A sample the collector never
+/// writes, with a name, a time, a value or minutes of another type, or more
+/// minutes than a step holds, is no part of a step, so it costs only
+/// itself; history.rs reads samples by the same rule.
 const THIN: &str = "INSERT INTO samples(name, ts, value, kind, minutes) \
      SELECT name, ts - ts % ?3 AS step, \
             CASE WHEN max(kind = 'increase') THEN sum(value) FILTER (WHERE kind = 'increase') \
@@ -36,7 +39,10 @@ const THIN: &str = "INSERT INTO samples(name, ts, value, kind, minutes) \
             CASE WHEN max(kind = 'increase') THEN 'increase' ELSE 'gauge' END, \
             CASE WHEN max(kind = 'increase') THEN sum(minutes) FILTER (WHERE kind = 'increase') \
                  ELSE sum(minutes) END \
-     FROM samples WHERE ts >= ?1 AND ts < ?2 GROUP BY name, step \
+     FROM samples WHERE ts >= ?1 AND ts < ?2 AND typeof(name) = 'text' \
+         AND typeof(ts) = 'integer' AND typeof(value) IN ('integer', 'real') \
+         AND typeof(minutes) = 'integer' AND minutes BETWEEN 1 AND 10 \
+     GROUP BY name, step \
      ON CONFLICT(name, ts) DO UPDATE SET \
          value = excluded.value, kind = excluded.kind, minutes = excluded.minutes";
 
@@ -57,17 +63,21 @@ fn mark(db: &Connection, at: i64) -> rusqlite::Result<()> {
 /// up again from the oldest sample of all: thinning a thinned step again
 /// changes nothing.
 fn start(transaction: &Transaction<'_>, newest: i64) -> rusqlite::Result<Option<i64>> {
+    // A mark that does not read, as no text or no number, is none.
     let kept: Option<String> = transaction
         .query_row("SELECT value FROM memory WHERE key = ?", [KEPT], |row| {
-            row.get(0)
+            Ok(super::as_written(row.get_ref(0)?))
         })
-        .optional()?;
+        .optional()?
+        .flatten();
     let kept: Option<i64> = kept.and_then(|text| text.parse().ok());
     let from = kept.filter(|at| *at <= newest).unwrap_or(i64::MIN);
-    let oldest: Option<i64> =
-        transaction.query_row("SELECT min(ts) FROM samples WHERE ts >= ?", [from], |row| {
-            row.get(0)
-        })?;
+    // A time of another type, which the collector never writes, is none.
+    let oldest: Option<i64> = transaction.query_row(
+        "SELECT min(ts) FROM samples WHERE ts >= ? AND typeof(ts) = 'integer'",
+        [from],
+        |row| row.get(0),
+    )?;
     // A time that is none, in a damaged database, is read as data.
     let oldest = oldest.map(|at| at.saturating_sub(at.rem_euclid(STEP)));
     if kept.is_some_and(|at| at > newest) {

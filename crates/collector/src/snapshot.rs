@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 /// The version of the stored form.
 pub const SCHEMA: u32 = 1;
 
-/// A provider that did not report in the run; an Unknown observation stands
-/// in for it, and the cause is in the collector's journal.
+/// A provider that failed or crashed in the run; an Unknown observation
+/// stands in for it, as for one that was not run, and the cause is in the
+/// collector's journal.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderError {

@@ -17,7 +17,7 @@ changelog, and for one more release the observation carries its old id in
 | `clamav.configuration` | `clamav` | The scanner's policy |
 | `clamav.signatures` | `clamav` | The signature files |
 | `collector.duplicates` | any | Two checks reported one observation; the first was kept. `garrison check-config` names providers that will |
-| `collector.<type>` | any | A check that failed as a whole, or was not run because the checks before it used up the run's time; the collector's journal says why. The second and later providers of one type stand in as `collector.<type>.<n>`. Where more than one provider of the type is configured, the card, the notice on the Services page and the journal also name its place in the configuration, as `garrison check-config` does: `systemd (providers[3])` is the fourth `[[providers]]` entry |
+| `collector.<type>` | any | A check that failed as a whole, or was not run because the checks before it used up the run's time; the collector's journal says why. The second and later providers of one type stand in as `collector.<type>.<n>`. Where more than one provider of the type is configured, the card, the journal and, for one that failed, the notice on the Services page also name its place in the configuration, as `garrison check-config` does: `systemd (providers[3])` is the fourth `[[providers]]` entry |
 | `dns.records` | `dns` | Stands in while the domains or the resolver are not known, and for the domains after the first `max_domains` (at most 100) |
 | `dns.<domain>` | `dns` | The records of one domain |
 | `flow.spam` | `mail-flow` | Spam and ham of the last seven days |

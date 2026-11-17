@@ -24,6 +24,11 @@ pub use run::{collect, collect_from};
 
 pub(crate) use garrison_checks::values;
 
+#[cfg(test)]
+mod data_tests;
+#[cfg(test)]
+mod journal;
+
 /// The checks' test helpers, with the workspace's test configuration and
 /// certificates.
 #[cfg(test)]

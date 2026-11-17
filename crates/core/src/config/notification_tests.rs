@@ -309,3 +309,75 @@ fn the_milter_runs_where_its_section_is_there() {
     assert!(with(&[("max_message_mib", toml::Value::Integer(257))]).is_err());
     assert!(with(&[("action", text("reject"))]).is_err());
 }
+
+/// An address no request could send as written is refused, and the
+/// refusal never repeats it.
+#[test]
+fn an_address_no_request_could_send_is_refused_without_a_word_of_it() {
+    let name = "notifications.webhook_url";
+    let alone = |name: &str| {
+        format!(
+            "{name} must name its server alone before its first \"/\": write \
+             https://host/?key=…, not https://host?key=…"
+        )
+    };
+    for wrong in [
+        "https://hooks.example.org?key=SECRET",
+        "https://hooks.example.org:8443?key=SECRET",
+        "https://hooks.example.org#SECRET",
+        "https://hooks.example.org\\SECRET",
+    ] {
+        assert_eq!(
+            webhook_address(wrong, name).unwrap_err().0,
+            alone(name),
+            "{wrong}"
+        );
+        let topic = wrong.replace("hooks", "ntfy");
+        assert_eq!(
+            ntfy_address(&topic, "notifications.ntfy_url")
+                .unwrap_err()
+                .0,
+            alone("notifications.ntfy_url"),
+            "{topic}"
+        );
+        // So does check-config, from garrison.toml.
+        assert_eq!(
+            with(&[("webhook_url", text(wrong))]).unwrap_err().0,
+            alone(name),
+            "{wrong}"
+        );
+    }
+    for wrong in [
+        "https://hooks.example.org/a b",
+        "https://hooks.example.org/a\tb",
+    ] {
+        assert_eq!(
+            webhook_address(wrong, name).unwrap_err().0,
+            format!("{name} must be one line of printable characters without spaces"),
+            "{wrong:?}"
+        );
+    }
+    for wrong in [
+        "HTTPS://hooks.example.org/x",
+        " https://hooks.example.org/x",
+    ] {
+        assert_eq!(
+            webhook_address(wrong, name).unwrap_err().0,
+            format!("{name} must be an https:// URL"),
+            "{wrong:?}"
+        );
+    }
+    for right in [
+        "https://hooks.example.org/?key=SECRET",
+        "https://hooks.example.org",
+        "https://hooks.example.org:8443/x?y#z",
+        "https://[2001:db8::1]:8443/x",
+        "https://Hooks.Example.org/x",
+    ] {
+        assert_eq!(
+            webhook_address(right, name),
+            Ok(right.to_owned()),
+            "{right}"
+        );
+    }
+}

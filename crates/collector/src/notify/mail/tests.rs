@@ -291,3 +291,82 @@ fn a_reply_line_without_an_end_is_read_only_so_far() {
     let read = (64 << 20) - source.get_ref().limit();
     assert!(read < 64 << 10, "{read} bytes read");
 }
+
+/// The greeting and the Message-ID name this installation's host without
+/// the port `public_origin` may name.
+#[test]
+fn the_greeting_and_the_message_id_name_the_host_alone() {
+    let certificates = certificates();
+    for (name, greeting, domain) in [
+        (
+            "garrison.example.org",
+            "garrison.example.org",
+            "garrison.example.org",
+        ),
+        (
+            "garrison.example.org:8443",
+            "garrison.example.org",
+            "garrison.example.org",
+        ),
+        ("192.0.2.1:8443", "192.0.2.1", "192.0.2.1"),
+        ("[2001:db8::1]:8443", "[2001:db8::1]", "[2001:db8::1]"),
+    ] {
+        let (port, received) = server(&certificates, "235 OK\r\n", "250 OK\r\n");
+        submit(
+            &mail(port),
+            name,
+            "Garrison: test",
+            "A test.",
+            now(),
+            &trusted(&certificates),
+        )
+        .unwrap();
+        let lines = received.recv().unwrap();
+        assert_eq!(lines[0], format!("EHLO {greeting}"), "{name}");
+        let id = lines
+            .iter()
+            .find(|line| line.starts_with("Message-ID: "))
+            .unwrap();
+        assert!(id.ends_with(&format!("@{domain}>")), "{name}: {id}");
+    }
+}
+
+/// The channels of an installation whose `public_origin` names a port greet
+/// with its host alone; the messages still name it with its port.
+#[test]
+fn an_origin_with_a_port_greets_with_its_host_alone() {
+    use garrison_core::config::MailSettings;
+
+    let certificates = certificates();
+    let (port, received) = server(&certificates, "235 OK\r\n", "250 OK\r\n");
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = crate::testing::config(directory.path());
+    config.deployment.public_origin = "https://garrison.example.org:8443".to_owned();
+    config.notifications.mail = Some(MailSettings {
+        host: "localhost".to_owned(),
+        port,
+        user: "garrison@example.test".to_owned(),
+        from: "garrison@example.test".to_owned(),
+        to: "anna@example.test".to_owned(),
+    });
+    let secrets = crate::notify::Secrets {
+        mail: Secret::Text("app-password-of-sixteen".to_owned()),
+        ..crate::notify::Secrets::default()
+    };
+    let channels = crate::notify::Channels::of(&config, secrets);
+    assert_eq!(channels.host, "garrison.example.org:8443");
+    let note = crate::notify::Note::plain(
+        format!("Garrison on {}: test", channels.host),
+        "A test.".to_owned(),
+        crate::notify::Level::Good,
+    );
+    let roots = trusted(&certificates);
+    let sent = channels.send_with(&note, now(), &roots, crate::context::Deadline::NONE);
+    assert_eq!(sent, [("mail", Ok(()))]);
+    let lines = received.recv().unwrap();
+    assert_eq!(lines[0], "EHLO garrison.example.org");
+    assert!(
+        lines.contains(&"Subject: Garrison on garrison.example.org:8443: test".to_owned()),
+        "{lines:?}"
+    );
+}

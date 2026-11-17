@@ -61,10 +61,23 @@ impl Note {
     }
 }
 
-/// `host` of `https://host/...`.
+/// The server of an address, `host` or `host:port`, never more of it: what
+/// an earlier release kept for the watch may hold a query right after it.
 pub(crate) fn host_of(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    rest.split('/').next().unwrap_or(rest)
+    rest.split(['/', '?', '#', '\\']).next().unwrap_or(rest)
+}
+
+/// An error of a request to `url` that names its server alone, where the
+/// client named the whole address or all up to its first `/`.
+fn named_by_server(error: &str, url: &str) -> String {
+    let server = host_of(url);
+    let error = error.replace(url, &format!("the address at {server}"));
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    match rest.split('/').next() {
+        Some(taken) if taken != server && !taken.is_empty() => error.replace(taken, server),
+        _ => error,
+    }
 }
 
 /// Send `body` as JSON to `url`, done by `until`; an empty token sends none.
@@ -99,7 +112,7 @@ fn post(
         .map(|answer| answer.status)
         .map_err(|error| match url {
             "" => error,
-            url => error.replace(url, &format!("the address at {}", host_of(url))),
+            url => named_by_server(&error, url),
         })
 }
 
@@ -189,19 +202,26 @@ impl Channels {
     /// of an address, never the rest of it.
     #[must_use]
     pub fn names(&self) -> Vec<String> {
-        let mut names = Vec::new();
+        self.named().into_iter().map(|(_, name)| name).collect()
+    }
+
+    /// The same, each with its kind, as [`Channels::send`] names it.
+    #[must_use]
+    pub fn named(&self) -> Vec<(&'static str, String)> {
+        let mut named = Vec::new();
         for (channel, address) in [("ntfy", &self.ntfy), ("webhook", &self.webhook)] {
             if let Some(address) = address {
-                names.push(match address.usable() {
+                let name = match address.usable() {
                     Ok(url) => format!("{channel} at {}", host_of(url)),
                     Err(_) => format!("{channel}, whose address cannot be read"),
-                });
+                };
+                named.push((channel, name));
             }
         }
         if let Some(mail) = &self.mail {
-            names.push(format!("mail to {}", mail.to));
+            named.push(("mail", format!("mail to {}", mail.to)));
         }
-        names
+        named
     }
 
     /// Send `note` on every channel and say how each one took it.

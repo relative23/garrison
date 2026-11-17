@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use garrison_core::config::Database;
 use garrison_core::sqlite::{self, Migration, SqliteError};
+use rusqlite::types::{FromSql, ValueRef};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::context::Memory;
@@ -83,6 +84,15 @@ const REBUILD_FOR: Duration = Duration::from_secs(60);
 /// not end it (`NotifyAccess=main`).
 const ASK_FOR: Duration = Duration::from_secs(60);
 const ASK_EVERY: Duration = Duration::from_secs(20);
+
+/// A stored value as the collector writes it, or `None` for one of another
+/// type: what the status database holds is data. A damaged or hand-edited
+/// file, or another release, may hold text where a number belongs, bytes
+/// where text does, or text that is no UTF-8, and such a value costs only
+/// itself.
+pub(crate) fn as_written<T: FromSql>(value: ValueRef<'_>) -> Option<T> {
+    T::column_result(value).ok()
+}
 
 #[derive(Debug)]
 pub struct StatusStore {
@@ -165,13 +175,16 @@ impl StatusStore {
         let mut transaction = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // A time of another type is none: no run before to hold the clock
+        // against.
         let previous: Option<i64> = transaction
             .query_row(
                 "SELECT collected_at FROM snapshots ORDER BY id DESC LIMIT 1",
                 [],
-                |row| row.get(0),
+                |row| Ok(as_written(row.get_ref(0)?)),
             )
-            .optional()?;
+            .optional()?
+            .flatten();
         transaction.execute(
             "INSERT INTO snapshots(collected_at, document) VALUES(?,?)",
             params![collected_at, document],
@@ -228,15 +241,33 @@ fn with_more_time<T>(until: Instant, work: impl FnOnce() -> T) -> T {
 
 impl Memory for StatusStore {
     fn recall(&self, key: &str) -> Option<String> {
-        self.db
+        let held = self
+            .db
             .query_row("SELECT value FROM memory WHERE key=?", [key], |row| {
-                row.get(0)
+                Ok(as_written::<String>(row.get_ref(0)?))
             })
-            .optional()
-            .unwrap_or_else(|error| {
+            .optional();
+        match held {
+            Ok(Some(Some(value))) => Some(value),
+            Ok(None) => None,
+            // Bytes, or text that is no UTF-8: a value the collector never
+            // writes, said once and taken out, so that it costs only itself.
+            Ok(Some(None)) => {
+                log::warn!(
+                    "The status database held {key} as something that is no text; it is taken \
+                     out, and the collector goes on without it"
+                );
+                let removed = self.db.execute("DELETE FROM memory WHERE key=?", [key]);
+                if let Err(error) = removed {
+                    log::warn!("The status database did not take out {key}: {error}");
+                }
+                None
+            }
+            Err(error) => {
                 log::warn!("The status database did not give {key}: {error}");
                 None
-            })
+            }
+        }
     }
 
     fn keep(&self, key: &str, value: &str) {
@@ -275,13 +306,19 @@ fn counter(db: &Connection, name: &str, now: i64, minute: i64, value: f64) -> ru
     if !value.is_finite() || value < 0.0 {
         return Ok(());
     }
+    // A reading of another type, as of no number, is no reading: the new
+    // one takes its place, and the interval counts nothing.
     let previous: Option<(i64, f64)> = db
         .query_row(
             "SELECT ts, value FROM counters WHERE name=?",
             [name],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| {
+                let value = as_written::<f64>(row.get_ref(1)?).filter(|value| value.is_finite());
+                Ok(as_written::<i64>(row.get_ref(0)?).zip(value))
+            },
         )
-        .optional()?;
+        .optional()?
+        .flatten();
     db.execute(
         "INSERT INTO counters VALUES(?,?,?) \
          ON CONFLICT(name) DO UPDATE SET ts=excluded.ts, value=excluded.value",

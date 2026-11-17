@@ -148,3 +148,37 @@ fn a_reading_kept_without_the_key_is_made_again_once_there_is_one() {
     }
     assert_eq!(kept, BTreeMap::new());
 }
+
+/// A run with the key, then one without it a minute later on the same
+/// memory: the cards of a check that keeps its reading show that reading,
+/// without a word of the key, until the check reads Stalwart again. So the
+/// collector's journal says only that each card says so when its check next
+/// reads Stalwart.
+#[test]
+fn a_reading_kept_with_the_key_stands_until_its_check_reads_stalwart_again() {
+    let work = tempfile::tempdir().unwrap();
+    let mut standing = std::collections::BTreeSet::new();
+    for case in cases(work.path()) {
+        let (provider, _directory, config) = reading_stalwart(case);
+        let provider = provider.as_ref();
+        let keyed = cards_at(provider, &config, Some(NATIVE_KEY), &Forgetful, 60);
+        let keyless = cards_at(provider, &config, None, &Forgetful, 60);
+        let memory = Remembered::default();
+        cards_at(provider, &config, Some(NATIVE_KEY), &memory, 0);
+        let after = cards_at(provider, &config, None, &memory, 60);
+        for id in keyed.keys().chain(keyless.keys()) {
+            if keyed.get(id) != keyless.get(id) && after.get(id) != keyless.get(id) {
+                standing.insert(id.clone());
+            }
+        }
+    }
+    let standing: Vec<String> = standing.into_iter().collect();
+    assert_eq!(
+        standing,
+        [
+            "flow.spam-domains",
+            "reputation.blocklists",
+            "reputation.reverse"
+        ]
+    );
+}

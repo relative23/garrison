@@ -94,6 +94,17 @@ fn header(value: &str) -> String {
     }
 }
 
+/// This installation's host from `name`, as `public_origin` names it,
+/// without its port: a greeting and a Message-ID name a host, never a port
+/// (RFC 5321, 4.1.1.1; RFC 5322, 3.6.4).
+fn host_name(name: &str) -> &str {
+    match name.strip_prefix('[') {
+        // An IPv6 address keeps the colons inside its brackets.
+        Some(rest) => rest.find(']').map_or(name, |end| &name[..end + 2]),
+        None => name.rsplit_once(':').map_or(name, |(host, _)| host),
+    }
+}
+
 /// The message: its text in base64, so that any character and any length of
 /// line arrives as it was written.
 pub fn message(mail: &Mail, name: &str, subject: &str, text: &str, now: time::Timestamp) -> String {
@@ -105,9 +116,10 @@ pub fn message(mail: &Mail, name: &str, subject: &str, text: &str, now: time::Ti
         .collect();
     format!(
         "From: {sender} <{from}>\r\nTo: <{to}>\r\nSubject: {subject}\r\nDate: {date}\r\n\
-         Message-ID: <{stamp}.{unique:08x}@{name}>\r\nAuto-Submitted: auto-generated\r\n\
+         Message-ID: <{stamp}.{unique:08x}@{host}>\r\nAuto-Submitted: auto-generated\r\n\
          MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\
          Content-Transfer-Encoding: base64\r\n\r\n{body}\r\n",
+        host = host_name(name),
         sender = header(&format!("Garrison on {name}")),
         from = mail.from,
         to = mail.to,
@@ -162,7 +174,7 @@ pub fn submit_over(
     let login = STANDARD.encode(format!("\0{}\0{}", mail.user, mail.password.text()?));
     let steps = [
         (None, 220, "greet"),
-        (Some(format!("EHLO {name}\r\n")), 250, "greet"),
+        (Some(format!("EHLO {}\r\n", host_name(name))), 250, "greet"),
         (Some(format!("AUTH PLAIN {login}\r\n")), 235, "sign in"),
         (
             Some(format!("MAIL FROM:<{}>\r\n", mail.from)),
