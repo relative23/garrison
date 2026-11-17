@@ -73,14 +73,19 @@ brokers never repeat a job; pending jobs become "uncertain".
   it misses what an archive with a password hides, a document in zip
   archives nested more than three deep, Excel 4.0 macro sheets in an old
   `.xls` file, the macros of an old `.ppt` file and archive formats other
-  than zip. It decodes the document however the message carries it: base64
-  and quoted-printable as a mail program writes them, base64 a sender broke
-  up with characters outside its alphabet (a decoder passes over them, RFC
-  2045 section 6.8), uuencode, and each part by the encoding its own headers
-  declare, reading the little of MIME it needs and splitting only on a
-  boundary a header declares. It does not decode yEnc, which mail programs do
-  not decode on their own; such a message passes as one without macros. A
-  part in an encoding the filter does not decode is incomplete, below, not a
+  than zip. It finds the document however the message wraps it, without
+  reading the message's structure: it reads the message as it stands, decodes
+  the base64 of the whole message (ignoring every byte outside the alphabet,
+  RFC 2045 section 6.8, so junk, boundaries and headers around a base64 body
+  fall away), undoes quoted-printable, and reads a uuencode block wherever it
+  stands. Where a part begins or ends, how deeply it is nested and how its
+  headers are written are never read to decide this, so no boundary trick,
+  depth or header hides a document the scan would otherwise find. It does not
+  decode yEnc, which mail programs do not decode on their own, nor a body
+  wrapped again in a transfer encoding (base64 whose own bytes are another
+  base64 or uuencode body, as a base64-encoded forwarded message may be);
+  such a message passes as one without macros. A part that declares a
+  transfer encoding the filter does not decode is incomplete, below, not a
   clean message. Anyone who can reach its loopback port can ask it about a
   message, as with any milter.
 - A message the macro filter could not scan completely is taken all the same

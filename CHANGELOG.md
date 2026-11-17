@@ -150,21 +150,24 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
-- **A document with macros is found however the message encodes it.** The
-  scan undid quoted-printable only when the message held one of four byte
-  strings, so an Office document written as quoted-printable on a single
-  line, in lower-case hexadecimal, or with only some bytes escaped passed as
-  clean; base64 a sender broke up with white space, or with characters
-  outside its alphabet, was not read, nor was a uuencoded attachment. The
-  scan now reads the document however a conforming mail program decodes it:
-  quoted-printable for any message that carries its escape; base64 that
-  carries white space or other characters outside its alphabet, which a
-  decoder passes over; uuencode, in a part that declares it or as a
-  `begin`/`end` block in any body; and each MIME part by the encoding its
-  own headers declare, reading the little of MIME it needs. A part in an
-  encoding the scan cannot decode, or a uuencode block begun and not ended,
-  is now marked unscanned (`on_incomplete`), not passed as clean. yEnc, which
-  mail programs do not decode on their own, stays a named limit (see
+- **A document with macros is found however the message wraps it.** The scan
+  undid quoted-printable only when the message held one of four byte strings,
+  so an Office document written as quoted-printable on a single line, in
+  lower-case hexadecimal, or with only some bytes escaped passed as clean;
+  base64 a sender broke up with white space or with characters outside its
+  alphabet was not read, nor was a uuencoded attachment; and a document
+  behind an odd boundary, an unusual `Content-Type` or deep nesting was
+  missed. The scan now finds the document without reading the message's
+  structure: it undoes quoted-printable over the whole message, decodes the
+  base64 of the whole message on each of the four grids a run of symbols can
+  sit on (ignoring every byte outside the alphabet, so boundaries, headers
+  and junk fall away), and reads a uuencode `begin`/`end` block wherever it
+  stands. No boundary, nesting depth or header is read to decide this, so
+  none of them hides a document. A part that declares a transfer encoding the
+  scan cannot decode, or a uuencode block begun and not ended, is marked
+  unscanned (`on_incomplete`), not passed as clean. yEnc, and a document
+  wrapped again in a transfer encoding (base64 whose own bytes are another
+  base64 body), stay named limits (see
   [configuration](docs/operator/configuration.md#milter)).
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
