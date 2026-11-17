@@ -156,6 +156,65 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **After a computer slept, a page no longer shows its checks as current.**
+  A page counted the time it waited with the browser's monotonic clock,
+  which stops while a computer sleeps on Linux and macOS (measured in Chrome
+  and Firefox), so a page left open overnight showed its last status as
+  current, "OK" included, for up to a minute after waking, and a refresh
+  that failed then said that checks grown too old were marked stale while
+  none was. A page now counts the larger of the browser's two clocks, and
+  its checks turn stale within fifteen seconds of waking.
+- **A card says how old its check is by the server's clock.** "Checked …
+  ago" on every card and "last received …" above the event views compared
+  the server's times with the browser's own clock: a browser two hours
+  ahead called a fresh check "Checked 2.0 h ago" beside a badge that was
+  not stale, and one behind said "Checked in 10 min", or "last received
+  just now" of a webhook silent for hours. Both now count on from the age
+  the server gives in its answer; the coverage answer of the API carries
+  it in the new field `lastBatchAge`.
+- **A session ends when the server ends it, whatever the browser's clock
+  says.** A page ended its session by comparing the session's end, a time
+  of the host's, with the browser's own clock: a browser ahead of the host
+  by ten minutes said "Your session has ended" ten minutes early, and one
+  ahead by more than a session lasts, 30 minutes by default, ended every
+  sign-in at once, while the server kept the session. A page now counts
+  down the time the session has left, which the session's answer of the
+  API gives in the new field `expiresIn`, and then asks the server, whose
+  answer says whether the session has ended.
+- **Paging through a list keeps the keyboard's place.** "Older" and
+  "Newest" under Event history, Deliveries and Sessions turned disabled
+  while the next page loaded and at either end of the list, and a button
+  that turns disabled drops the focus to the page, in Chrome and Firefox
+  alike: each step from the keyboard left it nowhere. So did Start in a
+  maintenance dialog where a refresh of the list changed the phrase it
+  waits for. Such buttons now only say that they cannot act, keep the
+  focus, and do nothing when pressed.
+- **Attacks & bans says when its checks could not be read.** Below its
+  summary the page shows what the collector's checks say of the module,
+  such as the sending addresses that send unusually much. Where the status
+  could not be read, that card was simply missing, as if there was nothing
+  to report, and after a refresh that failed the cards stayed without the
+  notice the dashboard and the status pages give. The page now says that
+  the module's checks could not be read and why, that a refresh failed and
+  of when the status is, or that the collector has produced none yet, as
+  every page that shows checks does.
+- **A write without an answer no longer says what became of it.** Where
+  no readable answer came, as when the connection broke after the request
+  went out, the maintenance dialog said "The request could not be sent."
+  though the broker may have started the job, the account page said that
+  the browser was still signed in though the session may have ended, and
+  the settings said they could not be saved though they may have been.
+  Each now says that it is not known whether it was done. Start sends the
+  same request again and starts no job twice, and the dialog then says
+  where an earlier request had started it; a sign-out or a save can simply
+  be repeated.
+- **A page ends its session when the server refuses it.** When the access
+  policy comes to refuse a signed-in user, as when the user's binding is
+  removed, the web service ends the session at its next request and
+  answers it 403. Where that request was the page's own question for its
+  session, as when a tab is shown again or another tab starts, the page
+  stayed signed in, its menu and data in view, until a later request was
+  refused, up to a minute later. It now says that the session has ended.
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",

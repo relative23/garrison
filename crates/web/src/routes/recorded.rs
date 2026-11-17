@@ -5,6 +5,7 @@
 //! receiver adds or changes fails to compile until the API, and with it the
 //! interface's types, takes a decision about it.
 
+use garrison_core::time;
 use garrison_ingest::answers;
 use garrison_ingest::deliveries::{Lifecycle, Milestones};
 
@@ -177,42 +178,54 @@ impl From<answers::Detail<answers::SessionSummary>> for SessionDetail {
     }
 }
 
-impl From<answers::Coverage> for Coverage {
-    fn from(coverage: answers::Coverage) -> Self {
-        let answers::Coverage {
-            available,
-            receiver,
-            heartbeat_at,
-            recording_since,
-            last_batch_at,
-            failing_since,
-            retention_days,
-            event_count,
-            trimmed,
-            gap_count,
-            gaps,
-            limitations,
-        } = coverage;
-        let gaps = gaps
-            .into_iter()
-            .map(|answers::Gap { start, end, reason }| Gap { start, end, reason })
-            .collect();
-        Coverage {
-            available,
-            receiver: receiver.as_str().to_owned(),
-            heartbeat_at,
-            recording_since,
-            last_batch_at,
-            failing_since,
-            retention_days,
-            event_count,
-            trimmed: trimmed.map(|answers::Trimmed { until, limit }| Trimmed {
-                until,
-                limit: limit.as_str().to_owned(),
-            }),
-            gap_count,
-            gaps,
-            limitations: limitations.into_iter().map(str::to_owned).collect(),
-        }
+/// How long ago `at` was at `now`, in seconds; none where `at` is no time a
+/// clock gives (as `recording::time_of` reads the heartbeat) or lies ahead of
+/// `now`, written before the clock went back.
+fn age(at: i64, now: i64) -> Option<i64> {
+    (time::Timestamp::from_second(at).is_ok() && at <= now).then(|| now - at)
+}
+
+/// The coverage as the API states it in an answer at `now`, the server's
+/// second: with the age of the last batch, which a page counts on from
+/// without comparing a time of the server's with its own clock.
+pub(super) fn coverage(coverage: answers::Coverage, now: i64) -> Coverage {
+    let answers::Coverage {
+        available,
+        receiver,
+        heartbeat_at,
+        recording_since,
+        last_batch_at,
+        failing_since,
+        retention_days,
+        event_count,
+        trimmed,
+        gap_count,
+        gaps,
+        limitations,
+    } = coverage;
+    let gaps = gaps
+        .into_iter()
+        .map(|answers::Gap { start, end, reason }| Gap { start, end, reason })
+        .collect();
+    Coverage {
+        available,
+        receiver: receiver.as_str().to_owned(),
+        heartbeat_at,
+        recording_since,
+        last_batch_at,
+        last_batch_age: last_batch_at.and_then(|at| age(at, now)),
+        failing_since,
+        retention_days,
+        event_count,
+        trimmed: trimmed.map(|answers::Trimmed { until, limit }| Trimmed {
+            until,
+            limit: limit.as_str().to_owned(),
+        }),
+        gap_count,
+        gaps,
+        limitations: limitations.into_iter().map(str::to_owned).collect(),
     }
 }
+
+#[cfg(test)]
+mod tests;

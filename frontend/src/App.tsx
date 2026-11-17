@@ -8,17 +8,25 @@ import { Centered, SignIn } from "./components/SignIn";
 import { ErrorState, Loading } from "./components/Status";
 import { ViewBoundary } from "./components/ViewBoundary";
 import { useTranslation } from "./i18n";
+import { elapsed, Instant, STEP, usePageTime } from "./lib/clock";
 import { AppContext, type AppState } from "./lib/context";
 import { redirect, useRoute } from "./lib/router";
 import { useCurrentStatus } from "./lib/staleness";
 import { announce, listen } from "./lib/tabs";
 import { applyTheme, useSystemDark } from "./lib/theme";
+import { after, delay } from "./lib/timers";
 import { useResource } from "./lib/useResource";
 import { ChunkView, isPage, moduleText, PAGE_VIEWS, PAGES, VIEWS } from "./modules/registry";
+
+/** The least time between two reads of the session, in seconds, whatever
+ * asks for them. */
+const SESSION_FLOOR = 1;
 
 /** A signed-in page's session as it was read, and how that read stands. */
 interface Reads {
   current: SessionInfo;
+  /** When `current` arrived, on the page's clock. */
+  receivedAt: Instant | null;
   /** Whether `current` answers the read asked last, not one asked before it. */
   latest: boolean;
   /** Whether the read asked last failed; `current` is then the one before. */
@@ -51,12 +59,25 @@ function SignedIn({ reads, onEnded }: { reads: Reads; onEnded: (csrf: string) =>
 
   // Again when the system changes its own, which "system" follows.
   useEffect(() => applyTheme(session.preferences.theme, system), [session.preferences.theme, system]);
+  // The server ends the session by its own clock: the page counts down the
+  // time left it gave and then asks; the answer says whether it has ended.
+  const now = usePageTime();
+  const { receivedAt } = reads;
+  const asked = useRef<Instant | null>(null);
   useEffect(() => {
-    // The server ends the session at expiresAt; say so then.
-    const remaining = session.expiresAt * 1000 - Date.now();
-    const timer = setTimeout(() => onEnded(session.csrf), Math.max(0, remaining));
-    return () => clearTimeout(timer);
-  }, [session.expiresAt, session.csrf, onEnded]);
+    // Without a time left that a timer can count, the read after each refresh
+    // of the status finds the end.
+    const given = delay(typeof session.expiresIn === "number" ? session.expiresIn * 1000 : null);
+    if (given === null || !receivedAt) return undefined;
+    const left = given - elapsed(receivedAt);
+    if (left > STEP) return undefined;
+    // At most once a step, so that no answer makes it ask again and again.
+    const since = (moment: Instant | null) => (moment ? elapsed(moment) : Number.POSITIVE_INFINITY);
+    return after(Math.max(0, left, STEP - since(receivedAt), STEP - since(asked.current)), () => {
+      asked.current = new Instant();
+      again();
+    });
+  }, [receivedAt, session.expiresIn, again, now]);
 
   // Each refresh of the status had the user's rights checked a moment ago.
   // The session read right after it is answered from that same check, which
@@ -134,7 +155,7 @@ function SignedIn({ reads, onEnded }: { reads: Reads; onEnded: (csrf: string) =>
 export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionState }) {
   const { t } = useTranslation();
   const route = useRoute();
-  const session = useResource((signal) => api.session(signal), [], 0, initial);
+  const session = useResource((signal) => api.session(signal), [], 0, initial, SESSION_FLOOR);
   const again = session.reload;
   const signedIn = session.data?.session ?? null;
   // The session that ended in this tab, by its CSRF token, and whether this
@@ -144,12 +165,17 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
   const [hadSession, setHadSession] = useState(current !== null);
   if (current && !hadSession) setHadSession(true);
 
-  // A session ends here when the server answers 401, when its time is up and
-  // at a sign-out. The session is read again at once: another tab may have
-  // signed in since, which this one then takes.
+  // A session ends here when the server answers 401, or 403 to the session's
+  // own question, and at a sign-out; at the end of its time the server's
+  // answer says so (SignedIn). The session is read again then, once for each
+  // session: another tab may have signed in since, which this one then
+  // takes, and a session the server keeps refusing is not asked again.
+  const asked = useRef<string | null>(null);
   const end = useCallback(
     (csrf: string) => {
       setEnded(csrf);
+      if (asked.current === csrf) return;
+      asked.current = csrf;
       again();
     },
     [again],
@@ -196,7 +222,7 @@ export function App({ shell, initial }: { shell?: ShellKind; initial?: SessionSt
   // Another session, with its own token, gets a page of its own; the same
   // session read again keeps the page and takes what changed in it.
   if (current) {
-    const reads = { current, latest: !session.loading, failed: session.error !== null, again };
+    const reads = { current, receivedAt: session.receivedAt, latest: !session.loading, failed: session.error !== null, again };
     content = <SignedIn key={current.csrf} reads={reads} onEnded={end} />;
   }
   // The session this tab showed has ended, here or in another tab.

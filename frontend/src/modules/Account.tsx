@@ -11,8 +11,10 @@ import { Trans, useTranslation } from "../i18n";
 import { useApp } from "../lib/context";
 import { dateTime } from "../lib/format";
 
-/** Why a sign-out left the session: the server answered with an error, or
- * no answer came. Only the second is the connection's. */
+/** Why a sign-out did not end the session here: the server answered with an
+ * error, which keeps the session, or no readable answer came, after which
+ * the page does not know whether it ended. Only the second is the
+ * connection's. */
 type SignOutFailure = "answered" | "unanswered";
 
 export function Account({ onLogout }: { onLogout: () => Promise<void> }) {

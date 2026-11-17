@@ -89,6 +89,13 @@ pub struct SessionInfo {
     pub csrf: String,
     /// The second the session ends, since the epoch.
     pub expires_at: i64,
+    /// Seconds from this answer to the session's end, by the server's clock.
+    /// A page counts them down on its own clock and then asks again: the
+    /// browser's clock may be another than the server's. Null where the end
+    /// lies further ahead than a session lasts, as for a row written while
+    /// the clock ran ahead: the page then counts nothing down.
+    #[schema(required)]
+    pub expires_in: Option<i64>,
     pub modules: Vec<ModuleInfo>,
     pub actions: Vec<String>,
     pub profiles: Vec<String>,
@@ -362,6 +369,11 @@ pub struct Coverage {
     pub recording_since: Option<i64>,
     #[serde(default)]
     pub last_batch_at: Option<i64>,
+    /// Seconds from `lastBatchAt` to this answer, by the server's clock; null
+    /// before the first batch. A page adds the time it waits since: the
+    /// browser's own clock may be another than the server's.
+    #[serde(default)]
+    pub last_batch_age: Option<i64>,
     /// Since when the receiver runs without storing what Stalwart sends
     /// (`receiver` is then "refusing"); null while it stores.
     #[serde(default)]

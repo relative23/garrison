@@ -2,13 +2,16 @@
 // that a newer load or an unmounted view has made obsolete.
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { elapsed, Instant } from "./clock";
+import { after, every } from "./timers";
+
 export interface Resource<T> {
   data: T | null;
   error: Error | null;
   loading: boolean;
-  /** When `data` arrived, on the page's monotonic clock (`performance.now()`);
-   * null without data. A failed refresh keeps the data and this time. */
-  receivedAt: number | null;
+  /** When `data` arrived, on the page's clock (src/lib/clock.ts); null
+   * without data. A failed refresh keeps the data and this moment. */
+  receivedAt: Instant | null;
   reload: () => void;
 }
 
@@ -16,7 +19,7 @@ interface Settled<T> {
   request: string;
   data: T | null;
   error: Error | null;
-  receivedAt: number | null;
+  receivedAt: Instant | null;
 }
 
 /**
@@ -24,13 +27,15 @@ interface Settled<T> {
  * function is always used; a new request starts when the dependencies change,
  * on `reload()` or on each refresh tick while the page is visible. `initial` is
  * an answer the page already has for the first request: it is shown at once,
- * and that request is not made.
+ * and that request is not made. A `reload()` within `floorSeconds` of the
+ * request before waits, and one request then answers all asked meanwhile.
  */
 export function useResource<T>(
   load: (signal: AbortSignal) => Promise<T>,
   dependencies: readonly unknown[],
   refreshSeconds = 0,
   initial?: T,
+  floorSeconds = 0,
 ): Resource<T> {
   const key = JSON.stringify(dependencies);
   const latest = useRef(load);
@@ -39,9 +44,12 @@ export function useResource<T>(
   const [settled, setSettled] = useState<Settled<T>>(() =>
     initial === undefined
       ? { request: "", data: null, error: null, receivedAt: null }
-      : { request, data: initial, error: null, receivedAt: performance.now() },
+      : { request, data: initial, error: null, receivedAt: new Instant() },
   );
   const answered = useRef(initial === undefined ? null : request);
+  // When the request before started; `initial` was asked for just before.
+  const started = useRef(initial === undefined ? null : new Instant());
+  const waiting = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     latest.current = load;
@@ -52,10 +60,11 @@ export function useResource<T>(
       answered.current = null;
       return undefined;
     }
+    started.current = new Instant();
     const controller = new AbortController();
     latest.current(controller.signal).then(
       (data) => {
-        if (!controller.signal.aborted) setSettled({ request, data, error: null, receivedAt: performance.now() });
+        if (!controller.signal.aborted) setSettled({ request, data, error: null, receivedAt: new Instant() });
       },
       (reason: unknown) => {
         if (controller.signal.aborted) return;
@@ -72,16 +81,28 @@ export function useResource<T>(
     return () => controller.abort();
   }, [key, request]);
 
-  useEffect(() => {
-    if (!refreshSeconds) return undefined;
-    // Background tabs do not poll; the next visible tick refreshes.
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") setTick((value) => value + 1);
-    }, refreshSeconds * 1000);
-    return () => clearInterval(timer);
-  }, [refreshSeconds]);
+  // Background tabs do not poll; the next visible tick refreshes.
+  useEffect(
+    () =>
+      every(refreshSeconds * 1000, () => {
+        if (document.visibilityState === "visible") setTick((value) => value + 1);
+      }),
+    [refreshSeconds],
+  );
 
-  const reload = useCallback(() => setTick((value) => value + 1), []);
+  const reload = useCallback(() => {
+    if (waiting.current) return;
+    const left = floorSeconds * 1000 - (started.current ? elapsed(started.current) : Number.POSITIVE_INFINITY);
+    if (!(left > 0)) {
+      setTick((value) => value + 1);
+      return;
+    }
+    waiting.current = after(left, () => {
+      waiting.current = null;
+      setTick((value) => value + 1);
+    });
+  }, [floorSeconds]);
+  useEffect(() => () => waiting.current?.(), []);
   // Data from other filters is not shown as if it matched the current ones.
   const sameQuery = settled.request.startsWith(`${key}#`);
   return {

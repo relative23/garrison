@@ -138,6 +138,11 @@ async fn session(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Jso
                 email: grant.email.clone(),
                 csrf: caller.session.csrf.clone(),
                 expires_at: caller.session.expires_at,
+                expires_in: time_left(
+                    caller.session.expires_at,
+                    time::now(),
+                    i64::from(app.config.web.session_minutes) * 60,
+                ),
                 modules,
                 actions,
                 profiles: grant.profiles.clone(),
@@ -150,6 +155,15 @@ async fn session(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Jso
         }))
     })
     .await
+}
+
+/// The seconds a session that ends at `expires_at` has left at `now`, a
+/// begun second counted whole, so that a page asks no earlier than the store
+/// ends it; none where the end lies further ahead than `lifetime`, as for a
+/// row written while the clock ran ahead.
+fn time_left(expires_at: i64, now: time::Timestamp, lifetime: i64) -> Option<i64> {
+    let left = expires_at.checked_sub(now.as_second())?;
+    (left <= lifetime).then_some(left.max(0))
 }
 
 /// Sign out: end the session and revoke its access token.

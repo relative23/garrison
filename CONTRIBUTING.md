@@ -235,22 +235,34 @@ grants everything, or the dashboard alone to a sign-in asked for with
 `profile=viewer`, and a job it starts is queued until it is first looked at.
 `e2e/` drives it in a real Chrome. `npm run flows` does what a user does: it
 signs in, opens every page, moves through the menu, also at a phone's width
-and from the keyboard, searches the event history, goes Back from a page the
+and from the keyboard, searches the event history and pages through it from
+the keyboard, goes Back from a page the
 interface led to, opens the page search with Ctrl+K on a phone, saves
 settings, runs a maintenance action from the keyboard and signs out. It
-makes requests fail and checks what the pages say: a status refresh, a
-search and a look at a job (with the page's clock moved on), and answers
+makes requests fail and checks what the pages say: a start of an action
+that is refused and one whose answer is lost, a status refresh, a search
+and a look at a job (with the page's clock moved on), and answers
 over HTTP/2, which carries no status text, through the proxy of
-`npm run measure`; it signs in as a viewer; it takes a module from the
+`npm run measure`; it opens pages in a browser whose clock runs three hours
+ahead of the preview's, past the session's end, and three hours behind, and
+they must keep the session and give the server's ages; it answers the
+session without its time left and with thirty days left, and the page must
+read it no oftener than once a second; it lets the computer
+sleep for ten minutes, by moving the page's wall clock alone, as waking up
+does, and the checks must turn stale before the next refresh; it signs in as
+a viewer; it takes a module from the
 profile and gives it back while a page is open, through the preview's broker
 (`crates/web/examples/preview/fakes.rs`), whose questions it counts: the menu
 must follow with the next refresh, at one question each; and in two tabs it
 saves a theme, signs out and signs in again, each of which the other tab
-must follow at once. It fails on an error in the console, a failed request
+must follow at once, and a tab whose read of the session the policy refuses
+must say that the session has ended. It fails on an error in the console, a
+failed request
 other than those, a finding of axe (WCAG 2.2 AA, in the light and the dark
 theme, each as the page switches to it with the system), a page that is
 wider than a phone's screen, a closed menu that takes the focus, a menu or
-a dialog that lets the focus out or drops it, or
+a dialog that lets the focus out or drops it, a button that drops the focus
+where it cannot act, or
 a page that does not start in the theme its user chose, light on a dark
 system and dark on a light one, from the first frame it paints, or in the
 system's theme without a session or a choice; CI runs it. The build draws

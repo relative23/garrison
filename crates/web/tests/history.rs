@@ -189,11 +189,21 @@ async fn coverage_states_where_the_history_begins_and_what_is_missing_inside() {
     // The receiver comes back after more than the hour Stalwart keeps events for it.
     store.start(now).unwrap();
     setup.client.sign_in("code-admin").await;
+    let asked = time::now().as_second();
+    let mut answer = setup.client.get(&api("coverage")).await.json();
+    let answered = time::now().as_second();
+    // The last batch's age at the answer, by the server's clock, which a page
+    // counts on from: the answer's second lies between the two.
+    let age = answer["lastBatchAge"].take().as_i64().unwrap();
+    assert!(
+        (asked - (now - 5000)..=answered - (now - 5000)).contains(&age),
+        "{age}"
+    );
     assert_eq!(
-        setup.client.get(&api("coverage")).await.json(),
+        answer,
         json!({
             "available": true, "receiver": "running", "heartbeatAt": now,
-            "recordingSince": began, "lastBatchAt": now - 5000, "failingSince": null, "retentionDays": 30,
+            "recordingSince": began, "lastBatchAt": now - 5000, "lastBatchAge": null, "failingSince": null, "retentionDays": 30,
             "eventCount": 1000,
             // The limit removed the hundred oldest: the history begins after them.
             "trimmed": {"until": first + 99, "limit": "events"},

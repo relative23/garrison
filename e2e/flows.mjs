@@ -1,16 +1,19 @@
 // What a user does, in a real Chrome against the preview
 // (`cargo run -p garrison-web --example preview`): signing in, every page,
 // moving through the menu, also on a phone and from the keyboard, searching
-// the event history, going Back, the page search on a phone, saving
-// settings, running a maintenance action from the keyboard, what each page
-// shows when a request fails (also over HTTP/2, as nginx serves Garrison),
-// a profile that grants the dashboard alone, a change of rights while a page
-// is open, two tabs that follow what the other does, and signing out. Along
-// the way nothing may write an error to the console, no request to the
-// preview may fail but those a step makes fail, and axe may find nothing on
-// any page (WCAG 2.2 AA, light and dark, as the system switches the page
-// between them); a page starts in the theme its user chose, from its first
-// frame on, and without a session or a choice in the system's.
+// the event history and paging through it from the keyboard, going Back, the
+// page search on a phone, saving settings, running a maintenance action from
+// the keyboard, what each page shows when a request fails (also over HTTP/2,
+// as nginx serves Garrison), a browser whose clock runs hours ahead or
+// behind, a session answer without a time left a timer can count, the checks
+// of a computer that slept, a profile that grants the dashboard alone, a
+// change of rights while a page is open, two tabs that follow what the other
+// does, a session the policy refuses, and signing out. Along the way nothing
+// may write an error to the console, no request to the preview may fail but
+// those a step makes fail, and axe may find nothing on any page (WCAG 2.2 AA,
+// light and dark, as the system switches the page between them); a page
+// starts in the theme its user chose, from its first frame on, and without a
+// session or a choice in the system's.
 //
 // It is a check, not a measurement: it exits with 1 and lists what failed.
 // `measure.mjs` measures the same pages with Lighthouse, by hand.
@@ -19,8 +22,10 @@
 import AxeBuilder from "@axe-core/playwright";
 import { chromium } from "playwright";
 
+import { skewed, slept, untimed } from "./clocks.mjs";
 import { failingRequests } from "./failures.mjs";
-import { rightsChange, twoTabs } from "./tabs.mjs";
+import { paging } from "./paging.mjs";
+import { refusedSession, rightsChange, twoTabs } from "./tabs.mjs";
 import { chosenTheme, firstPaint } from "./themes.mjs";
 
 const options = Object.fromEntries(
@@ -197,6 +202,8 @@ try {
   await page.getByRole("button", { name: "Search", exact: true }).click();
   expect((await searched).status() === 200, "the event history answers a search");
 
+  await paging(shared, page);
+
   step = "menu on a phone";
   await page.setViewportSize(PHONE);
   await page.goto(`${origin}/admin/dashboard`);
@@ -352,12 +359,32 @@ try {
   expect(await focused(start), "a start that failed leaves the focus on Start");
   await page.unroute("**/api/actions");
   failing.clear();
+  // A start whose answer is lost: the request may have started the job, and
+  // the page says that it does not know.
+  failing.add("no answer to POST /api/actions");
+  await page.route("**/api/actions", (route) => (route.request().method() === "POST" ? route.abort() : route.continue()));
+  await start.focus();
+  await page.keyboard.press("Enter");
+  const unknown = await dialog
+    .getByText(/^No readable answer came, so it is not known whether the job started\./)
+    .waitFor({ timeout: 3000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(unknown, "a start without an answer says that it is not known whether the job started");
+  expect(await focused(start), "a start without an answer leaves the focus on Start");
+  await page.unroute("**/api/actions");
+  failing.clear();
   const submitted = page.waitForResponse((response) => response.url().endsWith("/api/actions") && response.request().method() === "POST");
   await start.click();
   expect((await submitted).status() === 202, "a confirmed action is accepted");
   expect((await dialog.count()) === 0 && (await focused(run)), "the started dialog closes on the button that opened it");
 
   await failingRequests(shared, catalog);
+  await skewed(shared);
+  await untimed(shared);
+  await slept(shared);
 
   step = "a profile that grants the dashboard alone";
   const narrow = await browser.newContext({ viewport: DESKTOP });
@@ -389,8 +416,9 @@ try {
   }
 
   await rightsChange(shared);
-  // Its last step signs in again in one of the tabs, which the next one uses.
+  // Its last step signs in again in one of the tabs, which the next ones use.
   await twoTabs(shared, page);
+  await refusedSession(shared, page);
 
   step = "sign out";
   await page.goto(`${origin}/admin/account`);
@@ -410,5 +438,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `Passed: sign-in, ${PAGES.length} pages, menu, search, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, failures, HTTP/2, a viewer, a change of rights, two tabs and sign-out.`,
+  `Passed: sign-in, ${PAGES.length} pages, menu, search, paging, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, failures, HTTP/2, a clock ahead and behind, a session without a time left, a computer that slept, a viewer, a change of rights, two tabs, a refused session and sign-out.`,
 );

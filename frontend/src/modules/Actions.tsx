@@ -11,6 +11,7 @@ import { Input } from "../components/ui/input";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableHeadRow, TableRow } from "../components/ui/table";
 import { Trans, useTranslation } from "../i18n";
 import { dateTime, duration } from "../lib/format";
+import { after } from "../lib/timers";
 import { useResource } from "../lib/useResource";
 
 const TERMINAL = new Set(["succeeded", "failed", "uncertain"]);
@@ -25,7 +26,7 @@ function isStatus(status: string): status is (typeof STATUS)[number] {
 }
 const TONES: Record<string, BadgeTone> = { succeeded: "ok", failed: "failed", uncertain: "warning" };
 
-function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job) => void }) {
+function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job, replayed: boolean) => void }) {
   // The native <dialog> traps focus and closes on Escape without injecting
   // styles, so the strict Content-Security-Policy stays intact.
   const { t } = useTranslation();
@@ -42,18 +43,21 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job) =>
     setError(null);
     dialog.current?.showModal();
   };
+  const ready = typed === action.confirmation;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    // One start at a time; Start stays focusable meanwhile.
-    if (busy) return;
+    // Only with the phrase, and one start at a time; Start stays focusable.
+    if (!ready || busy) return;
     setBusy(true);
     setError(null);
     try {
       const result = await api.submitAction({ action: action.id, requestId: requestId.current, confirmation: typed });
-      onDone(result.job);
+      onDone(result.job, result.replayed);
       dialog.current?.close();
     } catch (reason) {
-      setError(reason instanceof ApiError && reason.message ? reason.message : t("actions.notSent"));
+      // An answer says why the broker refused. Without a readable one the
+      // request may have reached it all the same and started the job.
+      setError(reason instanceof ApiError ? reason.message : t("actions.unanswered"));
     } finally {
       setBusy(false);
     }
@@ -92,10 +96,11 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job) =>
             <Button variant="outline" onClick={() => dialog.current?.close()}>
               {t("actions.cancel")}
             </Button>
-            {/* aria-disabled while it starts, not disabled: a disabled
-                button would drop the focus, and a start that fails would
-                leave the keyboard nowhere. */}
-            <Button type="submit" disabled={typed !== action.confirmation} aria-disabled={busy || undefined}>
+            {/* aria-disabled, not disabled, until the phrase is typed and
+                while it starts: a disabled button would drop the focus, so a
+                start that fails, or a refresh of the catalog that changes
+                the phrase, would leave the keyboard nowhere. */}
+            <Button type="submit" aria-disabled={!ready || busy || undefined}>
               {busy ? t("actions.starting") : t("actions.start")}
             </Button>
           </div>
@@ -112,6 +117,9 @@ export function Actions() {
   const catalog = useResource((signal) => api.actions(signal), [], 15);
   const reloadCatalog = catalog.reload;
   const [watched, setWatched] = useState<Job | null>(null);
+  // The job that an earlier request with the same ID had started, as the
+  // broker answers a request it has seen before.
+  const [replayed, setReplayed] = useState<string | null>(null);
   // Why the job's status could not be read, and how often in a row.
   const [lost, setLost] = useState<{ error: Error; times: number } | null>(null);
 
@@ -121,27 +129,24 @@ export function Actions() {
   const failures = lost?.times ?? 0;
   useEffect(() => {
     if (!watched || TERMINAL.has(watched.status)) return undefined;
-    const timer = setTimeout(
-      () => {
-        api.job(watched.id).then(
-          (job) => {
-            setLost(null);
-            setWatched(job);
-          },
-          (reason: unknown) => {
-            const error = reason instanceof Error ? reason : new Error(String(reason));
-            setLost((before) => ({ error, times: (before?.times ?? 0) + 1 }));
-          },
-        );
-        reloadCatalog();
-      },
-      Math.min(LONGEST_POLL, POLL * 2 ** failures),
-    );
-    return () => clearTimeout(timer);
+    return after(Math.min(LONGEST_POLL, POLL * 2 ** failures), () => {
+      api.job(watched.id).then(
+        (job) => {
+          setLost(null);
+          setWatched(job);
+        },
+        (reason: unknown) => {
+          const error = reason instanceof Error ? reason : new Error(String(reason));
+          setLost((before) => ({ error, times: (before?.times ?? 0) + 1 }));
+        },
+      );
+      reloadCatalog();
+    });
   }, [watched, failures, reloadCatalog]);
-  const follow = (job: Job) => {
+  const follow = (job: Job, again: boolean) => {
     setLost(null);
     setWatched(job);
+    setReplayed(again ? job.id : null);
   };
 
   // The notice needs no data: it stands first while the catalog loads, and the
@@ -170,7 +175,8 @@ export function Actions() {
       {catalog.error && <ErrorState tone="warning" lead={t("actions.refreshFailed")} error={catalog.error} retry={catalog.reload} />}
       {watched && (
         <Notice tone={watched.status === "failed" ? "error" : "info"} live>
-          {t("actions.job", { id: watched.id.slice(0, 8), status: label(watched.status), message: watched.message })}
+          <p>{t("actions.job", { id: watched.id.slice(0, 8), status: label(watched.status), message: watched.message })}</p>
+          {replayed === watched.id && <p>{t("actions.replayed")}</p>}
         </Notice>
       )}
       {watched && lost && (

@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 
-import { coverage, metrics, observation, session, status } from "./support/fixtures";
+import { coverage, metrics, NOW, observation, session, status } from "./support/fixtures";
 import { openApp } from "./support/render";
 import { serve } from "./support/server";
 
@@ -269,7 +269,7 @@ describe("sign-out", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Account" })).toBeTruthy();
   });
 
-  it("names the connection only where sign-out got no answer", async () => {
+  it("says, where sign-out got no answer, that the page does not know whether it ended", async () => {
     serve({
       ...signedIn(),
       "POST logout": () => {
@@ -278,7 +278,13 @@ describe("sign-out", () => {
     });
     openApp("/admin/account");
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
-    expect(await screen.findByText(/this browser is still signed in\. Check the connection and try again\./)).toBeTruthy();
+    // The request may have reached the server, which ended the session.
+    expect(
+      await screen.findByText(
+        "No readable answer came, so it is not known whether you were signed out. Check the connection and sign out again.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/still signed in/)).toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "Account" })).toBeTruthy();
   });
 
@@ -288,14 +294,41 @@ describe("sign-out", () => {
     expect(await screen.findByText(/Your session has ended/)).toBeTruthy();
   });
 
-  it("shows the sign-in page when the session expires", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const expiresAt = Math.floor(Date.now() / 1000) + 60;
-    serve({ ...signedIn(), "GET session": { body: { session: session({ expiresAt }) } } });
+  /** The web service's answer to the session's question while the server's
+   * clock is `serverNow()`: the session until `end`, then none. */
+  const until = (end: number, serverNow: () => number) => () => ({
+    body: { session: serverNow() < end ? session({ expiresAt: end, expiresIn: end - serverNow() }) : null },
+  });
+
+  it("shows the sign-in page when the session's time is up at the server", async () => {
+    vi.useFakeTimers();
+    const now = () => Math.floor(Date.now() / 1000);
+    serve({ ...signedIn(), "GET session": until(now() + 60, now) });
     openApp();
     await act(async () => vi.advanceTimersByTimeAsync(1000));
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeTruthy();
     await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(screen.getByText(/Your session has ended/)).toBeTruthy();
+  });
+
+  it("keeps a session the server keeps, though the browser's clock is past its end", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    // The browser's clock runs two hours ahead of the server's; the session
+    // has half an hour left by the server's.
+    const ahead = 2 * 3600;
+    vi.setSystemTime((NOW + ahead) * 1000);
+    const serverNow = () => Math.floor(Date.now() / 1000) - ahead;
+    serve({ ...signedIn(), "GET session": until(NOW + 1800, serverNow) });
+    openApp();
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.queryByText(/Your session has ended/)).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeTruthy();
+    // Shortly before its end by the server's clock it is still there, and
+    // ends when the server ends it.
+    await act(async () => vi.advanceTimersByTimeAsync(1780_000));
+    expect(screen.queryByText(/Your session has ended/)).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
     expect(screen.getByText(/Your session has ended/)).toBeTruthy();
   });
 });
@@ -349,6 +382,37 @@ describe("a sign-in or sign-out in another tab", () => {
     server.answer("GET session", { body: { session: null } });
     shown();
     expect(await screen.findByRole("link", { name: "Sign in with Stalwart" })).toBeTruthy();
+  });
+
+  it("ends the page when the server refuses the session's own question", async () => {
+    const server = serve(signedIn());
+    openApp("/admin/account");
+    expect(await screen.findByText("admin@example.test")).toBeTruthy();
+    // The policy now refuses the user: the web service ends the session at
+    // its next question and answers it 403, and knows no such session after.
+    let refused = false;
+    server.answer("GET session", () => {
+      if (refused) return { body: { session: null } };
+      refused = true;
+      return { status: 403, body: { detail: "Garrison access is not authorized" } };
+    });
+    shown();
+    expect(await screen.findByText(/Your session has ended/)).toBeTruthy();
+    expect(screen.queryByText("admin@example.test")).toBeNull();
+  });
+
+  it("asks no more about a session the server keeps refusing", async () => {
+    const server = serve(signedIn());
+    openApp("/admin/account");
+    expect(await screen.findByText("admin@example.test")).toBeTruthy();
+    server.answer("GET session", { status: 403, body: { detail: "Garrison access is not authorized" } });
+    shown();
+    expect(await screen.findByText(/Your session has ended/)).toBeTruthy();
+    // The read after it waits until a second has passed since the one before.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1500)));
+    // The first read, the one refused, and the one after it that looks for a
+    // session another tab may have made: no more.
+    expect(server.requests("GET session")).toHaveLength(3);
   });
 
   it("is not looked for at the cost of the page when the session cannot be read again", async () => {

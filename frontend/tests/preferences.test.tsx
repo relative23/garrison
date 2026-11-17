@@ -106,6 +106,25 @@ describe("settings", () => {
     expect(await screen.findByText("Settings could not be saved.")).toBeTruthy();
     expect(dark()).toBe(false);
   });
+
+  it("say, where no answer came, that it is not known whether they were saved", async () => {
+    serve({
+      ...signedIn(),
+      "PUT preferences": () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    openApp("/admin/preferences");
+    fireEvent.click(await screen.findByRole("radio", { name: "Dark" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    // The request may have reached the web service, which saved them.
+    expect(
+      await screen.findByText(
+        "No readable answer came, so it is not known whether the settings were saved. Check the connection and save again.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("Settings could not be saved.")).toBeNull();
+  });
 });
 
 describe("theme button", () => {

@@ -1,3 +1,9 @@
+import { configure } from "@testing-library/react";
+
+// A page reads its session at most once a second (SESSION_FLOOR in
+// src/App.tsx), so what a second read brings may take that long to show.
+configure({ asyncUtilTimeout: 3000 });
+
 // Browser features jsdom leaves out but the interface uses: the native
 // <dialog>, matchMedia for the system theme, and ResizeObserver and
 // IntersectionObserver for the charts and tables.

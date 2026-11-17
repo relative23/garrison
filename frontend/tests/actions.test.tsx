@@ -30,9 +30,17 @@ describe("maintenance actions", () => {
     });
     renderView(<Actions />);
     await loaded();
-    expect(confirmWith("run health checks").disabled).toBe(true);
+    // Start cannot act yet, and stays where the keyboard is: a disabled
+    // button would drop the focus it holds.
+    const early = confirmWith("run health checks");
+    expect(early.disabled).toBe(false);
+    expect(early.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(early);
+    fireEvent.submit(early.closest("form") as HTMLFormElement);
+    await act(async () => undefined);
+    expect(server.requests("POST actions")).toHaveLength(0);
     const start = confirmWith("RUN HEALTH CHECKS");
-    expect(start.disabled).toBe(false);
+    expect(start.hasAttribute("aria-disabled")).toBe(false);
     fireEvent.click(start);
     expect(await screen.findByText("Job 01234567: Queued — Waiting to start")).toBeTruthy();
     const [sent] = server.requests("POST actions");
@@ -53,7 +61,13 @@ describe("maintenance actions", () => {
     renderView(<Actions />);
     await loaded();
     fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
-    expect(await screen.findByText("The request could not be sent.")).toBeTruthy();
+    // The request may have reached the broker, which started the job.
+    expect(
+      await screen.findByText(
+        "No readable answer came, so it is not known whether the job started. Start sends the same request again, which does not start a job twice.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/could not be sent/)).toBeNull();
     expect(dialogOpen()).toBe(true);
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
@@ -64,6 +78,18 @@ describe("maintenance actions", () => {
     expect(ids).toHaveLength(3);
     expect(ids[1]).toBe(ids[0]);
     expect(ids[2]).not.toBe(ids[0]);
+  });
+
+  it("say so when the broker finds that an earlier request started the job", async () => {
+    serve({
+      "GET actions": { body: catalog() },
+      "POST actions": { status: 202, body: { job: job(), replayed: true } },
+    });
+    renderView(<Actions />);
+    await loaded();
+    fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
+    const notice = (await screen.findByText("Job 01234567: Queued — Waiting to start")).closest("[role]");
+    expect(notice?.textContent).toContain("An earlier request had started this job; it was not started again.");
   });
 
   it("start once while a start is under way, and keep Start focusable meanwhile", async () => {

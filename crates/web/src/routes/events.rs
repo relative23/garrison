@@ -19,6 +19,7 @@ use garrison_ingest::queries::{self, Filter, QueryError};
 use rusqlite::Connection;
 use serde::Deserialize;
 
+use super::recorded;
 use crate::app::App;
 use crate::error::{ApiError, ApiResult, SLOW, blocking, stopped};
 use crate::models::errors::{
@@ -221,9 +222,9 @@ async fn coverage(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Js
             ],
         )?;
         let db = reading(&app.config.database(Database::Events), READ_BUDGET)?;
-        let coverage = history::read(db.as_deref(), time::now().as_second())
-            .map_err(|error| failed(&error, SLOW))?;
-        Ok(Json(coverage.into()))
+        let now = time::now().as_second();
+        let coverage = history::read(db.as_deref(), now).map_err(|error| failed(&error, SLOW))?;
+        Ok(Json(recorded::coverage(coverage, now)))
     })
     .await
 }

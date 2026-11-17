@@ -427,6 +427,13 @@ export interface components {
             gaps: components["schemas"]["Gap"][];
             /** Format: int64 */
             heartbeatAt?: number | null;
+            /**
+             * Format: int64
+             * @description Seconds from `lastBatchAt` to this answer, by the server's clock; null
+             *     before the first batch. A page adds the time it waits since: the
+             *     browser's own clock may be another than the server's.
+             */
+            lastBatchAge?: number | null;
             /** Format: int64 */
             lastBatchAt?: number | null;
             limitations: string[];
@@ -694,6 +701,15 @@ export interface components {
              * @description The second the session ends, since the epoch.
              */
             expiresAt: number;
+            /**
+             * Format: int64
+             * @description Seconds from this answer to the session's end, by the server's clock.
+             *     A page counts them down on its own clock and then asks again: the
+             *     browser's clock may be another than the server's. Null where the end
+             *     lies further ahead than a session lasts, as for a row written while
+             *     the clock ran ahead: the page then counts nothing down.
+             */
+            expiresIn: number | null;
             links: components["schemas"]["Links"];
             modules: components["schemas"]["ModuleInfo"][];
             preferences: components["schemas"]["Preferences"];

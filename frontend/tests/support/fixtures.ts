@@ -16,7 +16,9 @@ import type {
   StatusResponse,
 } from "../../src/api/client";
 
-const NOW = Math.floor(Date.now() / 1000);
+/** The server's clock, in seconds: the time of its answers. A test may set
+ * the browser's own clock elsewhere. */
+export const NOW = Math.floor(Date.now() / 1000);
 
 /** Every module, in the server's order. */
 const MODULES = [
@@ -42,6 +44,7 @@ export function session(overrides: Partial<SessionInfo> = {}, modules: string[] 
     email: "admin@example.test",
     csrf: "csrf-token",
     expiresAt: NOW + 3600,
+    expiresIn: 3600,
     modules: modules.map((id) => ({ id, label: id, description: "" })),
     actions: [],
     profiles: ["administrator"],

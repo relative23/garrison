@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type { SessionInfo, StatusResponse } from "../../src/api/client";
 import { App } from "../../src/App";
 import type { ShellKind } from "../../src/components/Shell";
+import { Instant } from "../../src/lib/clock";
 import { AppContext, type AppState } from "../../src/lib/context";
 import { session } from "./fixtures";
 
@@ -28,7 +29,7 @@ export function renderView(
       data: status instanceof Error ? null : status,
       error: status instanceof Error ? status : (state.refreshError ?? null),
       loading: false,
-      receivedAt: status === null || status instanceof Error ? null : 0,
+      receivedAt: status === null || status instanceof Error ? null : new Instant(),
       reload: () => undefined,
     },
     saving: false,
