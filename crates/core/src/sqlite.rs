@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 
 use rusqlite::config::DbConfig;
 use rusqlite::{Connection, OpenFlags};
-use rustix::fs::{Mode, OFlags};
 
 use crate::config::Database;
 
@@ -235,23 +234,19 @@ fn connect_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, Sqlite
     )?)
 }
 
-/// Refuses what is at `path` unless it is a regular file. SQLite opens a
-/// database without `O_NONBLOCK`, so a named pipe there would hold the open
-/// until a writer came, and the user who can replace the file decides that:
-/// it is opened here first as `files` opens a file, without waiting and
-/// without following a link, and looked at. What cannot be opened so, such
-/// as a link or a file that is not there, is left to SQLite's own open to
-/// name. A pipe put there in the moment between this look and SQLite's open
-/// still holds that open; SQLite offers none that does not wait.
+/// Refuses a named pipe or other file that is no regular file at `path`,
+/// whose open by SQLite, without `O_NONBLOCK`, could wait for ever. It looks
+/// without opening: closing a descriptor of the file would drop every lock
+/// this process holds on it, another reader's among them. A link, or what
+/// cannot be looked at, is left to SQLite's own open to refuse or name. A
+/// swap between this look and SQLite's open needs write access to the
+/// folder, which only the writing service and root have.
 fn regular(path: &Path) -> Result<(), SqliteError> {
-    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
-    let Ok(file) = rustix::fs::open(path, flags, Mode::empty()) else {
-        return Ok(());
-    };
-    if fs::File::from(file).metadata()?.is_file() {
-        Ok(())
-    } else {
-        Err(SqliteError::Io(std::io::Error::other("not a regular file")))
+    match fs::symlink_metadata(path) {
+        Ok(found) if !found.is_file() && !found.file_type().is_symlink() => {
+            Err(SqliteError::Io(std::io::Error::other("not a regular file")))
+        }
+        _ => Ok(()),
     }
 }
 

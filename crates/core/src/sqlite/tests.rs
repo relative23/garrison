@@ -397,7 +397,7 @@ fn a_pipe_or_a_folder_in_place_of_a_database_is_refused_without_waiting() {
         rustix::fs::CWD,
         &pipe,
         rustix::fs::FileType::Fifo,
-        Mode::from_raw_mode(0o644),
+        rustix::fs::Mode::from_raw_mode(0o644),
         0,
     )
     .unwrap();
@@ -425,6 +425,53 @@ fn a_pipe_or_a_folder_in_place_of_a_database_is_refused_without_waiting() {
             path.display()
         );
     }
+}
+
+/// Run again by the test below as a writer in a process of its own: takes
+/// the database that `GARRISON_TEST_WRITER` names for writing, without
+/// waiting, and says whether it could.
+#[test]
+#[ignore = "the other process of a_second_reader_keeps_the_lock_of_the_first"]
+fn a_writer_of_another_process() {
+    let Ok(path) = std::env::var("GARRISON_TEST_WRITER") else {
+        return;
+    };
+    let db = Connection::open(path).unwrap();
+    db.busy_timeout(Duration::ZERO).unwrap();
+    let taken = db.execute_batch("BEGIN EXCLUSIVE").is_ok();
+    println!("writer: {}", if taken { "took it" } else { "was refused" });
+}
+
+#[test]
+fn a_second_reader_keeps_the_lock_of_the_first() {
+    // POSIX locks belong to the process: closing any descriptor of the file
+    // drops them all. Two readers of one database at once, as the web
+    // service runs them, must keep another process's writer out.
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shared.sqlite");
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("CREATE TABLE t(a); INSERT INTO t VALUES(1);")
+        .unwrap();
+    let first = reading(&path, Duration::from_secs(5)).unwrap().unwrap();
+    let count: i64 = first
+        .query_row("SELECT count(*) FROM t", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
+    let second = reading(&path, Duration::from_secs(5)).unwrap().unwrap();
+    let writer = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "sqlite::tests::a_writer_of_another_process",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("GARRISON_TEST_WRITER", &path)
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&writer.stdout);
+    assert!(said.contains("writer: was refused"), "{said}");
+    drop((first, second));
 }
 
 #[test]
