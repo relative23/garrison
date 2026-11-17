@@ -7,8 +7,8 @@
 //! and keeps none. Every run lists the snapshots and reads the repository's
 //! size. `--verify` also runs the tool's integrity check, `--restore PATH`
 //! restores that path from the newest snapshot into a directory of its own
-//! and removes it again. The report keeps the last check and the last
-//! restore until the next one.
+//! and removes it again, after what interrupted restores left. The report
+//! keeps the last check and the last restore until the next one.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -294,13 +294,8 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
         .as_deref()
         .filter(|_| report.problem.is_none())
     {
-        let run = repository.restore(wanted, newest.as_deref());
-        say(&format!(
-            "Restore test: {} ({})",
-            if run.ok { "passed" } else { "FAILED" },
-            run.detail
-        ));
-        failed |= !run.ok;
+        let (run, failing) = restore::tested(&repository, wanted, newest.as_deref());
+        failed |= failing;
         report.restore = Some(run);
     }
     let text = serde_json::to_vec_pretty(&report).unwrap_or_default();

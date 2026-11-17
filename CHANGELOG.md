@@ -370,6 +370,17 @@ Notable changes for operators and users. The format follows
   backup-check` reads the report it wrote last the same way, where it had
   read it through a link, whole and from a pipe that kept it waiting: from
   anything but such a file it keeps no last check or restore and says so.
+- **An interrupted test restore no longer leaves its copy of the mail
+  behind.** `garrison backup-check --restore` restores into a directory of
+  its own under `/var/tmp` and removes it, but one stopped on the way, as by
+  a reboot, a stopped unit or the kernel's out-of-memory killer, left the
+  restored mail there, and each later run made and removed only its own, so
+  copies piled up with each interrupted run. A test restore now first
+  removes the copies earlier runs left, those of its own making that have
+  not changed for an hour and that no run holds, and says so; a link,
+  another user's folder or anything else of that name stays as it is. A
+  copy that cannot be removed, the run's own included, is named with how to
+  remove it, and the command then ends with 1.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year

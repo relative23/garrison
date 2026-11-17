@@ -224,9 +224,12 @@ the last check or restore is older than that. A check or restore that failed,
 and a repository the tool could not open, is Failed. A test restore proves
 that the newest snapshot can be read with the password and holds the path;
 it restores into a directory of its own under `/var/tmp`, counts the files
-and removes them, and does not compare them with the originals. The exit
-code of the command is 1 when something it ran failed, so the unit shows it
-too.
+and removes them, and does not compare them with the originals. A copy that
+an interrupted run left there, as after a reboot or a stopped unit, is
+removed by the next test restore once it has not changed for an hour and no
+run holds it; the command says so, and names a copy it could not remove.
+The exit code of the command is 1 when something it ran failed, so the unit
+shows it too.
 
 ## `systemd`: one-shot jobs
 
