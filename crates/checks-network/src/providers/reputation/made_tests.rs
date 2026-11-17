@@ -4,7 +4,7 @@
 //! hosts or another `max_domains` show at once. So is one that an earlier
 //! release kept, which says nothing of them.
 
-use garrison_core::observations::Observation;
+use garrison_core::observations::{Observation, State};
 use garrison_core::time;
 use garrison_testing::http::{json as answer_json, serve};
 
@@ -133,4 +133,54 @@ fn a_reading_an_earlier_release_kept_is_made_again_at_once() {
         stopping.questions().first(),
         Some(&("mail.example.test".to_owned(), Kind::A.code()))
     );
+}
+
+/// Without `hosts`, the check asks Stalwart for the mail hosts. Where
+/// Stalwart did not give them with the collector's key, as before `garrison
+/// stalwart setup` gave the key its rights, while it was down, over its
+/// rate limit, in an answer this release does not read, or named none, the
+/// reading is made again in the next run, which asks Stalwart alone: once
+/// Stalwart gives them, the cards follow at once, not an hour later.
+#[test]
+fn a_reading_stalwart_gave_no_mail_hosts_for_is_made_again_in_the_next_run() {
+    use garrison_testing::http::answer;
+    let (resolver, stopping) = resolver_until(mail_host(), |_| false);
+    let options =
+        format!("resolver = \"{resolver}\"\nlists = [\"up.example.org\"]\nlists_ipv6 = []");
+    let domains = |zone: Option<&str>| {
+        answer_json(&serde_json::json!({"methodResponses": [["x:Domain/get",
+            {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone}]}, "0"]]}))
+    };
+    let forbidden = answer_json(
+        &serde_json::json!({"methodResponses": [["error", {"type": "forbidden"}, "0"]]}),
+    );
+    for (failure, first) in [
+        ("a method refused the key", forbidden),
+        ("the key refused", answer(403, "")),
+        ("an outage", answer(503, "")),
+        ("its rate limit", answer(429, "")),
+        (
+            "an answer this release does not read",
+            answer(200, "<html>"),
+        ),
+        ("no mail host", domains(None)),
+    ] {
+        let memory = Remembered::default();
+        let stalwart = serve(vec![first]);
+        let before = blocklists(&options, &memory, 0, &stalwart.url);
+        stalwart.requests();
+        assert_eq!(before.state, State::Unknown, "{failure}");
+        let stalwart = serve(vec![domains(Some(
+            "example.test. IN MX 10 mail.example.test.\n",
+        ))]);
+        let after = blocklists(&options, &memory, 60, &stalwart.url);
+        stalwart.requests();
+        assert_eq!(
+            (made_at(&after), after.state),
+            (60, State::Ok),
+            "{failure}: {:?}",
+            after.findings
+        );
+    }
+    stopping.questions();
 }

@@ -46,6 +46,12 @@ pub(super) struct Read {
     /// collector's key: made again in the first run that has one.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(super) no_native_key: bool,
+    /// Whether Stalwart did not give the mail hosts with the key, or named
+    /// none: made again in the next run, which asks Stalwart alone while
+    /// that lasts, so that the cards follow it at once, as once setup gave
+    /// the key its rights. Nothing but that run tells the change.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) of_stalwart: bool,
     /// The mail hosts whose addresses of a kind could not be read, and why:
     /// an answer the check cannot use counts for that host alone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

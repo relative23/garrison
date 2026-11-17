@@ -138,13 +138,40 @@ impl Reputation {
         }
     }
 
+    /// The mail hosts to ask about, and what to say of Stalwart's domains
+    /// after the first `max_domains`; where there are none, the reading
+    /// that says why. Without the key it is made again in the first run
+    /// with one; what Stalwart did not give with the key, or a Stalwart
+    /// that names no mail host, is Stalwart's to mend, and asked again in
+    /// the next run.
+    fn hosts(&self, context: &Context<'_>) -> Result<(Vec<String>, Option<String>), Box<Read>> {
+        if !self.hosts.is_empty() {
+            return Ok((self.hosts.clone(), None));
+        }
+        let keyed = context.native_key.is_some();
+        let unread = |problem: String| {
+            Box::new(Read {
+                problem: Some(problem),
+                no_native_key: !keyed,
+                of_stalwart: keyed,
+                ..Read::default()
+            })
+        };
+        let (hosts, rest) = mail_hosts(context, self.max_domains, "").map_err(unread)?;
+        if hosts.is_empty() {
+            return Err(unread(
+                "Stalwart names no mail host for its domains".to_owned(),
+            ));
+        }
+        Ok((hosts, rest))
+    }
+
     /// Ask `resolver` about every address of the mail hosts.
     fn read(&self, context: &Context<'_>, resolver: Option<SocketAddr>) -> Result<Read, String> {
         let resolver = resolver.ok_or("this host names no resolver in /etc/resolv.conf")?;
-        let (mut hosts, rest) = if self.hosts.is_empty() {
-            mail_hosts(context, self.max_domains, "")?
-        } else {
-            (self.hosts.clone(), None)
+        let (mut hosts, rest) = match self.hosts(context) {
+            Ok(found) => found,
+            Err(unread) => return Ok(*unread),
         };
         let mut left_out = Vec::new();
         if hosts.len() > MOST_HOSTS {
@@ -153,9 +180,6 @@ impl Reputation {
                 hosts.len()
             ));
             hosts.truncate(MOST_HOSTS);
-        }
-        if hosts.is_empty() {
-            return Err("Stalwart names no mail host for its domains".to_owned());
         }
         let mut asker = Asker::new(resolver, context.deadline, self.patience);
         let mut addresses = Vec::new();
@@ -255,10 +279,11 @@ impl Reputation {
     /// after an hour where not everything could be asked or read, as where
     /// a list gave no verdict, and at once for one made with another
     /// resolver or other options than this run's, or that an earlier
-    /// release kept, for one that an earlier release kept with a zone's
-    /// key, for one that had no key for the Data Query Service where this
-    /// run has one, or another reason to have none, and for one made
-    /// without the collector's key where this run has it.
+    /// release kept, for one Stalwart did not give the mail hosts for, for
+    /// one that an earlier release kept with a zone's key, for one that had
+    /// no key for the Data Query Service where this run has one, or another
+    /// reason to have none, and for one made without the collector's key
+    /// where this run has it.
     fn known(&self, context: &Context<'_>) -> Kept<Read> {
         let resolver = self.resolver.or_else(system_resolver);
         let made = self.made(resolver);
@@ -266,6 +291,7 @@ impl Reputation {
         let keyed = context.native_key.is_some();
         let wait = |_, read: &Read| {
             if read.made.as_ref() != Some(&made)
+                || read.of_stalwart
                 || read.names_a_key()
                 || (read.keyless.is_some() && read.keyless != missing)
                 || (read.no_native_key && keyed)

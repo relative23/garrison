@@ -711,6 +711,14 @@ Notable changes for operators and users. The format follows
   reading now notes what it was made with, and one made otherwise is made
   again in the next run. A reading an earlier release kept says nothing of
   it, and the first run after the upgrade makes it again.
+- **The Blocklists and Reverse names cards follow Stalwart with the next
+  run.** Where Stalwart did not give the collector's key the mail hosts, as
+  before `garrison stalwart setup` gave the key its rights, while it was
+  down or over its rate limit, the reading kept that problem for an hour:
+  both cards still said to run setup again, or that Stalwart did not
+  answer, long after it was mended. Such a reading is now made again in the
+  next run, which asks Stalwart alone, one request a minute while it lasts,
+  as one made without the key is once there is one.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not

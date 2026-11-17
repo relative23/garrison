@@ -301,7 +301,10 @@ not every address was asked and why, or are Unknown where nothing could
 be, and the reading is asked again after an hour. Without `hosts` the
 check needs the collector's API key for Stalwart to read the mail hosts;
 where it has none, both cards say so, and the first run with a key asks at
-once.
+once. Where Stalwart does not give them, as where it refused the key, did
+not answer or names no mail host, both cards say why, and the next run asks
+Stalwart again, one request a minute while that lasts, so that the cards
+follow once it gives them, as after `garrison stalwart setup`.
 
 - **Blocklists.** A listing is Failed and names the address and the list.
   IPv4 addresses are asked of `lists` (default `zen.spamhaus.org`,
