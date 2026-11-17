@@ -1,9 +1,10 @@
-//! The questions of one reading, all to one resolver: a list that does not
-//! answer is asked no more, and neither are reverse names once one went
-//! unanswered, nor where they lead once that did; the lists are asked for a
-//! time in all, and nothing is asked once the run's checks must be done.
+//! The questions of one reading, all to one resolver: a list whose question
+//! got no usable answer is asked no more, and neither are reverse names once
+//! one went unanswered, nor where they lead once that did; the lists are
+//! asked for a time in all, and nothing is asked once the run's checks must
+//! be done.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
@@ -29,8 +30,9 @@ pub(super) const PATIENCE: Duration = Duration::from_secs(30);
 /// Asks one resolver.
 pub(super) struct Asker {
     resolver: SocketAddr,
-    /// Lists that gave an error instead of an answer; they are not asked again.
-    silent: BTreeSet<String>,
+    /// Lists whose question got no usable answer, each with the address it
+    /// was about; they are not asked again.
+    silent: BTreeMap<String, IpAddr>,
     until: Instant,
     /// When the run's checks must be done.
     deadline: Deadline,
@@ -52,7 +54,7 @@ impl Asker {
     pub(super) fn new(resolver: SocketAddr, deadline: Deadline, patience: Duration) -> Self {
         Asker {
             resolver,
-            silent: BTreeSet::new(),
+            silent: BTreeMap::new(),
             until: Instant::now() + patience,
             deadline,
             cut: false,
@@ -66,24 +68,30 @@ impl Asker {
         self.deadline.expired()
     }
 
-    /// What `zone` says of `address`.
+    /// What `zone` says of `address`. A list whose question got no usable
+    /// answer, whether the resolver was silent or answered with an error,
+    /// is asked no more in the reading: the next would likely wait as long
+    /// or end as the first did. Its rows say so, naming the address whose
+    /// row says why.
     pub(super) fn list(&mut self, zone: &str, address: IpAddr) -> Said {
-        if self.silent.contains(zone) {
-            return Said::Unanswered("the list did not answer before".to_owned());
+        if let Some(first) = self.silent.get(zone) {
+            return Said::Unanswered(format!(
+                "not asked again after no usable answer for {first}"
+            ));
         }
         if self.over() {
             self.cut = true;
-            return Said::Unanswered(format!("not asked: {RUN_OVER}"));
+            return Said::Unasked(RUN_OVER.to_owned());
         }
         if Instant::now() > self.until {
             self.slow = true;
-            return Said::Unanswered(format!("not asked: {SLOW}"));
+            return Said::Unasked(SLOW.to_owned());
         }
         // An error may repeat the question, and with it a zone's key.
         let answer = dns::ask(self.resolver, &dns::reversed(address, Some(zone)), Kind::A)
             .map_err(|error| error.to_string().replace(zone, &shown(zone)));
         if answer.is_err() {
-            self.silent.insert(zone.to_owned());
+            self.silent.insert(zone.to_owned(), address);
         }
         said(zone, answer)
     }

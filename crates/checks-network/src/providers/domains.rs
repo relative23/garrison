@@ -29,17 +29,19 @@ pub(super) fn left_out(domains: usize, most: usize) -> String {
 const SETUP: &str = "run `garrison stalwart setup` again to let it read them";
 
 /// Why Stalwart did not give the collector's key its `what`, by what went
-/// wrong: it did not answer, or refused the key for its rate limit, which
-/// both pass by themselves; it refused the key, which the setup mends; or
-/// it answered in a form this release does not read, which no setup mends,
-/// so the words name the answer and where the supported releases are
-/// named. `besides` is what else mends the last two, after a comma, such as
-/// naming the endpoints for the certificate check.
+/// wrong: it could not be reached or failed on its side, which the
+/// client's words name, as where it answered HTTP 503 or the JMAP error
+/// serverFail, or it refused the key for its rate limit, which both pass by
+/// themselves; it refused the key, which the setup mends; or it answered in
+/// a form this release does not read, which no setup mends, so the words
+/// name the answer and where the supported releases are named. `besides`
+/// is what else mends the last two, after a comma, such as naming the
+/// endpoints for the certificate check.
 pub(super) fn not_given(error: &garrison_stalwart::Error, what: &str, besides: &str) -> String {
     use garrison_stalwart::{Error, SUPPORTED};
     match error {
-        Error::Unavailable(_) => {
-            format!("Stalwart did not answer the collector's request for its {what}")
+        Error::Unavailable(how) => {
+            format!("Stalwart did not complete the collector's request for its {what} ({how})")
         }
         Error::Limited(_) => format!(
             "Stalwart refused the collector's key for its rate limit (HTTP 429), so its {what} \

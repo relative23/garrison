@@ -12,7 +12,10 @@ use super::{Read, Reputation, shown};
 use crate::context::{Context, Provider};
 
 impl Reputation {
-    /// A listing is a failure; a list without a verdict is only a row.
+    /// A listing is a failure. A list that gave no verdict about an
+    /// address, asked or not, keeps the card from being in order: one that
+    /// was asked is named with its addresses and why, an address no list
+    /// judged is named, and what was not asked is said beside.
     pub(super) fn blocklists(
         &self,
         context: &Context<'_>,
@@ -23,24 +26,54 @@ impl Reputation {
         let mut rows = Vec::new();
         let mut listed = Vec::new();
         let mut verdicts = 0;
+        // The lists that were asked and gave no verdict: each with the
+        // addresses and the reason its first row gives.
+        let mut silent: Vec<(String, Vec<&str>, &str)> = Vec::new();
+        // The addresses no list gave a verdict about.
+        let mut unjudged = Vec::new();
+        // Whether a list was not asked about an address.
+        let mut not_asked = false;
         for address in &read.addresses {
+            let mut judged = false;
             for (list, said) in &address.lists {
                 let list = shown(list);
                 let result = match said {
                     Said::Listed(code) => {
                         listed.push(format!("{} is listed on {list} ({code}).", address.address));
-                        verdicts += 1;
+                        (verdicts, judged) = (verdicts + 1, true);
                         format!("listed ({code})")
                     }
                     Said::Clear => {
-                        verdicts += 1;
+                        (verdicts, judged) = (verdicts + 1, true);
                         "not listed".to_owned()
                     }
-                    Said::Unanswered(reason) => format!("no verdict: {reason}"),
+                    Said::Unanswered(reason) => {
+                        match silent.iter_mut().find(|(known, _, _)| *known == list) {
+                            Some((_, addresses, _)) => addresses.push(&address.address),
+                            None => silent.push((list.clone(), vec![&address.address], reason)),
+                        }
+                        format!("no verdict: {reason}")
+                    }
+                    Said::Unasked(reason) => {
+                        not_asked = true;
+                        format!("no verdict: not asked: {reason}")
+                    }
                 };
                 rows.push(vec![json!(address.address), json!(list), json!(result)]);
             }
+            if !judged && !address.lists.is_empty() {
+                unjudged.push(format!("No list gave a verdict for {}.", address.address));
+            }
         }
+        let silent: Vec<String> = silent
+            .into_iter()
+            .map(|(list, addresses, why)| {
+                format!(
+                    "{list} gave no verdict for {}: {why}.",
+                    addresses.join(", ")
+                )
+            })
+            .collect();
         // A list left unasked for its time concerns this card alone, as
         // does one of the Data Query Service that this run had no key for.
         let lists_unasked = read.lists_unasked;
@@ -50,7 +83,11 @@ impl Reputation {
                  asked: {why}."
             )
         });
-        let partial = read.incomplete() || lists_unasked || keyless.is_some();
+        let partial = read.incomplete()
+            || lists_unasked
+            || keyless.is_some()
+            || not_asked
+            || !silent.is_empty();
         let state = match (unknown, listed.is_empty(), verdicts) {
             (Some(_), _, _) | (None, true, 0) => State::Unknown,
             (None, false, _) => State::Failed,
@@ -61,12 +98,14 @@ impl Reputation {
         let unasked = read.addresses.is_empty() && !read.hosts_unread.is_empty();
         let mut findings = match (unknown, verdicts) {
             (Some(unknown), _) => vec![unknown.clone()],
+            // Why the lists that were asked gave none.
+            (None, 0) if !silent.is_empty() => silent,
             // What was not asked is said once, beside both cards.
             (None, 0) if read.cut.is_some() || lists_unasked || keyless.is_some() || unasked => {
                 Vec::new()
             }
             (None, 0) => vec!["No list gave a verdict.".to_owned()],
-            (None, _) => listed,
+            (None, _) => listed.into_iter().chain(silent).chain(unjudged).collect(),
         };
         if unknown.is_none() && lists_unasked {
             findings.push(format!("Not every list was asked: {SLOW}."));

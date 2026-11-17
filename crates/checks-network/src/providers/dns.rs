@@ -9,6 +9,7 @@
 //! may still be held.
 
 use std::net::{IpAddr, SocketAddr};
+use std::path::{Path, PathBuf};
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Column, Evidence, Format, Observation, Required, State, Table};
@@ -16,19 +17,27 @@ use serde_json::json;
 
 use super::domains::{Domain, domains, left_out, max_domains, not_given};
 use crate::context::{Collected, Context, NO_KEY, Provider, Report};
-use crate::dns::{self, Answer, Kind};
+use crate::dns::{self, Answer};
 use crate::options::{Checked, Options, fail};
 
 mod sts;
+mod tally;
 mod zone;
 
+use tally::{Tally, summed};
 use zone::{Expected, Verdict, expected, mx_hosts, needed, plain, verdict};
 
 const RESOLV_CONF: &str = "/etc/resolv.conf";
 
-/// The first resolver the host itself uses.
-pub(super) fn system_resolver() -> Option<SocketAddr> {
-    let text = std::fs::read_to_string(RESOLV_CONF).ok()?;
+/// What a check that asks a resolver says where neither its `resolver`
+/// option nor this host names one, and what mends it.
+pub(super) const NO_RESOLVER: &str =
+    "this host names no resolver in /etc/resolv.conf; name one with `resolver`";
+
+/// The first resolver the host itself uses: the first that
+/// `/etc/resolv.conf` names, or for tests the file at `path`.
+pub(super) fn system_resolver(path: Option<&Path>) -> Option<SocketAddr> {
+    let text = std::fs::read_to_string(path.unwrap_or(Path::new(RESOLV_CONF))).ok()?;
     dns::resolvers(&text)
         .first()
         .map(|address| (*address, 53).into())
@@ -83,122 +92,55 @@ pub(super) fn mail_hosts(
     Ok((hosts, rest))
 }
 
+/// A text as a cell of the card's table shows it: 120 characters at the
+/// most, and where it is longer, those and "…", so that it does not read as
+/// the whole of it.
+fn cell(text: &str) -> String {
+    const MOST: usize = 120;
+    if text.chars().count() <= MOST {
+        text.to_owned()
+    } else {
+        text.chars().take(MOST).chain(['…']).collect()
+    }
+}
+
 /// Why records were not asked.
 const RUN_OVER: &str = "the collection run's time was used up";
+/// So many of a domain's records are asked at the most: each run asks every
+/// one of them again, and one domain is not to take the others' time.
+const MOST_RECORDS: usize = 60;
 
-/// What the questions about a domain's records came to.
-#[derive(Debug, Default)]
-struct Tally {
-    /// The records Stalwart names for the domain.
-    records: usize,
-    /// The records that are not as Stalwart names them.
-    open: Vec<String>,
-    /// The needed records the resolver gave no answer for.
-    unanswered: usize,
-    /// The records not asked, as the run's time for its checks was over.
-    unasked: usize,
-    /// What is said of the records whose name is no DNS name.
-    nameless: Vec<String>,
-}
-
-/// The state of a domain and what to say of it: the records that are not as
-/// Stalwart names them, those that were not asked, then what the MTA-STS
-/// policy leaves open. What was asked counts; what was not keeps the domain
-/// from being in order. A record whose name is no DNS name can never be
-/// published, so a needed one is not as Stalwart names it.
-fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>) {
-    let (mut state, mut findings) = if tally.records == 0 {
-        (
-            State::Unknown,
-            vec!["Stalwart names no records for this domain.".to_owned()],
-        )
-    } else if !tally.open.is_empty() {
-        (
-            State::Warning,
-            vec![format!(
-                "Not as Stalwart names them: {}.",
-                tally.open.join(", ")
-            )],
-        )
-    } else if tally.unanswered > 0 {
-        (
-            State::Unknown,
-            vec![format!(
-                "The resolver gave no answer for {} of the needed records.",
-                tally.unanswered
-            )],
-        )
-    } else if tally.unasked == tally.records {
-        (State::Unknown, Vec::new())
-    } else if tally.unasked > 0 {
-        (State::Partial, Vec::new())
-    } else {
-        (State::Ok, Vec::new())
-    };
-    findings.extend(tally.nameless.iter().cloned());
-    if tally.unasked > 0 && tally.unasked == tally.records {
-        findings.push(format!("Not asked: {RUN_OVER}."));
-    } else if tally.unasked > 0 {
-        findings.push(format!(
-            "{} of its {} records {} not asked: {RUN_OVER}.",
-            tally.unasked,
-            tally.records,
-            if tally.unasked == 1 { "was" } else { "were" }
-        ));
-    }
-    if tally.open.iter().any(|record| record.starts_with("TLSA ")) {
-        findings.push(
-            "A published TLSA record that is not the one of Stalwart's certificate makes \
-             senders that check DANE refuse this server."
-                .to_owned(),
-        );
-    }
-    match policy {
-        sts::Outcome::Fits => {}
-        sts::Outcome::Finding(finding) => {
-            if state == State::Ok {
-                state = State::Warning;
-            }
-            findings.push(finding);
-        }
-        sts::Outcome::Unasked => {
-            if state == State::Ok {
-                state = State::Partial;
-            }
-            findings.push(format!("Its MTA-STS policy was not fetched: {RUN_OVER}."));
-        }
-    }
-    (state, findings)
-}
-
-/// What the resolver answers for `record`, and what it found. A resolver
-/// that was silent once is not asked again in this run, for this domain or
-/// the next: each question would wait out its time, and the run has only so
-/// long. Once the run's time for its checks is over, nothing more is asked.
-/// A name that is no DNS name is never asked: that needs no resolver.
+/// What the resolver answers for `record`: the verdict, what it found, and
+/// why it gave nothing usable where it did not. A resolver that was silent
+/// once is not asked again in this run, for this domain or the next: each
+/// question would wait out its time, and the run has only so long; `silent`
+/// keeps why. Once the run's time for its checks is over, nothing more is
+/// asked. A name that is no DNS name is never asked: that needs no resolver.
 fn asked(
     context: &Context<'_>,
     resolver: SocketAddr,
     record: &Expected,
-    silent: &mut bool,
-) -> (Verdict, Vec<String>) {
+    silent: &mut Option<String>,
+) -> (Verdict, Vec<String>, Option<String>) {
     if !dns::is_name(&record.name) {
-        return (Verdict::NoName, Vec::new());
+        return (Verdict::NoName, Vec::new(), None);
     }
-    if *silent {
-        return (Verdict::Unanswered, Vec::new());
+    if let Some(why) = silent.as_ref() {
+        return (Verdict::Unanswered, Vec::new(), Some(why.clone()));
     }
     if context.deadline.expired() {
-        return (Verdict::Unasked, Vec::new());
+        return (Verdict::Unasked, Vec::new(), None);
     }
     match dns::ask(resolver, &record.name, record.kind) {
-        Ok(Answer::Records(found)) => (verdict(record, &found), found),
-        Ok(Answer::NoSuchName) => (Verdict::Missing, Vec::new()),
-        Err(error) => {
-            // An error for one name, such as SERVFAIL, is that name's.
-            *silent = matches!(error, dns::Error::NoAnswer { .. });
-            (Verdict::Unanswered, Vec::new())
+        Ok(Answer::Records(found)) => (verdict(record, &found), found, None),
+        Ok(Answer::NoSuchName) => (Verdict::Missing, Vec::new(), None),
+        Err(error @ dns::Error::NoAnswer { .. }) => {
+            let why = error.to_string();
+            *silent = Some(why.clone());
+            (Verdict::Unanswered, Vec::new(), Some(why))
         }
+        // An error for one name, such as SERVFAIL, is that name's.
+        Err(error) => (Verdict::Unread, Vec::new(), Some(error.to_string())),
     }
 }
 
@@ -212,6 +154,9 @@ pub struct Dns {
     /// The authorities a policy's server is checked against: the system's,
     /// unless a test gives its own.
     roots: Option<crate::fetch::Roots>,
+    /// Where the tests keep a resolv.conf of their own; otherwise it is
+    /// `/etc/resolv.conf`.
+    resolv_conf: Option<PathBuf>,
 }
 
 impl Dns {
@@ -222,6 +167,7 @@ impl Dns {
             max_domains: max_domains(&options)?,
             policy_url: None,
             roots: None,
+            resolv_conf: None,
         })
     }
 
@@ -233,8 +179,17 @@ impl Dns {
         self
     }
 
+    /// For tests: read the host's resolver from `path`.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_resolv_conf(mut self, path: &Path) -> Self {
+        self.resolv_conf = Some(path.to_owned());
+        self
+    }
+
     fn resolver(&self) -> Option<SocketAddr> {
-        self.resolver.or_else(system_resolver)
+        self.resolver
+            .or_else(|| system_resolver(self.resolv_conf.as_deref()))
     }
 
     fn unknown(
@@ -256,80 +211,60 @@ impl Dns {
         .with_max_age(180))
     }
 
-    /// `silent` is whether the resolver has stopped being asked in this run
-    /// because it did not answer once.
+    /// `silent` says why the resolver has stopped being asked in this run,
+    /// where it did not answer once.
     fn domain(
         &self,
         context: &Context<'_>,
         resolver: SocketAddr,
         domain: &Domain,
-        silent: &mut bool,
+        silent: &mut Option<String>,
     ) -> Result<Observation, crate::context::ProviderError> {
         let name = plain(&domain.name);
         let records = expected(domain.dns_zone_file.as_deref().unwrap_or_default());
+        // The mail hosts are those of every MX record, asked or not.
+        let hosts = mx_hosts(&records);
+        let asked_for = &records[..records.len().min(MOST_RECORDS)];
         let mut rows = Vec::new();
         let mut tally = Tally {
-            records: records.len(),
+            records: asked_for.len(),
+            left: records.len() - asked_for.len(),
             ..Tally::default()
         };
-        for record in &records {
-            let (verdict, found) = asked(context, resolver, record, silent);
-            let needed = needed(&name, record);
-            let counts = match verdict {
-                Verdict::Missing => needed,
-                // An SPF or DMARC policy of the operator's own is in order;
-                // another DKIM key or mail host is not what Stalwart uses.
-                Verdict::Differs => {
-                    // A TLSA record is a matter of choice, but one that is
-                    // published and wrong makes senders that check DANE refuse.
-                    record.kind == Kind::Tlsa
-                        || needed
-                            && (record.kind == Kind::Mx || record.name.contains("._domainkey."))
-                }
-                Verdict::Unanswered => {
-                    tally.unanswered += usize::from(needed);
-                    false
-                }
-                Verdict::Unasked => {
-                    tally.unasked += 1;
-                    false
-                }
-                Verdict::NoName => {
-                    tally.nameless.push(format!(
-                        "{}, so its {} record was not asked.",
-                        dns::no_name(&record.name),
-                        record.kind.name()
-                    ));
-                    needed
-                }
-                Verdict::Published => false,
-            };
-            if counts {
-                tally
-                    .open
-                    .push(format!("{} {}", record.kind.name(), record.name));
+        // What the record for an MTA-STS policy holds, as found.
+        let mut policy_record = Vec::new();
+        for record in asked_for {
+            let (verdict, found, why) = asked(context, resolver, record, silent);
+            tally.counted(&name, record, verdict, why.as_deref());
+            if record.name == format!("_mta-sts.{name}") {
+                policy_record.clone_from(&found);
             }
-            let short = |text: &str| text.chars().take(120).collect::<String>();
+            // An answer that cannot be used says what it was.
+            let result = match (verdict, why) {
+                (Verdict::Unread, Some(why)) => format!("not read: {why}"),
+                _ => verdict.label().to_owned(),
+            };
             rows.push(vec![
                 json!(record.name),
                 json!(record.kind.name()),
-                json!(if needed { "needed" } else { "optional" }),
-                json!(short(&record.value)),
-                json!(short(&found.join(" | "))),
-                json!(verdict.label()),
+                json!(if needed(&name, record) {
+                    "needed"
+                } else {
+                    "optional"
+                }),
+                json!(cell(&record.value)),
+                json!(cell(&found.join(" | "))),
+                json!(result),
             ]);
         }
         // A domain that publishes the record for an MTA-STS policy must have
         // one that senders can read and that names its mail hosts.
-        let published = rows.iter().any(|row: &Vec<serde_json::Value>| {
-            row[0] == format!("_mta-sts.{name}")
-                && row[4].as_str().is_some_and(|found| !found.is_empty())
-        });
-        let policy = published.then(|| {
+        let policy = (!policy_record.is_empty()).then(|| {
             let (row, outcome) = sts::checked(
                 context,
                 &name,
-                &mx_hosts(&records),
+                &hosts,
+                &policy_record,
                 self.policy_url.as_deref(),
                 self.roots.as_ref(),
             );
@@ -397,12 +332,11 @@ impl Provider for Dns {
             }
         };
         let Some(resolver) = self.resolver() else {
-            report
-                .observations
-                .push(self.unknown(context, "This host names no resolver in /etc/resolv.conf.")?);
+            let finding = format!("Not asked: {NO_RESOLVER}.");
+            report.observations.push(self.unknown(context, &finding)?);
             return Ok(report);
         };
-        let mut silent = false;
+        let mut silent = None;
         for domain in domains.iter().take(self.max_domains) {
             report
                 .observations
@@ -426,7 +360,11 @@ impl Provider for Dns {
 #[cfg(test)]
 pub(crate) mod domains_tests;
 #[cfg(test)]
+mod limits_tests;
+#[cfg(test)]
 mod root_tests;
+#[cfg(test)]
+mod rule_tests;
 #[cfg(test)]
 pub(crate) mod stand_in;
 #[cfg(test)]
@@ -437,3 +375,5 @@ pub(crate) mod tests;
 mod time_tests;
 #[cfg(test)]
 mod unread_tests;
+#[cfg(test)]
+mod unusable_tests;

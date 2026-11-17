@@ -3,9 +3,6 @@
 
 use crate::dns::Kind;
 
-/// The most records of one domain that are read.
-const MOST_RECORDS: usize = 60;
-
 /// One record Stalwart names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Expected {
@@ -53,7 +50,7 @@ pub(super) fn expected(zone: &str) -> Vec<Expected> {
             Kind::Tlsa => data.trim().to_ascii_lowercase(),
             Kind::A | Kind::Aaaa => data.trim().to_owned(),
         };
-        if !value.is_empty() && records.len() < MOST_RECORDS {
+        if !value.is_empty() {
             records.push(Expected {
                 name: plain(name),
                 kind,
@@ -106,8 +103,12 @@ pub(super) enum Verdict {
     /// Another record of the same purpose is published.
     Differs,
     Missing,
-    /// The resolver gave no answer.
+    /// The resolver gave no answer, to this question or to one before it in
+    /// the run, after which it is asked no more.
     Unanswered,
+    /// The resolver answered with nothing the check can use: an error code,
+    /// or an answer that is malformed or cut off.
+    Unread,
     /// The resolver was not asked: the run's time for its checks was over.
     Unasked,
     /// Its name is longer than DNS takes: no resolver can be asked it, and
@@ -122,6 +123,7 @@ impl Verdict {
             Verdict::Differs => "differs",
             Verdict::Missing => "missing",
             Verdict::Unanswered => "no answer",
+            Verdict::Unread => "not read",
             Verdict::Unasked => "not asked",
             Verdict::NoName => "no DNS name",
         }

@@ -1,7 +1,8 @@
 //! One HTTP request, as a visitor would make it: name lookup through the
 //! system, TLS validated against the system's trust store with the host name
 //! as SNI. Only what the caller reads comes back: status, headers and a
-//! bounded body, unpacked if the server sent it compressed. `garrison doctor`
+//! bounded body, unpacked if the server sent it compressed, and where a
+//! bound cut it, the words that say so (`Answer::cut`). `garrison doctor`
 //! asks the installation's public names with it, the collector the release
 //! list, the notification channel and Stalwart's sign-in page. No redirect is
 //! followed.
@@ -282,7 +283,9 @@ fn exchange(
     stream.write_all(request.body)?;
     stream.flush()?;
     let mut data = Vec::new();
-    match stream.take(LIMIT).read_to_end(&mut data) {
+    // One byte past the limit tells an answer that ends there from a longer
+    // one, which `send_at` cuts and says so.
+    match stream.take(LIMIT + 1).read_to_end(&mut data) {
         Ok(_) => Ok(data),
         // Many servers close the socket without the notice TLS ends with.
         // What arrived before counts where it holds what the request needs:
@@ -377,14 +380,24 @@ fn send_at(
 ) -> Result<Answer, String> {
     let url = request.url;
     let (secure, host, port, path) = split(url)?;
-    let data = if secure {
+    let mut data = if secure {
         let mut tls = secure_stream_at(&host, port, roots, until, at)?;
         exchange(&mut tls, &host, &path, request).map_err(|error| tls_error(&error))?
     } else {
         let mut stream = connect(&host, port, until)?;
         exchange(&mut stream, &host, &path, request).map_err(|error| error.to_string())?
     };
-    parse(&data).ok_or_else(|| format!("{url} gave no HTTP answer"))
+    let most = usize::try_from(LIMIT).unwrap_or(usize::MAX);
+    let longer = data.len() > most;
+    data.truncate(most);
+    let mut answer = parse(&data).ok_or_else(|| format!("{url} gave no HTTP answer"))?;
+    if longer {
+        answer.cut = Some(format!(
+            "the answer is longer than the {} KiB that are read",
+            LIMIT / 1024
+        ));
+    }
+    Ok(answer)
 }
 
 #[cfg(test)]

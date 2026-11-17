@@ -15,9 +15,8 @@ use std::net::{IpAddr, SocketAddr};
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Field, Format};
-use serde::{Deserialize, Serialize};
 
-use super::dns::{mail_hosts, resolver_option, system_resolver};
+use super::dns::{NO_RESOLVER, mail_hosts, resolver_option, system_resolver};
 use super::domains::max_domains;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::dns::{self, Kind};
@@ -28,11 +27,12 @@ mod asker;
 mod cards;
 mod dqs;
 mod named;
+mod reading;
 mod verdict;
 
 use asker::{Asker, PATIENCE, RUN_OVER};
 use named::{Before, names};
-use verdict::Said;
+use reading::{Asked, Made, Read};
 
 const EVERY: i64 = 6 * 3600;
 const AGAIN: i64 = 3600;
@@ -49,77 +49,6 @@ const LISTS: [&str; 4] = [
     "bl.mailspike.net",
 ];
 const LISTS_IPV6: [&str; 1] = ["zen.spamhaus.org"];
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-struct Asked {
-    host: String,
-    address: String,
-    /// The address's reverse name, if it has one.
-    pointer: Option<String>,
-    /// Whether that name leads back to the address.
-    confirmed: bool,
-    /// Why the reverse name, or where it leads, could not be read: an
-    /// answer the check cannot use counts for this address alone.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    unread: Option<String>,
-    lists: Vec<(String, Said)>,
-}
-
-/// What the status database keeps of the last reading.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-struct Read {
-    hosts: Vec<String>,
-    addresses: Vec<Asked>,
-    problem: Option<String>,
-    /// What to say of Stalwart's domains after the first `max_domains`.
-    #[serde(default)]
-    rest: Option<String>,
-    /// Why not every address or list was asked, where that is so.
-    #[serde(default)]
-    cut: Option<String>,
-    /// What the reading's own limits left out: mail hosts after the first
-    /// [`MOST_HOSTS`], addresses after the first [`MOST_ADDRESSES`].
-    #[serde(default)]
-    left_out: Vec<String>,
-    /// Why the zones of Spamhaus' Data Query Service written without their
-    /// key were not asked, where the run had no key.
-    #[serde(default)]
-    keyless: Option<String>,
-    /// Whether Stalwart's mail hosts were not asked for want of the
-    /// collector's key: made again in the first run that has one.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    no_native_key: bool,
-    /// The mail hosts whose addresses of a kind could not be read, and why:
-    /// an answer the check cannot use counts for that host alone.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    hosts_unread: Vec<String>,
-    /// Whether a list went unasked about an address because the lists had
-    /// had their time: the blocklists card cannot be in order then. The
-    /// row's words only say so.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    lists_unasked: bool,
-}
-
-impl Read {
-    /// Whether an address's reverse name could not be read: the reverse
-    /// names card cannot be in order then.
-    fn reverse_unread(&self) -> bool {
-        self.addresses.iter().any(|asked| asked.unread.is_some())
-    }
-
-    /// Whether an address of the mail hosts was neither asked nor counted:
-    /// then neither card can be in order.
-    fn incomplete(&self) -> bool {
-        self.cut.is_some() || !self.left_out.is_empty() || !self.hosts_unread.is_empty()
-    }
-
-    /// Whether it names a zone with a key, as an earlier release kept it.
-    fn names_a_key(&self) -> bool {
-        self.addresses
-            .iter()
-            .any(|asked| asked.lists.iter().any(|(zone, _)| shown(zone) != *zone))
-    }
-}
 
 /// A list's zone as the cards and the status database name it. A zone of
 /// Spamhaus' Data Query Service, `KEY.zen.dq.spamhaus.net`, holds the
@@ -146,6 +75,9 @@ pub struct Reputation {
     modules: BTreeSet<ModuleId>,
     /// How long the lists are asked in all; tests shorten it.
     patience: std::time::Duration,
+    /// Where the tests keep a resolv.conf of their own; otherwise it is
+    /// `/etc/resolv.conf`.
+    resolv_conf: Option<std::path::PathBuf>,
 }
 
 /// Say in `said` that the addresses of `kind` of `host` could not be read,
@@ -186,6 +118,7 @@ impl Reputation {
             lists_ipv6: names(raw, "lists_ipv6", &LISTS_IPV6, Before::Ipv6)?,
             modules: options.modules(&["dns_tls"])?,
             patience: PATIENCE,
+            resolv_conf: None,
         })
     }
 
@@ -197,16 +130,60 @@ impl Reputation {
         self
     }
 
-    /// Ask about every address of the mail hosts.
-    fn read(&self, context: &Context<'_>) -> Result<Read, String> {
-        let resolver = self
-            .resolver
-            .or_else(system_resolver)
-            .ok_or("this host names no resolver in /etc/resolv.conf")?;
-        let (mut hosts, rest) = if self.hosts.is_empty() {
-            mail_hosts(context, self.max_domains, "")?
-        } else {
-            (self.hosts.clone(), None)
+    /// For tests: read the host's resolver from `path`.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_resolv_conf(mut self, path: &std::path::Path) -> Self {
+        self.resolv_conf = Some(path.to_owned());
+        self
+    }
+
+    /// What a reading made now is made with, where it asks `resolver`.
+    fn made(&self, resolver: Option<SocketAddr>) -> Made {
+        let named = |zones: &[String]| zones.iter().map(|zone| shown(zone)).collect();
+        Made {
+            resolver: resolver.map(|address| address.to_string()),
+            hosts: self.hosts.clone(),
+            max_domains: self.hosts.is_empty().then_some(self.max_domains),
+            lists: named(&self.lists),
+            lists_ipv6: named(&self.lists_ipv6),
+        }
+    }
+
+    /// The mail hosts to ask about, and what to say of Stalwart's domains
+    /// after the first `max_domains`; where there are none, the reading
+    /// that says why. Without the key it is made again in the first run
+    /// with one; what Stalwart did not give with the key, or a Stalwart
+    /// that names no mail host, is Stalwart's to mend, and asked again in
+    /// the next run.
+    fn hosts(&self, context: &Context<'_>) -> Result<(Vec<String>, Option<String>), Box<Read>> {
+        if !self.hosts.is_empty() {
+            return Ok((self.hosts.clone(), None));
+        }
+        let keyed = context.native_key.is_some();
+        let unread = |problem: String| {
+            Box::new(Read {
+                problem: Some(problem),
+                no_native_key: !keyed,
+                of_stalwart: keyed,
+                ..Read::default()
+            })
+        };
+        let (hosts, rest) = mail_hosts(context, self.max_domains, "").map_err(unread)?;
+        if hosts.is_empty() {
+            return Err(unread(
+                "Stalwart names no mail host for its domains".to_owned(),
+            ));
+        }
+        Ok((hosts, rest))
+    }
+
+    /// Ask `resolver` about every address of the mail hosts.
+    fn read(&self, context: &Context<'_>, resolver: Option<SocketAddr>) -> Result<Read, String> {
+        let resolver = resolver.ok_or(NO_RESOLVER)?;
+        let (mut hosts, rest) = match self.hosts(context) {
+            Ok(found) => found,
+            Err(unread) => return Ok(*unread),
         };
         let mut left_out = Vec::new();
         if hosts.len() > MOST_HOSTS {
@@ -215,9 +192,6 @@ impl Reputation {
                 hosts.len()
             ));
             hosts.truncate(MOST_HOSTS);
-        }
-        if hosts.is_empty() {
-            return Err("Stalwart names no mail host for its domains".to_owned());
         }
         let mut asker = Asker::new(resolver, context.deadline, self.patience);
         let mut addresses = Vec::new();
@@ -314,16 +288,25 @@ impl Reputation {
     }
 
     /// The last reading, or a new one where that is due: after six hours,
-    /// after an hour where not everything could be asked or read, and at once for
-    /// one that an earlier release kept with a zone's key, for one that
-    /// had no key for the Data Query Service where this run has one, or
-    /// another reason to have none, and for one made without the
-    /// collector's key where this run has it.
+    /// after an hour where not everything could be asked or read, as where
+    /// a list gave no verdict, and at once for one made with another
+    /// resolver or other options than this run's, or that an earlier
+    /// release kept, for one Stalwart did not give the mail hosts for, for
+    /// one that an earlier release kept with a zone's key, for one that had
+    /// no key for the Data Query Service where this run has one, or another
+    /// reason to have none, and for one made without the collector's key
+    /// where this run has it.
     fn known(&self, context: &Context<'_>) -> Kept<Read> {
+        let resolver = self
+            .resolver
+            .or_else(|| system_resolver(self.resolv_conf.as_deref()));
+        let made = self.made(resolver);
         let missing = dqs::missing(&context.dqs_key);
         let keyed = context.native_key.is_some();
         let wait = |_, read: &Read| {
-            if read.names_a_key()
+            if read.made.as_ref() != Some(&made)
+                || read.of_stalwart
+                || read.names_a_key()
                 || (read.keyless.is_some() && read.keyless != missing)
                 || (read.no_native_key && keyed)
             {
@@ -332,6 +315,7 @@ impl Reputation {
                 || read.cut.is_some()
                 || read.lists_unasked
                 || read.reverse_unread()
+                || read.no_verdict()
                 || !read.hosts_unread.is_empty()
             {
                 AGAIN
@@ -339,8 +323,9 @@ impl Reputation {
                 EVERY
             }
         };
-        cached(context, MEMORY, wait, |_| {
-            self.read(context).unwrap_or_else(|problem| Read {
+        cached(context, MEMORY, wait, |_| Read {
+            made: Some(made.clone()),
+            ..self.read(context, resolver).unwrap_or_else(|problem| Read {
                 problem: Some(problem),
                 // Without hosts of its own it asks Stalwart for them.
                 no_native_key: self.hosts.is_empty() && !keyed,
@@ -407,10 +392,16 @@ mod dqs_tests;
 #[cfg(test)]
 mod limits_tests;
 #[cfg(test)]
+mod made_tests;
+#[cfg(test)]
 mod names_tests;
+#[cfg(test)]
+mod rule_tests;
 #[cfg(test)]
 mod silence_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod time_tests;
+#[cfg(test)]
+mod verdicts_tests;

@@ -152,21 +152,29 @@ fn a_listing_of_the_ipv6_address_is_a_failure_and_names_the_list() {
     );
 }
 
+/// A list that gives no verdict is no listing, and no clean result either:
+/// the card names it and why, and is not in order.
 #[test]
 fn a_list_that_gives_this_resolver_no_verdict_is_no_listing() {
     let mut zone = mail_host();
     listed(&mut zone, V4, "zen.spamhaus.org", [127, 255, 255, 254]);
     let (resolver, _) = stand_in(zone, None, 64);
     let (blocklists, _) = observed(&provider(resolver, ""), &Remembered::default(), 0);
+    let refuses = "the list gives this resolver no verdict; it refuses public resolvers";
     assert_eq!(
-        (blocklists.state, blocklists.findings.len()),
-        (State::Ok, 0)
+        (blocklists.state, blocklists.findings.clone()),
+        (
+            State::Partial,
+            vec![format!(
+                "zen.spamhaus.org gave no verdict for {V4}: {refuses}."
+            )]
+        )
     );
     assert_eq!(
         rows(&blocklists)[0],
-        "203.0.113.5 | zen.spamhaus.org | no verdict: the list gives this resolver no verdict; it refuses public resolvers"
+        format!("203.0.113.5 | zen.spamhaus.org | no verdict: {refuses}")
     );
-    // Where no list gives one, nothing is known.
+    // Where no list gives one, nothing is known, and the card says why.
     let mut zone = mail_host();
     listed(&mut zone, V4, "only.example.org", [127, 255, 255, 254]);
     let (resolver, handle) = stand_in(zone, Some("5.113.0.203.only.example.org"), 64);
@@ -174,7 +182,13 @@ fn a_list_that_gives_this_resolver_no_verdict_is_no_listing() {
     let alone = provider(resolver, "lists = [\"only.example.org\"]\nlists_ipv6 = []");
     let (blocklists, _) = observed(&alone, &Remembered::default(), 0);
     assert_eq!(blocklists.state, State::Unknown);
-    assert_eq!(blocklists.findings, ["No list gave a verdict."]);
+    assert_eq!(
+        blocklists.findings,
+        [format!(
+            "only.example.org gave no verdict for {V4}: the resolver {resolver} did not answer: no \
+             answer within 3 s."
+        )]
+    );
 }
 
 /// Lists answer within 127.0.0.0/8. A resolver that answers a name that does
@@ -190,15 +204,20 @@ fn an_answer_outside_127_0_0_0_is_no_listing_and_no_verdict() {
         "lists = [\"rewritten.example.org\"]\nlists_ipv6 = []",
     );
     let (blocklists, _) = observed(&alone, &Remembered::default(), 0);
+    let rewrites = "the resolver answered 192.0.2.80, which no list answers: it rewrites what \
+                    it is told, so the list cannot be read through it";
     assert_eq!(blocklists.state, State::Unknown);
-    assert_eq!(blocklists.findings, ["No list gave a verdict."]);
+    assert_eq!(
+        blocklists.findings,
+        [format!(
+            "rewritten.example.org gave no verdict for {V4}: {rewrites}."
+        )]
+    );
     assert_eq!(
         rows(&blocklists),
-        [
-            "203.0.113.5 | rewritten.example.org | no verdict: the resolver answered 192.0.2.80, \
-             which no list answers: it rewrites what it is told, so the list cannot be read \
-             through it"
-        ]
+        [format!(
+            "203.0.113.5 | rewritten.example.org | no verdict: {rewrites}"
+        )]
     );
     // Any code within 127.0.0.0/8 is a listing, not only 127.0.0.2.
     let mut zone = mail_host();
@@ -213,7 +232,10 @@ fn an_answer_outside_127_0_0_0_is_no_listing_and_no_verdict() {
     assert_eq!(blocklists.state, State::Failed);
     assert_eq!(
         blocklists.findings,
-        ["203.0.113.5 is listed on codes.example.org (127.0.0.10)."]
+        [
+            "203.0.113.5 is listed on codes.example.org (127.0.0.10).".to_owned(),
+            format!("rewritten.example.org gave no verdict for {V4}: {rewrites}."),
+        ]
     );
 }
 
@@ -320,17 +342,28 @@ fn a_list_that_is_down_is_asked_once_and_not_for_every_address() {
         began.elapsed()
     );
     let rows = rows(&blocklists);
-    assert!(
-        rows[0].starts_with("203.0.113.5 | down.example.org | no verdict: the resolver "),
-        "{}",
-        rows[0]
+    let silent = format!("the resolver {resolver} did not answer: no answer within 3 s");
+    assert_eq!(
+        rows[0],
+        format!("203.0.113.5 | down.example.org | no verdict: {silent}")
     );
     assert_eq!(
         rows[2],
-        "203.0.113.6 | down.example.org | no verdict: the list did not answer before"
+        "203.0.113.6 | down.example.org | no verdict: not asked again after no usable answer \
+         for 203.0.113.5"
     );
     assert_eq!(rows[3], "203.0.113.6 | up.example.org | not listed");
-    assert_eq!(blocklists.state, State::Ok);
+    // The list gave no verdict about any address: not in order.
+    assert_eq!(
+        (blocklists.state, blocklists.findings.clone()),
+        (
+            State::Partial,
+            vec![format!(
+                "down.example.org gave no verdict for 203.0.113.5, 203.0.113.6, 203.0.113.7, \
+                 203.0.113.8: {silent}."
+            )]
+        )
+    );
 }
 
 #[test]

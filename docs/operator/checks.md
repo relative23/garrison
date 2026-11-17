@@ -6,8 +6,9 @@ is one check, and `type` names it. The collector runs them every minute. A
 source that is missing or unreadable shows as Unknown; it never stops the
 other checks. The checks that read Stalwart's domains, listeners or
 accounts with the collector's API key (`dns`, `tls`, `reputation`,
-`mail-flow`) say why where they could not: Stalwart did not answer, or
-refused the key for its rate limit (HTTP 429), both of which pass by
+`mail-flow`) say why where they could not: Stalwart could not be reached or
+failed on its side, which the card names, such as "Stalwart answered HTTP
+503", or refused the key for its rate limit (HTTP 429), both of which pass by
 themselves, did not give the key what the check reads, which
 `garrison stalwart setup` mends, or answered in a form this release does
 not read, as a Stalwart release Garrison does not support yet may: the
@@ -246,19 +247,33 @@ check asks the resolver for them and compares:
   warning: senders that check DANE refuse a server whose record is wrong,
   which happens when a certificate is renewed and the record is not.
 - Where the record for an MTA-STS policy is published, the policy itself is
-  read from `https://mta-sts.<domain>/.well-known/mta-sts.txt`, once an hour.
+  read from `https://mta-sts.<domain>/.well-known/mta-sts.txt`, once an hour,
+  and at once where the record changed, as senders take a record with
+  another id for a new policy.
   A policy that cannot be read, or that does not name one of the domain's
-  mail hosts, is a warning: senders that honour it stop delivering.
+  mail hosts, is a warning, also beside records that could not be read or
+  were not asked: senders that honour it stop delivering. A policy file
+  longer than 256 KiB, or one that unpacks to more than 4 MiB, is not read,
+  as what comes before the cut is no policy to judge by.
 - A record whose name is longer than DNS takes, 253 octets as written, as a
   long domain's DKIM or TLSA record may be, says "no DNS name" and is not
   asked: no server can publish it, so a needed one is a warning.
 
 The answers are those of this resolver at this moment; another resolver may
-still hold older ones. A resolver that does not answer once is not asked again
+still hold older ones. A record that the resolver answers with an error, such
+as SERVFAIL for a zone whose DNSSEC signatures expired, or with an answer
+that is malformed or cut off, says "not read" and why. A record that could
+not be read keeps the domain from being in order, optional as it may be: a
+needed one leaves it Unknown, an optional one, such as a TLSA record, Partial
+where it would be OK, and the card names the records and why; where the
+record for an MTA-STS policy could not be read, the policy is not checked,
+and the card says so. A resolver that does not answer once is not asked again
 in that run, and the records left say "no answer"; once the run's time for its
 checks is up, the records left say "not asked", and the domain is Partial, or
 Unknown where nothing was asked; an MTA-STS policy that is due is then fetched
-in the next run. The check takes the first `max_domains` of the domains
+in the next run. Of each domain it asks the first 60 records Stalwart names;
+where Stalwart names more, the card says how many and is Partial where it
+would be OK. The check takes the first `max_domains` of the domains
 Stalwart lists, 100 at the most: each run asks every record of each of them
 again, and each is a card of its own. Where Stalwart has more, the card "DNS
 records" is Unknown and says how many it has; it sends no notification. With
@@ -271,7 +286,11 @@ A receiving server looks the sender's address up in blocklists and asks for
 its reverse name. The check asks the same questions, every six hours, for
 every address of the mail hosts: `hosts`, or without it the hosts Stalwart
 names in the MX records of its domains, of the first `max_domains` of them;
-the cards say when Stalwart has more. It asks about eight mail hosts and
+the cards say when Stalwart has more. A reading made with another resolver
+than the run's, the one `resolver` names or else the first of
+`/etc/resolv.conf`, or with other `hosts`, `max_domains`, `lists` or
+`lists_ipv6`, is made again in the next run, as is one an earlier release
+kept. It asks about eight mail hosts and
 twelve addresses at the most, and asks the lists for 30 seconds in all.
 Where there are more, or a list was left unasked, the cards say so, and are
 Partial where they would be OK. So they are for a mail host Stalwart names
@@ -287,20 +306,31 @@ not every address was asked and why, or are Unknown where nothing could
 be, and the reading is asked again after an hour. Without `hosts` the
 check needs the collector's API key for Stalwart to read the mail hosts;
 where it has none, both cards say so, and the first run with a key asks at
-once.
+once. Where Stalwart does not give them, as where it refused the key, did
+not answer or names no mail host, both cards say why, and the next run asks
+Stalwart again, one request a minute while that lasts, so that the cards
+follow once it gives them, as after `garrison stalwart setup`.
 
-- **Blocklists.** A listing is Failed and names the address and the list.
+- **Blocklists.** A listing is Failed and names the address, the list and
+  each code the list gave, as Spamhaus gives one for each of its lists.
   IPv4 addresses are asked of `lists` (default `zen.spamhaus.org`,
   `bl.spamcop.net`, `psbl.surriel.com`, `bl.mailspike.net`), IPv6 addresses
   of `lists_ipv6` (default `zen.spamhaus.org`): a listing of the IPv6 address
   is the one that is overlooked. A listing is an answer within
-  127.0.0.0/8, where lists give theirs. A list that gives no verdict is shown
-  as such and is no listing. Spamhaus gives none to public resolvers, such as
+  127.0.0.0/8, where lists give theirs. A list that gives no verdict is no
+  listing, and no clean result either: the card names the list, the
+  addresses and why, names an address that no list judged, and is Partial
+  where it would be OK, or Unknown where no list gave a verdict at all; such
+  a reading is asked again after an hour. A list whose question got no
+  usable answer, as an error of the resolver or none at all, is not asked
+  about the addresses after it in that reading, and their rows say so.
+  Spamhaus gives none to public resolvers, such as
   those of a hosting provider, nor after too many questions; a resolver of
   your own on the host gets one. An answer outside 127.0.0.0/8 comes from a
   resolver that answers names that do not exist with an address of its own:
   no list can be read through it, and the card stays Unknown until the
-  check asks another (`resolver`). A zone of Spamhaus' Data Query Service
+  check asks another: name one with `resolver`, which the next run asks. A
+  zone of Spamhaus' Data Query Service
   is read by Spamhaus' own codes too: a key that is disabled or used
   against its terms gives no verdict, never a listing. Its name holds the
   subscriber's key, `KEY.zen.dq.spamhaus.net`, and `garrison.toml` is read

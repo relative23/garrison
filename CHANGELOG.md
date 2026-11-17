@@ -653,6 +653,102 @@ Notable changes for operators and users. The format follows
   most, and left the others out without a word: the card was OK for what
   it had not probed. It now says how many endpoints there are and is
   Partial where it would be OK.
+- **A resolver's answer is read to its last record.** The DNS client read
+  the first 64 records of an answer and left the others without a word, so
+  an SPF policy that came after 64 other texts of a domain, such as
+  verification tokens, was "missing", a warning, and where the resolver
+  changes the order of the records, the card changed from run to run. Every
+  record of an answer is read now.
+- **The DNS check says when it leaves a domain's records out.** It asks the
+  first 60 records Stalwart names for a domain and left the others out
+  without a word, so the card was OK for records it never asked, and an MX
+  record after the 60th gave the reputation and TLS checks no mail host.
+  The card now says how many records Stalwart names and is Partial where it
+  would be OK, and every MX record names a mail host.
+- **A resolver that gives no answer is said to have given none in its
+  time.** Where a question of the `dns` or `reputation` check went
+  unanswered, the cards said "the resolver 127.0.0.53:53 did not answer:
+  Resource temporarily unavailable (os error 11)", the system's words for
+  a wait that ran out. They now say "… did not answer: no answer within
+  3 s".
+- **A DNS record that could not be read is named, optional as it may be.**
+  Where the resolver answered a record's question with an error, such as
+  SERVFAIL for a zone whose DNSSEC signatures expired, or with an answer
+  that is malformed or cut off, the row said "no answer" and the card "The
+  resolver gave no answer for 1 of the needed records.", as for a resolver
+  that is silent; and for an optional record, such as a TLSA record or the
+  record of an MTA-STS policy, the card stayed OK, so that the TLSA record
+  and the policy were not checked without a word. The row now says "not
+  read" and why, the card names the records and why, and is Unknown for a
+  needed record and Partial for an optional one where it would be OK; where
+  the record for an MTA-STS policy could not be read, the card says that
+  the policy was not checked.
+- **An MTA-STS policy that stops senders is a warning beside what could not
+  be checked.** A policy that leaves a mail host out, or that cannot be
+  read, made the domain's card a warning only where everything else was in
+  order. Beside a needed record that could not be read, or records the
+  run's time left unasked, as after a policy taken from within the hour,
+  the card stayed Unknown or Partial, which sends no notification. It is a
+  warning in either case now.
+- **A blocklist that gives no verdict keeps the Blocklists card from being
+  OK.** A list that refused this resolver, as Spamhaus refuses public ones,
+  answered with an error or did not answer at all, showed only in its row:
+  where another list gave a verdict, the card was OK without a finding, also
+  where no list judged an address at all, as the IPv6 address that only
+  Spamhaus is asked about by default, and the reading was kept for six
+  hours. The card now names each list that gave no verdict, the addresses
+  and why, and an address no list judged, is Partial where it would be OK,
+  and the reading is asked again after an hour. The addresses after a
+  list's question that got no usable answer said "the list did not answer
+  before", also where it had answered with an error; they now say that the
+  list was not asked again and after which address.
+- **The reputation check reads again at once after its options change.** It
+  used its reading for up to six hours after `resolver`, `hosts`,
+  `max_domains`, `lists` or `lists_ipv6` changed, or the resolver
+  `/etc/resolv.conf` names: a list taken out still showed, a listing on it
+  Failed, one added did not show, and a resolver named because the card
+  said that Spamhaus refuses the one before was asked hours later. A
+  reading now notes what it was made with, and one made otherwise is made
+  again in the next run. A reading an earlier release kept says nothing of
+  it, and the first run after the upgrade makes it again.
+- **The Blocklists and Reverse names cards follow Stalwart with the next
+  run.** Where Stalwart did not give the collector's key the mail hosts, as
+  before `garrison stalwart setup` gave the key its rights, while it was
+  down or over its rate limit, the reading kept that problem for an hour:
+  both cards still said to run setup again, or that Stalwart did not
+  answer, long after it was mended. Such a reading is now made again in the
+  next run, which asks Stalwart alone, one request a minute while it lasts,
+  as one made without the key is once there is one.
+- **The DNS and reputation cards name the option that gives them a
+  resolver.** Where `/etc/resolv.conf` names no resolver, they said only
+  that; they now add "name one with `resolver`".
+- **The DNS, TLS and reputation cards say how Stalwart failed a request.**
+  Where Stalwart answered the collector's request for its domains or
+  listeners with HTTP 5xx or 408, or with the JMAP error serverFail, the
+  cards said "Stalwart did not answer the collector's request", as where it
+  could not be reached. They now say that Stalwart did not complete the
+  request and how, such as "(Stalwart answered HTTP 503)" or "(Stalwart is
+  unavailable)" for a connection it did not take.
+- **An MTA-STS policy longer than is read is not judged by its start.** The
+  HTTPS client reads 256 KiB of an answer and unpacks a compressed body to
+  4 MiB, and left what came after out without a word: a policy whose `mx`
+  lines came later was said to leave the mail host out. The client now
+  says where it cut, and such a policy counts as one that cannot be read,
+  with that reason.
+- **A long text on the DNS records card ends in "…".** The table showed
+  the first 120 characters of a record, such as a DKIM key, as if they were
+  all of it; a longer one now ends in "…" there. The record is held against
+  what was found as a whole, as before.
+- **A listing names every code the list gave.** A list may answer an
+  address with several codes, as Spamhaus' ZEN gives one for each of its
+  lists that holds it, such as SBL and XBL; the Blocklists card named only
+  the first, so a listing beside it went unnamed, and which one came first
+  could change from run to run. Every code is named now, in order.
+- **An MTA-STS policy is read again once its record changes.** The DNS
+  check keeps a domain's policy for an hour, also where the domain's
+  `_mta-sts` record changed in between: a policy mended under a new id, as
+  senders take it at once, still showed as before for up to an hour. It is
+  read again in the first run that finds another record.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not

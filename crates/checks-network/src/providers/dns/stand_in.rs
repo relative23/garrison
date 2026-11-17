@@ -3,12 +3,15 @@
 //! answers with.
 
 use std::collections::BTreeMap;
-use std::io::ErrorKind;
-use std::net::{SocketAddr, UdpSocket};
+use std::io::{ErrorKind, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
+
+/// The records of a stand-in's zone: `(name, type)` to the data of each.
+type Zone = BTreeMap<(String, u16), Vec<Vec<u8>>>;
 
 /// A resolver on a free port that answers from `zone`: `(name, type)` to texts.
 /// Names it does not hold do not exist; `silent` is never answered. The
@@ -46,17 +49,64 @@ pub(crate) fn resolver_erring(
 /// answers a question for a name that `silent` takes: [`Stopping::questions`]
 /// stops it and gives every question it was asked, by name and type, in the
 /// order they came.
-pub(crate) fn resolver_until(
-    zone: BTreeMap<(String, u16), Vec<Vec<u8>>>,
+pub(crate) fn resolver_until(zone: Zone, silent: fn(&str) -> bool) -> (SocketAddr, Stopping) {
+    serve_until(zone, BTreeMap::new(), silent)
+}
+
+/// What the stand-in gives a question instead of the records of its zone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Fault {
+    /// An answer with this error code: SERVFAIL 2, NOTIMP 4, REFUSED 5.
+    Code(u8),
+    /// An answer cut off, over UDP and again over TCP.
+    CutOff,
+    /// No answer at all.
+    Silent,
+}
+
+/// A resolver like [`resolver_until`] that gives each question of `faults`,
+/// by name and type, its fault instead of an answer. It listens for TCP on
+/// its port as well, where a question cut off over UDP is asked again.
+pub(crate) fn resolver_faulty(
+    zone: Zone,
+    faults: BTreeMap<(String, u16), Fault>,
+) -> (SocketAddr, Stopping) {
+    serve_until(zone, faults, |_| false)
+}
+
+fn serve_until(
+    zone: Zone,
+    faults: BTreeMap<(String, u16), Fault>,
     silent: fn(&str) -> bool,
 ) -> (SocketAddr, Stopping) {
-    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    // One port for both, as a resolver has it. A port that is free for UDP
+    // may be taken for TCP by another test, so the pair is looked for.
+    let (socket, listener) = (0..50)
+        .find_map(|_| {
+            let socket = UdpSocket::bind("127.0.0.1:0").ok()?;
+            let listener = TcpListener::bind(socket.local_addr().ok()?).ok()?;
+            Some((socket, listener))
+        })
+        .expect("a port that is free for UDP and TCP");
     let address = socket.local_addr().unwrap();
-    // Polled, so that the thread sees when it is stopped.
+    // Polled, so that both threads see when they are stopped.
     socket
         .set_read_timeout(Some(Duration::from_millis(20)))
         .unwrap();
+    listener.set_nonblocking(true).unwrap();
     let done = Arc::new(AtomicBool::new(false));
+    let (zone, faults) = (Arc::new(zone), Arc::new(faults));
+    let over_tcp = {
+        let (done, zone, faults) = (Arc::clone(&done), Arc::clone(&zone), Arc::clone(&faults));
+        thread::spawn(move || {
+            while !done.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => over_tcp_once(stream, &zone, &faults),
+                    Err(_) => thread::sleep(Duration::from_millis(10)),
+                }
+            }
+        })
+    };
     let stopped = Arc::clone(&done);
     let handle = thread::spawn(move || {
         let mut questions = Vec::new();
@@ -73,15 +123,57 @@ pub(crate) fn resolver_until(
             };
             let question = &buffer[..length];
             let (name, kind) = asked(question);
-            if !silent(&name) {
-                let message = answered(question, &name, kind, &zone, &BTreeMap::new());
+            let fault = faults.get(&(name.clone(), kind)).copied();
+            if !silent(&name) && fault != Some(Fault::Silent) {
+                let message = faulty(question, &name, kind, &zone, fault);
                 socket.send_to(&message, client).unwrap();
             }
             questions.push((name, kind));
         }
+        over_tcp.join().unwrap();
         questions
     });
     (address, Stopping { done, handle })
+}
+
+/// One question over TCP, answered as over UDP, where an answer cut off is
+/// cut off again.
+fn over_tcp_once(mut stream: TcpStream, zone: &Zone, faults: &BTreeMap<(String, u16), Fault>) {
+    stream.set_nonblocking(false).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let mut size = [0; 2];
+    if stream.read_exact(&mut size).is_err() {
+        return;
+    }
+    let mut question = vec![0; usize::from(u16::from_be_bytes(size))];
+    if stream.read_exact(&mut question).is_err() {
+        return;
+    }
+    let (name, kind) = asked(&question);
+    let fault = faults.get(&(name.clone(), kind)).copied();
+    let message = faulty(&question, &name, kind, zone, fault);
+    let _ = stream.write_all(&u16::try_from(message.len()).unwrap().to_be_bytes());
+    let _ = stream.write_all(&message);
+}
+
+/// The answer to `question`, with `fault` where it has one.
+fn faulty(question: &[u8], name: &str, kind: u16, zone: &Zone, fault: Option<Fault>) -> Vec<u8> {
+    match fault {
+        Some(Fault::Code(code)) => {
+            let errors = BTreeMap::from([((name.to_owned(), kind), code)]);
+            answered(question, name, kind, zone, &errors)
+        }
+        Some(Fault::CutOff) => {
+            let mut message = question.to_vec();
+            // An answer, recursion wanted, cut off (TC), no error.
+            message[2] = 0x83;
+            message[3] = 0x80;
+            message
+        }
+        Some(Fault::Silent) | None => answered(question, name, kind, zone, &BTreeMap::new()),
+    }
 }
 
 /// A [`resolver_until`] at work.
@@ -184,13 +276,13 @@ pub(crate) fn guessable(numbers: &[u16]) -> bool {
             .all(|pair| pair[1] == pair[0].wrapping_add(1))
 }
 
-pub(super) fn text(value: &str) -> Vec<u8> {
+pub(crate) fn text(value: &str) -> Vec<u8> {
     let mut data = vec![u8::try_from(value.len()).unwrap()];
     data.extend_from_slice(value.as_bytes());
     data
 }
 
-pub(super) fn host(prefix: &[u8], name: &str) -> Vec<u8> {
+pub(crate) fn host(prefix: &[u8], name: &str) -> Vec<u8> {
     let mut data = prefix.to_vec();
     for label in name.split('.') {
         data.push(u8::try_from(label.len()).unwrap());

@@ -130,11 +130,22 @@ fn lists_left_unasked_for_their_time_keep_the_blocklists_card_from_being_in_orde
         rows[2..],
         [
             "203.0.113.6 | up.example.org | no verdict: not asked: the lists took too long",
-            "203.0.113.6 | down.example.org | no verdict: the list did not answer before",
+            "203.0.113.6 | down.example.org | no verdict: not asked again after no usable \
+             answer for 203.0.113.5",
         ]
     );
     assert_eq!(blocklists.state, State::Partial);
-    assert_eq!(blocklists.findings, [unasked]);
+    assert_eq!(
+        blocklists.findings,
+        [
+            format!(
+                "down.example.org gave no verdict for 203.0.113.5, 203.0.113.6: the resolver \
+                 {resolver} did not answer: no answer within 3 s."
+            ),
+            "No list gave a verdict for 203.0.113.6.".to_owned(),
+            unasked.to_owned(),
+        ]
+    );
     assert_eq!((reverse.state, reverse.findings.len()), (State::Ok, 0));
     // No time at all: no list gave a verdict, because none was asked.
     let (resolver, _) = stand_in(zone, None, 6);
@@ -145,21 +156,24 @@ fn lists_left_unasked_for_their_time_keep_the_blocklists_card_from_being_in_orde
     assert_eq!(reverse.state, State::Ok);
 }
 
-/// The kept reading says that a list went unasked for the lists' time; the
-/// words of its row are only shown. Kept with other words, as another
-/// release may write them, it keeps the card from being in order all the
-/// same, and is asked again after an hour.
+/// The kept reading says that a list went unasked for the lists' time, by
+/// the kind of its row and its mark; the words of the row are only shown.
+/// Kept with other words, as another release may write them, it keeps the
+/// card from being in order all the same, and is asked again after an hour.
 #[test]
 fn a_list_left_unasked_is_known_by_the_reading_not_by_the_words_of_its_row() {
-    let reading = |row: &str, marked: bool| {
+    let reading = |said: serde_json::Value, marked: bool| {
         let mut kept = json!({
             "at": now().as_second(),
             "hosts": ["mail.example.test"],
             "addresses": [{"host": "mail.example.test", "address": "203.0.113.5",
                            "pointer": "mail.example.test", "confirmed": true,
                            "lists": [["up.example.org", "Clear"],
-                                     ["down.example.org", {"Unanswered": row}]]}],
+                                     ["down.example.org", said]]}],
             "problem": null,
+            // As the provider below makes it, so that it is used.
+            "made": {"resolver": "127.0.0.1:9", "hosts": [], "max_domains": 20,
+                     "lists": ["up.example.org"], "lists_ipv6": []},
         });
         if marked {
             kept["lists_unasked"] = json!(true);
@@ -173,11 +187,11 @@ fn a_list_left_unasked_is_known_by_the_reading_not_by_the_words_of_its_row() {
         let provider = provider(SocketAddr::from(([127, 0, 0, 1], 9)), &[]);
         tests::observed(&provider, &memory, 0).0
     };
-    let other = "not asked: the lists had had their time";
-    let blocklists = reading(other, true);
+    let other = "the lists had had their time";
+    let blocklists = reading(json!({ "Unasked": other }), true);
     assert_eq!(
         rows(&blocklists)[1],
-        format!("203.0.113.5 | down.example.org | no verdict: {other}")
+        format!("203.0.113.5 | down.example.org | no verdict: not asked: {other}")
     );
     assert_eq!(blocklists.state, State::Partial);
     assert_eq!(
@@ -185,9 +199,17 @@ fn a_list_left_unasked_is_known_by_the_reading_not_by_the_words_of_its_row() {
         ["Not every list was asked: the lists took too long."]
     );
     assert_dated(&blocklists, 0, AGAIN);
-    // The words alone decide nothing: a reading without the mark, as 0.1.2
-    // kept it, counts as it counted there until it is asked again.
-    let earlier = reading(&format!("not asked: {SLOW}"), false);
-    assert_eq!((earlier.state, earlier.findings.len()), (State::Ok, 0));
-    assert_dated(&earlier, 0, EVERY);
+    // The words alone decide nothing: a row of a list without a verdict, as
+    // 0.1.2 kept a list left unasked, is one, whatever its words say.
+    let earlier = reading(json!({ "Unanswered": format!("not asked: {SLOW}") }), false);
+    assert_dated(&earlier, 0, AGAIN);
+    assert_eq!(
+        (earlier.state, earlier.findings),
+        (
+            State::Partial,
+            vec![format!(
+                "down.example.org gave no verdict for 203.0.113.5: not asked: {SLOW}."
+            )]
+        )
+    );
 }

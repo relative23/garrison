@@ -105,6 +105,23 @@ fn records_are_read_as_a_zone_file_writes_them() {
     );
 }
 
+/// An answer holds as many records as its length allows, and each is read:
+/// an apex with many TXT records, such as verification tokens beside its SPF
+/// policy, is read to its last record, so that a policy after the others is
+/// found as one before them is.
+#[test]
+fn every_record_of_an_answer_is_read() {
+    let mut records: Vec<(u16, Vec<u8>)> = (0..70)
+        .map(|number| (16, txt(&[&format!("token-{number}")])))
+        .collect();
+    records.push((16, txt(&["v=spf1 mx -all"])));
+    let Ok(Some(Answer::Records(read))) = asked(Kind::Txt, FINE, &records) else {
+        panic!("no records");
+    };
+    assert_eq!(read.len(), 71);
+    assert_eq!(read.last().map(String::as_str), Some("v=spf1 mx -all"));
+}
+
 #[test]
 fn what_a_resolver_says_instead_of_records() {
     assert_eq!(
@@ -141,10 +158,9 @@ fn each_failure_keeps_its_words() {
         (
             Error::NoAnswer {
                 server,
-                why: "Resource temporarily unavailable (os error 11)".to_owned(),
+                why: "no answer within 3 s".to_owned(),
             },
-            "the resolver 192.0.2.53:53 did not answer: Resource temporarily unavailable (os error \
-             11)",
+            "the resolver 192.0.2.53:53 did not answer: no answer within 3 s",
         ),
         (Error::Code(2), "the resolver could not answer (SERVFAIL)"),
         (Error::Code(5), "the resolver refused the question"),
@@ -299,6 +315,14 @@ fn an_answer_cut_off_over_udp_is_asked_for_again_over_tcp() {
         matches!(error, Error::NoAnswer { server, .. } if server == silent),
         "{error:?}"
     );
+    // Something takes the question and says nothing: its time runs out.
+    let quiet = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let error = ask(quiet.local_addr().unwrap(), "example.test", Kind::Txt).unwrap_err();
+    let waited = format!(
+        "{} did not answer: no answer within 3 s",
+        quiet.local_addr().unwrap()
+    );
+    assert_eq!(error.to_string(), format!("the resolver {waited}"));
 }
 
 /// An answer cut off over UDP is asked for over TCP: where nothing listens
@@ -425,7 +449,8 @@ fn a_resolver_that_answers_only_other_questions_did_not_answer() {
     });
     let began = Instant::now();
     let error = ask(server, "example.test", Kind::Txt).unwrap_err();
-    assert!(matches!(error, Error::NoAnswer { .. }), "{error:?}");
+    let waited = format!("the resolver {server} did not answer: no answer within 3 s");
+    assert_eq!(error.to_string(), waited);
     assert!(
         began.elapsed() < Duration::from_secs(4),
         "{:?}",

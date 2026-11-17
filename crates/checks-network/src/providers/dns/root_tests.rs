@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use super::stand_in::resolver;
 use super::tests::collected;
 use super::*;
+use crate::dns::Kind;
 
 #[test]
 fn a_record_that_names_the_root_is_shown_as_a_dot() {
