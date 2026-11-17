@@ -178,24 +178,98 @@ fn space() -> Vec<Finding> {
         .collect()
 }
 
-fn selinux() -> Option<Finding> {
-    let enforcing = fs::read_to_string("/sys/fs/selinux/enforce").ok()?;
-    let loaded = output("/usr/sbin/semodule", &["-l"]).is_some_and(|list| {
+/// Where SELinux says what it does, and where the installer keeps the
+/// module it loaded (install/selinux.rs); a test names other places.
+pub(super) struct SeLinux<'a> {
+    /// `1` where SELinux enforces.
+    pub(super) enforce: &'a str,
+    /// The boolean that lets nginx connect to every port.
+    pub(super) everywhere: &'a str,
+    /// The module's text as the installer last loaded it.
+    pub(super) module: &'a str,
+}
+
+const SELINUX: SeLinux<'static> = SeLinux {
+    enforce: "/sys/fs/selinux/enforce",
+    everywhere: "/sys/fs/selinux/booleans/httpd_can_network_connect",
+    module: "/opt/garrison/selinux/garrison.cil",
+};
+
+/// The port the module's text lets nginx reach, as the installer writes it:
+/// `(portcon tcp PORT …)`.
+fn module_port(text: &str) -> Option<u16> {
+    text.lines().find_map(|line| {
+        line.strip_prefix("(portcon tcp ")?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    })
+}
+
+fn selinux(config: &Config) -> Option<Finding> {
+    let listed = output("/usr/sbin/semodule", &["-l"]).is_some_and(|list| {
         list.lines()
             .any(|line| line.split_whitespace().next() == Some("garrison"))
     });
-    Some(if loaded {
-        Finding::ok("the SELinux module garrison lets nginx reach the web service")
-    } else if enforcing.trim() == "1" {
-        Finding::fail(
-            "SELinux is enforcing and the module garrison is not loaded, so nginx cannot reach Garrison",
-            "Run the installer again; it loads the module.",
-        )
-    } else {
-        Finding::warn(
-            "SELinux is permissive and the module garrison is not loaded",
-            "Run the installer again.",
-        )
+    selinux_at(&SELINUX, listed, config.web.port)
+}
+
+/// Whether SELinux, where it is in use, lets nginx (`httpd_t`) reach the
+/// web service on `port`: only a port of a type it may connect to, as the
+/// module gives the port it was loaded for. `listed`: whether `semodule -l`
+/// lists the module.
+pub(super) fn selinux_at(places: &SeLinux<'_>, listed: bool, port: u16) -> Option<Finding> {
+    let enforcing = fs::read_to_string(places.enforce).ok()?.trim() == "1";
+    let everywhere = fs::read_to_string(places.everywhere)
+        .is_ok_and(|value| value.split_whitespace().next() == Some("1"));
+    if everywhere {
+        return Some(Finding::ok(
+            "SELinux lets nginx connect to every port (httpd_can_network_connect)",
+        ));
+    }
+    if !listed {
+        return Some(if enforcing {
+            Finding::fail(
+                "SELinux is enforcing and the module garrison is not loaded, so nginx cannot reach \
+                 Garrison",
+                "Run the installer again; it loads the module.",
+            )
+        } else {
+            Finding::warn(
+                "SELinux is permissive and the module garrison is not loaded",
+                "Run the installer again.",
+            )
+        });
+    }
+    let labelled = fs::read_to_string(places.module)
+        .map_err(|error| format!("{} cannot be read ({error})", places.module))
+        .and_then(|text| {
+            module_port(&text).ok_or_else(|| format!("{} names no port", places.module))
+        });
+    Some(match labelled {
+        Ok(labelled) if labelled == port => Finding::ok(format!(
+            "the SELinux module garrison is loaded and lets nginx reach the web service on port \
+             {port}"
+        )),
+        Ok(labelled) => {
+            let what = format!(
+                "the SELinux module garrison lets nginx reach port {labelled}, not {port} \
+                 (web.port)"
+            );
+            let fix = "Run the installer again; it loads the module for web.port.";
+            if enforcing {
+                Finding::fail(format!("{what}, so nginx answers 502"), fix)
+            } else {
+                Finding::warn(
+                    format!("{what}; SELinux is permissive and only logs the denial"),
+                    fix,
+                )
+            }
+        }
+        Err(why) => Finding::unknown(format!(
+            "which port the SELinux module garrison lets nginx reach: {why}"
+        )),
     })
 }
 
@@ -273,7 +347,7 @@ pub(super) fn checks(config: &Config) -> Vec<Finding> {
     findings.extend(super::files::files(config));
     findings.push(clock());
     findings.extend(space());
-    findings.extend(selinux());
+    findings.extend(selinux(config));
     findings.push(events(config));
     findings
 }

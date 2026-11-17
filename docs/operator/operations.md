@@ -35,7 +35,8 @@ watch), the settings the units do not follow and the secrets they would not
 hand to the services, as `check-config` names them, that the credentials
 are private and that the broker may read the access policy, which only root
 may change and which must bind a role or an account, the clock,
-free space, the SELinux module and the last Stalwart event on this host,
+free space, that the SELinux module lets nginx reach `web.port`, and the
+last Stalwart event on this host,
 then, as a visitor
 would, Garrison's certificate and answer under its own name and on the port
 `public_origin` names, that Stalwart's
@@ -282,7 +283,7 @@ Stalwart WebUI if you no longer need them.
 | A sender is told "an attached Office document contains macros" | The macro filter refused the message ([configuration](configuration.md#milter)). `journalctl -u garrison-milter` shows when and what kind of document, never whose. With `on_macro = "tag"` such mail is taken and marked instead. |
 | An action says "not installed or loaded" | The configured unit does not exist on this host. |
 | An action is denied by systemd | The polkit rule is older than the configuration; run the installer again or write the rule (see [configuration](configuration.md#actions)). |
-| nginx answers 502 for Garrison | `garrison doctor` names the cause. Under SELinux, `semodule -l` must list `garrison`, the module that lets nginx reach the web port; run the installer again to load it. `garrison check-config` warns when nginx's include names another port than `web.port`. Otherwise `systemctl status garrison-web`. |
+| nginx answers 502 for Garrison | `garrison doctor` names the cause. Under SELinux the module `garrison` must be loaded for `web.port`, which doctor compares; run the installer again to load it. `garrison check-config` warns when nginx's include names another port than `web.port`. Otherwise `systemctl status garrison-web`. |
 | nginx answers 502 for Stalwart's own host | Under SELinux nginx may reach Stalwart's HTTP port 8080 (`http_cache_port_t`) only with `setsebool -P httpd_can_network_relay 1`. Garrison's own port needs no boolean: its module `garrison` covers it. |
 | `nginx -t` says `unknown directive "http2"` | nginx before 1.25.1 knows only `listen 443 ssl http2;`. `garrison nginx` writes the form your nginx reads. |
 | The browser says that Garrison's page redirects too many times | `public_origin` names a port other than 443, and nginx passes the host name without the port: an include of your own with `proxy_set_header Host $host;`. Garrison's include passes the host as the browser sent it (`$http_host`); write it anew: `sudo sh -c 'garrison nginx --snippet > /etc/nginx/snippets/garrison.conf' && sudo nginx -t && sudo systemctl reload nginx`. |

@@ -238,3 +238,81 @@ fn the_newest_snapshot_is_read_from_the_status_database() {
         Level::Unknown
     );
 }
+
+/// A host's SELinux, made of files: whether it enforces, the boolean that
+/// lets nginx connect anywhere, and the module's text as the installer
+/// writes it for `port`.
+fn selinux_host(enforce: &str, everywhere: &str, port: Option<u16>) -> tempfile::TempDir {
+    let directory = tempfile::tempdir().unwrap();
+    fs::write(directory.path().join("enforce"), enforce).unwrap();
+    fs::write(directory.path().join("boolean"), everywhere).unwrap();
+    if let Some(port) = port {
+        fs::write(
+            directory.path().join("garrison.cil"),
+            format!(
+                ";; Lets nginx (httpd_t) connect to Garrison's web service on port {port}.\n\
+                 (type garrison_port_t)\n(roletype object_r garrison_port_t)\n\
+                 (typeattributeset port_type (garrison_port_t))\n\
+                 (portcon tcp {port} (system_u object_r garrison_port_t ((s0) (s0))))\n\
+                 (allow httpd_t garrison_port_t (tcp_socket (name_connect)))\n"
+            ),
+        )
+        .unwrap();
+    }
+    directory
+}
+
+fn on(host: &tempfile::TempDir, listed: bool, port: u16) -> Option<Finding> {
+    let path = |name: &str| host.path().join(name).display().to_string();
+    let (enforce, everywhere, module) = (path("enforce"), path("boolean"), path("garrison.cil"));
+    selinux_at(
+        &SeLinux {
+            enforce: &enforce,
+            everywhere: &everywhere,
+            module: &module,
+        },
+        listed,
+        port,
+    )
+}
+
+/// nginx reaches the web service under SELinux only where the module the
+/// installer loaded gives its port the type nginx may connect to, or where
+/// nginx may connect anywhere; a module for another port fails with the
+/// installer, which loads it for web.port.
+#[test]
+fn the_selinux_module_is_judged_by_the_port_it_lets_nginx_reach() {
+    let enforcing = selinux_host("1", "0 0", Some(8091));
+    let kept = on(&enforcing, true, 8091).unwrap();
+    assert_eq!(
+        (kept.level, kept.what.as_str()),
+        (
+            Level::Ok,
+            "the SELinux module garrison is loaded and lets nginx reach the web service on port \
+             8091"
+        )
+    );
+    let moved = on(&enforcing, true, 9443).unwrap();
+    assert_eq!(moved.level, Level::Fail, "{}", moved.line());
+    assert_eq!(
+        moved.what,
+        "the SELinux module garrison lets nginx reach port 8091, not 9443 (web.port), so nginx \
+         answers 502"
+    );
+    assert_eq!(
+        moved.fix.as_deref(),
+        Some("Run the installer again; it loads the module for web.port.")
+    );
+    let permissive = selinux_host("0", "0 0", Some(8091));
+    assert_eq!(on(&permissive, true, 9443).unwrap().level, Level::Warn);
+    let unlisted = on(&enforcing, false, 8091).unwrap();
+    assert_eq!(unlisted.level, Level::Fail, "{}", unlisted.line());
+    let anywhere = selinux_host("1", "1 1", Some(8091));
+    assert_eq!(on(&anywhere, true, 9443).unwrap().level, Level::Ok);
+    let unwritten = selinux_host("1", "0 0", None);
+    let unknown = on(&unwritten, true, 8091).unwrap();
+    assert_eq!(unknown.level, Level::Unknown, "{}", unknown.line());
+    // No SELinux, no line.
+    let none = tempfile::tempdir().unwrap();
+    assert!(on(&none, true, 8091).is_none());
+}

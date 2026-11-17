@@ -1176,6 +1176,9 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` fails `metrics-credential` and `spamhaus-dqs-key` where
   a check reads them and they hold what the collector takes for none**, with
   how to fill them.
+- **`garrison doctor` fails an SELinux module loaded for another port than
+  `web.port`**, with which nginx answers 502, and names the installer, which
+  loads it for the port.
 
 ## [0.1.2] - 2026-11-13
 

@@ -63,8 +63,9 @@ The installer writes `web.port` into nginx's include,
 nginx reach it; `check-config` and `garrison doctor` warn while the include
 names another port.
 After changing the port, run the installer again. Without it, restart
-`garrison-web` and write the include anew; the SELinux module then moves with
-the next run of the installer:
+`garrison-web` and write the include anew; under SELinux nginx reaches the new
+port only once the next run of the installer moves the module, and
+`garrison doctor` fails it until then:
 
 ```sh
 sudo sh -c 'garrison nginx --snippet > /etc/nginx/snippets/garrison.conf'

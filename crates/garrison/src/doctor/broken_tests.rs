@@ -230,7 +230,33 @@ fn dqs_key_of_two_words() -> Broken {
     }
 }
 
-const HOSTS: [fn() -> Broken; 9] = [
+/// SELinux enforcing, its module loaded for the web service's old port, as
+/// after `web.port` changed and only the include was written anew.
+fn selinux_module_for_another_port() -> Broken {
+    let directory = tempfile::tempdir().unwrap();
+    let path = |name: &str| directory.path().join(name).display().to_string();
+    fs::write(path("enforce"), "1\n").unwrap();
+    fs::write(path("boolean"), "0 0\n").unwrap();
+    fs::write(
+        path("garrison.cil"),
+        "(portcon tcp 8091 (system_u object_r garrison_port_t ((s0) (s0))))\n",
+    )
+    .unwrap();
+    let (enforce, everywhere, module) = (path("enforce"), path("boolean"), path("garrison.cil"));
+    let places = host::SeLinux {
+        enforce: &enforce,
+        everywhere: &everywhere,
+        module: &module,
+    };
+    Broken {
+        host: "an SELinux module that labels another port than web.port",
+        found: host::selinux_at(&places, true, 9443).into_iter().collect(),
+        said: "lets nginx reach port 8091".into(),
+        fix: Some("Run the installer again".into()),
+    }
+}
+
+const HOSTS: [fn() -> Broken; 10] = [
     events_database_is_a_folder,
     origin_with_a_port,
     issuer_answers_with_a_web_page,
@@ -240,6 +266,7 @@ const HOSTS: [fn() -> Broken; 9] = [
     policy_names_a_dropped_action,
     metrics_credential_as_user_and_password,
     dqs_key_of_two_words,
+    selinux_module_for_another_port,
 ];
 
 /// What is wrong with what doctor said on `broken`, if anything.
