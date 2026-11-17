@@ -90,31 +90,37 @@ fn a_document_is_read_however_its_encoding_header_is_written() {
 
 #[test]
 fn two_disagreeing_encodings_do_not_hide_a_document() {
-    // A reading under one of the two reveals the document.
+    // The scan reads the body every way it can regardless of the headers, so
+    // two headers that disagree hide nothing: the base64 stream holds the
+    // document whichever header a client believed.
     let mut hiding =
         b"Content-Transfer-Encoding: 7bit\r\nContent-Transfer-Encoding: base64\r\n\r\n".to_vec();
     hiding.extend_from_slice(&base64_junk(&document()));
     assert_eq!(macros(&hiding), Outcome::Macros(Found::Zipped));
-    // When neither reading finds a document, the disagreement itself is a
-    // reason the message was not scanned as one thing.
+    // Both values are ones the scan decodes, so a clean body stays clean: the
+    // disagreement alone does not make it incomplete.
     let mut clean =
         b"Content-Transfer-Encoding: base64\r\nContent-Transfer-Encoding: 7bit\r\n\r\n".to_vec();
     clean.extend_from_slice(&base64_junk(&plain_document()));
-    assert_eq!(macros(&clean), Outcome::Incomplete(Gap::Encoding));
+    assert_eq!(macros(&clean), Outcome::Clean);
 }
 
 #[test]
 fn a_part_in_an_encoding_the_scan_cannot_read_is_incomplete() {
-    // An unknown transfer encoding: the body cannot be read, so the message
-    // is not a clean one, whatever the body holds.
-    for document in [document(), plain_document()] {
-        let mut message = b"Content-Transfer-Encoding: x-custom\r\n\r\n".to_vec();
-        message.extend_from_slice(&base64_junk(&document));
-        assert_eq!(macros(&message), Outcome::Incomplete(Gap::Encoding));
-    }
+    // A clean body under a transfer encoding the scan does not decode: it
+    // cannot be read, so the message is not a clean one.
+    let mut unknown = b"Content-Transfer-Encoding: x-custom\r\n\r\n".to_vec();
+    unknown.extend_from_slice(&base64_junk(&plain_document()));
+    assert_eq!(macros(&unknown), Outcome::Incomplete(Gap::Encoding));
+    // The scan reads base64 wherever it stands, so a macro document is found
+    // even under an unknown encoding: structure never makes the answer more
+    // lenient, only stricter.
+    let mut macro_doc = b"Content-Transfer-Encoding: x-custom\r\n\r\n".to_vec();
+    macro_doc.extend_from_slice(&base64_junk(&document()));
+    assert_eq!(macros(&macro_doc), Outcome::Macros(Found::Zipped));
     // The encodings that keep the bytes as they are do not make a clean
     // message incomplete.
-    for cte in ["7bit", "8bit", "binary", "base64"] {
+    for cte in ["7bit", "8bit", "binary", "base64", "quoted-printable"] {
         let mut message = format!("Content-Transfer-Encoding: {cte}\r\n\r\n").into_bytes();
         message.extend_from_slice(&STANDARD.encode(plain_document()).into_bytes());
         assert_eq!(macros(&message), Outcome::Clean, "{cte}");

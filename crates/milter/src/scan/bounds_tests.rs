@@ -19,6 +19,19 @@ fn in_time() -> Duration {
     }
 }
 
+#[test]
+fn a_megabyte_of_noise_is_scanned_in_time() {
+    // Random bytes have base64 symbols in them, so the four-phase pass has
+    // work to do on every message; a megabyte of noise is still scanned in
+    // proportion to its size.
+    let noise: Vec<u8> = (0..1024u32 * 1024)
+        .map(|index| index.wrapping_mul(2_654_435_761).to_le_bytes()[0])
+        .collect();
+    let began = Instant::now();
+    let _ = macros(&noise);
+    assert!(began.elapsed() < in_time(), "{:?}", began.elapsed());
+}
+
 /// Local file headers, deflated and written as a stream (no size), whose
 /// extra fields all end where the headers end: each one's data is everything
 /// that follows them. What follows is deflate that takes input and gives

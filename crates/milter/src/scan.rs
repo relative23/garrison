@@ -34,14 +34,13 @@
 
 use std::time::Instant;
 
+mod base64_stream;
 mod marks;
 mod parts;
-mod stretches;
 mod unpack;
 mod uu;
 
 use marks::contains;
-use stretches::Stretches;
 use unpack::Work;
 
 /// Archives inside archives are opened this deep.
@@ -183,37 +182,46 @@ fn scan(message: &[u8], until: Option<Instant>) -> Outcome {
     }
 }
 
-/// The first document with macros in what `message` may be read as.
+/// The first document with macros in what `message` may be read as. No pass
+/// reads where a part begins or ends, how deep it is, or how its headers are
+/// written: structure may make an answer more exact, never more lenient.
 fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
+    // The message as it stands: a document in the clear, any encoding's bytes
+    // that happen to be literal, the archives in them.
     if let Some(found) = work.scanned(message, DEPTH) {
         return Some(found);
     }
-    // One stretch is decoded, scanned and given up before the next.
-    for stretch in Stretches::of(message) {
+    // The base64 of the whole message, read on each of the four grids a run
+    // of symbols can sit on: wherever a base64 body stands, and whatever junk,
+    // fake boundary or header surrounds it, one phase holds its bytes whole.
+    // One phase is decoded, scanned and given up before the next.
+    let symbols = base64_stream::count(message);
+    for phase in 0..base64_stream::PHASES {
         if work.late() {
             return None;
         }
-        if let Some(found) = work.scanned(&stretch.decoded(), DEPTH) {
+        if let Some(found) =
+            work.scanned(&base64_stream::decode_phase(message, phase, symbols), DEPTH)
+        {
             return Some(found);
         }
     }
-    // Quoted-printable is undone next: it is how text travels, and rarely a
-    // file. The one escape is `=`; a message without it decodes to itself,
-    // which was scanned already. A message that holds `=` is read undone,
-    // however the sender wrote the encoding: lower-case hexadecimal, one
-    // long line, or only some bytes escaped are all a conforming client
-    // decodes to the document, so the scan must read them too.
+    // Quoted-printable, undone over the whole message: the one escape is `=`,
+    // and a message without it decodes to itself, which was scanned already.
     if contains(message, b"=")
         && let Some(found) = work.scanned(&unquoted(message), DEPTH)
     {
         return Some(found);
     }
-    // Last, the little of MIME a receiver reads: each part decoded by the
-    // encoding its own headers declare. This catches what the passes above
-    // cannot see without the headers — base64 a sender broke up with
-    // characters outside its alphabet, uuencode — and marks a part the scan
-    // cannot decode as a gap instead of letting it pass as clean.
-    work.scanned_parts(message)
+    // uuencode, in a `begin … end` block wherever it stands.
+    if let Some(found) = work.scanned_uuencoded(message) {
+        return Some(found);
+    }
+    // The one thing a header can still decide, and only to make the answer
+    // stricter: a part that declares a transfer encoding the scan does not
+    // decode is a message not scanned completely, not a clean one.
+    work.flag_undecodable_encoding(message);
+    None
 }
 
 #[cfg(test)]
@@ -224,5 +232,7 @@ mod encoding_tests;
 mod incomplete_tests;
 #[cfg(test)]
 mod parts_tests;
+#[cfg(test)]
+mod structure_tests;
 #[cfg(test)]
 pub(crate) mod tests;
