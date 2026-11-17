@@ -309,7 +309,8 @@ not answer or names no mail host, both cards say why, and the next run asks
 Stalwart again, one request a minute while that lasts, so that the cards
 follow once it gives them, as after `garrison stalwart setup`.
 
-- **Blocklists.** A listing is Failed and names the address and the list.
+- **Blocklists.** A listing is Failed and names the address, the list and
+  each code the list gave, as Spamhaus gives one for each of its lists.
   IPv4 addresses are asked of `lists` (default `zen.spamhaus.org`,
   `bl.spamcop.net`, `psbl.surriel.com`, `bl.mailspike.net`), IPv6 addresses
   of `lists_ipv6` (default `zen.spamhaus.org`): a listing of the IPv6 address

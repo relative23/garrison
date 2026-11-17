@@ -49,10 +49,15 @@ pub(super) fn said(zone: &str, answer: Result<Answer, String>) -> Said {
     // Spamhaus answers in 127.255.255.0/24 where it gives no verdict; its
     // documentation calls these codes errors that imply no listing.
     let error = |code: &Ipv4Addr| spamhaus(zone) && code.octets()[..3] == [127, 255, 255];
-    match (codes.iter().find(|code| !error(code)), codes.first()) {
-        (Some(code), _) => Said::Listed(code.to_string()),
-        (None, None) => Said::Clear,
-        (None, Some(code)) => Said::Unanswered(error_named(*code)),
+    // Every listing is named, as one list may answer for several of its own.
+    let mut listings: Vec<&Ipv4Addr> = codes.iter().filter(|code| !error(code)).collect();
+    listings.sort_unstable();
+    listings.dedup();
+    let listings: Vec<String> = listings.iter().map(ToString::to_string).collect();
+    match (listings.is_empty(), codes.first()) {
+        (false, _) => Said::Listed(listings.join(", ")),
+        (true, None) => Said::Clear,
+        (true, Some(code)) => Said::Unanswered(error_named(*code)),
     }
 }
 
@@ -84,6 +89,19 @@ mod tests {
 
     fn answered(zone: &str, code: &str) -> Said {
         said(zone, Ok(Answer::Records(vec![code.to_owned()])))
+    }
+
+    /// A list may answer an address with several codes, as Spamhaus' ZEN
+    /// gives one for each of its lists that holds it: each is named, once,
+    /// in order, so that a listing beside the first is not left out.
+    #[test]
+    fn every_listing_code_of_an_answer_is_named() {
+        let codes = ["127.0.0.4", "127.0.0.2", "127.0.0.4", "127.255.255.254"];
+        let answer = Ok(Answer::Records(codes.map(ToOwned::to_owned).to_vec()));
+        assert_eq!(
+            said("zen.spamhaus.org", answer),
+            Said::Listed("127.0.0.2, 127.0.0.4".to_owned())
+        );
     }
 
     /// Spamhaus' Data Query Service answers under `dq.spamhaus.net`, with the

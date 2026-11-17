@@ -739,6 +739,11 @@ Notable changes for operators and users. The format follows
   the first 120 characters of a record, such as a DKIM key, as if they were
   all of it; a longer one now ends in "…" there. The record is held against
   what was found as a whole, as before.
+- **A listing names every code the list gave.** A list may answer an
+  address with several codes, as Spamhaus' ZEN gives one for each of its
+  lists that holds it, such as SBL and XBL; the Blocklists card named only
+  the first, so a listing beside it went unnamed, and which one came first
+  could change from run to run. Every code is named now, in order.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not
