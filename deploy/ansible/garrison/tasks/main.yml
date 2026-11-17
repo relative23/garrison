@@ -97,6 +97,17 @@
     mode: "0644"
   register: garrison_config
 
+# An empty key file, or one of a line end alone, gives its service no key,
+# as a missing one does: setup runs where any of the three holds none.
+- name: What the key files setup writes hold
+  ansible.builtin.command:
+    argv: [grep, -qs, "[^[:space:]]", "/etc/garrison/credentials/{{ item }}"]
+  loop: [webhook-signature-key, collector-native-key, broker-native-key]
+  register: garrison_keys
+  changed_when: false
+  failed_when: false
+  when: garrison_stalwart_admin | length > 0
+
 - name: Stalwart is connected (the administrator goes in on standard input)
   ansible.builtin.command:
     argv:
@@ -106,9 +117,10 @@
       - --admin-credential
       - "-"
     stdin: "{{ garrison_stalwart_admin | to_json }}"
-    creates: /etc/garrison/credentials/broker-native-key
   no_log: true
-  when: garrison_stalwart_admin | length > 0
+  when: >-
+    garrison_stalwart_admin | length > 0
+    and garrison_keys.results | rejectattr('rc', 'equalto', 0) | list | length > 0
 
 - name: Stalwart's administrators have access
   ansible.builtin.command:

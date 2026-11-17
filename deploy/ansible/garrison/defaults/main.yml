@@ -20,7 +20,8 @@ garrison_modules: []
 # Further configuration, appended as TOML: providers, actions, [web], ...
 garrison_extra_config: ""
 
-# The Stalwart administrator for `garrison stalwart setup`, used once and
-# passed on standard input: {username: ..., secret: ...} or {apiKey: ...}.
-# Keep it in Ansible Vault.
+# The Stalwart administrator for `garrison stalwart setup`, passed on
+# standard input: {username: ..., secret: ...} or {apiKey: ...}. Used where a
+# key file setup writes is missing or empty, as on the first run. Keep it in
+# Ansible Vault.
 garrison_stalwart_admin: {}

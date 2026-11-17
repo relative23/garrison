@@ -1001,7 +1001,9 @@ Notable changes for operators and users. The format follows
   ham by domain card for ten minutes, so that they said that setup was
   needed after setup had made the key; the first run with a key reads them
   again, as it does a reading made without the key of Spamhaus' Data Query
-  Service.
+  Service. The Ansible role ran setup only where the broker's key file was
+  missing; it now runs it where any of the three key files is missing or
+  empty, and a run with every key in place still changes nothing.
 - **The metrics exporter's card says what makes the credential it lacks.**
   It said "No scrape credential is configured." where the file was empty,
   held no credential or could not be read, and named neither the file nor
