@@ -17,7 +17,7 @@ fn card(response: String) -> (State, Vec<String>) {
     config.deployment.stalwart_url.clone_from(&server.url);
     let runner = Canned(String::new());
     let context = Context {
-        metrics_credential: Some(("metrics".to_owned(), "secret".to_owned())),
+        metrics_credential: Scrape::Credential("metrics".to_owned(), "secret".to_owned()),
         ..context(&config, &runner)
     };
     let provider = Prometheus::new(&table("type = \"prometheus\"")).unwrap();

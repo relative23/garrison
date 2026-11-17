@@ -33,11 +33,12 @@ pub(super) fn ensure_metrics(
     let enabled = current.kind.as_deref() == Some("Enabled");
     let ours = enabled && current.auth_username.as_deref() == Some("garrison");
     if enabled && !ours {
-        return Ok(
-            "Prometheus exporter is enabled by someone else; not changed \
-                   (configure metrics_credential manually)"
-                .into(),
-        );
+        return Ok(format!(
+            "Prometheus exporter is enabled by someone else; not changed: for the collector, \
+             write its user name and password into {} as configuration.md says \
+             (collector.metrics_credential)",
+            target.display()
+        ));
     }
     if ours && holds(&target) && !rotate {
         return Ok("Prometheus exporter already configured".into());

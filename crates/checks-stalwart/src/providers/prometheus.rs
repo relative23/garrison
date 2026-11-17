@@ -21,7 +21,7 @@ use garrison_stalwart::http::Request;
 use garrison_stalwart::{Error, SUPPORTED};
 use rusqlite::params;
 
-use crate::context::{Collected, Context, Provider, Report};
+use crate::context::{Collected, Context, Provider, Report, SCRAPE_FIX, Scrape};
 use crate::options::{Checked, Options};
 
 /// The counted event types; each one's series is its type with `_` for `.` and `-`.
@@ -227,9 +227,21 @@ impl Prometheus {
         })
     }
 
+    /// The exporter's samples, or why there are none, with what mends it
+    /// where that is the credential's file.
     fn scrape(&self, context: &Context<'_>) -> Result<BTreeMap<String, f64>, String> {
-        let Some((user, secret)) = &context.metrics_credential else {
-            return Err("No scrape credential is configured.".into());
+        let (user, secret) = match &context.metrics_credential {
+            Scrape::Credential(user, secret) => (user, secret),
+            Scrape::Missing(why) => {
+                return Err(format!("No scrape credential: {why}. {SCRAPE_FIX}"));
+            }
+            Scrape::Off => {
+                return Err(
+                    "No scrape credential is configured: collector.metrics_credential \
+                            is off; configuration.md says how to name its file."
+                        .to_owned(),
+                );
+            }
         };
         let token = format!("Basic {}", STANDARD.encode(format!("{user}:{secret}")));
         let url = format!("{}{}", context.deployment.stalwart_url, self.path);

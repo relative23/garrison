@@ -1,6 +1,7 @@
-//! What the collector's journal says of its API key for Stalwart: where it
-//! has none, why, with the file and what makes one, once for each reason
-//! and not in every run; and once that it has the key again.
+//! What the collector's journal says of its API key for Stalwart and of the
+//! scrape credential of Stalwart's exporter: where it has none, why, with
+//! the file and what makes one, once for each reason and not in every run;
+//! and once that it has it again.
 
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Mutex, Once, PoisonError};
@@ -9,8 +10,8 @@ use std::thread::{self, ThreadId};
 use super::*;
 use crate::testing::{Canned, now};
 
-/// The lines the collection runs of this test binary write about the key,
-/// by the thread that wrote them, since tests run side by side.
+/// The lines the collection runs of this test binary write, by the thread
+/// that wrote them, since tests run side by side.
 struct Journal(Mutex<Vec<(ThreadId, String)>>);
 
 impl log::Log for Journal {
@@ -20,7 +21,7 @@ impl log::Log for Journal {
 
     fn log(&self, record: &log::Record<'_>) {
         let line = format!("{} {}", record.level(), record.args());
-        if record.target() == "garrison_collector::run" && line.contains("API key") {
+        if record.target() == "garrison_collector::run" {
             let mut lines = self.0.lock().unwrap_or_else(PoisonError::into_inner);
             lines.push((thread::current().id(), line));
         }
@@ -32,8 +33,9 @@ impl log::Log for Journal {
 static JOURNAL: Journal = Journal(Mutex::new(Vec::new()));
 static KEPT: Once = Once::new();
 
-/// The lines this thread's runs wrote about the key since the last call.
-fn said() -> Vec<String> {
+/// The lines this thread's runs wrote since the last call that `about`
+/// takes.
+fn said(about: impl Fn(&str) -> bool) -> Vec<String> {
     KEPT.call_once(|| {
         log::set_logger(&JOURNAL).unwrap();
         log::set_max_level(log::LevelFilter::Info);
@@ -42,7 +44,15 @@ fn said() -> Vec<String> {
     let mut lines = JOURNAL.0.lock().unwrap_or_else(PoisonError::into_inner);
     let (mine, others): (Vec<_>, Vec<_>) = lines.drain(..).partition(|(thread, _)| *thread == me);
     *lines = others;
-    mine.into_iter().map(|(_, line)| line).collect()
+    mine.into_iter()
+        .map(|(_, line)| line)
+        .filter(|line| about(line))
+        .collect()
+}
+
+/// A line about the collector's API key.
+fn key(line: &str) -> bool {
+    line.contains("API key")
 }
 
 fn private(path: &Path, data: &str) {
@@ -57,7 +67,7 @@ fn private(path: &Path, data: &str) {
 /// without it, and they say so themselves.
 #[test]
 fn the_journal_says_once_for_each_reason_why_the_collector_has_no_key() {
-    said();
+    said(key);
     let directory = tempfile::tempdir().unwrap();
     let config = crate::testing::config(directory.path());
     let credentials = Credentials::new(directory.path().join("credentials"));
@@ -65,7 +75,7 @@ fn the_journal_says_once_for_each_reason_why_the_collector_has_no_key() {
     let runner = Canned(String::new());
     let run = || {
         collect_from(&providers, &config, &credentials, &runner, now()).unwrap();
-        said()
+        said(key)
     };
     let key = credentials.path(&config.collector.native_key);
     let no_key = |why: &str| {
@@ -92,4 +102,50 @@ fn the_journal_says_once_for_each_reason_why_the_collector_has_no_key() {
     assert_eq!(run(), Vec::<String>::new());
     private(&key, "short\n");
     assert_eq!(run(), no_key("Protected secret has an invalid format"));
+}
+
+/// The scrape credential: a file that holds none is said once for each
+/// reason, with the file and what fills it, and once that it holds one
+/// again; an empty file, which the installer keeps where the exporter is
+/// another's, is not said, since the exporter's card says it.
+#[test]
+fn the_journal_says_once_for_each_reason_why_the_collector_has_no_scrape_credential() {
+    let scrape =
+        |line: &str| line.contains("scrape credential") || line.contains("metrics credential");
+    said(scrape);
+    let directory = tempfile::tempdir().unwrap();
+    let config = crate::testing::config(directory.path());
+    let credentials = Credentials::new(&config.credentials_directory);
+    let providers: Vec<Box<dyn Provider>> = Vec::new();
+    let runner = Canned(String::new());
+    let run = || {
+        collect_from(&providers, &config, &credentials, &runner, now()).unwrap();
+        said(scrape)
+    };
+    let file = config.credentials_directory.join("metrics-credential");
+    let none = |why: &str| {
+        vec![format!(
+            "WARN The collector has no scrape credential for Stalwart's exporter: {} {why}. Run \
+             `garrison stalwart setup`, which writes it while Stalwart's exporter is Garrison's \
+             or off; for an exporter of another's, write its user name and password into it as \
+             configuration.md says (collector.metrics_credential).",
+            file.display()
+        )]
+    };
+    assert_eq!(run(), none("cannot be read"));
+    assert_eq!(run(), Vec::<String>::new());
+    private(&file, "{\"username\": \"scraper\"\n");
+    assert_eq!(run(), none("holds no credential"));
+    assert_eq!(run(), Vec::<String>::new());
+    private(&file, r#"{"username": "scraper", "secret": "s3cret"}"#);
+    assert_eq!(
+        run(),
+        [format!(
+            "INFO The collector has a scrape credential again, from {}",
+            file.display()
+        )]
+    );
+    private(&file, "");
+    assert_eq!(run(), Vec::<String>::new());
+    assert_eq!(run(), Vec::<String>::new());
 }

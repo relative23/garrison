@@ -1002,6 +1002,18 @@ Notable changes for operators and users. The format follows
   needed after setup had made the key; the first run with a key reads them
   again, as it does a reading made without the key of Spamhaus' Data Query
   Service.
+- **The metrics exporter's card says what makes the credential it lacks.**
+  It said "No scrape credential is configured." where the file was empty,
+  held no credential or could not be read, and named neither the file nor
+  what fills it, though `garrison doctor` did. It now names the file, why it
+  gives no credential, and what fills it, in doctor's words: setup writes it
+  while the exporter is Garrison's or off, and for an exporter of another's
+  its user name and password go into it as configuration.md says; with
+  `collector.metrics_credential` off it says so. The collector's journal, which said in every run
+  that the metrics credential was unavailable, says once for each reason why
+  there is none, with the same words, and once that there is one again; and
+  setup, for an exporter of another's, names the file its user name and
+  password go into.
 - **An answer of Stalwart's that Garrison cannot read is no refusal.** An
   answer in a form this release does not read, as a Stalwart release it
   does not support yet may give after an upgrade (no JSON, an object it

@@ -52,7 +52,7 @@ impl Provider for Twice {
 }
 
 /// What a run handed to its provider: the API key and the metrics credential.
-type Handed = Arc<Mutex<Option<(Option<String>, Option<(String, String)>)>>>;
+type Handed = Arc<Mutex<Option<(Option<String>, Scrape)>>>;
 
 struct Probe(Handed);
 
@@ -90,12 +90,15 @@ fn providers_receive_the_credentials_that_could_be_read() {
         collect_from(&providers, &config, &credentials, &runner, now()).unwrap();
         handed.lock().unwrap().take().unwrap()
     };
-    assert_eq!(run(), (None, None));
+    // Why there is none names the file as the operator fills it.
+    let metrics = config.collector.metrics_credential.as_ref().unwrap();
+    let file = config.credentials_directory.join("metrics-credential");
+    let missing = |what: &str| Scrape::Missing(format!("{} {what}", file.display()));
+    assert_eq!(run(), (None, missing("cannot be read")));
     private(
         &credentials.path(&config.collector.native_key),
         "collector-key-0123456789",
     );
-    let metrics = config.collector.metrics_credential.as_ref().unwrap();
     private(
         &credentials.path(metrics),
         r#"{"username": "scraper", "secret": "s3cret"}"#,
@@ -104,17 +107,22 @@ fn providers_receive_the_credentials_that_could_be_read() {
         run(),
         (
             Some("collector-key-0123456789".into()),
-            Some(("scraper".into(), "s3cret".into()))
+            Scrape::Credential("scraper".into(), "s3cret".into())
         )
     );
     private(&credentials.path(metrics), r#"{"username": "scraper"}"#);
-    assert_eq!(run().1, None);
+    assert_eq!(run().1, missing("holds no credential"));
     // A list of the two values is no credential.
     private(&credentials.path(metrics), r#"["scraper", "s3cret"]"#);
-    assert_eq!(run().1, None);
+    assert_eq!(run().1, missing("holds no credential"));
     // An empty file, as the installer keeps one, is none.
     private(&credentials.path(metrics), "\n");
-    assert_eq!(run().1, None);
+    assert_eq!(run().1, missing("is empty"));
+    // The setting off reads no file at all.
+    let mut off = config.clone();
+    off.collector.metrics_credential = None;
+    collect_from(&providers, &off, &credentials, &runner, now()).unwrap();
+    assert_eq!(handed.lock().unwrap().take().unwrap().1, Scrape::Off);
 }
 
 /// What a run handed to its provider of the key of Spamhaus' Data Query Service.

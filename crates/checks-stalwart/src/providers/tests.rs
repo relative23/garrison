@@ -3,7 +3,7 @@ use garrison_testing::http::{answer, serve};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::context::Provider;
+use crate::context::{Provider, Scrape};
 use crate::testing::{Canned, config, context, table};
 
 /// The accounts of an answer of Stalwart, as the provider reads them.
@@ -113,7 +113,7 @@ fn the_exporter_is_read_with_its_credential() {
     let config = garrison_testing::config(directory.path(), &server.url);
     let runner = Canned(String::new());
     let mut context = context(&config, &runner);
-    context.metrics_credential = Some(("user".into(), "secret".into()));
+    context.metrics_credential = Scrape::Credential("user".into(), "secret".into());
     let provider = Prometheus::new(&table("type = \"prometheus\"")).unwrap();
     let report = provider.collect(&context).unwrap();
     assert_eq!(
@@ -136,11 +136,41 @@ fn the_exporter_is_read_with_its_credential() {
     let request = server.requests().remove(0);
     assert!(request.starts_with("GET /metrics/prometheus HTTP/1.1"));
     assert!(request.contains("authorization: Basic dXNlcjpzZWNyZXQ=\r\n"));
-    context.metrics_credential = None;
-    let missing = provider.collect(&context).unwrap();
+    context.metrics_credential = Scrape::Off;
+    let off = provider.collect(&context).unwrap();
     assert_eq!(
-        missing.observations[0].findings,
-        ["No scrape credential is configured."]
+        off.observations[0].findings,
+        [
+            "No scrape credential is configured: collector.metrics_credential is off; \
+          configuration.md says how to name its file."
+        ]
+    );
+}
+
+/// Without a scrape credential the card says why and what makes one, as
+/// doctor does: setup writes it while the exporter is Garrison's or off,
+/// and for an exporter of another's its user name and password go into it.
+#[test]
+fn without_a_scrape_credential_the_card_names_what_makes_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    let runner = Canned(String::new());
+    let mut context = context(&config, &runner);
+    let file = "/etc/garrison/credentials/metrics-credential";
+    context.metrics_credential = Scrape::Missing(format!("{file} is empty"));
+    let provider = Prometheus::new(&table("type = \"prometheus\"")).unwrap();
+    let card = provider.collect(&context).unwrap().observations.remove(0);
+    assert_eq!(
+        (card.state, card.findings),
+        (
+            State::Unknown,
+            vec![format!(
+                "No scrape credential: {file} is empty. Run `garrison stalwart setup`, which \
+                 writes it while Stalwart's exporter is Garrison's or off; for an exporter of \
+                 another's, write its user name and password into it as configuration.md says \
+                 (collector.metrics_credential)."
+            )]
+        )
     );
 }
 
@@ -156,7 +186,7 @@ fn a_scrape_without_every_gauge_is_a_warning() {
     let config = garrison_testing::config(directory.path(), &server.url);
     let runner = Canned(String::new());
     let mut context = context(&config, &runner);
-    context.metrics_credential = Some(("user".into(), "secret".into()));
+    context.metrics_credential = Scrape::Credential("user".into(), "secret".into());
     let provider = Prometheus::new(&table("type = \"prometheus\"")).unwrap();
     let complete = provider.collect(&context).unwrap();
     assert_eq!(complete.observations[0].state, State::Ok);

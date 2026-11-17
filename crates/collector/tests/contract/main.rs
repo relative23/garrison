@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use garrison_collector::command::SystemRunner;
+use garrison_collector::context::Scrape;
 use garrison_collector::providers::prometheus::parse;
 use garrison_collector::providers::stalwart::{REQUIRED_PERMISSIONS, calls};
 use garrison_collector::providers::{Prometheus, Stalwart};
@@ -82,7 +83,9 @@ fn collect(
         deployment,
         now: time::now(),
         native_key: key,
-        metrics_credential: metrics,
+        metrics_credential: metrics.map_or(Scrape::Off, |(user, secret)| {
+            Scrape::Credential(user, secret)
+        }),
         dqs_key: garrison_collector::context::DqsKey::Unset,
         events_database: directory.path().join("events.sqlite"),
         runner: &SystemRunner,

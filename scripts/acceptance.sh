@@ -113,7 +113,7 @@ check "the installer keeps both files, empty and root's alone" "
     done"
 check "the collector reads an empty metrics credential as none" \
     "! journalctl -u garrison-collect.service --since @$since --no-pager |
-        grep -q 'metrics credential is unavailable'"
+        grep -q 'no scrape credential'"
 # doctor names a missing file with a command that makes it.
 inside "rm -f $credentials/metrics-credential"
 check "doctor names the missing metrics credential" \

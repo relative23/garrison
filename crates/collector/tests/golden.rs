@@ -180,7 +180,10 @@ fn every_provider_reports_the_expected_observations() {
         deployment: &config.deployment,
         now: time::parse(NOW).unwrap(),
         native_key: Some("native-key-0123456789".into()),
-        metrics_credential: Some(("user".into(), "secret".into())),
+        metrics_credential: garrison_collector::context::Scrape::Credential(
+            "user".into(),
+            "secret".into(),
+        ),
         dqs_key: garrison_collector::context::DqsKey::Unset,
         events_database: config.database(Database::Events),
         runner: &Commands,

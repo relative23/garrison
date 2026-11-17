@@ -119,10 +119,7 @@ fn reader(config: &Config, name: &str) -> Option<(&'static str, String)> {
     (name == "metrics-credential" && scraped).then(|| {
         (
             "the prometheus check reads Stalwart's exporter with it",
-            "Run `garrison stalwart setup`, which writes it while Stalwart's exporter is \
-             Garrison's or off; for an exporter of another's, write its user name and password \
-             into it as configuration.md says (collector.metrics_credential)."
-                .to_owned(),
+            garrison_collector::context::SCRAPE_FIX.to_owned(),
         )
     })
 }

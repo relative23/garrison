@@ -17,7 +17,7 @@ use garrison_core::config::{Config, Database};
 use garrison_core::time::{self, Timestamp};
 
 use crate::command::{Output, Runner};
-use crate::context::{Context, Deadline, DqsKey, Forgetful};
+use crate::context::{Context, Deadline, DqsKey, Forgetful, Scrape};
 
 /// 2026-10-29T12:00:00Z, the collection time of the tests.
 pub fn now() -> Timestamp {
@@ -50,7 +50,7 @@ pub fn context<'a>(config: &'a Config, runner: &'a dyn Runner) -> Context<'a> {
         now: now(),
         deadline: Deadline::NONE,
         native_key: None,
-        metrics_credential: None,
+        metrics_credential: Scrape::Off,
         dqs_key: DqsKey::Unset,
         events_database: config.database(Database::Events),
         runner,

@@ -22,7 +22,7 @@ use garrison_core::time::{self, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::command::Runner;
-use crate::context::{Context, Deadline, DqsKey, Memory, Provider};
+use crate::context::{Context, Deadline, DqsKey, Memory, Provider, SCRAPE_FIX, Scrape};
 use crate::notify::{Channels, Secrets};
 use crate::snapshot::{ProviderError, SCHEMA, Snapshot};
 use crate::store::StatusStore;
@@ -97,6 +97,28 @@ fn alone(database: &Path) -> Result<File, Error> {
 /// Where the status database keeps what the journal last said of the
 /// collector's API key for Stalwart: why it had none, or nothing.
 const KEY_SAID: &str = "run.native-key";
+/// The same of the scrape credential of Stalwart's metrics exporter.
+const SCRAPE_SAID: &str = "run.metrics-credential";
+
+/// Whether the journal is to say `now` of what it keeps under `key`, since
+/// it said otherwise last: the runs come every minute, and each reason is
+/// said once. `now` is kept for the next run.
+fn news(memory: &dyn Memory, key: &str, now: &str) -> bool {
+    let changed = memory.recall(key).unwrap_or_default() != now;
+    if changed {
+        memory.keep(key, now);
+    }
+    changed
+}
+
+/// The file a secret setting names, as an operator fills it: in the
+/// configured credentials directory, not systemd's copy of it.
+fn configured(config: &Config, source: &SecretSource) -> PathBuf {
+    match source {
+        SecretSource::Credential(name) => config.credentials_directory.join(name),
+        SecretSource::File(path) => path.clone(),
+    }
+}
 
 /// The collector's API key for Stalwart, read anew for each run. Where it
 /// has none, the journal says why, with the file and what makes a key,
@@ -110,7 +132,7 @@ fn native_key(config: &Config, credentials: &Credentials, memory: &dyn Memory) -
         .err()
         .map(ToString::to_string)
         .unwrap_or_default();
-    if memory.recall(KEY_SAID).unwrap_or_default() != why {
+    if news(memory, KEY_SAID, &why) {
         match &read {
             Ok(_) => log::info!(
                 "The collector has an API key for Stalwart again, from {}",
@@ -122,7 +144,6 @@ fn native_key(config: &Config, credentials: &Credentials, memory: &dyn Memory) -
                 made_by_setup(error)
             ),
         }
-        memory.keep(KEY_SAID, &why);
     }
     read.ok()
 }
@@ -154,24 +175,51 @@ impl ScrapeCredential {
     }
 }
 
-fn metrics_credential(config: &Config, credentials: &Credentials) -> Option<(String, String)> {
-    let source = config.collector.metrics_credential.as_ref()?;
-    let data = credentials.read_private(source, MAX_CREDENTIAL).ok();
-    // An empty file, as the installer keeps one where setup wrote none
-    // because Stalwart's exporter is another's, means none: nothing to warn of.
-    if data
-        .as_ref()
-        .is_some_and(|data| data.trim_ascii().is_empty())
-    {
-        return None;
-    }
-    let Some(ScrapeCredential { username, secret }) =
-        data.as_deref().and_then(ScrapeCredential::read)
-    else {
-        log::warn!("The metrics credential is unavailable");
-        return None;
+/// The scrape credential of Stalwart's metrics exporter from its file,
+/// read anew for each run as the collector's key is. Why there is none
+/// names the file, never what it holds; the exporter's card says it with
+/// what fills the file. The journal says it once for each reason, but not
+/// of an empty file, which the installer keeps where setup wrote none
+/// because the exporter is another's.
+fn metrics_credential(config: &Config, credentials: &Credentials, memory: &dyn Memory) -> Scrape {
+    let Some(source) = &config.collector.metrics_credential else {
+        return Scrape::Off;
     };
-    Some((username, secret))
+    let file = configured(config, source);
+    let missing = |what: &str| format!("{} {what}", file.display());
+    let read = credentials.read_private(source, MAX_CREDENTIAL);
+    let held = read
+        .as_deref()
+        .map(|data| (data.trim_ascii().is_empty(), ScrapeCredential::read(data)));
+    let (scrape, said) = match held {
+        Ok((true, _)) => (Scrape::Missing(missing("is empty")), String::new()),
+        Ok((false, Some(ScrapeCredential { username, secret }))) => {
+            (Scrape::Credential(username, secret), String::new())
+        }
+        Ok((false, None)) => (
+            Scrape::Missing(missing("holds no credential")),
+            missing("holds no credential"),
+        ),
+        Err(_) => (
+            Scrape::Missing(missing("cannot be read")),
+            missing("cannot be read"),
+        ),
+    };
+    if news(memory, SCRAPE_SAID, &said) {
+        match (&scrape, said.is_empty()) {
+            (_, false) => log::warn!(
+                "The collector has no scrape credential for Stalwart's exporter: {said}. {SCRAPE_FIX}"
+            ),
+            (Scrape::Credential(..), true) => {
+                log::info!(
+                    "The collector has a scrape credential again, from {}",
+                    file.display()
+                );
+            }
+            (Scrape::Off | Scrape::Missing(_), true) => {}
+        }
+    }
+    scrape
 }
 
 /// The key of Spamhaus' Data Query Service from its credential, read anew
@@ -181,10 +229,7 @@ fn dqs_key(config: &Config, credentials: &Credentials) -> DqsKey {
     let Some(source) = &config.collector.dqs_key else {
         return DqsKey::Unset;
     };
-    let file = match source {
-        SecretSource::Credential(name) => config.credentials_directory.join(name),
-        SecretSource::File(path) => path.clone(),
-    };
+    let file = configured(config, source);
     let missing = |what: &str| {
         DqsKey::Missing(format!(
             "{} {what}; write the key of Spamhaus' Data Query Service into it",
@@ -338,7 +383,7 @@ pub fn collect_within(
         now,
         deadline: Deadline::within(time.checks),
         native_key: native_key(config, credentials, &store),
-        metrics_credential: metrics_credential(config, credentials),
+        metrics_credential: metrics_credential(config, credentials, &store),
         dqs_key: dqs_key(config, credentials),
         events_database: config.database(Database::Events),
         runner,

@@ -91,6 +91,35 @@ impl fmt::Debug for DqsKey {
     }
 }
 
+/// The credential of Stalwart's metrics exporter, as the collector read it
+/// for this run: the `prometheus` check scrapes with it.
+#[derive(Clone, PartialEq, Eq)]
+pub enum Scrape {
+    /// `collector.metrics_credential` is off (`""`).
+    Off,
+    /// Its file gives none: why, in words that hold no secret.
+    Missing(String),
+    /// The user name and the secret.
+    Credential(String, String),
+}
+
+impl fmt::Debug for Scrape {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The secret stays out of logs and panic messages.
+        match self {
+            Scrape::Off => formatter.write_str("Off"),
+            Scrape::Missing(why) => formatter.debug_tuple("Missing").field(why).finish(),
+            Scrape::Credential(user, _) => formatter.write_str(&format!("Credential({user:?}, …)")),
+        }
+    }
+}
+
+/// What fills the scrape credential's file where it holds none, as the
+/// exporter's card and `garrison doctor` say it after naming the file.
+pub const SCRAPE_FIX: &str = "Run `garrison stalwart setup`, which writes it while Stalwart's \
+     exporter is Garrison's or off; for an exporter of another's, write its user name and \
+     password into it as configuration.md says (collector.metrics_credential).";
+
 /// Why a check that reads Stalwart with the collector's API key could not,
 /// where the collector has none, as where its credential file is missing or
 /// empty, and what makes one. Every card that needs the key says these
@@ -106,8 +135,8 @@ pub struct Context<'a> {
     /// The collector's read-only management-API key, if it could be read;
     /// without it a check that needs it says [`NO_KEY`].
     pub native_key: Option<String>,
-    /// User name and secret for the metrics exporter.
-    pub metrics_credential: Option<(String, String)>,
+    /// User name and secret for the metrics exporter, or why there are none.
+    pub metrics_credential: Scrape,
     /// The key of Spamhaus' Data Query Service.
     pub dqs_key: DqsKey,
     pub events_database: PathBuf,
@@ -252,10 +281,16 @@ mod tests {
         let mut context = context(&config, &runner);
         context.native_key = Some("collector-secret-key".into());
         context.dqs_key = super::DqsKey::Key("abcdefghijklmnopqrstuvwxyz".into());
+        context.metrics_credential =
+            super::Scrape::Credential("user".into(), "scrape-secret".into());
         let text = format!("{context:?}");
         assert!(text.starts_with("Context { now: "), "{text}");
         assert!(text.contains("native_key: Some(\"…\")"), "{text}");
         assert!(!text.contains("collector-secret-key"), "{text}");
         assert_eq!(format!("{:?}", context.dqs_key), "Key(…)");
+        assert_eq!(
+            format!("{:?}", context.metrics_credential),
+            "Credential(\"user\", …)"
+        );
     }
 }
