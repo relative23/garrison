@@ -319,6 +319,55 @@ impl Receipt {
             Some(_) => None,
         }
     }
+
+    /// Why there is no receipt to read, with what mends it: none at its
+    /// path, which a job of the operator's writes; a folder on the way that
+    /// the collector's user may not search; a file it may not open, as one
+    /// a job writes under umask 027 or 077; a link or no plain file; or a
+    /// file too large or no JSON object or list.
+    fn unread(&self) -> String {
+        let path = self.path.display();
+        let denied = |error: &std::io::Error| error.kind() == std::io::ErrorKind::PermissionDenied;
+        match std::fs::symlink_metadata(&self.path) {
+            Err(error) if denied(&error) => {
+                // The deepest folder that can be looked at is the one that
+                // cannot be searched.
+                let folder = self
+                    .path
+                    .ancestors()
+                    .skip(1)
+                    .find(|folder| std::fs::symlink_metadata(folder).is_ok())
+                    .unwrap_or(&self.path)
+                    .display();
+                format!(
+                    "The receipt at {path} cannot be looked for: the collector's user may not \
+                     search the folder {folder}; let every user search it (chmod o+x {folder})."
+                )
+            }
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                format!("The receipt at {path} cannot be looked for: {error}.")
+            }
+            Err(_) => {
+                format!("No receipt at {path}: the job that writes it has written none there.")
+            }
+            Ok(metadata) if metadata.is_symlink() => format!(
+                "The receipt at {path} is a link, which is not followed: let the job write the \
+                 file there itself."
+            ),
+            Ok(metadata) if !metadata.is_file() => format!(
+                "The receipt at {path} is no plain file: let the job write it there as one."
+            ),
+            Ok(_) if std::fs::File::open(&self.path).is_err_and(|error| denied(&error)) => format!(
+                "The receipt at {path} is there, but the collector's user may not open it: let \
+                 the job write it with mode 0644 (chmod 0644 {path})."
+            ),
+            Ok(_) => format!(
+                "The receipt at {path} cannot be read: it must be at most {} KiB of JSON, an \
+                 object or a list.",
+                MAX_DOCUMENT / 1024
+            ),
+        }
+    }
 }
 
 impl Provider for Receipt {
@@ -355,7 +404,7 @@ impl Provider for Receipt {
             .map(|observation| observation.with_scope(self.scope.clone()))
         };
         let Some((document, metadata)) = read else {
-            let unknown = base(State::Unknown)?.with_findings(vec!["No readable receipt.".into()]);
+            let unknown = base(State::Unknown)?.with_findings(vec![self.unread()]);
             return Ok(Report::of(unknown));
         };
         // A result that someone else could have written is not evidence.
@@ -443,3 +492,6 @@ impl Provider for Receipt {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod unread_tests;

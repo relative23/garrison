@@ -438,7 +438,13 @@ order, and the card says so in a finding.
 A receipt counts only if nobody else can have written it: it must belong to
 root (or to the collector's own user) and must not be writable by others, nor
 by its group unless that group is root. Otherwise the observation is Unknown.
-Let the job write it as root with mode `0644`.
+Let the job write it as root with mode `0644`. Where the card cannot read the
+receipt, it says why and what mends it: there is no file at `path`, which the
+job has not written; the collector's user may not search a folder on the way
+there (`chmod o+x` that folder) or may not open the file, as where a job
+under umask 027 or 077 writes it with mode 0640 or 0600 (mode `0644` mends
+it); it is a link, which is not followed, or no plain file; or it is larger
+than 1024 KiB or no JSON object or list.
 
 A receipt can list results, one row each: `rows = []` where the file itself
 is the list, or `rows = ["results"]` for a list under that key. `columns`

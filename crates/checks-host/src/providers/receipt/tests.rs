@@ -109,7 +109,13 @@ fn a_missing_receipt_is_unknown_not_failed() {
         .observations
         .remove(0);
     assert_eq!(observation.state, State::Unknown);
-    assert_eq!(observation.findings, ["No readable receipt."]);
+    assert_eq!(
+        observation.findings,
+        [format!(
+            "No receipt at {}: the job that writes it has written none there.",
+            directory.path().join("none.json").display()
+        )]
+    );
 }
 
 #[test]

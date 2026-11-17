@@ -915,6 +915,14 @@ Notable changes for operators and users. The format follows
   row that is no JSON object was dropped without a word, so a failure
   written as a text passed; the card now says how many rows were not read
   and is Partial where it would be in order.
+- **A receipt the card cannot read says why, and what mends it.** The
+  card said "No readable receipt." whatever kept it from reading the file.
+  It now tells apart a file that the job has not written at the path, a
+  folder on the way that the collector's user may not search, a file it
+  may not open, as a job under umask 027 or 077 writes one (mode 0644 mends
+  it, as the documentation asks), a link, which is not followed, or no
+  plain file, and a file larger than 1024 KiB or no JSON object or list,
+  and names what mends each.
 - **A receipt's time is the same instant for every viewer.** A field or
   column of a receipt with `format = "datetime"` went out as the job wrote
   it, and a time written without its offset, such as `2026-11-17T03:00:00`,
