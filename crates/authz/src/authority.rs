@@ -16,7 +16,7 @@ use garrison_core::modules::ModuleId;
 use garrison_core::{files, time};
 use garrison_stalwart::jmap::JmapClient;
 use garrison_stalwart::oidc::Provider;
-use garrison_stalwart::permissions::native_rights;
+use garrison_stalwart::permissions::{Native, account_rights};
 
 use crate::Error;
 use crate::grant::Grant;
@@ -24,6 +24,9 @@ use crate::policy::{Capabilities, Policy, parse_policy};
 
 /// The policy is small; anything larger is not a policy.
 const MAX_POLICY: usize = 65536;
+/// Why an account Garrison evaluates no rights for is refused.
+const NOT_EVALUATED: &str = "This identity's account belongs to a tenant, or is no user account of \
+                          Stalwart's own; Garrison evaluates no rights for it";
 
 #[derive(Debug)]
 pub struct Authority {
@@ -123,20 +126,25 @@ impl Authority {
         let policy = self.policy()?;
         let account_id = policy.account_for(&identity.subject)?;
         // The broker asks with its own key. What Stalwart refuses here is
-        // about that key, never about the user, who is refused only by the
-        // policy; an answer this release does not read is that answer's.
-        let rights =
-            native_rights(&self.native_client()?, &account_id).map_err(|error| match error {
-                Error::Denied(reason) | Error::InvalidToken(reason) => Error::Misconfigured(
-                    format!("the account's rights could not be read from Stalwart: {reason}"),
-                ),
+        // about that key, never about the user; an answer this release does
+        // not read is that answer's. What Stalwart says of the user's
+        // account is about the user: one Garrison evaluates no rights for,
+        // such as a tenant's member, is refused, as the policy refuses.
+        let rights = match account_rights(&self.native_client()?, &account_id) {
+            Ok(Native::Rights(rights)) => rights,
+            Ok(Native::Ineligible) => return Err(Error::Denied(NOT_EVALUATED.into())),
+            Err(Error::Denied(reason) | Error::InvalidToken(reason)) => {
+                return Err(Error::Misconfigured(format!(
+                    "the account's rights could not be read from Stalwart: {reason}"
+                )));
+            }
+            Err(
                 error @ (Error::Unavailable(_)
                 | Error::Limited(_)
                 | Error::Unreadable(_)
-                | Error::Misconfigured(_)) => {
-                    asked(error, "the broker's key", "the management API")
-                }
-            })?;
+                | Error::Misconfigured(_)),
+            ) => return Err(asked(error, "the broker's key", "the management API")),
+        };
         let offered = self.offered(policy.capabilities(
             &identity.subject,
             &rights.permissions,

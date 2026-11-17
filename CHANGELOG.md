@@ -1165,6 +1165,15 @@ Notable changes for operators and users. The format follows
   and its line names how. The broker's journal also names a token that
   Stalwart no longer takes, and a job that did not start because its
   rights changed or its sign-in ended.
+- **An account of a tenant is refused, not taken for a broken setup.** An
+  account that belongs to a tenant, a tenant's administrator's too, was
+  answered as if Garrison's own setup were broken: its sign-in page said
+  "Your access could not be checked just now. Try again in a few minutes.",
+  which no try mends, the broker's journal got an error at every try, and a
+  signed-in account moved into a tenant kept its session, with an error for
+  each of its requests. Such an account is now refused, as one without a
+  profile is: its sign-in fails, a session it has ends, and the broker's
+  journal names the reason.
 
 ## [0.1.2] - 2026-11-13
 

@@ -31,6 +31,12 @@ profile is.
 and binds Stalwart's System Administrator role to `administrator`. Users,
 groups and tenant administrators get nothing by default.
 
+An account that belongs to a tenant, a tenant's administrator's too
+(Stalwart's tenants are an Enterprise feature), is refused whatever the
+policy binds, as Garrison evaluates no rights for it: its sign-in fails as
+one without a profile does, and a session it has ends. `garrison access
+check` says "A non-tenant native user account is required" for it.
+
 Profiles can only require `authenticate` and `sys*` permissions: those are the
 ones whose evaluation Garrison verifies against Stalwart in its contract tests.
 

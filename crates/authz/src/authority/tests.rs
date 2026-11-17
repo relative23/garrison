@@ -247,6 +247,62 @@ fn an_empty_key_file_is_named_with_what_makes_the_key() {
     server.requests();
 }
 
+/// An account that belongs to a tenant, its administrator's too, or one
+/// that is no user account of Stalwart's own: Garrison evaluates no rights
+/// for it. That is what Stalwart says of the user, so it is a refusal,
+/// which ends the session and fails the sign-in, never a setup of
+/// Garrison's own that is broken, which would keep the session and say
+/// "Try again in a few minutes" at every try.
+#[test]
+fn an_account_garrison_evaluates_no_rights_for_is_refused() {
+    let tenant = |roles: Value, permissions: Value| {
+        json!({"id": "b", "@type": "User", "roles": roles, "permissions": permissions,
+               "memberTenantId": "t1"})
+    };
+    let replace = json!({"@type": "Replace", "enabledPermissions": {"authenticate": true},
+                         "disabledPermissions": {}});
+    let shapes = [
+        (
+            "a tenant's user",
+            tenant(json!({"@type": "User"}), json!({"@type": "Inherit"})),
+        ),
+        (
+            "a tenant's administrator",
+            tenant(json!({"@type": "Admin"}), json!({"@type": "Inherit"})),
+        ),
+        (
+            "a tenant's user with its own permissions",
+            tenant(json!({"@type": "User"}), replace),
+        ),
+        (
+            "a group",
+            json!({"id": "b", "@type": "Group", "roles": {"@type": "User"},
+                   "permissions": {"@type": "Inherit"}}),
+        ),
+    ];
+    for (case, account) in shapes {
+        let (authority, server, _directory) = authority(vec![
+            respond(&json!({"sub": "1", "email": "ann@example.test"})),
+            jmap("x:Account/get", &json!([account])),
+            // What an evaluation would read next; none is needed.
+            jmap(
+                "x:Authentication/get",
+                &json!([{"id": "singleton", "defaultAdminRoleIds": {}, "defaultUserRoleIds": {}}]),
+            ),
+        ]);
+        assert_eq!(
+            authority.authorize(TOKEN),
+            Err(Error::Denied(
+                "This identity's account belongs to a tenant, or is no user account of \
+                 Stalwart's own; Garrison evaluates no rights for it"
+                    .into()
+            )),
+            "{case}"
+        );
+        drop(server);
+    }
+}
+
 #[test]
 fn a_denied_subject_is_refused_before_the_native_lookup() {
     let (authority, server, directory) = authority(native("e", &[]));

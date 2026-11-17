@@ -40,11 +40,13 @@ differences found that way are documented in
 Nothing is granted unless it could be decided, and the answer says which of
 two things kept it from being granted.
 
-A refusal (403) is what the policy says of a user: the subject is on the deny
-list, has no binding, belongs to an account that is not allowed, lacks the
-rights its profile requires, or has profiles that name none of the modules
-the installation offers. It ends that user's session, as an invalid token
-does (401).
+A refusal (403) is what the policy and Stalwart say of a user: the subject is
+on the deny list, has no binding, belongs to an account Garrison evaluates no
+rights for (one of a tenant, a tenant's administrator's too, or no user
+account of Stalwart's own), lacks the rights its profile requires, or has
+profiles that name none of the modules the installation offers. It ends that
+user's session, as an invalid token does (401), and the broker's journal
+names the reason of each.
 
 Everything else grants nothing and refuses nobody, and is answered 503: a
 Stalwart or a broker that is temporarily unavailable, a setup of Garrison's

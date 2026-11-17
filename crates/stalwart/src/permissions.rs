@@ -8,7 +8,10 @@
 //! granting access.
 //!
 //! Cycles, missing roles, tenant members and unrecognized shapes grant
-//! nothing.
+//! nothing. An account Garrison evaluates no rights for, a tenant's member
+//! or no user account of the server's own, is told apart from the rest
+//! ([`Native::Ineligible`]): that is what Stalwart says of the user, not of
+//! the key that asked.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -37,6 +40,8 @@ pub const AUTHENTICATION_PROPERTIES: [&str; 3] =
 /// Stored in the System Administrator role, but withheld by the server once the
 /// bootstrap is complete, as `/api/account` shows.
 const RUNTIME_WITHHELD: [&str; 2] = ["sysBootstrapGet", "sysBootstrapUpdate"];
+/// Why an account's rights are not evaluated: see [`Account::is_eligible`].
+const NOT_A_USER: &str = "A non-tenant native user account is required";
 
 /// A role, account or tenant ID: `[A-Za-z0-9_-]{1,128}`.
 pub fn is_identifier(text: &str) -> bool {
@@ -183,15 +188,23 @@ pub struct Role {
 }
 
 impl Account {
+    /// Whether Garrison evaluates this account's rights at all: a user
+    /// account of the server's own, which belongs to no tenant. A tenant's
+    /// member, its administrator too (Stalwart's tenants are an Enterprise
+    /// feature, and an account belongs to one by its `memberTenantId`), and
+    /// a group are not.
+    #[must_use]
+    pub fn is_eligible(&self) -> bool {
+        self.kind == "User" && self.member_tenant_id.is_none()
+    }
+
     /// The Admin/User/Custom role IDs assigned to a non-tenant user.
     pub fn role_ids<'a>(
         &'a self,
         authentication: &'a Authentication,
     ) -> Result<&'a BTreeSet<String>, Error> {
-        if self.kind != "User" || self.member_tenant_id.is_some() {
-            return Err(Error::denied(
-                "A non-tenant native user account is required",
-            ));
+        if !self.is_eligible() {
+            return Err(Error::denied(NOT_A_USER));
         }
         if authentication.id != "singleton" {
             return Err(Error::denied(
@@ -310,13 +323,28 @@ impl Walk<'_> {
     }
 }
 
-/// Read one account's role graph from Stalwart and evaluate it.
+/// What Garrison makes of one account.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Native {
+    /// The account's effective rights.
+    Rights(Rights),
+    /// An account Garrison evaluates no rights for ([`Account::is_eligible`]):
+    /// what Stalwart says of the user's account, not of the key that read it.
+    Ineligible,
+}
+
+/// Read one account's role graph from Stalwart and evaluate it, or find,
+/// before anything else is read, that it is an account Garrison evaluates no
+/// rights for.
 ///
 /// Roles are fetched in batches of eight, only as far as the account's roles
 /// reach, and never more than [`MAX_ROLES`].
-pub fn native_rights(client: &JmapClient, account_id: &str) -> Result<Rights, Error> {
+pub fn account_rights(client: &JmapClient, account_id: &str) -> Result<Native, Error> {
     let account: Account =
         first(client.get("Account", Some(&[account_id]), &ACCOUNT_PROPERTIES)?)?;
+    if !account.is_eligible() {
+        return Ok(Native::Ineligible);
+    }
     let authentication: Authentication = first(client.get(
         "Authentication",
         Some(&["singleton"]),
@@ -341,7 +369,16 @@ pub fn native_rights(client: &JmapClient, account_id: &str) -> Result<Rights, Er
         pending.extend(parents);
         pending.retain(|identifier| !roles.contains_key(identifier));
     }
-    evaluate(&account, &roles, &authentication)
+    evaluate(&account, &roles, &authentication).map(Native::Rights)
+}
+
+/// [`account_rights`], with an account Garrison evaluates no rights for
+/// refused as [`evaluate`] refuses it, as `garrison access check` shows it.
+pub fn native_rights(client: &JmapClient, account_id: &str) -> Result<Rights, Error> {
+    match account_rights(client, account_id)? {
+        Native::Rights(rights) => Ok(rights),
+        Native::Ineligible => Err(Error::denied(NOT_A_USER)),
+    }
 }
 
 fn first<T>(objects: Vec<T>) -> Result<T, Error> {

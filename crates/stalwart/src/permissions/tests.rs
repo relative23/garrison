@@ -211,6 +211,22 @@ fn accounts_garrison_does_not_evaluate_deny() {
     );
 }
 
+/// An account Garrison evaluates no rights for is told apart by its one
+/// request, whatever its roles, and as a refusal where `native_rights` is
+/// asked, as `garrison access check` shows it.
+#[test]
+fn an_account_garrison_evaluates_no_rights_for_is_told_apart_at_once() {
+    let mut tenant = account(json!({"@type": "Admin"}), inherit());
+    tenant["memberTenantId"] = json!("t1");
+    let listed = answer(&json!({"methodResponses": [["x:Account/get",
+        {"list": [tenant], "notFound": []}, "0"]]}));
+    let server = serve(vec![listed.clone(), listed]);
+    let client = JmapClient::new(&server.url, "native-key-0123456789");
+    assert_eq!(account_rights(&client, "b"), Ok(Native::Ineligible));
+    assert_eq!(native_rights(&client, "b"), denied(NOT_A_USER));
+    assert_eq!(server.requests().len(), 2);
+}
+
 /// A shape this module does not know is no account, role or setting at all:
 /// it is never read as the nearest shape it knows.
 #[test]
