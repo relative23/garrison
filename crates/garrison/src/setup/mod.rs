@@ -40,7 +40,7 @@ use administrator::Source;
 use exporter::ensure_metrics;
 use folder::{writable, write_secret};
 use keys::Key;
-use objects::{Action, Enabled, OAuthClient, Refused, Set, StoredClient};
+use objects::{Action, Enabled, In, Listed, OAuthClient, Refused, Set, StoredClient};
 use webhook::ensure_webhook;
 
 mod administrator;
@@ -198,6 +198,40 @@ impl Admin {
         self.call::<_, IgnoredAny>(method, arguments).map(drop)
     }
 
+    /// Every object of a kind in `account`, or in the administrator's own
+    /// where that is `None`, and which account it is.
+    fn list_in<T: DeserializeOwned>(
+        &self,
+        kind: &str,
+        account: Option<&str>,
+    ) -> Result<Listed<T>, String> {
+        let all = In {
+            account,
+            arguments: Get {
+                ids: None,
+                properties: None,
+            },
+        };
+        self.call(&format!("x:{kind}/get"), &all)
+    }
+
+    /// A `/set` method on the objects of `account`, or on the
+    /// administrator's own where that is `None`.
+    fn set_in<T: Serialize>(
+        &self,
+        method: &str,
+        account: Option<&str>,
+        arguments: &Set<'_, T>,
+    ) -> Result<(), String> {
+        let arguments = In { account, arguments };
+        self.call::<_, IgnoredAny>(method, &arguments).map(drop)
+    }
+
+    /// Where a key opens its JMAP session.
+    fn session_url(&self) -> String {
+        format!("{}session", self.url)
+    }
+
     /// Every object of a kind, read as far as `T` names its fields.
     fn list<T: DeserializeOwned>(&self, kind: &str) -> Result<Vec<T>, String> {
         let all = Get {
@@ -261,7 +295,7 @@ struct Asked<'a> {
 /// running service holds, which Stalwart uses by then.
 #[derive(Default)]
 struct Done {
-    replaced: Vec<String>,
+    replaced: Vec<keys::Replaced>,
     renewed: bool,
 }
 

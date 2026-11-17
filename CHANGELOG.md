@@ -1064,6 +1064,9 @@ Notable changes for operators and users. The format follows
 - **A failed `garrison stalwart setup` no longer leaves the broker or the
   receiver with a key that Stalwart no longer takes.** Its message names
   the run that mends it.
+- **Setup run as another administrator keeps, or with `--rotate`
+  removes, the API keys the one before made.** They stayed valid, also
+  after a rotation.
 - **The metrics exporter's card says what makes the credential it lacks.**
   It said "No scrape credential is configured." where the file was empty,
   held no credential or could not be read, and named neither the file nor

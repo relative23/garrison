@@ -147,7 +147,10 @@ fn mended(
     );
     let said = text(&output);
     let mut faults = Vec::new();
-    if stop != Stop::Interrupted && !said.contains("Run `garrison stalwart setup") {
+    // A run that fails names the run that mends it; one may go on past a
+    // lost answer, as where it asks whose a file's key is.
+    let failed = output.status.code() == Some(1);
+    if failed && !said.contains("Run `garrison stalwart setup") {
         faults.push("the failed run names no run that mends it".to_owned());
     }
     if held.is_some() && names_the_restart(&said) {

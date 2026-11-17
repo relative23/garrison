@@ -14,22 +14,40 @@ const COLLECTOR: Key = Key {
     held: false,
 };
 
-/// What `ensure` does for the collector's key with the file holding
-/// `written`, while Stalwart has the keys `listed` of that description:
-/// the step, the keys it replaces, what the file holds after, and
-/// whether it asked Stalwart for a new key.
-fn ensured(written: &str, listed: &[&str]) -> (String, Vec<String>, String, bool) {
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join(COLLECTOR.file);
-    garrison_testing::write_private(&file, written.as_bytes());
-    let listed: Vec<_> = listed
+/// Stalwart's list of an account's keys of the collector's description.
+fn listed(account: &str, ids: &[&str]) -> String {
+    let list: Vec<_> = ids
         .iter()
         .map(|id| json!({"id": id, "description": "garrison collector"}))
         .collect();
-    let listed = json(&json!({"methodResponses": [["x:ApiKey/get", {"list": listed}, "0"]]}));
+    json(&json!({"methodResponses": [["x:ApiKey/get",
+        {"accountId": account, "list": list}, "0"]]}))
+}
+
+/// The session a key opens, which names the account it belongs to.
+fn session(account: &str) -> String {
+    json(&json!({"username": "admin@example.test",
+        "primaryAccounts": {"urn:stalwart:jmap": account}}))
+}
+
+/// What `ensure` does for the collector's key with the file holding
+/// `written`, while Stalwart has the keys `listed` of that description in
+/// the administrator's own account, which the file's key belongs to: the
+/// step, the keys it replaces, what the file holds after, and whether it
+/// asked Stalwart for a new key.
+fn ensured(written: &str, ids: &[&str]) -> (String, Vec<String>, String, bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join(COLLECTOR.file);
+    garrison_testing::write_private(&file, written.as_bytes());
     let set = json(&json!({"methodResponses": [["x:ApiKey/set",
         {"created": {"new": {"id": "fresh", "secret": NEW}}, "updated": {"old": null}}, "0"]]}));
-    let server = serve(vec![listed, set]);
+    let mut answers = vec![listed("b", ids)];
+    // The file's key is asked whose it is only where it holds one.
+    if holds_key(&file) {
+        answers.push(session("b"));
+    }
+    answers.push(set);
+    let server = serve(answers);
     let admin = Admin {
         url: format!("{}/jmap/", server.url),
         authorization: "Bearer admin".to_owned(),
@@ -41,8 +59,9 @@ fn ensured(written: &str, listed: &[&str]) -> (String, Vec<String>, String, bool
         .step
         .replace(&directory.path().display().to_string(), "DIR");
     let held = std::fs::read_to_string(&file).unwrap();
-    assert_eq!(done.made, requests[1].contains("\"create\""));
-    (step, done.replaced, held, done.made)
+    assert_eq!(done.made, requests.last().unwrap().contains("\"create\""));
+    let replaced = done.replaced.iter().map(|key| key.id.clone()).collect();
+    (step, replaced, held, done.made)
 }
 
 /// A key file that holds no key, as an empty one, gets a new key, as a
@@ -100,9 +119,7 @@ fn two_keys_of_one_description_are_replaced_by_one() {
 #[test]
 fn a_full_quota_lets_the_old_keys_go_first() {
     let directory = tempfile::tempdir().unwrap();
-    let listed = json(&json!({"methodResponses": [["x:ApiKey/get", {"list": [
-        {"id": "old", "description": "garrison collector"},
-        {"id": "older", "description": "garrison collector"}]}, "0"]]}));
+    let listed = listed("b", &["old", "older"]);
     let full = json(
         &json!({"methodResponses": [["x:ApiKey/set", {"notCreated": {"new": {
         "type": "overQuota", "description": "You have exceeded your quota of 5 API keys."}}},
@@ -128,7 +145,7 @@ fn a_full_quota_lets_the_old_keys_go_first() {
         "replaced API key 'garrison collector' -> DIR/collector-native-key (the old ones \
          went first: Stalwart's quota of API keys left no room)"
     );
-    assert_eq!((done.replaced, done.made), (Vec::<String>::new(), true));
+    assert_eq!((done.replaced, done.made), (Vec::<Replaced>::new(), true));
     let held = std::fs::read_to_string(directory.path().join(COLLECTOR.file)).unwrap();
     assert_eq!(held, format!("{NEW}\n"));
 }
@@ -144,7 +161,7 @@ fn a_new_key_whose_file_cannot_be_written_goes_again() {
     let folder = directory.path().join("credentials");
     std::fs::create_dir(&folder).unwrap();
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o500)).unwrap();
-    let listed = json(&json!({"methodResponses": [["x:ApiKey/get", {"list": []}, "0"]]}));
+    let listed = listed("b", &[]);
     let made = json(&json!({"methodResponses": [["x:ApiKey/set",
         {"created": {"new": {"id": "fresh", "secret": NEW}}}, "0"]]}));
     let gone = json(&json!({"methodResponses": [["x:ApiKey/set",
@@ -170,6 +187,106 @@ fn a_new_key_whose_file_cannot_be_written_goes_again() {
         requests[2].contains(r#""destroy":["fresh"]"#),
         "{}",
         requests[2]
+    );
+}
+
+/// What `ensure` does where the file's key belongs to another
+/// administrator's account, `c`, which holds the key `k` of the
+/// description: the step, the keys it replaces, and the requests.
+fn ensured_elsewhere(rotate: bool) -> (String, Vec<Replaced>, Vec<String>) {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join(COLLECTOR.file);
+    garrison_testing::write_private(&file, format!("{OLD}\n").as_bytes());
+    let done = json(&json!({"methodResponses": [["x:ApiKey/set",
+        {"created": {"new": {"id": "fresh", "secret": NEW}}, "updated": {"k": null}}, "0"]]}));
+    let answers = vec![listed("b", &[]), session("c"), listed("c", &["k"]), done];
+    let server = serve(answers);
+    let admin = Admin {
+        url: format!("{}/jmap/", server.url),
+        authorization: "Bearer admin".to_owned(),
+    };
+    let networks = Enabled::of(["127.0.0.1/32"]);
+    let done = ensure(&admin, directory.path(), &COLLECTOR, &networks, rotate).unwrap();
+    let step = done
+        .step
+        .replace(&directory.path().display().to_string(), "DIR");
+    (step, done.replaced, server.requests())
+}
+
+/// The keys setup makes are the administrator's, and another administrator
+/// lists only its own account's: a run as a second administrator found none
+/// of the first one's, made new keys and left those valid for good, after a
+/// rotation too. The account the file's key belongs to is now asked as
+/// well: its key is kept and updated there, and a rotation replaces it.
+#[test]
+fn the_keys_another_administrator_made_are_kept_or_replaced_in_its_account() {
+    let (step, replaced, requests) = ensured_elsewhere(false);
+    assert_eq!(
+        step,
+        "updated API key 'garrison collector' (secret unchanged)"
+    );
+    assert_eq!(replaced, Vec::new());
+    assert!(
+        requests[1].starts_with("GET /jmap/session "),
+        "{}",
+        requests[1]
+    );
+    assert!(requests[1].contains(&format!("Bearer {OLD}")));
+    assert!(
+        requests[2].contains(r#""accountId":"c""#),
+        "{}",
+        requests[2]
+    );
+    assert!(
+        requests[3].contains(r#""accountId":"c""#) && requests[3].contains(r#""update":{"k""#),
+        "{}",
+        requests[3]
+    );
+    let (step, replaced, requests) = ensured_elsewhere(true);
+    assert_eq!(
+        step,
+        "replaced API key 'garrison collector' -> DIR/collector-native-key"
+    );
+    let theirs = Replaced {
+        account: Some("c".to_owned()),
+        id: "k".to_owned(),
+    };
+    assert_eq!(replaced, vec![theirs]);
+    // The new key is the administrator's own.
+    assert!(!requests[3].contains("accountId"), "{}", requests[3]);
+}
+
+/// Each replaced key goes from the account that holds it.
+#[test]
+fn a_replaced_key_goes_from_its_account() {
+    let gone =
+        |id: &str| json(&json!({"methodResponses": [["x:ApiKey/set", {"destroyed": [id]}, "0"]]}));
+    let server = serve(vec![gone("k"), gone("x")]);
+    let admin = Admin {
+        url: format!("{}/jmap/", server.url),
+        authorization: "Bearer admin".to_owned(),
+    };
+    let replaced = [
+        Replaced {
+            account: Some("c".to_owned()),
+            id: "k".to_owned(),
+        },
+        Replaced {
+            account: None,
+            id: "x".to_owned(),
+        },
+    ];
+    remove(&admin, &replaced).unwrap();
+    let requests = server.requests();
+    assert!(
+        requests[0].contains(r#""accountId":"c","destroy":["k"]"#),
+        "{}",
+        requests[0]
+    );
+    assert!(
+        requests[1].contains(r#""destroy":["x"]"#) && !requests[1].contains("accountId"),
+        "{}",
+        requests[1]
     );
 }
 

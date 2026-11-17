@@ -76,7 +76,26 @@ impl Capture {
 /// opens a session, and is refused once that one key no longer allows this
 /// host.
 pub(super) fn assert_keys_held(lab: &Lab, credentials: &Path, gateway: &str, context: &str) {
-    let listed = lab.call("x:ApiKey/get", &json!({"ids": null}));
+    assert_keys_held_in(lab, None, credentials, gateway, context);
+}
+
+/// `assert_keys_held` for the keys of `account`, or of the lab's
+/// administrator where that is `None`.
+pub(super) fn assert_keys_held_in(
+    lab: &Lab,
+    account: Option<&str>,
+    credentials: &Path,
+    gateway: &str,
+    context: &str,
+) {
+    // Without an accountId, Stalwart takes the administrator's own.
+    let within = |mut arguments: Value| {
+        if let Some(account) = account {
+            arguments["accountId"] = json!(account);
+        }
+        arguments
+    };
+    let listed = lab.call("x:ApiKey/get", &within(json!({"ids": null})));
     for (name, description) in [
         ("broker-native-key", "garrison broker"),
         ("collector-native-key", "garrison collector"),
@@ -96,7 +115,7 @@ pub(super) fn assert_keys_held(lab: &Lab, credentials: &Path, gateway: &str, con
             if let Some(gateway) = gateway {
                 networks[gateway] = json!(true);
             }
-            json!({"update": {id: {"allowedIps": networks}}})
+            within(json!({"update": {id: {"allowedIps": networks}}}))
         };
         lab.call("x:ApiKey/set", &networks(None));
         let narrowed = key_status(&lab.url, &secret);

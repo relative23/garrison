@@ -68,6 +68,26 @@ impl<'a, T> Set<'a, T> {
     }
 }
 
+/// The arguments of a method on the objects of another account than the
+/// administrator's own, `account`, or on its own where that is `None`. An
+/// administrator lists and changes only its own account's API keys unless
+/// it names another (measured on Stalwart 1.1.0).
+#[derive(Debug, Serialize)]
+pub(super) struct In<'a, T> {
+    #[serde(rename = "accountId", skip_serializing_if = "Option::is_none")]
+    pub(super) account: Option<&'a str>,
+    #[serde(flatten)]
+    pub(super) arguments: T,
+}
+
+/// Every object of one kind in an account, and that account.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct Listed<T> {
+    pub(super) account_id: String,
+    pub(super) list: Vec<T>,
+}
+
 /// What a `/set` method answers about the objects it created.
 #[derive(Debug, Deserialize)]
 pub(super) struct Created<T> {
@@ -304,6 +324,16 @@ mod tests {
             json!(Set::<()>::Destroy(["k1"])),
             json!({"destroy": ["k1"]})
         );
+        let theirs = In {
+            account: Some("c"),
+            arguments: Set::<()>::Destroy(["k1"]),
+        };
+        assert_eq!(json!(theirs), json!({"accountId": "c", "destroy": ["k1"]}));
+        let own = In {
+            account: None,
+            arguments: Set::<()>::Destroy(["k1"]),
+        };
+        assert_eq!(json!(own), json!({"destroy": ["k1"]}));
         assert_eq!(
             json!(Set::create(Action::ReloadSettings)),
             json!({"create": {"new": {"@type": "ReloadSettings"}}})

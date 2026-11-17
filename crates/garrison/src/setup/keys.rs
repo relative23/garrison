@@ -8,12 +8,13 @@ use std::time::Duration;
 
 use garrison_core::config::Config;
 use garrison_core::files::{self, Form, Holds, Privacy};
+use garrison_core::json;
 use garrison_stalwart::http::Request;
 
 use super::objects::{
-    Created, Enabled, KeyPermissions, KeyRights, NEW, NewKey, NewSecret, Set, StoredKey,
+    Created, Enabled, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, StoredKey,
 };
-use super::{Admin, write_secret};
+use super::{Admin, MAX_ANSWER, write_secret};
 
 /// One of the keys: its file, as the broker or the collector reads it, its
 /// description in Stalwart, what it may do, and whether a running service
@@ -33,13 +34,38 @@ pub(super) fn holds_key(path: &Path) -> bool {
     files::holds(path, Form::Token).is_ok_and(|held| held == Holds::Secret)
 }
 
+/// A key that a new one replaces, in the account that holds it: the
+/// administrator's own where `account` is `None`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Replaced {
+    pub(super) account: Option<String>,
+    pub(super) id: String,
+}
+
+/// The account the key in `target` belongs to, as the session it opens
+/// names it: an administrator lists only its own account's keys (Stalwart
+/// 1.1.0), and setup's keys are the administrator's that made them.
+fn owner(admin: &Admin, target: &Path) -> Option<String> {
+    let secret = files::read_secret(target, Privacy::Owned).ok()?;
+    let answer = Request::get(&admin.session_url())
+        .header("Authorization", &format!("Bearer {secret}"))
+        .timeout(Duration::from_secs(30))
+        .limit(MAX_ANSWER)
+        .send()
+        .ok()
+        .filter(|answer| answer.status == 200)?;
+    let session = json::parse(&answer.body, MAX_ANSWER).ok()?;
+    let account = session["primaryAccounts"]["urn:stalwart:jmap"].as_str();
+    account.map(str::to_owned)
+}
+
 /// What `ensure` did: the step, the keys a new one replaces, and whether
 /// the file holds a key this run made. `setup` removes the replaced keys
 /// once the services that hold them have restarted with the new one, also
 /// when it fails on the way (`remove`).
 pub(super) struct Ensured {
     pub(super) step: String,
-    pub(super) replaced: Vec<String>,
+    pub(super) replaced: Vec<Replaced>,
     pub(super) made: bool,
 }
 
@@ -59,11 +85,23 @@ pub(super) fn ensure(
     rotate: bool,
 ) -> Result<Ensured, String> {
     let (target, description) = (directory.join(key.file), key.description);
-    let existing: Vec<StoredKey> = admin
-        .list::<StoredKey>("ApiKey")?
+    let ours = |item: &StoredKey| item.description.as_deref() == Some(description);
+    let own: Listed<StoredKey> = admin.list_in("ApiKey", None)?;
+    let mut existing: Vec<(Option<String>, StoredKey)> = own
+        .list
         .into_iter()
-        .filter(|item| item.description.as_deref() == Some(description))
+        .filter(|item| ours(item))
+        .map(|item| (None, item))
         .collect();
+    // The file's key may be another administrator's: that account's keys of
+    // this description count as well.
+    let held = holds_key(&target);
+    let other = held.then(|| owner(admin, &target)).flatten();
+    if let Some(account) = other.filter(|account| *account != own.account_id) {
+        let theirs: Listed<StoredKey> = admin.list_in("ApiKey", Some(&account))?;
+        let theirs = theirs.list.into_iter().filter(|item| ours(item));
+        existing.extend(theirs.map(|item| (Some(account.clone()), item)));
+    }
     let rights = || KeyRights {
         permissions: KeyPermissions::Replace {
             permissions: Enabled::of(key.permissions.iter().copied()),
@@ -75,15 +113,22 @@ pub(super) fn ensure(
     // whose clean-up failed, no run can tell which one the file holds, since
     // Stalwart shows no key's secret: a new key replaces them all, as where
     // the file holds none.
-    if let ([only], true, false) = (existing.as_slice(), holds_key(&target), rotate) {
-        admin.set("x:ApiKey/set", &Set::update(&only.id, rights()))?;
+    if let ([(account, only)], true, false) = (existing.as_slice(), held, rotate) {
+        let update = Set::update(&only.id, rights());
+        admin.set_in("x:ApiKey/set", account.as_deref(), &update)?;
         return Ok(Ensured {
             step: format!("updated API key '{description}' (secret unchanged)"),
             replaced: Vec::new(),
             made: false,
         });
     }
-    let mut replaced: Vec<String> = existing.iter().map(|item| item.id.clone()).collect();
+    let mut replaced: Vec<Replaced> = existing
+        .iter()
+        .map(|(account, item)| Replaced {
+            account: account.clone(),
+            id: item.id.clone(),
+        })
+        .collect();
     let path = target.display();
     let mut step = match (existing.len(), rotate) {
         (0, _) | (1, false) => format!("created API key '{description}' -> {path}"),
@@ -165,10 +210,11 @@ fn refused(error: &str, description: &str) -> String {
     format!("{error} (Stalwart did not return the new API key secret)")
 }
 
-/// Remove the keys that new ones replaced.
-pub(super) fn remove(admin: &Admin, replaced: &[String]) -> Result<(), String> {
-    for id in replaced {
-        admin.set("x:ApiKey/set", &Set::<()>::Destroy([id.as_str()]))?;
+/// Remove the keys that new ones replaced, each from its account.
+pub(super) fn remove(admin: &Admin, replaced: &[Replaced]) -> Result<(), String> {
+    for key in replaced {
+        let destroy = Set::<()>::Destroy([key.id.as_str()]);
+        admin.set_in("x:ApiKey/set", key.account.as_deref(), &destroy)?;
     }
     Ok(())
 }
