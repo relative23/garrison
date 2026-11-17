@@ -73,8 +73,13 @@ brokers never repeat a job; pending jobs become "uncertain".
   it misses what an archive with a password hides, a document in zip
   archives nested more than three deep, Excel 4.0 macro sheets in an old
   `.xls` file, the macros of an old `.ppt` file and archive formats other
-  than zip. Such a message passes as one without macros. Anyone who can
-  reach its loopback port can ask it about a message, as with any milter.
+  than zip. It decodes the base64 and quoted-printable a MIME message uses,
+  however a sender folds or pads them, but not a body encoded as a
+  conforming mail program would not encode it: uuencode, which is not a MIME
+  transfer encoding, or base64 interrupted by characters outside its
+  alphabet, which the filter does not decode though a lenient reader might.
+  Such a message passes as one without macros. Anyone who can reach its
+  loopback port can ask it about a message, as with any milter.
 - A message the macro filter could not scan completely is taken all the same
   unless the operator chose otherwise: one larger than `max_message_mib`,
   one whose archives unpack to more than 16 MiB a file or 64 MiB together or

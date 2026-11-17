@@ -285,11 +285,17 @@ the newer format (`.docm`, `.xlsm`, `.pptm`, also under another name such as
 `.docx`) and in Word and Excel files of the old one (`.doc`, `.xls`), Excel
 4.0 macro sheets in the newer format, and Word's single-file web pages with
 an embedded macro store, each also inside zip archives up to three levels
-deep. A file counts as soon as it has a macro project, also an empty one.
-What it does not see: an archive with a password, other archive formats such
-as 7z and RAR, Excel 4.0 macro sheets in an old `.xls` file, the macros of an
-old `.ppt` file, macros in LibreOffice's own formats, and a document behind
-a link. It complements a virus scanner and does not replace one.
+deep. A file counts as soon as it has a macro project, also an empty one. The
+filter decodes the base64 and quoted-printable a MIME message carries,
+however a sender folds or pads them, and reads the message as it stands as
+well, so the encoding around a document does not hide it. What it does not
+see: an archive with a password, other archive formats such as 7z and RAR,
+Excel 4.0 macro sheets in an old `.xls` file, the macros of an old `.ppt`
+file, macros in LibreOffice's own formats, a document whose body is encoded
+as a conforming mail program would not encode it (uuencode, which is not a
+MIME transfer encoding, or base64 broken up with characters outside its
+alphabet), and a document behind a link. It complements a virus scanner and
+does not replace one.
 
 A message the filter could not scan completely is never passed as if it were
 clean. That is a message

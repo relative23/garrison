@@ -150,6 +150,18 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A document with macros is found however its MIME part is encoded.** The
+  scan undid quoted-printable only when the message held one of four byte
+  strings, so an Office document written as quoted-printable on a single
+  line, in lower-case hexadecimal, or with only some bytes escaped passed as
+  clean; base64 whose lines a transport broke up with white space was not
+  read either. The scan now undoes quoted-printable for any message that
+  carries its escape, reads the white space a base64 line may carry, and so
+  finds the document or marks it unscanned, as it already did for the plain
+  encodings. A body a conforming mail program would not write — uuencode, or
+  base64 interrupted by characters outside its alphabet — is a named limit
+  the filter shares with the virus scanner it complements (see
+  [configuration](docs/operator/configuration.md#milter)).
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",
