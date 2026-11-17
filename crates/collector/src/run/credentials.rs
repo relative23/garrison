@@ -176,8 +176,10 @@ pub(super) fn metrics_credential(
 
 /// The key of Spamhaus' Data Query Service from its credential, read anew
 /// for each run as the metrics credential is. Why there is none names the
-/// file an operator writes it into, never what it holds.
-pub(super) fn dqs_key(config: &Config, credentials: &Credentials) -> DqsKey {
+/// file an operator writes it into, never what it holds. `garrison doctor`
+/// judges the file by it.
+#[must_use]
+pub fn dqs_key(config: &Config, credentials: &Credentials) -> DqsKey {
     let Some(source) = &config.collector.dqs_key else {
         return DqsKey::Unset;
     };

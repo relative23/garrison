@@ -7,6 +7,7 @@ mod files;
 mod host;
 mod milter;
 mod notify;
+mod policy;
 mod public;
 
 use garrison_core::config::Config;
@@ -168,7 +169,7 @@ pub(crate) fn run(config: &Config) -> u8 {
     }
     let mut findings = origins(config);
     findings.extend(host::checks(config));
-    findings.extend(milter::checks(config, &config.credentials_directory));
+    findings.extend(milter::checks(config, &crate::credentials(config)));
     findings.extend(unfollowed(config));
     let (unloaded, channels) = secrets(config);
     findings.extend(unloaded);
@@ -316,3 +317,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod broken_tests;

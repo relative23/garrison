@@ -1,15 +1,18 @@
-//! Files that must stay private: the access policy, root's and readable by
-//! the broker's group alone, and the credentials, root's alone. The units
-//! load every credential (`LoadCredential=`), and systemd starts none of
+//! The credentials, which must stay root's alone. The units load every
+//! credential (`LoadCredential=`), and systemd starts none of
 //! them without its file, so each must be there; a file that may be empty,
-//! which means none, is in order empty unless the configuration reads it.
-//! A key setup writes is no key empty, as missing.
+//! which means none, is in order empty unless the configuration reads it,
+//! and judged by its reader where it holds something. A key setup writes is
+//! no key empty, as missing.
 
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
+use garrison_collector::context::DqsKey;
+use garrison_collector::run::{self as collector, ScrapeCredential};
 use garrison_core::config::Config;
+use garrison_core::credentials::Credentials;
 use garrison_core::files::{self as protected, Form, Holds};
 
 use super::{Finding, Level};
@@ -22,16 +25,15 @@ const KEYS: [&str; 3] = [
     "broker-native-key",
 ];
 
-/// One of the files doctor checks: what it is, whether its group may read
-/// it, the command that makes it, and what gives it owner and mode.
+/// One of the files doctor checks: what it is, the command that makes it,
+/// and what gives it owner and mode.
 struct Private<'a> {
     what: &'a str,
-    group_read: bool,
     made_by: &'a str,
     kept: String,
 }
 
-/// Root-owned and readable by nobody else (`group` may read the policy).
+/// Root-owned and readable by nobody else.
 fn private(path: &Path, file: &Private<'_>) -> Finding {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return Finding::fail(
@@ -54,14 +56,13 @@ fn private(path: &Path, file: &Private<'_>) -> Finding {
             ),
         );
     }
-    let allowed = if file.group_read { 0o640 } else { 0o600 };
     let mode = metadata.mode() & 0o777;
-    if metadata.uid() == 0 && mode & !allowed == 0 {
+    if metadata.uid() == 0 && mode & !0o600 == 0 {
         Finding::ok(format!("{} is private ({mode:o})", file.what))
     } else {
         Finding::fail(
             format!(
-                "{} is not root-owned with mode {allowed:o} or less (mode {mode:o})",
+                "{} is not root-owned with mode 600 or less (mode {mode:o})",
                 path.display()
             ),
             file.kept.clone(),
@@ -99,7 +100,7 @@ fn key(path: &Path, file: &Private<'_>) -> Finding {
 /// What of the configuration reads the file `name` and so needs it filled,
 /// with how to fill it; `None` where an empty file serves. The notification
 /// channels' files are judged with the channels.
-fn reader(config: &Config, name: &str) -> Option<(&'static str, String)> {
+pub(super) fn reader(config: &Config, name: &str) -> Option<(&'static str, String)> {
     let scraped = config.collector.metrics_credential.is_some()
         && config.collector.providers.iter().any(|provider| {
             provider.get("type").and_then(toml::Value::as_str) == Some("prometheus")
@@ -134,20 +135,66 @@ fn loaders(name: &str) -> String {
     loading.join(" and ")
 }
 
-/// An empty file that may be empty: in order where nothing reads it, a
-/// failure with the way to fill it where something does. A file that holds
-/// something is judged by owner and mode alone (`kept`).
-fn judged(
+/// What a file that may be empty holds, as its reader takes it.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Held {
+    /// Nothing but line ends and spaces, which means none.
+    Nothing,
+    /// What its reader takes.
+    Usable,
+    /// Something its reader takes for none, in the reader's words.
+    Unusable(&'static str),
+}
+
+/// What the file `name` at `path` holds, by its reader's own rule: the
+/// scrape credential and the key of Spamhaus' Data Query Service as the
+/// collector reads them.
+pub(super) fn held(config: &Config, name: &str, path: &Path) -> Held {
+    let Ok(data) = fs::read(path) else {
+        return Held::Unusable("cannot be read");
+    };
+    if data.trim_ascii().is_empty() {
+        return Held::Nothing;
+    }
+    match name {
+        "metrics-credential" if ScrapeCredential::read(&data).is_none() => {
+            Held::Unusable("holds no credential")
+        }
+        "spamhaus-dqs-key" => {
+            let credentials = Credentials::new(&config.credentials_directory);
+            match collector::dqs_key(config, &credentials) {
+                DqsKey::Missing(_) => {
+                    Held::Unusable("holds no key, one word of letters and digits")
+                }
+                DqsKey::Key(_) | DqsKey::Unset => Held::Usable,
+            }
+        }
+        _ => Held::Usable,
+    }
+}
+
+/// A file that may be empty: empty, in order where nothing reads it; empty
+/// or holding what its reader takes for none, a failure with the way to
+/// fill it where something reads it. Otherwise owner and mode judge it
+/// (`kept`).
+pub(super) fn judged(
     name: &str,
-    empty: bool,
+    held: &Held,
     mode: u32,
     reader: Option<(&str, String)>,
     kept: Finding,
 ) -> Finding {
-    match (empty, reader) {
-        (true, Some((reads, fill))) => Finding::fail(format!("{name} is empty, but {reads}"), fill),
-        (true, None) => Finding::ok(format!("{name} is empty, which means none ({mode:o})")),
-        (false, _) => kept,
+    match (held, reader) {
+        (Held::Nothing, Some((reads, fill))) => {
+            Finding::fail(format!("{name} is empty, but {reads}"), fill)
+        }
+        (Held::Nothing, None) => {
+            Finding::ok(format!("{name} is empty, which means none ({mode:o})"))
+        }
+        (Held::Unusable(what), Some((reads, fill))) => {
+            Finding::fail(format!("{name} {what}, but {reads}"), fill)
+        }
+        (Held::Usable | Held::Unusable(_), _) => kept,
     }
 }
 
@@ -174,7 +221,6 @@ fn optional(config: &Config, name: &str) -> Finding {
         &path,
         &Private {
             what: name,
-            group_read: false,
             made_by: &made,
             kept: format!(
                 "Make it root's with mode 600: chown root {0} && chmod 600 {0}",
@@ -185,24 +231,14 @@ fn optional(config: &Config, name: &str) -> Finding {
     if kept.level != Level::Ok {
         return kept;
     }
-    let empty = fs::read(&path).is_ok_and(|data| data.trim_ascii().is_empty());
-    judged(name, empty, metadata.mode() & 0o777, reads, kept)
+    let held = held(config, name, &path);
+    judged(name, &held, metadata.mode() & 0o777, reads, kept)
 }
 
 pub(super) fn files(config: &Config) -> Vec<Finding> {
-    // Where the broker reads it. The installer gives it owner and mode.
-    let policy = Private {
-        what: "the access policy",
-        group_read: true,
-        made_by: "garrison access init",
-        kept: "Run the installer again; it sets owner and mode.".to_owned(),
-    };
-    let mut findings = vec![private(&config.broker.policy, &policy)];
-    // Root reads it; the broker, in its unit's sandbox, may not.
-    if let Some((what, fix)) = units::hidden_policy(&config.broker.policy) {
-        findings.push(Finding::fail(what, format!("{fix}.")));
-    }
-    // And the checks' paths, which the collector reads in its own.
+    let mut findings = Vec::new();
+    // The checks' paths, which root reads and the collector, in its unit's
+    // sandbox, may not.
     if let Ok(providers) = garrison_collector::build(&config.collector.providers) {
         for (what, fix) in units::hidden_paths(&providers) {
             findings.push(Finding::fail(what, format!("{fix}.")));
@@ -213,7 +249,6 @@ pub(super) fn files(config: &Config) -> Vec<Finding> {
         let path = config.credentials_directory.join(name);
         let credential = Private {
             what: name,
-            group_read: false,
             made_by: "garrison stalwart setup",
             kept: format!(
                 "Make it root's with mode 600: chown root {0} && chmod 600 {0}",

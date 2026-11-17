@@ -114,7 +114,8 @@ pub(crate) fn settings(config: &Config, include: Option<&str>) -> Vec<Unfollowed
                 nginx::SNIPPET
             ),
             fix: format!(
-                "Run the installer again, or write the include anew and reload nginx: sudo sh -c \
+                "Run the installer again, which under SELinux also loads the module for the \
+                 port; without SELinux, writing the include anew does as well: sudo sh -c \
                  'garrison nginx --snippet > {}' && sudo nginx -t && sudo systemctl reload nginx",
                 nginx::SNIPPET
             ),

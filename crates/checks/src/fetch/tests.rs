@@ -435,3 +435,41 @@ fn an_answer_cut_at_a_limit_says_so() {
     );
     assert_eq!(unpacked.body.len(), 4 * 1024 * 1024);
 }
+
+/// A request to a port other than the scheme's own names it in `Host`, as
+/// RFC 9110 has it: a server that tells its names apart by host and port,
+/// as Garrison's web service does for `public_origin`, takes the name
+/// alone for another one.
+#[test]
+fn the_host_header_names_a_port_other_than_the_schemes_own() {
+    let server = garrison_testing::http::serve(vec![garrison_testing::http::answer(200, "{}")]);
+    let port = server.url.rsplit_once(':').unwrap().1.to_owned();
+    assert_eq!(
+        get(&format!("{}/x", server.url), &roots()).unwrap().status,
+        200
+    );
+    let sent = server.requests().remove(0);
+    assert!(
+        sent.contains(&format!("\r\nHost: 127.0.0.1:{port}\r\n")),
+        "{sent}"
+    );
+    for (host, port, secure, header) in [
+        ("garrison.example.org", 443, true, "garrison.example.org"),
+        ("garrison.example.org", 80, false, "garrison.example.org"),
+        (
+            "garrison.example.org",
+            8443,
+            true,
+            "garrison.example.org:8443",
+        ),
+        (
+            "garrison.example.org",
+            443,
+            false,
+            "garrison.example.org:443",
+        ),
+        ("2001:db8::1", 8443, true, "[2001:db8::1]:8443"),
+    ] {
+        assert_eq!(host_header(host, port, secure), header);
+    }
+}

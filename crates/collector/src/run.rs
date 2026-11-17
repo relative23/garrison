@@ -26,8 +26,8 @@ use crate::store::StatusStore;
 
 mod credentials;
 
-pub use credentials::ScrapeCredential;
-use credentials::{dqs_key, metrics_credential, native_key};
+pub use credentials::{ScrapeCredential, dqs_key};
+use credentials::{metrics_credential, native_key};
 
 /// A check that took this long is named in the journal.
 const SLOW: Duration = Duration::from_secs(10);

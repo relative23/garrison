@@ -25,8 +25,8 @@ either.
 
 | Key | Meaning |
 |---|---|
-| `public_origin` | `https://host` of Garrison's own host name, or `https://host:port` where nginx serves it on a port other than 443; users open `/admin/` on it. It must differ from the issuer and from `admin_url`'s origin. |
-| `issuer` | Stalwart's OAuth issuer (`https://host`). |
+| `public_origin` | `https://host` of Garrison's own host name, or `https://host:port` where nginx serves it on a port other than 443; users open `/admin/` on it. It must differ from the issuer and from `admin_url`'s origin. `garrison doctor` checks the certificate and Garrison's answer on that port. |
+| `issuer` | Stalwart's OAuth issuer (`https://host`): the name Stalwart gives itself, `https://` and its Default Hostname, under which it sends every sign-in back; `garrison doctor` compares the two. |
 | `stalwart_url` | Stalwart's HTTP listener, **loopback only** (e.g. `http://127.0.0.1:8080`). |
 | `admin_url` | Native Stalwart administration (default `<issuer>/admin/`). |
 | `links` | Extra header links, e.g. `{ webmail = "https://..." }`. |
@@ -45,8 +45,8 @@ either.
 | `collector.history_days` | 90 | Metric history retention: every minute of the last eight days, ten-minute values before them. With every check that is about 21 MiB for eight days and 48 MiB for 90. Counted from the collector's own run time: a pause of more than ten minutes or a clock that jumps ahead is not counted, so the history keeps that much longer until the collector has run at the new time for a day. |
 | `collector.native_key`, `broker.native_key` | `credential:collector-native-key`, `credential:broker-native-key` | The two read-only API keys; `stalwart setup` writes them, also where a file is empty or holds no key, which is as good as none. |
 | `collector.metrics_credential` | `credential:metrics-credential` | User name and password for Stalwart's Prometheus exporter, which the `prometheus` check reads. `stalwart setup` writes the file while the exporter is Garrison's or off, also where it is there but holds no credential; for an exporter of another's, write its user and password into it as `{"username": "...", "secret": "..."}`. The installer keeps an empty file, which means none; `""` turns the setting off. Without a credential the metrics exporter's card says why, with the file and what fills it, as `garrison doctor` does. |
-| `collector.dqs_key` | none | Where the key of Spamhaus' Data Query Service is read from: `credential:spamhaus-dqs-key`. The `reputation` check asks a list written without its key, such as `zen.dq.spamhaus.net`, with it, read anew for each run; the key goes into the question and nowhere else ([checks](checks.md#reputation)). Write the key into the file with `sudo sh -c 'cat > /etc/garrison/credentials/spamhaus-dqs-key'` (paste it, Enter, Ctrl-D); the installer keeps an empty file there, which means none, and such a list is then not asked. `check-config` refuses such a list without this setting. |
-| `broker.policy` | `/etc/garrison/access-policy.json` | Access policy, see [access.md](access.md). The broker reads it there, the installer starts Garrison once it is there and keeps it root's and readable only for the broker's group, `garrison doctor` checks it there, and `garrison uninstall --purge` removes it with its backups. It must be a file of its own: a folder or a link there is left as it is, and `check-config` refuses it. It must also lie where the broker sees it: its unit hides `/home`, `/root`, `/run/user`, `/tmp`, `/var/tmp` and `/dev` from it (all but `/dev/shm` and `/dev/mqueue`), and the kernel's own files, as the collector's unit hides them from the collector ([checks](checks.md#paths-the-collector-cannot-see)), so `check-config` refuses a policy there, or a folder link into them, and `garrison doctor` names it. |
+| `collector.dqs_key` | none | Where the key of Spamhaus' Data Query Service is read from: `credential:spamhaus-dqs-key`. The `reputation` check asks a list written without its key, such as `zen.dq.spamhaus.net`, with it, read anew for each run; the key goes into the question and nowhere else ([checks](checks.md#reputation)). Write the key into the file with `sudo sh -c 'cat > /etc/garrison/credentials/spamhaus-dqs-key'` (paste it, Enter, Ctrl-D); the installer keeps an empty file there, which means none, and such a list is then not asked. `check-config` refuses such a list without this setting, and `garrison doctor` fails the file where such a list is asked and it holds no key. |
+| `broker.policy` | `/etc/garrison/access-policy.json` | Access policy, see [access.md](access.md). The broker reads it there, the installer starts Garrison once it is there and keeps it root's and readable only for the broker's group, `garrison doctor` checks there that the broker may read it and that it binds a role or an account, and `garrison uninstall --purge` removes it with its backups. It must be a file of its own: a folder or a link there is left as it is, and `check-config` refuses it. It must also lie where the broker sees it: its unit hides `/home`, `/root`, `/run/user`, `/tmp`, `/var/tmp` and `/dev` from it (all but `/dev/shm` and `/dev/mqueue`), and the kernel's own files, as the collector's unit hides them from the collector ([checks](checks.md#paths-the-collector-cannot-see)), so `check-config` refuses a policy there, or a folder link into them, and `garrison doctor` names it. |
 | `broker.allowed_peers` | `["garrison"]` | System users allowed to use the broker socket. |
 | `broker.socket` | `/run/garrison/broker.sock` | The broker's Unix socket. Keep the default: `garrison-broker.socket` listens there whatever this says. |
 
@@ -63,8 +63,9 @@ The installer writes `web.port` into nginx's include,
 nginx reach it; `check-config` and `garrison doctor` warn while the include
 names another port.
 After changing the port, run the installer again. Without it, restart
-`garrison-web` and write the include anew; the SELinux module then moves with
-the next run of the installer:
+`garrison-web` and write the include anew; under SELinux nginx reaches the new
+port only once the next run of the installer moves the module, and
+`garrison doctor` fails it until then:
 
 ```sh
 sudo sh -c 'garrison nginx --snippet > /etc/nginx/snippets/garrison.conf'
@@ -286,7 +287,8 @@ it takes the entry out of Stalwart first and stops the filter afterwards.
 Keep to that order. While Stalwart has the entry and the filter does not run,
 Stalwart defers all incoming mail (or takes it unscanned, with `"accept"`).
 For the same reason `garrison uninstall` refuses while the entry is there,
-and `garrison doctor` reports a filter that Stalwart asks in vain.
+and `garrison doctor`, which reads Stalwart's entry with the collector's API
+key, reports a filter that Stalwart asks in vain, also at an old `port`.
 
 What the filter finds: a VBA project in Word, Excel and PowerPoint files of
 the newer format (`.docm`, `.xlsm`, `.pptm`, also under another name such as

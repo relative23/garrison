@@ -1802,6 +1802,53 @@ Notable changes for operators and users. The format follows
   service's. The journal now says "Sign-in rejected at the callback (…)"
   with which, naming the issuer the callback named and the one configured,
   never the code.
+- **`garrison doctor` no longer takes an events database it cannot read for
+  an empty one.** A history that is damaged, that the receiver's writer held
+  for longer than doctor waits, or a folder in the database's place gave "no
+  Stalwart event recorded yet" with the advice about the webhook. It now says
+  that when the last event arrived is not known, with the database and why,
+  as it does for the status database.
+- **`garrison doctor` checks the certificate on the port `public_origin`
+  names.** It probed port 443 of the name whatever the origin's port, so
+  for `https://host:8443` it failed a working installation where nothing,
+  or another server with a certificate of its own, answers on 443, or it
+  judged that other certificate and never warned that the one on 8443 ends.
+  It now probes the origin's port and names it.
+- **A request to a port other than its scheme's own names that port.** The
+  HTTPS client sent the host name alone in `Host`, so for `public_origin =
+  "https://host:8443"` `garrison doctor` said that Garrison answered 308
+  instead of its answer to a visitor, as the web service redirects a name
+  that is not its own, and failed a working installation with the advice to
+  include `garrison.conf`. Every request of the client names such a port
+  now, the sign-in check's and the notification channels' among them.
+- **`garrison doctor` no longer takes another application's answer at the
+  issuer for Stalwart refusing Garrison's sign-in client.** It names what
+  answered and says that the issuer's proxy must pass `/api/auth/client` and
+  `/api/auth` to Stalwart.
+- **`garrison doctor` fails an `issuer` that is not the name Stalwart gives
+  itself**, with which every sign-in fails at Garrison's callback, and says
+  what to set.
+- **`garrison doctor` fails an access policy the broker may not read**, such
+  as one root's alone after `chmod 600`, with which nobody can sign in, and
+  gives the `chown` and `chmod` that mend it.
+- **`garrison doctor` fails an access policy that binds nobody, or that names
+  an action garrison.toml no longer has**, and names the `garrison access`
+  command that mends it.
+- **`garrison doctor` fails `metrics-credential` and `spamhaus-dqs-key` where
+  a check reads them and they hold what the collector takes for none**, with
+  how to fill them.
+- **`garrison doctor` fails an SELinux module loaded for another port than
+  `web.port`**, with which nginx answers 502, and names the installer, which
+  loads it for the port.
+- **`garrison stalwart setup` leaves one entry for the macro filter in
+  Stalwart**, also where its note of the entry is lost, and switches that
+  entry on again where it was switched off.
+- **`garrison doctor` fails a macro filter entry in Stalwart that asks another
+  port than `[milter]` names**, as after a change of `port` without setup, with
+  which Stalwart defers all incoming mail.
+- **`garrison doctor` says that nginx does not reach the web service where it
+  answers 502 for Garrison**, and names the service, the include's port and the
+  SELinux module instead of the include itself.
 
 ## [0.1.2] - 2026-11-13
 
