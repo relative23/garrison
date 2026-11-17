@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use garrison_stalwart::ids::account_id_for_subject;
 use garrison_stalwart::jmap::JmapClient;
 use garrison_stalwart::permissions::{
-    ACCOUNT_PROPERTIES, AUTHENTICATION_PROPERTIES, Account, Authentication, ROLE_PROPERTIES, Role,
-    RoleIds, evaluate, is_verified_scope, native_rights,
+    ACCOUNT_PROPERTIES, AUTHENTICATION_PROPERTIES, Account, Authentication, Native,
+    ROLE_PROPERTIES, Role, RoleIds, account_rights, evaluate, is_verified_scope, native_rights,
 };
 use garrison_stalwart::sign_in_page;
 use garrison_testing::lab::{Lab, random_hex, unique};
@@ -260,18 +260,9 @@ fn role_map_shape_is_boolean() {
 }
 
 /// The permissions `garrison stalwart setup` gives the broker's API key.
-const BROKER_PERMISSIONS: [&str; 4] = [
-    "authenticate",
-    "sysAccountGet",
-    "sysRoleGet",
-    "sysAuthenticationGet",
-];
-
-#[test]
-#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
-fn the_broker_key_reads_the_role_graph_it_evaluates() {
-    let mut lab = Lab::from_environment();
-    let tag = unique();
+/// A client of the management API with a key that holds the broker's
+/// permissions alone, as `stalwart setup` makes it, named by `tag`.
+fn broker_client(lab: &mut Lab, tag: &str) -> JmapClient {
     let permissions: Value = BROKER_PERMISSIONS
         .iter()
         .map(|name| (name.to_string(), json!(true)))
@@ -287,6 +278,22 @@ fn the_broker_key_reads_the_role_graph_it_evaluates() {
     let key = &created["created"]["k"];
     lab.created
         .push(("ApiKey".into(), key["id"].as_str().unwrap().to_owned()));
+    JmapClient::new(&lab.url, key["secret"].as_str().unwrap())
+}
+
+const BROKER_PERMISSIONS: [&str; 4] = [
+    "authenticate",
+    "sysAccountGet",
+    "sysRoleGet",
+    "sysAuthenticationGet",
+];
+
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn the_broker_key_reads_the_role_graph_it_evaluates() {
+    let mut lab = Lab::from_environment();
+    let tag = unique();
+    let client = broker_client(&mut lab, &tag);
     let parent = lab.create(
         "Role",
         &json!({
@@ -310,7 +317,6 @@ fn the_broker_key_reads_the_role_graph_it_evaluates() {
         &json!({"@type": "Custom", "roleIds": {child.clone(): true}}),
         &json!({"@type": "Inherit"}),
     );
-    let client = JmapClient::new(&lab.url, key["secret"].as_str().unwrap());
     let rights = native_rights(&client, &user.id).unwrap();
     assert_eq!(rights.roles, BTreeSet::from([parent, child]));
     let (account, roles, authentication) = fetch(&lab, &user.id);
@@ -323,6 +329,15 @@ fn the_broker_key_reads_the_role_graph_it_evaluates() {
             .collect::<BTreeSet<_>>(),
         assert_equal(&lab, &user)
     );
+    // An account is a user or a group, the two variants of `x:Account` that
+    // Stalwart's schema names. A group, whose roles are of a kind of their
+    // own, is an account Garrison evaluates no rights for, which refuses it.
+    let domain = domain_id(&lab);
+    let group = lab.create(
+        "Account",
+        &json!({"@type": "Group", "name": unique(), "domainId": domain}),
+    );
+    assert_eq!(account_rights(&client, &group), Ok(Native::Ineligible));
 }
 
 /// The texts in quotes in `html` that name a script or a style sheet.

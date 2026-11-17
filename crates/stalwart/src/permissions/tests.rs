@@ -218,13 +218,32 @@ fn accounts_garrison_does_not_evaluate_deny() {
 fn an_account_garrison_evaluates_no_rights_for_is_told_apart_at_once() {
     let mut tenant = account(json!({"@type": "Admin"}), inherit());
     tenant["memberTenantId"] = json!("t1");
-    let listed = answer(&json!({"methodResponses": [["x:Account/get",
-        {"list": [tenant], "notFound": []}, "0"]]}));
-    let server = serve(vec![listed.clone(), listed]);
+    let listed = |account: Value| {
+        answer(&json!({"methodResponses": [["x:Account/get",
+            {"list": [account], "notFound": []}, "0"]]}))
+    };
+    // A type this release does not know refuses nobody.
+    let unknown = with(
+        account(json!({"@type": "User"}), inherit()),
+        "@type",
+        json!("Individual"),
+    );
+    let server = serve(vec![
+        listed(tenant.clone()),
+        listed(tenant),
+        listed(unknown),
+    ]);
     let client = JmapClient::new(&server.url, "native-key-0123456789");
     assert_eq!(account_rights(&client, "b"), Ok(Native::Ineligible));
     assert_eq!(native_rights(&client, "b"), denied(NOT_A_USER));
-    assert_eq!(server.requests().len(), 2);
+    assert_eq!(
+        account_rights(&client, "b"),
+        Err(Error::unreadable(
+            "x:Account/get returned an account of a type this release does not know \
+             (\"Individual\")"
+        ))
+    );
+    assert_eq!(server.requests().len(), 3);
 }
 
 /// A shape this module does not know is no account, role or setting at all:

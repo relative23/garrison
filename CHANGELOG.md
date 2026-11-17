@@ -1171,9 +1171,11 @@ Notable changes for operators and users. The format follows
   "Your access could not be checked just now. Try again in a few minutes.",
   which no try mends, the broker's journal got an error at every try, and a
   signed-in account moved into a tenant kept its session, with an error for
-  each of its requests. Such an account is now refused, as one without a
-  profile is: its sign-in fails, a session it has ends, and the broker's
-  journal names the reason.
+  each of its requests. Such an account, and a group, is now refused, as one
+  without a profile is: its sign-in fails, a session it has ends, and the
+  broker's journal names the reason. An account of a type other than a user
+  or a group, as a Stalwart release Garrison does not support yet might
+  answer, refuses nobody, as any answer this release does not read.
 - **A broker that gives no answer is worded alike everywhere, and the
   journal says why.** Where the broker gave no answer (stopped, its 16
   places taken, its socket gone), pages said "Authorization is temporarily

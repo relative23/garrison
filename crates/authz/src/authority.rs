@@ -25,8 +25,8 @@ use crate::policy::{Capabilities, Policy, parse_policy};
 /// The policy is small; anything larger is not a policy.
 const MAX_POLICY: usize = 65536;
 /// Why an account Garrison evaluates no rights for is refused.
-const NOT_EVALUATED: &str = "This identity's account belongs to a tenant, or is no user account of \
-                          Stalwart's own; Garrison evaluates no rights for it";
+const NOT_EVALUATED: &str = "This identity's account belongs to a tenant, or is a group; Garrison \
+                             evaluates no rights for it";
 
 #[derive(Debug)]
 pub struct Authority {

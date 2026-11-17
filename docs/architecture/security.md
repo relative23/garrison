@@ -42,8 +42,8 @@ two things kept it from being granted.
 
 A refusal (403) is what the policy and Stalwart say of a user: the subject is
 on the deny list, has no binding, belongs to an account Garrison evaluates no
-rights for (one of a tenant, a tenant's administrator's too, or no user
-account of Stalwart's own), lacks the rights its profile requires, or has
+rights for (one of a tenant, a tenant's administrator's too, or a group),
+lacks the rights its profile requires, or has
 profiles that name none of the modules the installation offers. It ends that
 user's session, as an invalid token does (401), and the broker's journal
 names the reason of each.
@@ -55,7 +55,8 @@ not read. The setup is a policy that does not read, is not protected or
 names an action the configuration does not have; a broker key that is
 missing or that Stalwart no longer takes; and an answer about an account's
 rights that cannot be used. An answer this release does not read is one
-without JSON, with an object or a status it does not know, larger than it
+without JSON, with an object or a status it does not know (an account of a
+type other than a user or a group too), larger than it
 reads or without what was asked, or an error of a method other than
 `forbidden`, such as `unknownMethod` for a method Stalwart does not know, as
 a Stalwart release Garrison does not support yet may give, to UserInfo, where

@@ -9,9 +9,9 @@
 //!
 //! Cycles, missing roles, tenant members and unrecognized shapes grant
 //! nothing. An account Garrison evaluates no rights for, a tenant's member
-//! or no user account of the server's own, is told apart from the rest
-//! ([`Native::Ineligible`]): that is what Stalwart says of the user, not of
-//! the key that asked.
+//! or a group, is told apart from the rest ([`Native::Ineligible`]): that is
+//! what Stalwart says of the user, not of the key that asked. An account of
+//! a type this release does not know refuses nobody.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -42,6 +42,13 @@ pub const AUTHENTICATION_PROPERTIES: [&str; 3] =
 const RUNTIME_WITHHELD: [&str; 2] = ["sysBootstrapGet", "sysBootstrapUpdate"];
 /// Why an account's rights are not evaluated: see [`Account::is_eligible`].
 const NOT_A_USER: &str = "A non-tenant native user account is required";
+/// The types of an account this release knows (`@type`), the two variants
+/// of the Account object that Stalwart's documentation names ("Accounts"):
+/// a user, and a group, which nobody signs in with.
+const USER: &str = "User";
+const GROUP: &str = "Group";
+/// How much of a type this release does not know an error repeats.
+const MAX_SHOWN: usize = 64;
 
 /// A role, account or tenant ID: `[A-Za-z0-9_-]{1,128}`.
 pub fn is_identifier(text: &str) -> bool {
@@ -195,7 +202,7 @@ impl Account {
     /// a group are not.
     #[must_use]
     pub fn is_eligible(&self) -> bool {
-        self.kind == "User" && self.member_tenant_id.is_none()
+        self.kind == USER && self.member_tenant_id.is_none()
     }
 
     /// The Admin/User/Custom role IDs assigned to a non-tenant user.
@@ -328,9 +335,36 @@ impl Walk<'_> {
 pub enum Native {
     /// The account's effective rights.
     Rights(Rights),
-    /// An account Garrison evaluates no rights for ([`Account::is_eligible`]):
-    /// what Stalwart says of the user's account, not of the key that read it.
+    /// An account Garrison evaluates no rights for ([`Account::is_eligible`]),
+    /// of a type this release knows: what Stalwart says of the user's
+    /// account, not of the key that read it.
     Ineligible,
+}
+
+/// Whether Garrison evaluates the rights of the account `object`, by its
+/// type and tenant alone, before the rest of it is read: a group's roles are
+/// of a kind of their own (`Default`, measured on Stalwart 1.1.0), and an
+/// account Garrison evaluates no rights for is refused whatever its roles.
+/// A type this release does not know is an answer it does not read.
+fn evaluated(object: &Value) -> Result<bool, Error> {
+    let unsupported = || Error::unreadable("x:Account/get returned an unsupported object");
+    let tenant = match object.get("memberTenantId") {
+        None | Some(Value::Null) => false,
+        Some(Value::String(_)) => true,
+        Some(_) => return Err(unsupported()),
+    };
+    match object.get("@type").and_then(Value::as_str) {
+        Some(USER) => Ok(!tenant),
+        Some(GROUP) => Ok(false),
+        Some(kind) => {
+            let kind: String = kind.chars().take(MAX_SHOWN).collect();
+            Err(Error::unreadable(format!(
+                "x:Account/get returned an account of a type this release does not know \
+                 ({kind:?})"
+            )))
+        }
+        None => Err(unsupported()),
+    }
 }
 
 /// Read one account's role graph from Stalwart and evaluate it, or find,
@@ -340,11 +374,12 @@ pub enum Native {
 /// Roles are fetched in batches of eight, only as far as the account's roles
 /// reach, and never more than [`MAX_ROLES`].
 pub fn account_rights(client: &JmapClient, account_id: &str) -> Result<Native, Error> {
-    let account: Account =
-        first(client.get("Account", Some(&[account_id]), &ACCOUNT_PROPERTIES)?)?;
-    if !account.is_eligible() {
+    let object: Value = first(client.get("Account", Some(&[account_id]), &ACCOUNT_PROPERTIES)?)?;
+    if !evaluated(&object)? {
         return Ok(Native::Ineligible);
     }
+    let account: Account = serde_json::from_value(object)
+        .map_err(|_| Error::unreadable("x:Account/get returned an unsupported object"))?;
     let authentication: Authentication = first(client.get(
         "Authentication",
         Some(&["singleton"]),

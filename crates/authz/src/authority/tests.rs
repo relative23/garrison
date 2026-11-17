@@ -247,9 +247,9 @@ fn an_empty_key_file_is_named_with_what_makes_the_key() {
     server.requests();
 }
 
-/// An account that belongs to a tenant, its administrator's too, or one
-/// that is no user account of Stalwart's own: Garrison evaluates no rights
-/// for it. That is what Stalwart says of the user, so it is a refusal,
+/// An account that belongs to a tenant, its administrator's too, or a
+/// group: Garrison evaluates no rights for it. That is what Stalwart says
+/// of the user, so it is a refusal,
 /// which ends the session and fails the sign-in, never a setup of
 /// Garrison's own that is broken, which would keep the session and say
 /// "Try again in a few minutes" at every try.
@@ -279,6 +279,13 @@ fn an_account_garrison_evaluates_no_rights_for_is_refused() {
             json!({"id": "b", "@type": "Group", "roles": {"@type": "User"},
                    "permissions": {"@type": "Inherit"}}),
         ),
+        // As Stalwart 1.1.0 answers for a group: its roles are of a kind
+        // this module reads for no account it evaluates.
+        (
+            "a group as Stalwart answers it",
+            json!({"id": "b", "@type": "Group", "roles": {"@type": "Default"},
+                   "permissions": {"@type": "Inherit"}, "memberTenantId": null}),
+        ),
     ];
     for (case, account) in shapes {
         let (authority, server, _directory) = authority(vec![
@@ -293,14 +300,43 @@ fn an_account_garrison_evaluates_no_rights_for_is_refused() {
         assert_eq!(
             authority.authorize(TOKEN),
             Err(Error::Denied(
-                "This identity's account belongs to a tenant, or is no user account of \
-                 Stalwart's own; Garrison evaluates no rights for it"
+                "This identity's account belongs to a tenant, or is a group; Garrison evaluates no \
+                 rights for it"
                     .into()
             )),
             "{case}"
         );
         drop(server);
     }
+}
+
+/// An account of a type this release does not know, as a Stalwart release
+/// Garrison does not support yet might answer for every user, is an answer
+/// this release does not read: it refuses nobody, so that nobody is signed
+/// out for it, and is named with the request it answered.
+#[test]
+fn an_account_of_a_type_this_release_does_not_know_refuses_nobody() {
+    let (authority, server, _directory) = authority(vec![
+        respond(&json!({"sub": "1", "email": "ann@example.test"})),
+        jmap(
+            "x:Account/get",
+            &json!([{"id": "b", "@type": "Individual", "roles": {"@type": "User"},
+                     "permissions": {"@type": "Inherit"}}]),
+        ),
+        jmap(
+            "x:Authentication/get",
+            &json!([{"id": "singleton", "defaultAdminRoleIds": {}, "defaultUserRoleIds": {}}]),
+        ),
+    ]);
+    assert_eq!(
+        authority.authorize(TOKEN),
+        Err(Error::Unreadable(
+            "the management API: x:Account/get returned an account of a type this release \
+             does not know (\"Individual\")"
+                .into()
+        ))
+    );
+    drop(server);
 }
 
 #[test]

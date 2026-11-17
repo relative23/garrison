@@ -242,9 +242,11 @@ fn refusing() -> Vec<AtStalwart> {
         &value!({"id": "b", "@type": "User", "roles": {"@type": "Admin"},
                                   "permissions": {"@type": "Inherit"}, "memberTenantId": "t1"}),
     );
+    // As Stalwart 1.1.0 answers for a group: its roles are of a kind of
+    // their own.
     let group = account(
-        &value!({"id": "b", "@type": "Group", "roles": {"@type": "User"},
-                                 "permissions": {"@type": "Inherit"}}),
+        &value!({"id": "b", "@type": "Group", "roles": {"@type": "Default"},
+                                 "permissions": {"@type": "Inherit"}, "memberTenantId": null}),
     );
     let mut weak = granting();
     weak[3] = listed(
@@ -283,7 +285,20 @@ fn undecided() -> Vec<AtStalwart> {
             "the account's rights could not be read from Stalwart: {why}"
         ))
     };
+    let unknown = account(
+        &value!({"id": "b", "@type": "Individual", "roles": {"@type": "User"},
+                                   "permissions": {"@type": "Inherit"}}),
+    );
     vec![
+        case(
+            "an account of a type this release does not know",
+            at_the_api(unknown),
+            Error::Unreadable(
+                "the management API: x:Account/get returned an account of a type this release \
+                 does not know (\"Individual\")"
+                    .into(),
+            ),
+        ),
         case(
             "UserInfo in a form this release does not read",
             vec![answer(200, "<html>")],
