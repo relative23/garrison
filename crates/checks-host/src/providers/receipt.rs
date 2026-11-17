@@ -41,6 +41,32 @@ const MAX_DOCUMENT: usize = 1024 * 1024;
 const MAX_ROWS: usize = 200;
 const DEFAULT_SCOPE: &str = "Historical result reported by the job; not a current test.";
 
+/// Refuses the options that a receipt of this shape would not read.
+fn unused(options: &Options<'_>, rows: Option<&Key>) -> Checked<()> {
+    let found = |names: [&'static str; 3]| names.into_iter().find(|name| options.has(name));
+    match rows {
+        None => match found(["columns", "ok_rows", "row_date"]) {
+            Some(name) => fail(format!("providers[receipt].{name} needs rows")),
+            None => Ok(()),
+        },
+        Some(key) if !key.is_empty() && options.has("row_date") => fail(
+            "providers[receipt].row_date is only for rows = []; rows under a key take the \
+             receipt's date from date",
+        ),
+        Some(key) if !key.is_empty() => Ok(()),
+        Some(_) => match found(["fields", "ok_when", "date"]) {
+            Some(name) => fail(format!(
+                "providers[receipt].{name} reads an object, but rows = [] reads a list; use \
+                 columns, ok_rows and row_date"
+            )),
+            None if !options.has("row_date") => {
+                fail("providers[receipt] with rows = [] needs row_date, the key of each row's date")
+            }
+            None => Ok(()),
+        },
+    }
+}
+
 #[derive(Debug)]
 pub struct Receipt {
     id: String,
@@ -123,6 +149,7 @@ impl Receipt {
             Some(value) => Some(key(Some(value), "receipt.row_date")?),
             None => None,
         };
+        unused(&options, rows.as_ref())?;
         Ok(Receipt {
             id,
             title,

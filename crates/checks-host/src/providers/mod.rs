@@ -20,6 +20,9 @@ pub use web::{Bulwark, Http};
 mod kinds_tests;
 
 #[cfg(test)]
+mod options_tests;
+
+#[cfg(test)]
 mod systemd_tests;
 
 #[cfg(test)]

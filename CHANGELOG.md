@@ -8,6 +8,10 @@ Notable changes for operators and users. The format follows
 
 ### Upgrade notes
 
+- **`garrison check-config`, and with it the upgrade, refuses an option
+  that its check would not use.** Such as `disk_path` without the `disk`
+  check, a version `pattern` without a group, or a receipt's `columns`
+  without `rows`; the message names what mends it.
 - `expect = "idle"` or `max_age_hours` on a `systemd` timer, socket or path
   unit is refused by `garrison check-config` now, and with it the upgrade,
   before anything stops. Put them on the service the unit starts, such as

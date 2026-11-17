@@ -309,7 +309,7 @@ fn limits() -> BTreeSet<(String, String)> {
             let path = entry.unwrap().path();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
             if path.is_dir() {
-                if name != "tests" {
+                if !name.ends_with("tests") {
                     folders.push(path);
                 }
                 continue;

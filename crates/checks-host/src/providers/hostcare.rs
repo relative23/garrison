@@ -113,6 +113,9 @@ impl HostCare {
                 return fail("providers[host-care].firewall_units lists systemd units, each once");
             }
         };
+        if !checks.contains("disk") && options.has("disk_path") {
+            return fail("providers[host-care].disk_path needs the disk check");
+        }
         Ok(HostCare {
             root: options.path("root", Some("/"))?,
             disk_path: options.path("disk_path", Some("/"))?,
