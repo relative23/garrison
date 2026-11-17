@@ -66,6 +66,19 @@ async fn a_session_says_how_long_it_has_left_by_the_servers_clock() {
     assert!((30 * 60 - 5..=30 * 60).contains(&left), "{left}");
 }
 
+#[tokio::test]
+async fn a_session_dated_further_ahead_than_it_lasts_gives_no_time_left() {
+    let mut setup = setup();
+    setup.client.sign_in("code-admin").await;
+    // The row as a clock that ran a day ahead wrote it, since put right.
+    let db = rusqlite::Connection::open(setup.config.database(Database::Web)).unwrap();
+    db.execute("UPDATE sessions SET expires_at = expires_at + 86400", [])
+        .unwrap();
+    let session = setup.client.get(&api("session")).await.json()["session"].clone();
+    assert!(session["expiresAt"].is_i64());
+    assert_eq!(session["expiresIn"], Value::Null);
+}
+
 fn observation(id: &str, modules: &[&str]) -> Value {
     json!({
         "id": id, "provider": "p", "title": "t", "modules": modules, "evidence": "process",

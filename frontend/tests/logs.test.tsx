@@ -180,6 +180,17 @@ describe("history coverage", () => {
     expect(banner.textContent).toContain(" · last received 3.0 h ago · ");
   });
 
+  it("says it does not know when the last batch came where the server gives no age for it", async () => {
+    // A time the server does not count from: none a clock gives, or one ahead of its clock.
+    serve({
+      "GET coverage": { body: coverage({ lastBatchAt: NOW + 3600, lastBatchAge: null }) },
+      "GET events": { body: { items: [], next: null } },
+    });
+    renderView(<Logs />);
+    const banner = await screen.findByText(/Recording since/);
+    expect(banner.textContent).toContain(" · last received Unknown · ");
+  });
+
   it("warns when the receiver runs but stores nothing", async () => {
     const since = Math.floor(Date.now() / 1000) - 7200;
     const gaps = [{ start: 100, end: 200, reason: "batches-refused" }];

@@ -91,8 +91,11 @@ pub struct SessionInfo {
     pub expires_at: i64,
     /// Seconds from this answer to the session's end, by the server's clock.
     /// A page counts them down on its own clock and then asks again: the
-    /// browser's clock may be another than the server's.
-    pub expires_in: i64,
+    /// browser's clock may be another than the server's. Null where the end
+    /// lies further ahead than a session lasts, as for a row written while
+    /// the clock ran ahead: the page then counts nothing down.
+    #[schema(required)]
+    pub expires_in: Option<i64>,
     pub modules: Vec<ModuleInfo>,
     pub actions: Vec<String>,
     pub profiles: Vec<String>,

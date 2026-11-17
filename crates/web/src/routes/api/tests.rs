@@ -67,12 +67,25 @@ fn a_session_says_how_long_it_has_left_by_the_servers_clock() {
     let at = time::parse("2026-10-29T12:00:00+00:00").unwrap();
     let ends = at.as_second() + 1800;
     let after = |micros: i64| at + time::SignedDuration::from_micros(micros);
-    assert_eq!(time_left(ends, at), 1800);
+    assert_eq!(time_left(ends, at, 1800), Some(1800));
     // A begun second counts whole: the page asks no earlier than the session
     // ends, which it does once the second of `expires_at` has begun.
-    assert_eq!(time_left(ends, after(500_000)), 1800);
-    assert_eq!(time_left(ends, after(1_799_999_999)), 1);
-    assert_eq!(time_left(ends, after(1_800_000_000)), 0);
+    assert_eq!(time_left(ends, after(500_000), 1800), Some(1800));
+    assert_eq!(time_left(ends, after(1_799_999_999), 1800), Some(1));
+    assert_eq!(time_left(ends, after(1_800_000_000), 1800), Some(0));
+    // Read after the store kept it, at its very end: none left, not less.
+    assert_eq!(time_left(ends, after(1_805_000_000), 1800), Some(0));
+}
+
+#[test]
+fn a_session_dated_further_ahead_than_it_lasts_gives_no_time_left() {
+    let at = time::parse("2026-10-29T12:00:00+00:00").unwrap();
+    // Written while the clock ran a day ahead, then put right.
+    assert_eq!(time_left(at.as_second() + 86_400 + 1800, at, 1800), None);
+    assert_eq!(time_left(at.as_second() + 1801, at, 1800), None);
+    assert_eq!(time_left(i64::MAX, at, 1800), None);
+    let before_1970 = time::parse("1969-12-31T00:00:00+00:00").unwrap();
+    assert_eq!(time_left(i64::MAX, before_1970, 1800), None);
 }
 
 /// An observation checked at `at`; without `max_age` it keeps the default.

@@ -1368,9 +1368,12 @@
             "type": "integer"
           },
           "expiresIn": {
-            "description": "Seconds from this answer to the session's end, by the server's clock.\nA page counts them down on its own clock and then asks again: the\nbrowser's clock may be another than the server's.",
+            "description": "Seconds from this answer to the session's end, by the server's clock.\nA page counts them down on its own clock and then asks again: the\nbrowser's clock may be another than the server's. Null where the end\nlies further ahead than a session lasts, as for a row written while\nthe clock ran ahead: the page then counts nothing down.",
             "format": "int64",
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "links": {
             "$ref": "#/components/schemas/Links"

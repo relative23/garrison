@@ -5,6 +5,7 @@
 //! receiver adds or changes fails to compile until the API, and with it the
 //! interface's types, takes a decision about it.
 
+use garrison_core::time;
 use garrison_ingest::answers;
 use garrison_ingest::deliveries::{Lifecycle, Milestones};
 
@@ -177,6 +178,13 @@ impl From<answers::Detail<answers::SessionSummary>> for SessionDetail {
     }
 }
 
+/// How long ago `at` was at `now`, in seconds; none where `at` is no time a
+/// clock gives (as `recording::time_of` reads the heartbeat) or lies ahead of
+/// `now`, written before the clock went back.
+fn age(at: i64, now: i64) -> Option<i64> {
+    (time::Timestamp::from_second(at).is_ok() && at <= now).then(|| now - at)
+}
+
 /// The coverage as the API states it in an answer at `now`, the server's
 /// second: with the age of the last batch, which a page counts on from
 /// without comparing a time of the server's with its own clock.
@@ -205,7 +213,7 @@ pub(super) fn coverage(coverage: answers::Coverage, now: i64) -> Coverage {
         heartbeat_at,
         recording_since,
         last_batch_at,
-        last_batch_age: last_batch_at.map(|at| now.saturating_sub(at)),
+        last_batch_age: last_batch_at.and_then(|at| age(at, now)),
         failing_since,
         retention_days,
         event_count,
@@ -218,3 +226,6 @@ pub(super) fn coverage(coverage: answers::Coverage, now: i64) -> Coverage {
         limitations: limitations.into_iter().map(str::to_owned).collect(),
     }
 }
+
+#[cfg(test)]
+mod tests;
