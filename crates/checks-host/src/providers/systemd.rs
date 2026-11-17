@@ -198,6 +198,22 @@ fn last_run(
     ]
 }
 
+/// Why a job's expectation does not fit `unit`, where it does not: a job is
+/// a service that runs and ends. A timer, a socket or a path unit is active
+/// while it waits and inactive once stopped, with a successful result
+/// (measured), which "idle" would take for a job at rest, and it has no run
+/// of its own whose age could be held to a limit.
+fn no_job(unit: &str) -> Option<String> {
+    let (stem, kind) = unit.rsplit_once('.')?;
+    (kind != "service").then(|| {
+        format!(
+            "providers[systemd] unit {unit}: expect = \"idle\" and max_age_hours are for a \
+             service that runs and ends, not for a {kind}; put them on the service the {kind} \
+             starts, such as {stem}.service"
+        )
+    })
+}
+
 impl Systemd {
     pub fn new(raw: &toml::Table) -> Checked<Self> {
         let options = Options::new(raw, &["units"])?;
@@ -231,6 +247,11 @@ impl Systemd {
                     ));
                 }
             };
+            if (idle || item.contains_key("max_age_hours"))
+                && let Some(refused) = no_job(unit)
+            {
+                return fail(refused);
+            }
             let max_age_hours = match item.get("max_age_hours").map(toml::Value::as_integer) {
                 None => None,
                 Some(Some(hours)) if idle && (1..=8760).contains(&hours) => Some(hours),

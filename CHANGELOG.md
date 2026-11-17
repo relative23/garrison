@@ -8,6 +8,10 @@ Notable changes for operators and users. The format follows
 
 ### Upgrade notes
 
+- `expect = "idle"` or `max_age_hours` on a `systemd` timer, socket or path
+  unit is refused by `garrison check-config` now, and with it the upgrade,
+  before anything stops. Put them on the service the unit starts, such as
+  `backup.service` for `backup.timer`; check-config names it.
 - A zone of Spamhaus' Data Query Service written with its key in `lists`,
   such as `KEY.zen.dq.spamhaus.net`, keeps working, and `check-config`,
   the installer and `garrison doctor` warn of it: write the zone without
@@ -555,6 +559,13 @@ Notable changes for operators and users. The format follows
   the unit it stands for ("Alias of"). A unit that
   systemd gives no answer for, and every unit while `systemctl` cannot be
   run, is Unknown and says why.
+- **A job's expectation on a systemd timer is refused.** `expect = "idle"`
+  and `max_age_hours` were taken on a timer, a socket or a path unit. A
+  stopped timer is inactive with a successful result (measured), which
+  "idle" takes for a job at rest, so a backup schedule that no longer fired
+  was in order, and `max_age_hours` did nothing on such a unit. `garrison
+  check-config`, and with it the installer before an upgrade, refuses both
+  there now and names the service to put them on.
 - **Only a blocklist's own answer is a listing.** Any address a resolver
   gave for a list's question counted as a listing, so a resolver that
   answers names that do not exist with an address of its own, as some

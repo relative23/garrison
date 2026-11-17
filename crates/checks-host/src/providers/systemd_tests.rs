@@ -275,3 +275,54 @@ units = [{{ unit = "backup.service", label = "Backup job", modules = ["backups"]
         );
     }
 }
+
+/// What `systemctl show` answered, with the collector's arguments, for a
+/// stopped and a waiting timer in a container of Debian 13 that runs
+/// systemd 257 (`systemd/show/`, measured 2026-11-17).
+const TIMER_STOPPED: &str = include_str!("systemd/show/debian-13-timer-stopped.txt");
+const TIMER_WAITING: &str = include_str!("systemd/show/debian-13-timer-waiting.txt");
+
+/// A timer, a socket or a path unit is active while it waits and inactive
+/// once stopped, and runs nothing of its own: `expect = "idle"`, which takes
+/// an inactive unit whose last result was a success for one at rest, called
+/// a stopped timer in order (measured: a stopped timer is inactive with
+/// Result success), and `max_age_hours` never applied to one. check-config
+/// refuses both there and names the service to put them on. A stopped
+/// timer that is expected active is Failed, a waiting one in order.
+#[test]
+fn a_job_expectation_on_a_unit_that_is_no_service_is_refused() {
+    for (unit, kind, extra) in [
+        ("backup.timer", "timer", "expect = \"idle\""),
+        (
+            "backup.timer",
+            "timer",
+            "expect = \"idle\", max_age_hours = 26",
+        ),
+        ("backup.timer", "timer", "max_age_hours = 26"),
+        ("backup.socket", "socket", "expect = \"idle\""),
+        ("backup.path", "path", "expect = \"idle\""),
+    ] {
+        let raw = format!(
+            "type = \"systemd\"\nunits = [{{ unit = \"{unit}\", label = \"Backup\", \
+             modules = [\"backups\"], {extra} }}]"
+        );
+        assert_eq!(
+            Systemd::new(&table(&raw)).map(|_| ()).unwrap_err().0,
+            format!(
+                "providers[systemd] unit {unit}: expect = \"idle\" and max_age_hours are for a \
+                 service that runs and ends, not for a {kind}; put them on the service the \
+                 {kind} starts, such as backup.service"
+            ),
+            "{unit} {extra}"
+        );
+    }
+    let schedule = r#"{ unit = "hostchk-job.timer", label = "Schedule", modules = ["backups"] }"#;
+    let stopped = observed(schedule, &Canned(TIMER_STOPPED.to_owned()));
+    assert_eq!(stopped[0].state, State::Failed);
+    let waiting = observed(schedule, &Canned(TIMER_WAITING.to_owned()));
+    assert_eq!(waiting[0].state, State::Ok);
+    assert_eq!(
+        value_of(&waiting[0], "Next run"),
+        &json!("2026-11-17T03:00:00+00:00")
+    );
+}

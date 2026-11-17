@@ -1,0 +1,11 @@
+TimersCalendar={ OnCalendar=*-*-* 03:00:00 ; next_elapse=Tue 2026-11-17 03:00:00 UTC }
+NextElapseUSecRealtime=Tue 2026-11-17 03:00:00 UTC
+NextElapseUSecMonotonic=0
+LastTriggerUSec=
+LastTriggerUSecMonotonic=0
+Result=success
+Id=hostchk-job.timer
+Names=hostchk-job.timer
+LoadState=loaded
+ActiveState=active
+SubState=waiting

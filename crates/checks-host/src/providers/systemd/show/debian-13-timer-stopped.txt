@@ -1,0 +1,11 @@
+TimersCalendar={ OnCalendar=*-*-* 03:00:00 ; next_elapse=(null) }
+NextElapseUSecRealtime=
+NextElapseUSecMonotonic=infinity
+LastTriggerUSec=
+LastTriggerUSecMonotonic=0
+Result=success
+Id=hostchk-job.timer
+Names=hostchk-job.timer
+LoadState=loaded
+ActiveState=inactive
+SubState=dead

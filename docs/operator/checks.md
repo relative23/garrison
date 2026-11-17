@@ -246,6 +246,12 @@ Use `expect = "idle"` for a job that runs and ends, such as a backup. The
 entry then shows when the job last ran, how it ended and how long it took, as
 systemd reports it. With `max_age_hours` it warns when the last run is older.
 
+A job is a service. `garrison check-config` refuses `expect = "idle"` and
+`max_age_hours` on a timer, a socket or a path unit, which is active while it
+waits and inactive once it is stopped: put them on the service the timer
+starts, such as `backup.service` for `backup.timer`, and leave the timer at
+the default, `expect = "active"`, under which a stopped timer is Failed.
+
 ## `dns`
 
 Stalwart names the records each of its domains needs (its zone file). The
