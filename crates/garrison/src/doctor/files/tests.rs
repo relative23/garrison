@@ -109,6 +109,49 @@ fn starting<'a>(findings: &'a [Finding], what: &str) -> &'a Finding {
         .unwrap_or_else(|| panic!("no finding {what}: {findings:?}"))
 }
 
+/// Every file the units load is judged empty as its service reads it: a key
+/// setup writes is no key empty, so doctor fails it, as the service refuses
+/// it; a file that may be empty means none, so doctor finds it in order, as
+/// its reader takes it. A file the units come to load that is neither fails
+/// here until someone decides which it is.
+#[test]
+fn every_file_the_units_load_is_judged_empty_as_it_is_read() {
+    use garrison_core::files::{Privacy, ProtectedFileError, read_optional_secret, read_secret};
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    fs::create_dir_all(&config.credentials_directory).unwrap();
+    let optional: Vec<&str> = units::COLLECTOR_FILES
+        .into_iter()
+        .chain(units::NOTIFICATION_FILES)
+        .collect();
+    for (_, _, name) in units::SECRETS {
+        let path = config.credentials_directory.join(name);
+        garrison_testing::write_private(&path, b"\n");
+        if KEYS.contains(&name) {
+            assert!(
+                matches!(
+                    read_secret(&path, Privacy::Owned),
+                    Err(ProtectedFileError::Empty(_))
+                ),
+                "{name}"
+            );
+            let found = files(&config);
+            let finding = starting(&found, &format!("{name} is empty, so "));
+            assert_eq!(finding.level, Level::Fail, "{name}");
+        } else if optional.contains(&name) {
+            let read = read_optional_secret(&path, Privacy::Owned, Form::Token);
+            assert!(matches!(read, Ok(None)), "{name}");
+            let kept = Finding::ok(format!("{name} is private (600)"));
+            let judged = judged(name, true, 0o600, reader(&config, name), kept);
+            assert_eq!(judged.level, Level::Ok, "{name}: {}", judged.line());
+        } else {
+            panic!(
+                "{name} is loaded by the units, but neither a key setup writes nor a file that may be empty"
+            );
+        }
+    }
+}
+
 /// A key file that is empty, or holds something other than a key, gives
 /// the service that reads it none, as a missing one does: doctor fails it
 /// with the setup that makes the key. One that holds a key is judged by
