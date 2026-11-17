@@ -14,7 +14,7 @@ use garrison_authz::policy::{Policy, is_profile_name, parse_policy};
 use garrison_authz::{Authority, Error, SUPPORTED};
 use garrison_core::config::Config;
 use garrison_core::files::read_protected;
-use garrison_stalwart::jmap::{JmapClient, Object};
+use garrison_stalwart::jmap::JmapClient;
 use garrison_stalwart::oidc::is_subject;
 use garrison_stalwart::permissions::native_rights;
 use serde_json::{Value, json};
@@ -24,7 +24,7 @@ use crate::{complain, credentials, say};
 mod defaults;
 mod folder;
 
-use defaults::{administrator_roles, default_profiles};
+use defaults::{Roles, administrator_roles, default_profiles};
 use folder::{Current, Folder};
 
 const POLICY_GROUP: &str = "garrison-broker";
@@ -282,36 +282,55 @@ fn init(config: &Config, force: bool) -> Result<u8, String> {
     }
     // Under the lock, so that nothing that came meanwhile is replaced
     // without --force, and before Stalwart is asked.
-    let roles = locked(config, true, |folder| {
-        if !force && matches!(folder.current()?, Current::File(_)) {
+    let done = locked(config, true, |folder| {
+        let there = matches!(folder.current()?, Current::File(_));
+        if !force && there {
             return Ok(None);
         }
-        let roles = administrator_roles(config)?;
+        let candidates = administrator_roles(config)?;
+        let qualified: Vec<&String> = candidates
+            .iter()
+            .filter(|(_, candidate)| candidate.lacks.is_empty())
+            .map(|(identifier, _)| identifier)
+            .collect();
+        // A new policy would bind nobody and sign everyone out: one that
+        // reads stays, whatever --force says.
+        if qualified.is_empty() && there && written(config).is_ok() {
+            return Ok(Some((candidates, false)));
+        }
         let policy = Policy {
             profiles: default_profiles(config),
-            role_bindings: roles
-                .keys()
-                .map(|role| (role.clone(), "administrator".to_owned()))
+            role_bindings: qualified
+                .iter()
+                .map(|role| ((*role).clone(), "administrator".to_owned()))
                 .collect(),
             ..Policy::default()
         };
         save(config, folder, &policy)?;
-        Ok(Some(roles))
+        Ok(Some((candidates, true)))
     })?;
-    let Some(roles) = roles else {
+    let Some((candidates, saved)) = done else {
         return exists();
     };
-    // The profiles are there for `bind-role`, which binds the role that the
-    // administrators have where none of Stalwart's qualifies.
-    if roles.is_empty() {
-        complain(
-            "No native administrator role with full administrative rights was found, so the \
-             policy binds no role and nobody can sign in yet. Bind the role of your \
-             administrators: garrison access bind-role <role-id> --profile administrator",
-        );
+    let bound: Vec<(&String, &String)> = candidates
+        .iter()
+        .filter(|(_, candidate)| candidate.lacks.is_empty())
+        .map(|(identifier, candidate)| (identifier, &candidate.description))
+        .collect();
+    if bound.is_empty() {
+        let kept = if saved {
+            String::new()
+        } else {
+            format!(
+                "\nWith no role to bind, a new default policy would bind no role and sign \
+                 everyone out: {} is kept as it is.",
+                path.display()
+            )
+        };
+        complain(&format!("{}{kept}", defaults::unbound(&candidates)));
         return Ok(1);
     }
-    for (identifier, description) in &roles {
+    for (identifier, description) in bound {
         say(&format!(
             "Bound native role {identifier} ({description}) to profile administrator."
         ));
@@ -357,12 +376,21 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
                 ));
                 return Ok(1);
             }
-            // The role must exist.
-            native(config)?
-                .get::<Object>("Role", Some(&[role.as_str()]), &["id"])
-                .map_err(said)?;
+            // The role must exist; what it lacks for the profile is said.
+            let roles = Roles::read(config)?;
+            if !roles.exists(role) {
+                return Err(format!(
+                    "Stalwart has no role {role}: bind one of the roles the native \
+                     administration shows (Roles)."
+                ));
+            }
+            let rights = roles.rights(role)?;
             policy.role_bindings.insert(role.clone(), profile.clone());
-            save(config, folder, &policy).map(|()| 0)
+            save(config, folder, &policy)?;
+            if let Some(note) = defaults::fit(&policy, profile, role, rights.as_ref()) {
+                say(&note);
+            }
+            Ok(0)
         }),
         Command::UnbindRole { role } => locked(config, false, |folder| {
             let mut policy = load(config)?;

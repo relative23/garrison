@@ -406,9 +406,15 @@ Notable changes for operators and users. The format follows
   five rights the administrator profile requires, or the administrators had
   a role of their own, `init` wrote nothing, and every other `garrison
   access` command failed for want of a policy, so no command led to one. It
-  now writes the default profiles without a binding, says so on standard
-  error with the `garrison access bind-role` that binds the administrators'
-  role, and ends with 1.
+  now writes the default profiles without a binding and ends with 1, and
+  says on standard error what the administrator profile requires and, for
+  each of Stalwart's default administrator roles, which of those rights it
+  lacks, that Stalwart's administrator gives them to the role, and which
+  profiles it meets as it is. `garrison access bind-role` says the same of
+  a role it binds to a profile whose rights the role lacks, whose users
+  would get nothing of it. Where a policy that reads is there, `init
+  --force` keeps it in that case, since a new one would bind nobody and sign
+  everyone out.
 - **An action added after `garrison access init` reaches its users.**
   `init` gives the `administrator` profile every action of `[[actions]]`
   and the `operator` profile those marked `operator = true`, as

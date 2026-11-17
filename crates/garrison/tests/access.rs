@@ -13,6 +13,8 @@ mod actions;
 mod folder;
 #[path = "access/links.rs"]
 mod links;
+#[path = "access/roles.rs"]
+mod roles;
 
 use std::collections::BTreeSet;
 
@@ -105,13 +107,15 @@ fn init_binds_only_roles_with_every_administrator_right() {
 fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
     let authentication = json!({"id": "singleton", "defaultAdminRoleIds": names(&["weak"]),
                                 "defaultUserRoleIds": {}});
+    let roles = json!([
+        role("weak", &["authenticate"], "Weak"),
+        role("admins", &ADMINISTRATOR_RIGHTS, "Administrators of our own")
+    ]);
     let server = serve(vec![
         respond("x:Authentication/get", &json!([authentication])),
-        respond(
-            "x:Role/get",
-            &json!([role("weak", &["authenticate"], "Weak")]),
-        ),
-        respond("x:Role/get", &json!([{"id": "admins"}])),
+        respond("x:Role/get", &roles),
+        respond("x:Authentication/get", &json!([authentication])),
+        respond("x:Role/get", &roles),
     ]);
     let directory = against(&server.url);
     let init = run(directory.path(), &["access", "init"]);
@@ -119,8 +123,12 @@ fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
     assert_eq!(
         text(&init.stderr),
         "No native administrator role with full administrative rights was found, so the \
-         policy binds no role and nobody can sign in yet. Bind the role of your \
-         administrators: garrison access bind-role <role-id> --profile administrator\n"
+         policy binds no role and nobody can sign in yet. The administrator profile requires \
+         authenticate, sysAccountUpdate, sysDomainUpdate, sysRoleUpdate and sysActionCreate.\n\
+         Stalwart's default administrator role weak (Weak) lacks sysAccountUpdate, \
+         sysDomainUpdate, sysRoleUpdate and sysActionCreate: give the role those rights in the \
+         native administration (Roles), then run garrison access bind-role weak --profile \
+         administrator. As it is, it meets none of the profiles.\n"
     );
     let written = policy(directory.path());
     assert_eq!(written["roleBindings"], json!({}));
@@ -137,6 +145,11 @@ fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
         ],
     );
     assert_eq!(bound.status.code(), Some(0), "{}", text(&bound.stderr));
+    assert!(
+        !text(&bound.stdout).contains("Note: role"),
+        "{}",
+        text(&bound.stdout)
+    );
     assert_eq!(
         policy(directory.path())["roleBindings"],
         json!({"admins": "administrator"})
@@ -264,7 +277,15 @@ fn an_answer_this_release_does_not_read_is_said_as_one() {
 
 #[test]
 fn a_role_is_bound_to_a_known_profile_once_stalwart_knows_it() {
-    let server = serve(vec![respond("x:Role/get", &json!([{"id": "r2"}]))]);
+    let authentication =
+        json!({"id": "singleton", "defaultAdminRoleIds": {}, "defaultUserRoleIds": {}});
+    let server = serve(vec![
+        respond("x:Authentication/get", &json!([authentication])),
+        respond(
+            "x:Role/get",
+            &json!([role("r2", &["authenticate", "sysAccountGet"], "Readers")]),
+        ),
+    ]);
     let directory = against(&server.url);
     garrison_testing::write_private(
         &directory.path().join("policy.json"),

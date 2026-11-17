@@ -39,7 +39,15 @@ fn roles() -> Vec<String> {
 }
 
 fn known_role() -> Vec<String> {
-    vec![respond("x:Role/get", &json!([{"id": "r2"}]))]
+    let authentication =
+        json!({"id": "singleton", "defaultAdminRoleIds": {}, "defaultUserRoleIds": {}});
+    vec![
+        respond("x:Authentication/get", &json!([authentication])),
+        respond(
+            "x:Role/get",
+            &json!([role("r2", &["authenticate", "sysAccountGet"], "Readers")]),
+        ),
+    ]
 }
 
 fn same(settings: &str) -> String {

@@ -40,9 +40,16 @@ To give the profiles new actions, use `update` (below) instead.
 
 Where no role of Stalwart's has all five rights, as where its administrator
 role was changed or your administrators have a role of their own, `init`
-writes the profiles without a binding, says so and ends with 1: nobody can
-sign in until you bind your administrators' role with
-`garrison access bind-role <role-id> --profile administrator`.
+writes the profiles without a binding, says so and ends with 1. It names,
+for each of Stalwart's default administrator roles, the rights it lacks and
+the profiles it meets as it is. Nobody can sign in until a role is bound to
+a profile whose rights it holds: give the role what it lacks in the native
+administration (Roles), then bind it with
+`garrison access bind-role <role-id> --profile administrator`, or bind it to
+a profile it meets. `bind-role` says so where it binds a role that lacks a
+right its profile requires. Where a policy that reads is there already,
+`init --force` keeps it then, since a new one would bind nobody and sign
+everyone out.
 
 Profiles can only require `authenticate` and `sys*` permissions: those are the
 ones whose evaluation Garrison verifies against Stalwart in its contract tests.
