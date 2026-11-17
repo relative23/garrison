@@ -665,6 +665,12 @@ Notable changes for operators and users. The format follows
   record after the 60th gave the reputation and TLS checks no mail host.
   The card now says how many records Stalwart names and is Partial where it
   would be OK, and every MX record names a mail host.
+- **A resolver that gives no answer is said to have given none in its
+  time.** Where a question of the `dns` or `reputation` check went
+  unanswered, the cards said "the resolver 127.0.0.53:53 did not answer:
+  Resource temporarily unavailable (os error 11)", the system's words for
+  a wait that ran out. They now say "… did not answer: no answer within
+  3 s".
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not

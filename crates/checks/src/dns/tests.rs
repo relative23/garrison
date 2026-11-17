@@ -158,10 +158,9 @@ fn each_failure_keeps_its_words() {
         (
             Error::NoAnswer {
                 server,
-                why: "Resource temporarily unavailable (os error 11)".to_owned(),
+                why: "no answer within 3 s".to_owned(),
             },
-            "the resolver 192.0.2.53:53 did not answer: Resource temporarily unavailable (os error \
-             11)",
+            "the resolver 192.0.2.53:53 did not answer: no answer within 3 s",
         ),
         (Error::Code(2), "the resolver could not answer (SERVFAIL)"),
         (Error::Code(5), "the resolver refused the question"),
@@ -316,6 +315,14 @@ fn an_answer_cut_off_over_udp_is_asked_for_again_over_tcp() {
         matches!(error, Error::NoAnswer { server, .. } if server == silent),
         "{error:?}"
     );
+    // Something takes the question and says nothing: its time runs out.
+    let quiet = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let error = ask(quiet.local_addr().unwrap(), "example.test", Kind::Txt).unwrap_err();
+    let waited = format!(
+        "{} did not answer: no answer within 3 s",
+        quiet.local_addr().unwrap()
+    );
+    assert_eq!(error.to_string(), format!("the resolver {waited}"));
 }
 
 /// An answer cut off over UDP is asked for over TCP: where nothing listens
@@ -442,7 +449,8 @@ fn a_resolver_that_answers_only_other_questions_did_not_answer() {
     });
     let began = Instant::now();
     let error = ask(server, "example.test", Kind::Txt).unwrap_err();
-    assert!(matches!(error, Error::NoAnswer { .. }), "{error:?}");
+    let waited = format!("the resolver {server} did not answer: no answer within 3 s");
+    assert_eq!(error.to_string(), waited);
     assert!(
         began.elapsed() < Duration::from_secs(4),
         "{:?}",

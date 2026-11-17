@@ -416,6 +416,17 @@ fn over_tcp(server: SocketAddr, question: &[u8]) -> io::Result<Vec<u8>> {
     }
 }
 
+/// Why no answer came, in words: a wait that ran out says so, where the
+/// system's own words for it read "Resource temporarily unavailable".
+fn waited(error: &io::Error) -> String {
+    match error.kind() {
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => {
+            format!("no answer within {} s", TIMEOUT.as_secs())
+        }
+        _ => error.to_string(),
+    }
+}
+
 /// Ask `server` for the records of `kind` at `name`.
 pub fn ask(server: SocketAddr, name: &str, kind: Kind) -> Result<Answer, Error> {
     let mut number = [0; 2];
@@ -424,7 +435,7 @@ pub fn ask(server: SocketAddr, name: &str, kind: Kind) -> Result<Answer, Error> 
     let question = question(id, name, kind).ok_or_else(|| Error::NoName(name.to_owned()))?;
     let unanswered = |error: io::Error| Error::NoAnswer {
         server,
-        why: error.to_string(),
+        why: waited(&error),
     };
     let answer = over_udp(server, &question).map_err(unanswered)?;
     if let Some(answer) = read(&answer, id, kind)? {
