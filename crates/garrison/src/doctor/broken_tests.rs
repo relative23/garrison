@@ -140,12 +140,47 @@ fn policy_root_alone() -> Broken {
     }
 }
 
-const HOSTS: [fn() -> Broken; 5] = [
+/// A policy that binds no role and no account, as `access init` leaves it
+/// where no role qualifies: the broker refuses everyone.
+fn policy_binds_nobody() -> Broken {
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    let mut document = garrison_testing::policy_document();
+    document["roleBindings"] = serde_json::json!({});
+    garrison_testing::write_policy(&config, &document);
+    Broken {
+        host: "an access policy that binds nobody",
+        found: vec![policy::content(&config)],
+        said: "binds no role and no account".into(),
+        fix: Some("garrison access bind-role <role-id> --profile administrator".into()),
+    }
+}
+
+/// A policy that names an action garrison.toml no longer has, which the
+/// broker cannot use.
+fn policy_names_a_dropped_action() -> Broken {
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    let mut document = garrison_testing::policy_document();
+    document["profiles"]["administrator"]["actions"] =
+        serde_json::json!(["run_backup", "run_monitor", "run_reports"]);
+    garrison_testing::write_policy(&config, &document);
+    Broken {
+        host: "an access policy that names an action garrison.toml does not have",
+        found: vec![policy::content(&config)],
+        said: "(run_reports)".into(),
+        fix: Some("garrison access update".into()),
+    }
+}
+
+const HOSTS: [fn() -> Broken; 7] = [
     events_database_is_a_folder,
     origin_with_a_port,
     issuer_answers_with_a_web_page,
     issuer_states_another_name,
     policy_root_alone,
+    policy_binds_nobody,
+    policy_names_a_dropped_action,
 ];
 
 /// What is wrong with what doctor said on `broken`, if anything.

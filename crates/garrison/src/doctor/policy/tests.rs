@@ -156,3 +156,64 @@ fn the_policy_is_judged_where_the_configuration_names_it() {
         .unwrap();
     assert_eq!(named.level, Level::Fail, "{}", named.line());
 }
+
+/// What the policy grants is read as the broker reads it: one that binds
+/// no role and no account refuses everyone, one that names an action
+/// garrison.toml does not have, or does not read, keeps the broker from
+/// using it; each is named with the command that mends it.
+#[test]
+fn the_policy_grants_what_the_broker_reads() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    let mut document = garrison_testing::policy_document();
+    garrison_testing::write_policy(&config, &document);
+    let bound = content(&config);
+    assert_eq!(
+        (bound.level, bound.what.as_str()),
+        (Level::Ok, "the access policy binds 2 roles and 0 accounts")
+    );
+    document["roleBindings"] = serde_json::json!({});
+    garrison_testing::write_policy(&config, &document);
+    let unbound = content(&config);
+    assert_eq!(
+        (unbound.level, unbound.what.as_str()),
+        (
+            Level::Fail,
+            "the access policy binds no role and no account, so nobody can sign in"
+        )
+    );
+    assert!(
+        unbound
+            .fix
+            .as_deref()
+            .unwrap()
+            .ends_with("garrison access bind-role <role-id> --profile administrator")
+    );
+    // An account bound alone lets that account in.
+    document["subjects"] = serde_json::json!({"s1": {"accountId": "b", "profile": "viewer"}});
+    garrison_testing::write_policy(&config, &document);
+    assert_eq!(content(&config).level, Level::Ok);
+    let mut dropped = garrison_testing::policy_document();
+    dropped["profiles"]["administrator"]["actions"] =
+        serde_json::json!(["run_backup", "run_monitor", "run_reports"]);
+    garrison_testing::write_policy(&config, &dropped);
+    let named = content(&config);
+    assert_eq!(
+        (named.level, named.what.as_str(), named.fix.as_deref()),
+        (
+            Level::Fail,
+            "the access policy names actions garrison.toml does not have (run_reports), so \
+             nobody can sign in",
+            Some("Run `garrison access update`, which mends it.")
+        )
+    );
+    let mut broken = garrison_testing::policy_document();
+    broken["schemaVersion"] = serde_json::json!(2);
+    garrison_testing::write_policy(&config, &broken);
+    let unread = content(&config);
+    assert_eq!(unread.level, Level::Fail);
+    assert_eq!(
+        unread.what,
+        "the access policy does not read (schemaVersion must be 1), so nobody can sign in"
+    );
+}

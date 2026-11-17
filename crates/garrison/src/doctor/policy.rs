@@ -4,20 +4,27 @@
 //! only where root owns it, its group may not change it and others may not
 //! read it (`garrison_core::files::read_protected`). doctor reads as root,
 //! who may read more, so it judges owner, group and mode, and the folders
-//! above, for the broker.
+//! above, for the broker; and what the policy grants, as the broker reads
+//! it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
+use garrison_authz::Authority;
+use garrison_authz::policy::parse_policy;
 use garrison_core::config::Config;
+use garrison_core::credentials::Credentials;
+use serde_json::Value;
 
-use super::Finding;
+use super::{Finding, counted};
 use crate::units;
 
 /// The user, and the group, the broker's unit runs it as.
 const BROKER: &str = "garrison-broker";
+/// As much of the policy as the broker reads.
+const LIMIT: usize = 64 * 1024;
 
 /// Who the broker is on this host: its user and the groups systemd gives it.
 #[derive(Clone, Debug)]
@@ -173,6 +180,76 @@ pub(super) fn readable(
     ))
 }
 
+/// The actions the policy's profiles name that garrison.toml does not have,
+/// where those alone keep the broker from using it.
+fn beyond(config: &Config) -> Vec<String> {
+    let Some(raw) = garrison_core::files::read_json(&config.broker.policy, LIMIT) else {
+        return Vec::new();
+    };
+    let configured: BTreeSet<&str> = config
+        .broker
+        .actions
+        .iter()
+        .map(|action| action.id.as_str())
+        .collect();
+    let named: BTreeSet<&str> = raw
+        .get("profiles")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|profiles| profiles.values())
+        .filter_map(|profile| profile.get("actions")?.as_array())
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let widened: BTreeSet<&str> = configured.union(&named).copied().collect();
+    if parse_policy(&raw, &widened).is_err() {
+        return Vec::new();
+    }
+    named
+        .difference(&configured)
+        .map(|action| (*action).to_owned())
+        .collect()
+}
+
+/// What the policy grants, read and checked as the broker reads it.
+pub(super) fn content(config: &Config) -> Finding {
+    let authority = Authority::new(config, Credentials::new(&config.credentials_directory));
+    let policy = match authority.policy() {
+        Ok(policy) => policy,
+        Err(error) => {
+            let beyond = beyond(config);
+            if !beyond.is_empty() {
+                return Finding::fail(
+                    format!(
+                        "the access policy names actions garrison.toml does not have ({}), so \
+                         nobody can sign in",
+                        beyond.join(", ")
+                    ),
+                    "Run `garrison access update`, which mends it.",
+                );
+            }
+            let error = error.to_string();
+            let why = error.trim_start_matches("Garrison access policy: ");
+            return Finding::fail(
+                format!("the access policy does not read ({why}), so nobody can sign in"),
+                "Correct it as docs/operator/access.md shows.",
+            );
+        }
+    };
+    if policy.role_bindings.is_empty() && policy.subjects.is_empty() {
+        return Finding::fail(
+            "the access policy binds no role and no account, so nobody can sign in",
+            "Bind the role of your administrators: garrison access bind-role <role-id> \
+             --profile administrator",
+        );
+    }
+    Finding::ok(format!(
+        "the access policy binds {} and {}",
+        counted(policy.role_bindings.len(), "role", "roles"),
+        counted(policy.subjects.len(), "account", "accounts")
+    ))
+}
+
 /// The folders above `path`, each as it is seen, nearest first.
 fn folders(path: &Path) -> Vec<(PathBuf, Seen)> {
     path.ancestors()
@@ -204,13 +281,19 @@ pub(super) fn checks(config: &Config) -> Vec<Finding> {
         Ok(metadata) => {
             let read = |file: &str| fs::read_to_string(file).unwrap_or_default();
             let (names, broker) = accounts(&read("/etc/passwd"), &read("/etc/group"));
+            let file = Seen::of(&metadata);
             findings.push(readable(
                 path,
-                Seen::of(&metadata),
+                file,
                 &folders(path),
                 broker.as_ref(),
                 &names,
             ));
+            // Root reads what the broker would take; one it does not take
+            // grants nothing to judge.
+            if taken(file) {
+                findings.push(content(config));
+            }
         }
     }
     // Root may read a policy that the broker's unit hides from it.

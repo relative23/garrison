@@ -1170,6 +1170,9 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` fails an access policy the broker may not read**, such
   as one root's alone after `chmod 600`, with which nobody can sign in, and
   gives the `chown` and `chmod` that mend it.
+- **`garrison doctor` fails an access policy that binds nobody, or that names
+  an action garrison.toml no longer has**, and names the `garrison access`
+  command that mends it.
 
 ## [0.1.2] - 2026-11-13
 

@@ -34,7 +34,7 @@ collector last finished a run (none for ten minutes is a problem, as for the
 watch), the settings the units do not follow and the secrets they would not
 hand to the services, as `check-config` names them, that the credentials
 are private and that the broker may read the access policy, which only root
-may change, the clock,
+may change and which must bind a role or an account, the clock,
 free space, the SELinux module and the last Stalwart event on this host,
 then, as a visitor
 would, Garrison's certificate and answer under its own name and on the port
