@@ -50,14 +50,15 @@ fn restore_source(name: &str) -> Step<PathBuf> {
 
 /// Before anything stops: the access policy that the state in `source`
 /// brings, where it brings one, goes where the broker reads it and suits
-/// today's configuration as `target` reads it. Returns the policy's owner.
+/// today's configuration as `target` reads it, and every copy fits beside
+/// the database it replaces. Returns the policy's owner.
 fn state_fits(target: &Path, source: &Path, comes_back: bool) -> Step<(Uid, Gid)> {
     let refused = |reason: String| format!("{reason} Nothing was changed.");
     let owner = state::policy_owner().map_err(refused)?;
+    let settings = Path::new(CONFIG).join("garrison.toml");
+    let config = config::load(&settings)
+        .map_err(|error| refused(format!("Cannot load {}: {error}.", settings.display())))?;
     if comes_back {
-        let settings = Path::new(CONFIG).join("garrison.toml");
-        let config = config::load(&settings)
-            .map_err(|error| refused(format!("Cannot load {}: {error}.", settings.display())))?;
         precheck::policy_place(&config).map_err(refused)?;
         if let Err(said) = precheck::policy_comes_back(target, source)? {
             return Err(format!(
@@ -69,23 +70,29 @@ fn state_fits(target: &Path, source: &Path, comes_back: bool) -> Step<(Uid, Gid)
             ));
         }
     }
+    precheck::copies_fit(source, &config, &[])?;
     Ok(owner)
 }
 
 /// Put the pre-upgrade copies of the databases and the policy back, the
-/// policy owned by `owner`.
-fn restore_state(source: &Path, owner: (Uid, Gid)) -> Step {
+/// policy owned by `owner`; what went back is in `restored`.
+fn restore_state(source: &Path, owner: (Uid, Gid), restored: &mut Vec<&'static str>) -> Step {
     // The configured state directories, which need not be the defaults.
     let settings = Path::new(CONFIG).join("garrison.toml");
     let config = config::load(&settings)
         .map_err(|error| format!("Cannot load {}: {error}", settings.display()))?;
-    state::restore_all(source, &config, owner)
+    state::restore_all(source, &config, owner, restored)
 }
 
 /// Make `target` current and `current` previous, then start `target`.
-fn roll_back_to(target: &Path, current: &Path, source: Option<(&Path, (Uid, Gid))>) -> Step {
+fn roll_back_to(
+    target: &Path,
+    current: &Path,
+    source: Option<(&Path, (Uid, Gid))>,
+    restored: &mut Vec<&'static str>,
+) -> Step {
     if let Some((source, owner)) = source {
-        restore_state(source, owner)?;
+        restore_state(source, owner, restored)?;
     }
     let base = Path::new(BASE);
     switch(&base.join("current"), target)?;
@@ -140,7 +147,8 @@ pub(super) fn rollback(with_state: bool) -> Step {
     let restoring = source
         .as_ref()
         .map(|(source, owner)| (source.as_path(), *owner));
-    if let Err(error) = roll_back_to(&target, &current, restoring) {
+    let mut restored = Vec::new();
+    if let Err(error) = roll_back_to(&target, &current, restoring, &mut restored) {
         // Garrison is stopped now: back to the release that ran, and running.
         announce("Rollback failed; starting the release that ran before.");
         switch(&base.join("current"), &current)?;
@@ -151,8 +159,12 @@ pub(super) fn rollback(with_state: bool) -> Step {
         } else {
             "the release that ran before did not start either"
         };
+        // What went back stays: the release that ran runs on it now.
+        let back = restoring.map_or_else(String::new, |(source, _)| {
+            state::went_back(&restored, source)
+        });
         return Err(format!(
-            "The rollback failed ({error}); {outcome}. See the journal."
+            "The rollback failed ({error}); {outcome}.{back} See the journal."
         ));
     }
     announce(&format!("Rolled back to {name}."));

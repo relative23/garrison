@@ -1,8 +1,8 @@
 //! What a restore of the state checks before anything stops, for
 //! `garrison restore` and `install --rollback --restore-state` alike: the
 //! release that will start takes today's configuration with the access
-//! policy the state puts back, and that policy can go where the broker
-//! reads it.
+//! policy the state puts back, that policy can go where the broker reads
+//! it, and every copy fits beside the database it replaces.
 //!
 //! The release that will start is the judge, also an older one a rollback
 //! returns to: its own `check-config` reads today's `garrison.toml` and then
@@ -11,12 +11,13 @@
 use std::fs;
 use std::io::ErrorKind;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use garrison_core::config::{self, Config};
+use garrison_core::config::{self, Config, Database};
 
 use super::files::{Step, io, place, run};
+use super::requirements::{room, size};
 use super::{CONFIG, cli, toml_text};
 
 /// Where a release's check of the policy that comes back is prepared:
@@ -145,6 +146,25 @@ fn check_in(
     })
 }
 
+/// Room for every copy in `source` beside the database it replaces, which
+/// goes only once the copy is whole, and for what `besides` names.
+pub(super) fn copies_fit(source: &Path, config: &Config, besides: &[(&Path, u64)]) -> Step {
+    let folders: Vec<(PathBuf, u64)> = Database::ALL
+        .into_iter()
+        .filter_map(|database| {
+            let copy = source.join(database.writer()).join(database.file_name());
+            let folder = config.database(database).parent()?.to_owned();
+            Some((folder, size(&copy)))
+        })
+        .collect();
+    let mut needs: Vec<(&Path, u64)> = folders
+        .iter()
+        .map(|(folder, bytes)| (folder.as_path(), *bytes))
+        .collect();
+    needs.extend_from_slice(besides);
+    room(&needs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +280,26 @@ mod tests {
             "Access policy not usable: unknown actions: run_check"
         );
         assert!(!folder.exists());
+    }
+
+    /// A copy larger than the room beside its database is refused before
+    /// anything stops; a sparse file stands in for a large database.
+    #[test]
+    fn every_copy_must_fit_beside_its_database() {
+        let directory = tempfile::tempdir().unwrap();
+        let config =
+            garrison_testing::config(&directory.path().join("state"), "http://127.0.0.1:9");
+        for database in Database::ALL {
+            fs::create_dir_all(config.database(database).parent().unwrap()).unwrap();
+        }
+        let source = directory.path().join("backup");
+        fs::create_dir_all(source.join("ingest")).unwrap();
+        let copy = fs::File::create(source.join("ingest/events.sqlite")).unwrap();
+        copy.set_len(4096).unwrap();
+        copies_fit(&source, &config, &[]).unwrap();
+        let stat = rustix::fs::statvfs(directory.path()).unwrap();
+        copy.set_len(stat.f_bavail * stat.f_frsize).unwrap();
+        let refused = copies_fit(&source, &config, &[]).unwrap_err();
+        assert!(refused.ends_with("; nothing was changed."), "{refused}");
     }
 }

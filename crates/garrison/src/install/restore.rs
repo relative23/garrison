@@ -24,7 +24,7 @@ use garrison_core::config;
 use garrison_core::time;
 
 use super::files::{Step, announce, io, lock};
-use super::requirements::preflight;
+use super::requirements::{preflight, state_size};
 use super::{BACKUPS, BASE, CONFIG, LOCK, cli, precheck, start, state, stop_services};
 
 /// The backup at `from`, if it is one that `garrison backup` wrote.
@@ -89,6 +89,8 @@ fn restore(from: &Path) -> Step {
             ));
         }
     }
+    // Each copy beside the database it replaces, and the state as it is.
+    precheck::copies_fit(&source, &config, &[(Path::new(BACKUPS), state_size())])?;
     // What is there now, so that this restore can be taken back.
     let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
     let kept = Path::new(BACKUPS).join(format!("pre-restore-{stamp}"));
@@ -104,10 +106,11 @@ fn restore(from: &Path) -> Step {
         ));
     }
     stop_services();
-    let restored = state::restore_all(&source, &config, owner);
+    let mut restored = Vec::new();
+    let result = state::restore_all(&source, &config, owner, &mut restored);
     // Garrison is stopped now: whatever was put back, it starts again.
     let started = start(&current);
-    match (restored, started) {
+    match (result, started) {
         (Ok(()), Ok(())) => {
             announce(&format!(
                 "Restored the state from {place}; Garrison {name} is running. Users sign in \
@@ -117,12 +120,13 @@ fn restore(from: &Path) -> Step {
             Ok(())
         }
         (Err(error), started) => Err(format!(
-            "The restore failed ({error}); Garrison {}. The state from before is in {}.",
+            "The restore failed ({error}); Garrison {}.{} The state from before is in {}.",
             if started.is_ok() {
                 "is running with what could be put back"
             } else {
                 "did not start either"
             },
+            state::went_back(&restored, &source),
             kept.display()
         )),
         (Ok(()), Err(error)) => Err(format!(

@@ -1132,6 +1132,14 @@ Notable changes for operators and users. The format follows
   that will start now runs its own `check-config` on today's configuration
   with the policy that comes back, before anything stops, and a refusal
   changes nothing.
+- **A rollback that fails once the state went back says what went back.**
+  `install --rollback --restore-state` that failed after it had put the
+  state from before the upgrade back started the release that ran before on
+  that state and said only that it runs again; a nearly full disk, which
+  nothing checked, stopped it after the first databases. It now checks,
+  before anything stops, that each copy fits beside the database it
+  replaces, as `garrison restore` does now too, and where it fails all the
+  same it names what went back to its copy, as a failed restore does.
 - **A stale event history no longer reads as a quiet mail server.** The
   mail-flow summaries and the sending accounts counted whatever the event
   history held and called it in order, also when the event receiver had not

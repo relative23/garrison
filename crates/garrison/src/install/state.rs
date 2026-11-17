@@ -116,7 +116,13 @@ pub(super) fn policy_owner() -> Step<(Uid, Gid)> {
 
 /// Put back every database and the policy as `source` holds them, the
 /// policy owned by `owner`, and remove the databases it says did not exist.
-pub(super) fn restore_all(source: &Path, config: &Config, owner: (Uid, Gid)) -> Step {
+/// What went back is in `restored`, also where a later one failed.
+pub(super) fn restore_all(
+    source: &Path,
+    config: &Config,
+    owner: (Uid, Gid),
+    restored: &mut Vec<&'static str>,
+) -> Step {
     announce(&format!(
         "Restoring Garrison state from {}",
         source.display()
@@ -128,13 +134,30 @@ pub(super) fn restore_all(source: &Path, config: &Config, owner: (Uid, Gid)) -> 
             put_back(config, database, &copy)?;
         } else if absent_before(&manifest, database) {
             take_away(config, database)?;
+        } else {
+            continue;
         }
+        restored.push(database.writer());
     }
     let policy = source.join(crate::ops::POLICY_COPY);
     if policy.exists() {
         put_policy_back(&policy, &config.broker.policy, owner)?;
+        restored.push("the access policy");
     }
     Ok(())
+}
+
+/// What went back to the copies in `source`, as a sentence to append to a
+/// message: nothing where nothing went back.
+pub(super) fn went_back(restored: &[&str], source: &Path) -> String {
+    if restored.is_empty() {
+        return String::new();
+    }
+    format!(
+        " These went back to their copies in {}: {}.",
+        source.display(),
+        restored.join(", ")
+    )
 }
 
 /// The access policy as the broker reads it: a file of its own, made new
@@ -284,7 +307,22 @@ mod tests {
         let (config, backup) = failed_upgrade(directory.path());
         fs::write(backup.join(crate::ops::POLICY_COPY), "{}").unwrap();
         fs::create_dir_all(config.broker.policy.parent().unwrap()).unwrap();
-        restore_all(&backup, &config, own()).unwrap();
+        let mut restored = Vec::new();
+        restore_all(&backup, &config, own(), &mut restored).unwrap();
+        // The jobs database went back to not being there.
+        assert_eq!(
+            restored,
+            ["web", "ingest", "collector", "broker", "the access policy"]
+        );
+        assert_eq!(
+            went_back(&restored, &backup),
+            format!(
+                " These went back to their copies in {}: web, ingest, collector, broker, the \
+                 access policy.",
+                backup.display()
+            )
+        );
+        assert_eq!(went_back(&[], &backup), "");
         for kept in [Database::Web, Database::Events, Database::Status] {
             assert_eq!(note(&config.database(kept)), "before the upgrade");
         }
@@ -293,7 +331,7 @@ mod tests {
         // A backup that does not say what was absent removes nothing.
         database(&config.database(Database::Jobs), 3, "kept");
         fs::remove_file(backup.join("backup.json")).unwrap();
-        restore_all(&backup, &config, own()).unwrap();
+        restore_all(&backup, &config, own(), &mut Vec::new()).unwrap();
         assert_eq!(note(&config.database(Database::Jobs)), "kept");
     }
 
@@ -311,8 +349,11 @@ mod tests {
         fs::set_permissions(&victim, fs::Permissions::from_mode(0o644)).unwrap();
         fs::create_dir_all(config.broker.policy.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(&victim, &config.broker.policy).unwrap();
-        let refused = restore_all(&backup, &config, own()).unwrap_err();
+        let mut restored = Vec::new();
+        let refused = restore_all(&backup, &config, own(), &mut restored).unwrap_err();
         assert!(refused.contains("not a file of its own"), "{refused}");
+        // What went back before the policy is named as such.
+        assert_eq!(restored, ["web", "ingest", "collector", "broker"]);
         assert_eq!(
             fs::read_to_string(&victim).unwrap(),
             "root:x:0:0::/root:/bin/sh\n"
@@ -328,7 +369,7 @@ mod tests {
         fs::remove_file(&config.broker.policy).unwrap();
         fs::create_dir(&config.broker.policy).unwrap();
         fs::write(config.broker.policy.join("mail"), "kept").unwrap();
-        assert!(restore_all(&backup, &config, own()).is_err());
+        assert!(restore_all(&backup, &config, own(), &mut Vec::new()).is_err());
         let kept = fs::read_to_string(config.broker.policy.join("mail")).unwrap();
         assert_eq!(kept, "kept");
     }
@@ -350,7 +391,7 @@ mod tests {
                 fs::write(policy, "{}").unwrap();
                 fs::set_permissions(policy, fs::Permissions::from_mode(mode)).unwrap();
             }
-            restore_all(&backup, &config, own()).unwrap();
+            restore_all(&backup, &config, own(), &mut Vec::new()).unwrap();
             let written = fs::symlink_metadata(policy).unwrap();
             assert!(written.file_type().is_file());
             assert_eq!(mode(policy), 0o640);
