@@ -73,18 +73,23 @@ brokers never repeat a job; pending jobs become "uncertain".
   it misses what an archive with a password hides, a document in zip
   archives nested more than three deep, Excel 4.0 macro sheets in an old
   `.xls` file, the macros of an old `.ppt` file and archive formats other
-  than zip. It decodes the base64 and quoted-printable a MIME message uses,
-  however a sender folds or pads them, but not a body encoded as a
-  conforming mail program would not encode it: uuencode, which is not a MIME
-  transfer encoding, or base64 interrupted by characters outside its
-  alphabet, which the filter does not decode though a lenient reader might.
-  Such a message passes as one without macros. Anyone who can reach its
-  loopback port can ask it about a message, as with any milter.
+  than zip. It decodes the document however the message carries it: base64
+  and quoted-printable as a mail program writes them, base64 a sender broke
+  up with characters outside its alphabet (a decoder passes over them, RFC
+  2045 section 6.8), uuencode, and each part by the encoding its own headers
+  declare, reading the little of MIME it needs and splitting only on a
+  boundary a header declares. It does not decode yEnc, which mail programs do
+  not decode on their own; such a message passes as one without macros. A
+  part in an encoding the filter does not decode is incomplete, below, not a
+  clean message. Anyone who can reach its loopback port can ask it about a
+  message, as with any milter.
 - A message the macro filter could not scan completely is taken all the same
   unless the operator chose otherwise: one larger than `max_message_mib`,
   one whose archives unpack to more than 16 MiB a file or 64 MiB together or
   are compressed by another method than deflate (bzip2, LZMA and the like),
-  and one whose scan was not done within 20 seconds. By default (`on_incomplete = "tag"`) it arrives with the
+  one with a part that declares a transfer encoding the filter does not
+  decode or a uuencode block begun and not ended, and one whose scan was not
+  done within 20 seconds. By default (`on_incomplete = "tag"`) it arrives with the
   header `X-Garrison-Scan: unscanned`, and it is up to a Sieve rule or the
   mail program to act on that; `"defer"` and `"refuse"` keep it out.
 - A flood of sign-in callbacks from more than 4096 networks within a minute

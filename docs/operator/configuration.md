@@ -286,16 +286,18 @@ the newer format (`.docm`, `.xlsm`, `.pptm`, also under another name such as
 4.0 macro sheets in the newer format, and Word's single-file web pages with
 an embedded macro store, each also inside zip archives up to three levels
 deep. A file counts as soon as it has a macro project, also an empty one. The
-filter decodes the base64 and quoted-printable a MIME message carries,
-however a sender folds or pads them, and reads the message as it stands as
-well, so the encoding around a document does not hide it. What it does not
-see: an archive with a password, other archive formats such as 7z and RAR,
-Excel 4.0 macro sheets in an old `.xls` file, the macros of an old `.ppt`
-file, macros in LibreOffice's own formats, a document whose body is encoded
-as a conforming mail program would not encode it (uuencode, which is not a
-MIME transfer encoding, or base64 broken up with characters outside its
-alphabet), and a document behind a link. It complements a virus scanner and
-does not replace one.
+filter reads the document however the message carries it: base64 and
+quoted-printable as a mail program writes them, however a sender folds or
+pads them or breaks the base64 up with characters outside its alphabet (a
+decoder passes over them); uuencode, in a part that declares it or as a
+`begin`/`end` block in any body; each part by the encoding its own headers
+declare; and the message as it stands. So the encoding around a document does
+not hide it. What it does not see: an archive with a password, other archive
+formats such as 7z and RAR, Excel 4.0 macro sheets in an old `.xls` file, the
+macros of an old `.ppt` file, macros in LibreOffice's own formats, a document
+in the yEnc encoding (which mail programs do not decode on their own), and a
+document behind a link. It complements a virus scanner and does not replace
+one.
 
 A message the filter could not scan completely is never passed as if it were
 clean. That is a message
@@ -305,7 +307,11 @@ clean. That is a message
   together, or that holds more packed files than a zip archive lists
   (65 535),
 - with a zip archive packed otherwise than by deflate (bzip2, LZMA, zstd,
-  Deflate64 and the like), or
+  Deflate64 and the like),
+- with a part that declares a transfer encoding the filter does not decode
+  (any but 7bit, 8bit, binary, base64, quoted-printable and uuencode), that
+  declares two encodings that disagree, or that holds a uuencode block begun
+  and not ended, or
 - whose scan was not done 20 seconds after the message's end, the wait for
   other messages' scans included.
 

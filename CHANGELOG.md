@@ -150,17 +150,21 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
-- **A document with macros is found however its MIME part is encoded.** The
+- **A document with macros is found however the message encodes it.** The
   scan undid quoted-printable only when the message held one of four byte
   strings, so an Office document written as quoted-printable on a single
   line, in lower-case hexadecimal, or with only some bytes escaped passed as
-  clean; base64 whose lines a transport broke up with white space was not
-  read either. The scan now undoes quoted-printable for any message that
-  carries its escape, reads the white space a base64 line may carry, and so
-  finds the document or marks it unscanned, as it already did for the plain
-  encodings. A body encoded as a conforming mail program would not encode it
-  (uuencode, or base64 interrupted by characters outside its alphabet) is a
-  named limit the filter shares with the virus scanner it complements (see
+  clean; base64 a sender broke up with white space, or with characters
+  outside its alphabet, was not read, nor was a uuencoded attachment. The
+  scan now reads the document however a conforming mail program decodes it:
+  quoted-printable for any message that carries its escape; base64 that
+  carries white space or other characters outside its alphabet, which a
+  decoder passes over; uuencode, in a part that declares it or as a
+  `begin`/`end` block in any body; and each MIME part by the encoding its
+  own headers declare, reading the little of MIME it needs. A part in an
+  encoding the scan cannot decode, or a uuencode block begun and not ended,
+  is now marked unscanned (`on_incomplete`), not passed as clean. yEnc, which
+  mail programs do not decode on their own, stays a named limit (see
   [configuration](docs/operator/configuration.md#milter)).
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
