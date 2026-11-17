@@ -20,7 +20,7 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 
 use garrison_core::config::{Config, Database, IngestConfig};
-use garrison_core::credentials::Credentials;
+use garrison_core::credentials::{Credentials, made_by_setup};
 use garrison_core::files::ProtectedFileError;
 use garrison_core::time;
 
@@ -28,7 +28,8 @@ use crate::store::{EventStore, Limits, SqliteError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("signature key: {0}")]
+    /// Also an empty file, which is as good as none.
+    #[error("signature key: {0}{made}", made = made_by_setup(.0))]
     Key(#[from] ProtectedFileError),
     #[error("event history: {0}")]
     Store(#[from] SqliteError),
@@ -112,5 +113,29 @@ mod tests {
             (limits.retention_days, limits.max_events, limits.max_bytes),
             (7, 5000, 64 * 1024 * 1024)
         );
+    }
+
+    /// The receiver does not start without its signature key, and an empty
+    /// file is none: it says so, with what makes the key.
+    #[test]
+    fn an_empty_signature_key_is_named_with_what_makes_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        let credentials = Credentials::new(&config.credentials_directory);
+        let path = credentials.path(&config.ingest.signature_key);
+        std::fs::create_dir_all(credentials.directory()).unwrap();
+        for written in ["", "\n"] {
+            garrison_testing::write_private(&path, written.as_bytes());
+            let error = run(&config, &credentials).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "signature key: Protected file is empty: {}; run `garrison stalwart setup`, \
+                     which makes it",
+                    path.display()
+                ),
+                "{written:?}"
+            );
+        }
     }
 }

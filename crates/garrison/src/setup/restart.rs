@@ -17,6 +17,14 @@ pub(super) const HELD: [(&str, &str); 2] = [
     (units::BROKER, "broker-native-key"),
 ];
 
+/// Whether a file of the services' secrets holds none, so that setup makes
+/// it anew: a running service holds the secrets it read when it started,
+/// and one that started with an empty file has none.
+pub(super) fn unheld(directory: &Path) -> bool {
+    HELD.iter()
+        .any(|(_, name)| !super::keys::holds_key(&directory.join(name)))
+}
+
 /// Whether a running service holds another secret than its file in
 /// `directory` holds now. systemd copied the file for the unit when it
 /// started, so a copy that differs means the file was replaced since: by a
@@ -67,6 +75,23 @@ pub(super) fn restart() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file that holds no secret, as an empty one, is made anew as a
+    /// missing one is, and its service must start again to read it.
+    #[test]
+    fn a_file_that_holds_no_secret_is_made_anew() {
+        let directory = tempfile::tempdir().unwrap();
+        for (_, name) in HELD {
+            fs::write(directory.path().join(name), "0123456789abcdef-secret\n").unwrap();
+        }
+        assert!(!unheld(directory.path()));
+        for written in ["", "\n", "short\n"] {
+            fs::write(directory.path().join("broker-native-key"), written).unwrap();
+            assert!(unheld(directory.path()), "{written:?}");
+        }
+        fs::remove_file(directory.path().join("broker-native-key")).unwrap();
+        assert!(unheld(directory.path()));
+    }
 
     #[test]
     fn a_service_holds_another_secret_where_its_copy_and_its_file_differ() {

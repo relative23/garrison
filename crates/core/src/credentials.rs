@@ -39,6 +39,24 @@ impl fmt::Display for SecretSource {
     }
 }
 
+/// What follows an error about a key that `garrison stalwart setup` writes,
+/// as the service that reads the key says it. Where the file is missing,
+/// empty or holds no key, setup makes one there; a file that other users
+/// may read keeps its words alone, and `garrison doctor` names what keeps
+/// it private.
+#[must_use]
+pub fn made_by_setup(error: &ProtectedFileError) -> &'static str {
+    match error {
+        ProtectedFileError::Unavailable(_)
+        | ProtectedFileError::Empty(_)
+        | ProtectedFileError::TooLarge(_)
+        | ProtectedFileError::InvalidSecret(_) => "; run `garrison stalwart setup`, which makes it",
+        ProtectedFileError::NotPrivate(_)
+        | ProtectedFileError::TooOpen(_)
+        | ProtectedFileError::InvalidJson(_) => "",
+    }
+}
+
 /// A systemd credential name; dots alone would name a directory, not a file.
 pub fn is_credential_name(name: &str) -> bool {
     (1..=64).contains(&name.len())
@@ -181,6 +199,29 @@ mod tests {
             br#"{"apiKey": "k"}"#
         );
         assert!(credentials.read_private(&source, 4).is_err());
+    }
+
+    /// Setup makes a key where its file is missing, empty or holds none; a
+    /// file other users may read needs another fix, which doctor names.
+    #[test]
+    fn setup_is_named_where_it_makes_the_key() {
+        let path = PathBuf::from("/etc/garrison/credentials/broker-native-key");
+        let made = "; run `garrison stalwart setup`, which makes it";
+        for error in [
+            ProtectedFileError::Unavailable(path.clone()),
+            ProtectedFileError::Empty(path.clone()),
+            ProtectedFileError::TooLarge(path.clone()),
+            ProtectedFileError::InvalidSecret(path.clone()),
+        ] {
+            assert_eq!(made_by_setup(&error), made, "{error}");
+        }
+        for error in [
+            ProtectedFileError::NotPrivate(path.clone()),
+            ProtectedFileError::TooOpen(path.clone()),
+            ProtectedFileError::InvalidJson(path),
+        ] {
+            assert_eq!(made_by_setup(&error), "", "{error}");
+        }
     }
 
     #[test]

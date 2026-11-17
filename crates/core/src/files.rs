@@ -27,6 +27,10 @@ pub enum ProtectedFileError {
     InvalidJson(PathBuf),
     #[error("Protected secret has an invalid format: {}", .0.display())]
     InvalidSecret(PathBuf),
+    /// A key's file holds nothing, line ends and spaces aside: as good as
+    /// none, as where it is missing.
+    #[error("Protected file is empty: {}", .0.display())]
+    Empty(PathBuf),
 }
 
 /// Who may read a private file besides its owner.
@@ -130,15 +134,14 @@ pub enum Form {
     Address,
 }
 
-/// Read a single-line secret that may be absent: an empty file holds none.
-pub fn read_optional_secret(
-    path: &Path,
-    privacy: Privacy,
-    form: Form,
-) -> Result<Option<String>, ProtectedFileError> {
-    let data = read_private(path, 16384, privacy)?;
-    let invalid = || ProtectedFileError::InvalidSecret(path.into());
-    let text = std::str::from_utf8(&data).map_err(|_| invalid())?.trim();
+/// The most a secret's file may hold.
+const SECRET_LIMIT: usize = 16384;
+
+/// The secret `data` holds in `form`: none where it holds nothing but line
+/// ends and spaces, and `Err` where it holds something that is no such
+/// secret.
+fn secret(data: &[u8], form: Form) -> Result<Option<&str>, ()> {
+    let text = std::str::from_utf8(data).map_err(|_| ())?.trim();
     if text.is_empty() {
         return Ok(None);
     }
@@ -150,17 +153,54 @@ pub fn read_optional_secret(
         Form::Password => text.len() <= 8192 && !text.chars().any(char::is_control),
         Form::Address => text.len() <= 8192 && text.bytes().all(|byte| byte.is_ascii_graphic()),
     };
-    if fits {
-        Ok(Some(text.to_owned()))
-    } else {
-        Err(invalid())
-    }
+    if fits { Ok(Some(text)) } else { Err(()) }
 }
 
-/// Read a single-line secret such as an API key or an HMAC key.
+/// Read a single-line secret that may be absent: an empty file holds none.
+pub fn read_optional_secret(
+    path: &Path,
+    privacy: Privacy,
+    form: Form,
+) -> Result<Option<String>, ProtectedFileError> {
+    let data = read_private(path, SECRET_LIMIT, privacy)?;
+    secret(&data, form)
+        .map(|text| text.map(str::to_owned))
+        .map_err(|()| ProtectedFileError::InvalidSecret(path.into()))
+}
+
+/// Read a single-line secret such as an API key or an HMAC key. An empty
+/// file holds none, which is as good as a missing one.
 pub fn read_secret(path: &Path, privacy: Privacy) -> Result<String, ProtectedFileError> {
     read_optional_secret(path, privacy, Form::Token)?
-        .ok_or_else(|| ProtectedFileError::InvalidSecret(path.into()))
+        .ok_or_else(|| ProtectedFileError::Empty(path.into()))
+}
+
+/// What a secret's file holds, as [`read_secret`] and
+/// [`read_optional_secret`] read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Holds {
+    /// Nothing but line ends and spaces, if anything: no secret.
+    Nothing,
+    /// A secret of the form asked about.
+    Secret,
+    /// Something else, which no reader takes for one: text of another
+    /// form, or more than a secret's file holds.
+    Other,
+}
+
+/// What the file at `path` holds as a secret of `form`: a regular file,
+/// never followed through a link, read as the services read it. Who may
+/// read it is not asked, since that is for the reader to judge; setup asks
+/// whether a file it writes holds a key, and doctor what is wrong with one.
+pub fn holds(path: &Path, form: Form) -> io::Result<Holds> {
+    let Some(data) = read_limited(open_regular(path)?, SECRET_LIMIT)? else {
+        return Ok(Holds::Other);
+    };
+    Ok(match secret(&data, form) {
+        Ok(None) => Holds::Nothing,
+        Ok(Some(_)) => Holds::Secret,
+        Err(()) => Holds::Other,
+    })
 }
 
 /// Read an authorization file that only root (or this user) can change.

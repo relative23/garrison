@@ -115,12 +115,51 @@ fn secrets_are_one_printable_line_of_sane_length() {
         read_secret(&key, Privacy::Owned),
         Err(ProtectedFileError::TooLarge(_))
     ));
-    // A key is never optional.
-    write(&key, "\n", 0o600);
-    assert!(matches!(
-        read_secret(&key, Privacy::Owned),
-        Err(ProtectedFileError::InvalidSecret(_))
-    ));
+    // A key is never optional: an empty file holds none, as a missing one.
+    for empty in ["", "\n", "  \r\n"] {
+        write(&key, empty, 0o600);
+        let error = read_secret(&key, Privacy::Owned).unwrap_err();
+        assert!(
+            matches!(error, ProtectedFileError::Empty(_)),
+            "{empty:?}: {error}"
+        );
+        assert_eq!(
+            error.to_string(),
+            format!("Protected file is empty: {}", key.display())
+        );
+    }
+}
+
+/// What a secret's file holds, as the readers read it, for setup and
+/// doctor: an empty file and one of a line end hold nothing, one that holds
+/// another form or too much holds something else, and a link or a folder
+/// is no file to read.
+#[test]
+fn a_file_holds_a_secret_only_where_a_reader_would_take_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let key = directory.path().join("key");
+    for (data, held) in [
+        ("", Holds::Nothing),
+        ("\n", Holds::Nothing),
+        (" \r\n", Holds::Nothing),
+        ("short\n", Holds::Other),
+        ("has a space inside it", Holds::Other),
+        (SECRET, Holds::Secret),
+        (&format!("{SECRET}\n"), Holds::Secret),
+        (&"x".repeat(16385), Holds::Other),
+    ] {
+        // Whoever may read it: setup asks before it writes the file anew.
+        write(&key, data, 0o644);
+        assert_eq!(holds(&key, Form::Token).unwrap(), held, "{data:?}");
+    }
+    write(&key, "pass word 1\n", 0o600);
+    assert_eq!(holds(&key, Form::Password).unwrap(), Holds::Secret);
+    assert_eq!(holds(&key, Form::Token).unwrap(), Holds::Other);
+    let link = directory.path().join("link");
+    symlink(&key, &link).unwrap();
+    assert!(holds(&link, Form::Token).is_err());
+    assert!(holds(directory.path(), Form::Token).is_err());
+    assert!(holds(&directory.path().join("missing"), Form::Token).is_err());
 }
 
 #[test]

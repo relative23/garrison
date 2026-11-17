@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use garrison_core::config::Config;
-use garrison_core::credentials::{Credentials, SecretSource};
+use garrison_core::credentials::{Credentials, SecretSource, made_by_setup};
 use garrison_core::modules::ModuleId;
 use garrison_core::{files, time};
 use garrison_stalwart::jmap::JmapClient;
@@ -68,12 +68,16 @@ impl Authority {
         Ok(parse_policy(&raw, &self.action_ids())?)
     }
 
-    /// A client for the management API with the broker's read-only key.
+    /// A client for the management API with the broker's read-only key. An
+    /// empty key file is no key, as a missing one is not.
     pub fn native_client(&self) -> Result<JmapClient, Error> {
         let key = self
             .credentials
             .read_secret(&self.native_key)
-            .map_err(|error| Error::Misconfigured(format!("the broker's API key: {error}")))?;
+            .map_err(|error| {
+                let made = made_by_setup(&error);
+                Error::Misconfigured(format!("the broker's API key: {error}{made}"))
+            })?;
         Ok(JmapClient::new(&self.stalwart_url, &key))
     }
 

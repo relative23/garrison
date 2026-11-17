@@ -120,6 +120,15 @@ impl fmt::Debug for ScrapeCredential {
     }
 }
 
+impl ScrapeCredential {
+    /// The credential a file holds, as setup writes it; none for anything
+    /// else, an empty file among it. Setup asks so whether to write one.
+    #[must_use]
+    pub fn read(data: &[u8]) -> Option<Self> {
+        json::object(json::parse(data, MAX_CREDENTIAL).ok()?).ok()
+    }
+}
+
 fn metrics_credential(config: &Config, credentials: &Credentials) -> Option<(String, String)> {
     let source = config.collector.metrics_credential.as_ref()?;
     let data = credentials.read_private(source, MAX_CREDENTIAL).ok();
@@ -131,12 +140,12 @@ fn metrics_credential(config: &Config, credentials: &Credentials) -> Option<(Str
     {
         return None;
     }
-    let value = data.and_then(|data| json::parse(&data, MAX_CREDENTIAL).ok());
-    let Some(value) = value else {
+    let Some(ScrapeCredential { username, secret }) =
+        data.as_deref().and_then(ScrapeCredential::read)
+    else {
         log::warn!("The metrics credential is unavailable");
         return None;
     };
-    let ScrapeCredential { username, secret } = json::object(value).ok()?;
     Some((username, secret))
 }
 

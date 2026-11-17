@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use garrison_core::config::Config;
-use garrison_core::files::{Privacy, read_private};
+use garrison_core::files::{self, Form, Holds, Privacy};
 use garrison_stalwart::http::Request;
 
 use super::objects::{
@@ -17,6 +17,14 @@ use super::{Admin, write_secret};
 
 /// The key files, as the broker and the collector read them.
 const KEYS: [&str; 2] = ["broker-native-key", "collector-native-key"];
+
+/// Whether the file at `path` holds a key as the service that reads it
+/// takes one. An empty file, one of a line end alone and one that holds
+/// something else hold none: setup makes a key there, as where the file is
+/// missing, since a key kept in such a file leaves its service with none.
+pub(super) fn holds_key(path: &Path) -> bool {
+    files::holds(path, Form::Token).is_ok_and(|held| held == Holds::Secret)
+}
 
 /// What `ensure` did, and the keys a new one replaces. `setup` removes those
 /// once the services that hold them have restarted with the new one, or
@@ -47,7 +55,7 @@ pub(super) fn ensure(
         },
         allowed_ips: networks,
     };
-    if let (Some(first), true, false) = (existing.first(), target.exists(), rotate) {
+    if let (Some(first), true, false) = (existing.first(), holds_key(&target), rotate) {
         admin.set("x:ApiKey/set", &Set::update(&first.id, rights()))?;
         return Ok(Ensured {
             step: format!("updated API key '{description}' (secret unchanged)"),
@@ -95,9 +103,10 @@ pub(super) fn remove(admin: &Admin, replaced: &[String]) -> Result<(), String> {
 pub(super) fn verify(config: &Config, directory: &Path) -> Result<String, String> {
     let url = format!("{}/jmap/session", config.deployment.stalwart_url);
     for name in KEYS {
-        let key = read_private(&directory.join(name), 16384, Privacy::Owned)
+        // As the services read it, so that what is tried is what they use.
+        let key = files::read_secret(&directory.join(name), Privacy::Owned)
             .map_err(|error| format!("{name}: {error}"))?;
-        let authorization = format!("Bearer {}", String::from_utf8_lossy(&key).trim());
+        let authorization = format!("Bearer {key}");
         let status = Request::get(&url)
             .header("Authorization", &authorization)
             .timeout(Duration::from_secs(30))
@@ -150,7 +159,83 @@ pub(super) fn network(text: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use garrison_testing::http::{json, serve};
+    use serde_json::json;
+
     use super::*;
+
+    const OLD: &str = "the-key-stalwart-has-0123456789";
+    const NEW: &str = "the-key-stalwart-made-0123456789";
+
+    /// What `ensure` does for the collector's key with the file holding
+    /// `written`, while Stalwart still has a key of that description: the
+    /// step, the keys it replaces, what the file holds after, and whether
+    /// it asked Stalwart for a new key.
+    fn ensured(written: &str) -> (String, Vec<String>, String, bool) {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("collector-native-key");
+        garrison_testing::write_private(&file, written.as_bytes());
+        let listed = json(&json!({"methodResponses": [["x:ApiKey/get",
+            {"list": [{"id": "old", "description": "garrison collector"}]}, "0"]]}));
+        let set = json(&json!({"methodResponses": [["x:ApiKey/set",
+            {"created": {"new": {"id": "fresh", "secret": NEW}}, "updated": {"old": null}}, "0"]]}));
+        let server = serve(vec![listed, set]);
+        let admin = Admin {
+            url: format!("{}/jmap/", server.url),
+            authorization: "Bearer admin".to_owned(),
+        };
+        let networks = Enabled::of(["127.0.0.1/32"]);
+        let done = ensure(
+            &admin,
+            directory.path(),
+            "collector-native-key",
+            "garrison collector",
+            &["authenticate"],
+            &networks,
+            false,
+        )
+        .unwrap();
+        let requests = server.requests();
+        let step = done
+            .step
+            .replace(&directory.path().display().to_string(), "DIR");
+        let held = std::fs::read_to_string(&file).unwrap();
+        (
+            step,
+            done.replaced,
+            held,
+            requests[1].contains("\"create\""),
+        )
+    }
+
+    /// A key file that holds no key, as an empty one, gets a new key, as a
+    /// missing one does, and the key it replaces goes: kept, the collector
+    /// would have no key while setup said "secret unchanged". A file that
+    /// holds a key keeps it.
+    #[test]
+    fn a_key_file_that_holds_no_key_gets_a_new_one() {
+        for written in ["", "\n", " \r\n", "short\n"] {
+            assert_eq!(
+                ensured(written),
+                (
+                    "created API key 'garrison collector' -> DIR/collector-native-key".to_owned(),
+                    vec!["old".to_owned()],
+                    format!("{NEW}\n"),
+                    true
+                ),
+                "{written:?}"
+            );
+        }
+        assert_eq!(
+            ensured(&format!("{OLD}\n")),
+            (
+                "updated API key 'garrison collector' (secret unchanged)".to_owned(),
+                Vec::new(),
+                format!("{OLD}\n"),
+                false
+            )
+        );
+    }
 
     #[test]
     fn networks_are_written_in_canonical_form() {

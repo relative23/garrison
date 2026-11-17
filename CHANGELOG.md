@@ -972,6 +972,22 @@ Notable changes for operators and users. The format follows
   that `endpoints` named for it need none. The Spam and ham by domain card
   is Unknown then; its counts stay, and the other mail-flow cards, which
   need no key, are as before.
+- **An empty key file is a missing key, and setup makes one there.**
+  `garrison stalwart setup` made the API keys and the webhook's signature
+  key only where their file was missing. Where it was there but empty, as
+  after a truncation, held a line end alone or something other than a key,
+  setup kept it while Stalwart still had that key, said "secret unchanged"
+  and stopped with advice about a container bridge network that did not
+  apply; an empty signature key it gave Stalwart, which refused it, so that
+  setup failed at the webhook every time after. Where the metrics
+  credential held a line end alone or no credential, setup called the
+  exporter configured, and the collector had no credential. Setup now
+  makes a new key, or a new credential where the exporter is Garrison's,
+  wherever the file holds none, as where it is missing, removes the key it
+  replaces in Stalwart and has the receiver and the broker read the new
+  one. Both called an empty key file one of "an invalid format"; they now
+  say that it is empty and that `garrison stalwart setup` makes the key,
+  as they do for a missing file and one that holds no key.
 - **An answer of Stalwart's that Garrison cannot read is no refusal.** An
   answer in a form this release does not read, as a Stalwart release it
   does not support yet may give after an upgrade (no JSON, an object it

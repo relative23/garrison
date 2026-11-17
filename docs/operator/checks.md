@@ -13,12 +13,11 @@ themselves, did not give the key what the check reads, which
 not read, as a Stalwart release Garrison does not support yet may: the
 card names the answer, and the README the supported releases. The
 `stalwart` and `prometheus` checks say the same of their own requests.
-Where the collector has no such key, its credential file empty or
-missing, these checks and the `stalwart` check ask Stalwart nothing, and
-each of their cards that needs the key says so in the same words: the
-collector has no API key for Stalwart, and `garrison stalwart setup`
-makes one ([operations](operations.md#troubleshooting) says what to do
-where the file is there but empty).
+Where the collector has no such key, its credential file missing, empty
+or holding no key, these checks and the `stalwart` check ask Stalwart
+nothing, and each of their cards that needs the key says so in the same
+words: the collector has no API key for Stalwart, and `garrison stalwart
+setup` makes one, also where the file is there.
 
 Every card says when its source was asked ("Checked ..."). Most checks ask in
 every run, and their cards are marked stale when the last run is more than

@@ -280,11 +280,7 @@ fn configure(
     replaced: &mut Vec<String>,
 ) -> Result<(), String> {
     let (directory, rotate) = (&config.credentials_directory, asked.rotate);
-    // A running service holds the secrets it read when it started.
-    let fresh = rotate
-        || restart::HELD
-            .iter()
-            .any(|(_, name)| !directory.join(name).exists());
+    let fresh = rotate || restart::unheld(directory);
     let broker = keys::ensure(
         admin,
         directory,

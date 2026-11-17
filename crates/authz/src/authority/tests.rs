@@ -183,6 +183,40 @@ fn a_broken_setup_is_no_refusal_of_the_user() {
     server.requests();
 }
 
+/// An empty key file is no key, as a missing one is not: the broker's error
+/// says which it is, with what makes the key, as `garrison doctor` does.
+#[test]
+fn an_empty_key_file_is_named_with_what_makes_the_key() {
+    let (authority, server, directory) = authority(Vec::new());
+    let path = config(directory.path(), &server.url)
+        .credentials_directory
+        .join("broker-native-key");
+    let said = |written: Option<&str>| {
+        match written {
+            Some(text) => garrison_testing::write_private(&path, text.as_bytes()),
+            None => std::fs::remove_file(&path).unwrap(),
+        }
+        match authority.native_client().err() {
+            Some(Error::Misconfigured(reason)) => reason,
+            other => panic!("{other:?}"),
+        }
+    };
+    let made = "run `garrison stalwart setup`, which makes it";
+    let path_shown = path.display();
+    for (written, how) in [
+        (Some(""), "is empty"),
+        (Some("\n"), "is empty"),
+        (None, "is unavailable"),
+    ] {
+        assert_eq!(
+            said(written),
+            format!("the broker's API key: Protected file {how}: {path_shown}; {made}"),
+            "{written:?}"
+        );
+    }
+    server.requests();
+}
+
 #[test]
 fn a_denied_subject_is_refused_before_the_native_lookup() {
     let (authority, server, directory) = authority(native("e", &[]));
