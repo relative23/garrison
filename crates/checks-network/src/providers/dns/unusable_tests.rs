@@ -4,7 +4,8 @@
 //! record that could not be read leaves it Unknown, an optional one, such
 //! as a TLSA record or the record of an MTA-STS policy, Partial where it
 //! would be OK. A policy whose record could not be read is not checked, and
-//! the card says so.
+//! the card says so; one that stops senders is a warning beside such a
+//! record as well.
 
 use std::collections::BTreeMap;
 
@@ -44,22 +45,20 @@ fn published() -> BTreeMap<(String, u16), Vec<Vec<u8>>> {
 }
 
 /// The card of the domain whose zone file is `zone_file`, where the
-/// resolver answers `answers` and gives `faults`, and a policy is served
-/// with `policy` where one is fetched.
+/// resolver answers `answers` and gives `faults`, and the server of its
+/// MTA-STS policy answers `policy` where it is asked.
 fn card(
     zone_file: &str,
     answers: BTreeMap<(String, u16), Vec<Vec<u8>>>,
     faults: &[(&str, Kind, Fault)],
-    policy: Option<&str>,
+    policy: Option<String>,
 ) -> Observation {
     let faults = faults
         .iter()
         .map(|(name, kind, fault)| (((*name).to_owned(), kind.code()), *fault))
         .collect();
     let (address, stopping) = resolver_faulty(answers, faults);
-    let served = policy.map(|policy| {
-        garrison_testing::http::serve(vec![garrison_testing::http::answer(200, policy)])
-    });
+    let served = policy.map(|policy| garrison_testing::http::serve(vec![policy]));
     let observations = collected_with(
         &json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
         address,
@@ -212,4 +211,55 @@ fn an_optional_record_the_resolver_does_not_answer_keeps_the_card_from_being_in_
             )]
         )
     );
+}
+
+/// A policy that leaves the mail host out, or that cannot be read, stops
+/// the senders that honour it: it is a warning also beside a record that
+/// could not be read, needed or optional.
+#[test]
+fn a_policy_that_stops_senders_is_a_warning_beside_what_could_not_be_read() {
+    use garrison_testing::http::answer;
+    let leaves_out = "version: STSv1\nmode: enforce\nmx: other.example.test\nmax_age: 86400\n";
+    let sts = "_mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n";
+    let tlsa = "_25._tcp.mail.example.test. IN TLSA 3 1 1 7B26323DAC\n";
+    let not_named = "The MTA-STS policy of example.test does not name mail.example.test: senders \
+                     that honour it do not deliver there.";
+    let unread = "example.test publishes an MTA-STS record, but its policy could not be read: \
+                  the server answered 404.";
+    for (zone_file, faulted, policy, said) in [
+        // The SPF record could not be read: Unknown without the policy.
+        (
+            format!("{NEEDED}{sts}"),
+            ("example.test", Kind::Txt),
+            answer(200, leaves_out),
+            not_named,
+        ),
+        (
+            format!("{NEEDED}{sts}"),
+            ("example.test", Kind::Txt),
+            answer(404, ""),
+            unread,
+        ),
+        // The TLSA record could not be read: Partial without it.
+        (
+            format!("{NEEDED}{sts}{tlsa}"),
+            ("_25._tcp.mail.example.test", Kind::Tlsa),
+            answer(200, leaves_out),
+            not_named,
+        ),
+    ] {
+        let (name, kind) = faulted;
+        let domain = card(
+            &zone_file,
+            published(),
+            &[(name, kind, Fault::Code(2))],
+            Some(policy),
+        );
+        assert_eq!(
+            (domain.state, domain.findings.last().map(String::as_str)),
+            (State::Warning, Some(said)),
+            "{name}: {:?}",
+            domain.findings
+        );
+    }
 }

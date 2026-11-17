@@ -165,6 +165,70 @@ fn a_policy_the_runs_time_does_not_reach_is_not_fetched() {
     );
 }
 
+/// A policy fetched within the hour is taken from the status database, also
+/// once the run's time is up: one that leaves the mail host out is a
+/// warning beside the records that time left unasked.
+#[test]
+fn a_kept_policy_that_leaves_the_mail_host_out_is_a_warning_beside_records_not_asked() {
+    // Each answer comes 1.2 s after its question; the run's time for its
+    // checks ends before the third record is asked.
+    let zone: BTreeMap<(String, u16), Vec<Vec<u8>>> = [
+        (("_mta-sts.example.test", 16), vec![text("v=STSv1; id=1")]),
+        (
+            ("example.test", 15),
+            vec![host(&[0, 10], "mail.example.test")],
+        ),
+    ]
+    .into_iter()
+    .map(|((name, kind), records)| ((name.to_owned(), kind), records))
+    .collect();
+    let (address, handle) = resolver_after(zone, None, 2, Duration::from_millis(1200));
+    let zone_file = "_mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n\
+                     example.test. IN MX 10 mail.example.test.\n\
+                     example.test. IN TXT \"v=spf1 mx -all\"\n";
+    let stalwart = serve(vec![answer_json(
+        &json!({"methodResponses": [["x:Domain/get",
+        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
+    )]);
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = config(directory.path());
+    config.deployment.stalwart_url.clone_from(&stalwart.url);
+    let runner = Canned(String::new());
+    let memory = Remembered::default();
+    let kept = json!({
+        "at": crate::testing::now().as_second() - 60,
+        "outcome": {"Ok": {"mode": "enforce", "hosts": ["other.example.test"], "max_age": 86400}},
+    });
+    memory
+        .0
+        .borrow_mut()
+        .insert("dns.sts.example.test".to_owned(), kept.to_string());
+    let context = Context {
+        native_key: Some("key".into()),
+        deadline: Deadline::within(Duration::from_secs(2)),
+        memory: &memory,
+        ..crate::testing::context(&config, &runner)
+    };
+    let provider = Dns::new(&table(&format!("type = \"dns\"\nresolver = \"{address}\""))).unwrap();
+    let domain = provider.collect(&context).unwrap().observations.remove(0);
+    stalwart.requests();
+    handle.join().unwrap();
+    assert_eq!(policy_result(&domain), json!("leaves a mail host out"));
+    assert_eq!(
+        (domain.state, domain.findings.clone()),
+        (
+            State::Warning,
+            vec![
+                "1 of its 3 records was not asked: the collection run's time was used up."
+                    .to_owned(),
+                "The MTA-STS policy of example.test does not name mail.example.test: senders \
+                 that honour it do not deliver there."
+                    .to_owned(),
+            ]
+        )
+    );
+}
+
 /// A policy the run had no time for is fetched in the next run, however
 /// recently the one before was kept.
 #[test]

@@ -683,6 +683,13 @@ Notable changes for operators and users. The format follows
   needed record and Partial for an optional one where it would be OK; where
   the record for an MTA-STS policy could not be read, the card says that
   the policy was not checked.
+- **An MTA-STS policy that stops senders is a warning beside what could not
+  be checked.** A policy that leaves a mail host out, or that cannot be
+  read, made the domain's card a warning only where everything else was in
+  order. Beside a needed record that could not be read, or records the
+  run's time left unasked, as after a policy taken from within the hour,
+  the card stayed Unknown or Partial, which sends no notification. It is a
+  warning in either case now.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not

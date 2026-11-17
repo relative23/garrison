@@ -100,8 +100,9 @@ impl Tally {
 /// then what the MTA-STS policy leaves open. What was asked and answered
 /// counts; what was not keeps the domain from being in order, optional as
 /// it may be: Unknown for a needed record, Partial for an optional one. A
-/// record whose name is no DNS name can never be published, so a needed one
-/// is not as Stalwart names it.
+/// policy that stops senders is a warning beside either. A record whose
+/// name is no DNS name can never be published, so a needed one is not as
+/// Stalwart names it.
 pub(super) fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>) {
     let (mut state, mut findings) = if tally.records == 0 {
         (
@@ -157,7 +158,9 @@ pub(super) fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>
     match policy {
         sts::Outcome::Fits => {}
         sts::Outcome::Finding(finding) => {
-            if state == State::Ok {
+            // Senders that honour the policy stop, whatever else could not
+            // be read or asked.
+            if matches!(state, State::Ok | State::Partial | State::Unknown) {
                 state = State::Warning;
             }
             findings.push(finding);
