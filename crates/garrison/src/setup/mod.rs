@@ -20,9 +20,7 @@
 //! reloaded its settings, which is when it takes them. So the next run
 //! brings both places together wherever a run stopped.
 
-use std::io;
-use std::os::unix::fs::DirBuilderExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use base64::Engine;
@@ -30,24 +28,24 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use clap::Subcommand;
 use garrison_collector::providers::stalwart::REQUIRED_PERMISSIONS as COLLECTOR_PERMISSIONS;
 use garrison_core::config::Config;
-use garrison_core::files::atomic_write;
 use garrison_core::json;
 use garrison_stalwart::http::Request;
 use garrison_stalwart::jmap::{Answers, Calls, Get, Got, Problem};
 use garrison_stalwart::{Error, SUPPORTED};
-use rustix::fs::Access;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 
 use crate::say;
 use administrator::Source;
 use exporter::ensure_metrics;
+use folder::{writable, write_secret};
 use keys::Key;
 use objects::{Action, Enabled, OAuthClient, Refused, Set, StoredClient};
 use webhook::ensure_webhook;
 
 mod administrator;
 mod exporter;
+mod folder;
 mod keys;
 mod milter;
 mod objects;
@@ -216,49 +214,6 @@ impl Admin {
 /// Stalwart releases are named, since no run of setup mends it.
 fn unreadable(method: &str, what: &str) -> String {
     format!("{method}: {what}, which this release of Garrison does not read; {SUPPORTED}")
-}
-
-fn write_secret(path: &Path, value: &str) -> Result<(), String> {
-    atomic_write(path, format!("{value}\n").as_bytes(), 0o600)
-        .map_err(|error| format!("Could not write {}: {error}", path.display()))
-}
-
-/// Before anything changes: setup writes the keys that Stalwart makes to
-/// the credentials directory, so it must take new files there, or a key
-/// would be made whose secret is lost. The installer makes it root's and
-/// 0700, so another user may not even look into it. The exit code goes
-/// with the message: 2 for a run without root, which was called wrongly.
-fn writable(directory: &Path) -> Result<(), (u8, String)> {
-    let checked = std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(directory)
-        .and_then(|()| {
-            rustix::fs::access(directory, Access::WRITE_OK | Access::EXEC_OK)
-                .map_err(io::Error::from)
-        });
-    let Err(error) = checked else {
-        return Ok(());
-    };
-    let refused = format!(
-        "Setup cannot write the credentials folder {}: {error}.",
-        directory.display()
-    );
-    if error.kind() == io::ErrorKind::PermissionDenied && !rustix::process::geteuid().is_root() {
-        return Err((
-            2,
-            format!(
-                "{refused} Run it as root, as `sudo garrison stalwart setup`; nothing was changed."
-            ),
-        ));
-    }
-    Err((
-        1,
-        format!(
-            "{refused} Nothing was changed; run `garrison stalwart setup` again once this is \
-             mended."
-        ),
-    ))
 }
 
 /// Register Garrison as an OAuth client of Stalwart.
