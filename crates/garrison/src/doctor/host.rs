@@ -29,9 +29,13 @@ fn output(program: &str, arguments: &[&str]) -> Option<String> {
 }
 
 fn release() -> Finding {
+    release_in(Path::new("/opt/garrison"))
+}
+
+/// The release installed under `base`, as the installer links it.
+pub(super) fn release_in(base: &Path) -> Finding {
     let version = |link: &str| {
-        fs::read_to_string(Path::new("/opt/garrison").join(link).join("VERSION"))
-            .map(|text| text.trim().to_owned())
+        fs::read_to_string(base.join(link).join("VERSION")).map(|text| text.trim().to_owned())
     };
     match (version("current"), version("previous")) {
         (Ok(current), Ok(previous)) => {
@@ -39,25 +43,28 @@ fn release() -> Finding {
         }
         (Ok(current), Err(_)) => Finding::ok(format!("release {current}, no previous release")),
         (Err(_), _) => Finding::fail(
-            "no installed release in /opt/garrison/current",
+            format!("no installed release in {}", base.join("current").display()),
             "Run the installer from the release archive.",
         ),
+    }
+}
+
+/// What systemd's answer says of `unit`.
+pub(super) fn service(unit: &str, answer: Option<&str>) -> Finding {
+    match answer {
+        Some("active") => Finding::ok(format!("{unit} is active")),
+        Some(state) => Finding::fail(
+            format!("{unit} is {state}"),
+            format!("journalctl -u {unit} -n 50 shows why."),
+        ),
+        None => Finding::unknown(format!("{unit}: systemctl gave no answer")),
     }
 }
 
 fn services() -> Vec<Finding> {
     SERVICES
         .iter()
-        .map(
-            |unit| match output(SYSTEMCTL, &["is-active", unit]).as_deref() {
-                Some("active") => Finding::ok(format!("{unit} is active")),
-                Some(state) => Finding::fail(
-                    format!("{unit} is {state}"),
-                    format!("journalctl -u {unit} -n 50 shows why."),
-                ),
-                None => Finding::unknown(format!("{unit}: systemctl gave no answer")),
-            },
-        )
+        .map(|unit| service(unit, output(SYSTEMCTL, &["is-active", unit]).as_deref()))
         .collect()
 }
 
@@ -69,7 +76,7 @@ fn ago(seconds: i64) -> String {
 
 /// What the newest snapshot says of the collector, judged as the watch
 /// judges it: stopped after ten minutes without a finished run.
-fn finished(last: Result<Option<i64>, String>, now: time::Timestamp) -> Finding {
+pub(super) fn finished(last: Result<Option<i64>, String>, now: time::Timestamp) -> Finding {
     let why = format!(
         "`systemctl status {} {}` and `garrison check-config` say why.",
         units::COLLECT,
@@ -143,12 +150,18 @@ fn collection(config: &Config) -> Vec<Finding> {
 }
 
 fn clock() -> Finding {
-    match output(
-        "/usr/bin/timedatectl",
-        &["show", "-p", "NTPSynchronized", "--value"],
+    synchronized(
+        output(
+            "/usr/bin/timedatectl",
+            &["show", "-p", "NTPSynchronized", "--value"],
+        )
+        .as_deref(),
     )
-    .as_deref()
-    {
+}
+
+/// What timedatectl's answer says of the clock.
+pub(super) fn synchronized(answer: Option<&str>) -> Finding {
+    match answer {
         Some("yes") => Finding::ok("the clock is synchronized"),
         Some("no") => Finding::warn(
             "the clock is not synchronized",

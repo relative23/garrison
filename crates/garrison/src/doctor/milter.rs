@@ -78,7 +78,7 @@ impl Entry {
 }
 
 /// What `answered` says of the filter on `port`.
-fn answering(port: u16, answered: Result<(), String>) -> Finding {
+pub(super) fn answering(port: u16, answered: Result<(), String>) -> Finding {
     match answered {
         Ok(()) => Finding::ok(format!("the macro milter answers on 127.0.0.1:{port}")),
         Err(error) => Finding::fail(

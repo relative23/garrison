@@ -121,7 +121,7 @@ pub(super) fn interface(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Find
 }
 
 /// The exporter that `stalwart setup` enables must not answer from outside.
-fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Finding> {
+pub(super) fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Finding> {
     let mut origins = vec![origin(&config.deployment.issuer)];
     let admin = origin(&config.deployment.admin_url);
     if !origins.contains(&admin) {
@@ -295,7 +295,7 @@ pub(super) fn issuer(config: &Config) -> Finding {
 
 /// Stalwart's sign-in page as a visitor's browser loads it, with the files it
 /// names; the `sign-in` check examines it the same way every few minutes.
-fn sign_in_page(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
+pub(super) fn sign_in_page(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
     // Asked by hand: no run's time to keep, the certificate judged by the clock.
     let examined = signin::check(&config.deployment, signin::Asking::by_hand(roots));
     match examined.state {

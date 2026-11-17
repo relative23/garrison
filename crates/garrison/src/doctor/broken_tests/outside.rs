@@ -114,3 +114,71 @@ pub(super) fn nginx_answers_502() -> Broken {
         fix: Some("systemctl status garrison-web.service".into()),
     }
 }
+
+/// A TLS server standing in for one of the installation's names, answering
+/// `status` with `body` of `kind`.
+fn answering(status: u16, kind: &str, body: &str) -> garrison_testing::tls::Server {
+    serve_until(
+        vec![format!(
+            "HTTP/1.1 {status} X\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n{body}",
+            body.len()
+        )],
+        2036,
+        1,
+        1,
+    )
+}
+
+/// Garrison answers without Strict-Transport-Security, as behind a server
+/// block that does without the include.
+pub(super) fn no_hsts() -> Broken {
+    let server = answering(200, "application/json", r#"{"session":null}"#);
+    let roots = Arc::new(server.roots.clone());
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    config.deployment.public_origin.clone_from(&server.url);
+    let found = public::interface(&config, &roots);
+    server.finish();
+    Broken {
+        host: "Garrison answering without Strict-Transport-Security",
+        found,
+        said: "no Strict-Transport-Security header".into(),
+        fix: Some("garrison.conf".into()),
+    }
+}
+
+/// Stalwart's metrics exporter answers under the issuer's name.
+pub(super) fn metrics_public() -> Broken {
+    let server = answering(200, "text/plain", "stalwart_up 1");
+    let roots = Arc::new(server.roots.clone());
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    config.deployment.issuer.clone_from(&server.url);
+    config.deployment.admin_url = format!("{}/admin/", server.url);
+    let found = public::metrics(&config, &roots);
+    server.finish();
+    Broken {
+        host: "Stalwart's metrics exporter served under the issuer's name",
+        found,
+        said: "Stalwart's metrics exporter is public".into(),
+        fix: Some("garrison-stalwart-server".into()),
+    }
+}
+
+/// The issuer's name answers 404 for Stalwart's sign-in page.
+pub(super) fn sign_in_page_answers_404() -> Broken {
+    let server = answering(404, "text/html", "<html>Not found</html>");
+    let roots = Arc::new(server.roots.clone());
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    config.deployment.issuer.clone_from(&server.url);
+    let found = vec![public::sign_in_page(&config, &roots)];
+    server.finish();
+    Broken {
+        host: "an issuer's name that answers 404 for Stalwart's sign-in page",
+        found,
+        said: "answers 404".into(),
+        fix: Some("proxy rules".into()),
+    }
+}

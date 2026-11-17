@@ -6,7 +6,7 @@ use std::path::Path;
 use garrison_core::config::Database;
 use garrison_testing::http::{json, serve};
 
-use super::super::{Finding, files, host, milter, policy};
+use super::super::{Finding, files, host, milter, notify, policy};
 use super::Broken;
 
 /// The events database is a folder, as a restore gone wrong may leave it:
@@ -209,5 +209,119 @@ pub(super) fn milter_on_another_port() -> Broken {
         found,
         said: format!("at 127.0.0.1:{old}"),
         fix: Some("garrison stalwart setup".into()),
+    }
+}
+
+/// No release where the installer puts it.
+pub(super) fn no_release() -> Broken {
+    let directory = tempfile::tempdir().unwrap();
+    Broken {
+        host: "no release installed",
+        found: vec![host::release_in(directory.path())],
+        said: "no installed release".into(),
+        fix: Some("Run the installer".into()),
+    }
+}
+
+/// A unit of Garrison's that failed.
+pub(super) fn unit_failed() -> Broken {
+    Broken {
+        host: "a unit of Garrison's that failed",
+        found: vec![host::service("garrison-web.service", Some("failed"))],
+        said: "garrison-web.service is failed".into(),
+        fix: Some("journalctl -u garrison-web.service".into()),
+    }
+}
+
+/// A collector whose last run finished an hour ago.
+pub(super) fn collector_stopped() -> Broken {
+    let now = garrison_core::time::now();
+    Broken {
+        host: "a collector that stopped an hour ago",
+        found: vec![host::finished(Ok(Some(now.as_second() - 3600)), now)],
+        said: "no collection run has finished since".into(),
+        fix: Some("systemctl status garrison-collect.service".into()),
+    }
+}
+
+/// A key file that is not root's alone, as a copy made by hand leaves it.
+pub(super) fn key_not_roots() -> Broken {
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    fs::create_dir_all(&config.credentials_directory).unwrap();
+    let key = config.credentials_directory.join("broker-native-key");
+    fs::write(&key, garrison_testing::NATIVE_KEY).unwrap();
+    Broken {
+        host: "a key file that is not root's alone",
+        found: files::files(&config),
+        said: format!("{} is not root-owned", key.display()),
+        fix: Some("chmod 600".into()),
+    }
+}
+
+/// An empty scrape credential where the prometheus check reads it.
+pub(super) fn metrics_credential_empty_where_read() -> Broken {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    config
+        .collector
+        .providers
+        .push("type = \"prometheus\"".parse().unwrap());
+    Broken {
+        host: "an empty scrape credential that the prometheus check reads",
+        found: filled(&config, "metrics-credential", b""),
+        said: "metrics-credential is empty, but".into(),
+        fix: Some("garrison stalwart setup".into()),
+    }
+}
+
+/// A clock that follows no time server.
+pub(super) fn clock_unsynchronized() -> Broken {
+    Broken {
+        host: "a clock that is not synchronized",
+        found: vec![host::synchronized(Some("no"))],
+        said: "the clock is not synchronized".into(),
+        fix: Some("timedatectl set-ntp true".into()),
+    }
+}
+
+/// A folder whose disk cannot be asked.
+pub(super) fn space_unknown() -> Broken {
+    Broken {
+        host: "free space that cannot be asked",
+        found: vec![host::room("/garrison-test-folder-that-is-not-there")],
+        said: "free space of".into(),
+        fix: None,
+    }
+}
+
+/// A macro milter that does not answer on its port.
+pub(super) fn milter_silent() -> Broken {
+    Broken {
+        host: "a macro milter that does not answer",
+        found: vec![milter::answering(8096, Err("Connection refused".into()))],
+        said: "does not answer on 127.0.0.1:8096".into(),
+        fix: Some("journalctl -u garrison-milter.service".into()),
+    }
+}
+
+/// An ntfy channel whose address file is empty.
+pub(super) fn channel_without_its_address() -> Broken {
+    use garrison_core::config::Endpoint;
+    use garrison_core::credentials::{Credentials, SecretSource};
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    config.notifications.ntfy_url =
+        Some(Endpoint::File(SecretSource::Credential("ntfy-url".into())));
+    let credentials = Credentials::new(&config.credentials_directory);
+    fs::create_dir_all(credentials.directory()).unwrap();
+    for name in crate::units::NOTIFICATION_FILES {
+        garrison_testing::write_private(&credentials.directory().join(name), b"");
+    }
+    Broken {
+        host: "an ntfy channel whose address file is empty",
+        found: notify::checks(&config, &credentials),
+        said: "notifications: ntfy".into(),
+        fix: Some("garrison notify-test".into()),
     }
 }
