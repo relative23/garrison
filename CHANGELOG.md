@@ -1023,6 +1023,15 @@ Notable changes for operators and users. The format follows
   run it as root and exits with 2. An error writing one of its files names
   the file, and a new key whose file cannot be written, as on a full disk,
   is taken out of Stalwart again.
+- **Setup gives Stalwart's exporter the credential its file holds.** Where
+  a run of `garrison stalwart setup` stopped after Stalwart's exporter took
+  a new scrape credential and before its file did, as when the run was
+  interrupted or Stalwart's answer was lost, every later run said
+  "Prometheus exporter already configured" and left the two apart: Stalwart
+  refused the collector's scrape until a `--rotate`. Setup now gives
+  Stalwart the file's credential on every run where the exporter is
+  Garrison's or off, as it gives the webhook its file's key, and says
+  "updated Prometheus exporter (credential unchanged)".
   A user without Stalwart's administrator rights got as far as the first
   API key, whose permissions Stalwart does not let it grant, and setup
   named only Stalwart's refusal; it now says to run setup as an
