@@ -18,14 +18,14 @@ use garrison_broker::store::{JobStatus, JobStore};
 use garrison_core::config::{Action, Config, Database};
 use garrison_stalwart::Error;
 use garrison_stalwart::oidc::{CodeExchange, Token};
-use garrison_testing::http::json;
+use garrison_testing::http::{json, serve};
 use garrison_testing::{config, credentials, policy_document, write_policy};
 use garrison_web::security::{Broker, Gate};
 use garrison_web::store::WebStore;
 use garrison_web::{App, Identity, router};
 use serde_json::{Value, json as value};
 
-use super::{Client, ORIGIN};
+use super::{Client, ORIGIN, grant};
 
 pub(crate) const TOKEN: &str = "token-0123456789abcdef";
 
@@ -206,4 +206,159 @@ pub(crate) fn granting() -> Vec<String> {
                 "sysRoleUpdate": true}}]),
         ),
     ]
+}
+
+/// What a case ends in: the web service's answer to a request of a signed-in
+/// user (status and detail), whether that ends the session, the reason the
+/// sign-in page gets (`None` where the case is no sign-in's), and words of
+/// the one line in a journal that names the cause.
+pub(crate) struct Expected {
+    pub(crate) status: u16,
+    pub(crate) detail: &'static str,
+    pub(crate) ended: bool,
+    pub(crate) reason: Option<&'static str>,
+    pub(crate) line: String,
+}
+
+/// A case that keeps the session and says at sign-in that access could not
+/// be checked.
+pub(crate) fn kept(status: u16, detail: &'static str, line: &str) -> Expected {
+    Expected {
+        status,
+        detail,
+        ended: false,
+        reason: Some("unchecked"),
+        line: line.to_owned(),
+    }
+}
+
+/// A case that ends the session and fails the sign-in.
+pub(crate) fn ended(status: u16, detail: &'static str, line: &str) -> Expected {
+    Expected {
+        status,
+        detail,
+        ended: true,
+        reason: Some("1"),
+        line: line.to_owned(),
+    }
+}
+
+/// How often a line holds `words`.
+fn found(lines: &[String], words: &str) -> usize {
+    lines.iter().filter(|line| line.contains(words)).count()
+}
+
+/// The reason a sign-in ended on the sign-in page with, or "" where it
+/// made a session.
+pub(crate) async fn signed_in(client: &mut Client) -> String {
+    let login = client.get("/auth/login").await;
+    let location = url::Url::parse(login.header("location")).unwrap();
+    let (_, state) = location
+        .query_pairs()
+        .find(|(key, _)| key == "state")
+        .unwrap();
+    let callback =
+        format!("/auth/callback?state={state}&code=code&iss=https%3A%2F%2Fmail.example.test");
+    let back = client.get(&callback).await.header("location").to_owned();
+    back.split_once("login_error=")
+        .map(|(_, reason)| reason.to_owned())
+        .unwrap_or_default()
+}
+
+/// What differs from `expected` at a request of the signed-in user of
+/// `client` and in the lines it wrote.
+async fn requested(client: &mut Client, app: &App, expected: &Expected) -> Vec<String> {
+    written();
+    let answer = client.get("/api/status").await;
+    let lines = written();
+    let mut wrong = Vec::new();
+    let got = (
+        answer.status.as_u16(),
+        answer.json()["detail"].as_str().unwrap_or("").to_owned(),
+    );
+    if got != (expected.status, expected.detail.to_owned()) {
+        wrong.push(format!("answered {got:?}"));
+    }
+    let cookie = client.cookies.get("__Host-garrison_session").cloned();
+    let ended = app
+        .store
+        .get(&cookie.unwrap_or_default())
+        .unwrap()
+        .is_none();
+    if ended != expected.ended {
+        wrong.push(format!("session ended: {ended}"));
+    }
+    if found(&lines, &expected.line) != 1 {
+        wrong.push(format!("lines {lines:?}"));
+    }
+    wrong
+}
+
+/// What differs from `expected` at a sign-in through `client`.
+async fn at_sign_in(client: &mut Client, expected: &Expected) -> Vec<String> {
+    let Some(reason) = expected.reason else {
+        return Vec::new();
+    };
+    written();
+    let got = signed_in(client).await;
+    let lines = written();
+    let mut wrong = Vec::new();
+    if got != reason {
+        wrong.push(format!("at sign-in the reason {got:?}"));
+    }
+    let rejected = format!(
+        "WARN Sign-in rejected by authorization (HTTP {}: ",
+        expected.status
+    );
+    if found(&lines, &expected.line) != 1 || found(&lines, &rejected) != 1 {
+        wrong.push(format!("at sign-in lines {lines:?}"));
+    }
+    wrong
+}
+
+/// One kind of failure at Stalwart, which Stalwart's `answers` to one check
+/// make, or which `before` makes of Garrison's own setup: what differs from
+/// `expected` at a request of a user whose sign-in Stalwart granted, and at
+/// a sign-in.
+pub(crate) async fn at_stalwart(
+    answers: &[String],
+    before: fn(&Config),
+    expected: &Expected,
+) -> Vec<String> {
+    let directory = tempfile::tempdir().unwrap();
+    let server = serve([granting(), answers.to_vec()].concat());
+    let config = configured(directory.path(), &server.url);
+    let (mut client, app) = web(&config, Arc::new(Asked(service(&config))));
+    assert_eq!(signed_in(&mut client).await, "", "the sign-in before");
+    before(&config);
+    let mut wrong = requested(&mut client, &app, expected).await;
+    drop(server);
+    let directory = tempfile::tempdir().unwrap();
+    let server = serve(answers.to_vec());
+    let config = configured(directory.path(), &server.url);
+    let (mut client, _app) = web(&config, Arc::new(Asked(service(&config))));
+    before(&config);
+    wrong.extend(at_sign_in(&mut client, expected).await);
+    drop(server);
+    wrong
+}
+
+/// One kind of failure of the broker's own, which `failing` stands for: what
+/// differs from `expected` at a request of a user whose sign-in the broker
+/// granted, and at a sign-in.
+pub(crate) async fn at_the_broker(
+    failing: fn(&Path) -> Arc<dyn Broker>,
+    expected: &Expected,
+) -> Vec<String> {
+    let directory = tempfile::tempdir().unwrap();
+    let config = configured(directory.path(), "http://127.0.0.1:9");
+    let granting: Arc<dyn Broker> = Arc::new(Fixed(Ok(grant("1", &["dashboard"], &[]))));
+    let switch = Arc::new(Switch(Mutex::new(granting)));
+    let (mut client, app) = web(&config, Arc::clone(&switch) as Arc<dyn Broker>);
+    assert_eq!(signed_in(&mut client).await, "", "the sign-in before");
+    *switch.0.lock().unwrap() = failing(directory.path());
+    let mut wrong = requested(&mut client, &app, expected).await;
+    let (mut client, _app) = web(&config, failing(directory.path()));
+    wrong.extend(at_sign_in(&mut client, expected).await);
+    wrong
 }
