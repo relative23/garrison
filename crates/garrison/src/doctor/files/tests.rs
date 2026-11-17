@@ -105,7 +105,7 @@ fn every_file_the_units_load_is_judged_empty_as_it_is_read() {
             let read = read_optional_secret(&path, Privacy::Owned, Form::Token);
             assert!(matches!(read, Ok(None)), "{name}");
             let kept = Finding::ok(format!("{name} is private (600)"));
-            let judged = judged(name, true, 0o600, reader(&config, name), kept);
+            let judged = judged(name, &Held::Nothing, 0o600, reader(&config, name), kept);
             assert_eq!(judged.level, Level::Ok, "{name}: {}", judged.line());
         } else {
             panic!(
@@ -202,7 +202,7 @@ fn an_empty_file_is_in_order_unless_the_configuration_reads_it() {
     let kept = || Finding::ok("metrics-credential is private (600)");
     let unread = judged(
         "metrics-credential",
-        true,
+        &Held::Nothing,
         0o600,
         reader(&config, "metrics-credential"),
         kept(),
@@ -219,7 +219,7 @@ fn an_empty_file_is_in_order_unless_the_configuration_reads_it() {
     config.collector.providers.push(prometheus);
     let read = judged(
         "metrics-credential",
-        true,
+        &Held::Nothing,
         0o600,
         reader(&config, "metrics-credential"),
         kept(),
@@ -240,7 +240,7 @@ fn an_empty_file_is_in_order_unless_the_configuration_reads_it() {
     // Filled, it is judged by owner and mode alone.
     let filled = judged(
         "metrics-credential",
-        false,
+        &Held::Usable,
         0o600,
         reader(&config, "metrics-credential"),
         kept(),
@@ -296,7 +296,7 @@ fn the_dqs_key_is_read_where_a_list_written_without_it_is_asked() {
     );
     let empty = judged(
         "spamhaus-dqs-key",
-        true,
+        &Held::Nothing,
         0o600,
         reader(&config, "spamhaus-dqs-key"),
         Finding::ok("spamhaus-dqs-key is private (600)"),
@@ -309,4 +309,91 @@ fn the_dqs_key_is_read_where_a_list_written_without_it_is_asked() {
              Data Query Service with it"
         )
     );
+}
+
+/// A file the configuration reads is judged by its reader's own rule where
+/// it holds something: a scrape credential written as `user:password`, or
+/// as JSON without its secret, and a key of Spamhaus' Data Query Service
+/// that is no word of letters and digits hold none, as their readers take
+/// them, and fail with how to fill them. Where nothing reads such a file,
+/// what it holds is not judged.
+#[test]
+fn a_file_its_reader_takes_for_none_fails_where_the_configuration_reads_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    fs::create_dir_all(&config.credentials_directory).unwrap();
+    let kept = || Finding::ok("kept");
+    let metrics = config.credentials_directory.join("metrics-credential");
+    let mut prometheus = toml::Table::new();
+    prometheus.insert("type".into(), "prometheus".into());
+    config.collector.providers.push(prometheus);
+    for written in [
+        "garrison:a-password",
+        r#"{"username": "garrison"}"#,
+        "short",
+    ] {
+        garrison_testing::write_private(&metrics, written.as_bytes());
+        let held = held(&config, "metrics-credential", &metrics);
+        assert_eq!(held, Held::Unusable("holds no credential"), "{written}");
+        let reads = reader(&config, "metrics-credential");
+        let found = judged("metrics-credential", &held, 0o600, reads, kept());
+        assert_eq!(
+            (found.level, found.what.as_str(), found.fix.as_deref()),
+            (
+                Level::Fail,
+                "metrics-credential holds no credential, but the prometheus check reads \
+                 Stalwart's exporter with it",
+                Some(garrison_collector::context::SCRAPE_FIX)
+            ),
+            "{written}"
+        );
+    }
+    garrison_testing::write_private(&metrics, br#"{"username": "garrison", "secret": "s"}"#);
+    assert_eq!(held(&config, "metrics-credential", &metrics), Held::Usable);
+    let reputation: toml::Table = "type = \"reputation\"\nhosts = [\"mail.example.test\"]\n\
+         lists = [\"zen.dq.spamhaus.net\"]\nlists_ipv6 = []"
+        .parse()
+        .unwrap();
+    config.collector.providers.push(reputation);
+    config.collector.dqs_key = Some(garrison_core::credentials::SecretSource::Credential(
+        "spamhaus-dqs-key".into(),
+    ));
+    let key = config.credentials_directory.join("spamhaus-dqs-key");
+    for written in [
+        "two words".to_owned(),
+        "a-hyphen".to_owned(),
+        "x".repeat(64),
+    ] {
+        garrison_testing::write_private(&key, written.as_bytes());
+        let held = held(&config, "spamhaus-dqs-key", &key);
+        assert_eq!(
+            held,
+            Held::Unusable("holds no key, one word of letters and digits"),
+            "{written}"
+        );
+        let reads = reader(&config, "spamhaus-dqs-key");
+        let found = judged("spamhaus-dqs-key", &held, 0o600, reads, kept());
+        assert_eq!(found.level, Level::Fail, "{written}");
+        assert!(
+            found
+                .fix
+                .as_deref()
+                .unwrap()
+                .starts_with("Write the key into it"),
+            "{}",
+            found.line()
+        );
+    }
+    garrison_testing::write_private(&key, b"abcdefghijklmnopqrstuvwxyz");
+    assert_eq!(held(&config, "spamhaus-dqs-key", &key), Held::Usable);
+    // With nothing that reads it, what it holds is not judged.
+    config.collector.dqs_key = None;
+    let found = judged(
+        "spamhaus-dqs-key",
+        &Held::Unusable("holds no key, one word of letters and digits"),
+        0o600,
+        reader(&config, "spamhaus-dqs-key"),
+        kept(),
+    );
+    assert_eq!(found.what, "kept");
 }

@@ -1,14 +1,18 @@
 //! The credentials, which must stay root's alone. The units load every
 //! credential (`LoadCredential=`), and systemd starts none of
 //! them without its file, so each must be there; a file that may be empty,
-//! which means none, is in order empty unless the configuration reads it.
-//! A key setup writes is no key empty, as missing.
+//! which means none, is in order empty unless the configuration reads it,
+//! and judged by its reader where it holds something. A key setup writes is
+//! no key empty, as missing.
 
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
+use garrison_collector::context::DqsKey;
+use garrison_collector::run::{self as collector, ScrapeCredential};
 use garrison_core::config::Config;
+use garrison_core::credentials::Credentials;
 use garrison_core::files::{self as protected, Form, Holds};
 
 use super::{Finding, Level};
@@ -96,7 +100,7 @@ fn key(path: &Path, file: &Private<'_>) -> Finding {
 /// What of the configuration reads the file `name` and so needs it filled,
 /// with how to fill it; `None` where an empty file serves. The notification
 /// channels' files are judged with the channels.
-fn reader(config: &Config, name: &str) -> Option<(&'static str, String)> {
+pub(super) fn reader(config: &Config, name: &str) -> Option<(&'static str, String)> {
     let scraped = config.collector.metrics_credential.is_some()
         && config.collector.providers.iter().any(|provider| {
             provider.get("type").and_then(toml::Value::as_str) == Some("prometheus")
@@ -131,20 +135,66 @@ fn loaders(name: &str) -> String {
     loading.join(" and ")
 }
 
-/// An empty file that may be empty: in order where nothing reads it, a
-/// failure with the way to fill it where something does. A file that holds
-/// something is judged by owner and mode alone (`kept`).
-fn judged(
+/// What a file that may be empty holds, as its reader takes it.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Held {
+    /// Nothing but line ends and spaces, which means none.
+    Nothing,
+    /// What its reader takes.
+    Usable,
+    /// Something its reader takes for none, in the reader's words.
+    Unusable(&'static str),
+}
+
+/// What the file `name` at `path` holds, by its reader's own rule: the
+/// scrape credential and the key of Spamhaus' Data Query Service as the
+/// collector reads them.
+pub(super) fn held(config: &Config, name: &str, path: &Path) -> Held {
+    let Ok(data) = fs::read(path) else {
+        return Held::Unusable("cannot be read");
+    };
+    if data.trim_ascii().is_empty() {
+        return Held::Nothing;
+    }
+    match name {
+        "metrics-credential" if ScrapeCredential::read(&data).is_none() => {
+            Held::Unusable("holds no credential")
+        }
+        "spamhaus-dqs-key" => {
+            let credentials = Credentials::new(&config.credentials_directory);
+            match collector::dqs_key(config, &credentials) {
+                DqsKey::Missing(_) => {
+                    Held::Unusable("holds no key, one word of letters and digits")
+                }
+                DqsKey::Key(_) | DqsKey::Unset => Held::Usable,
+            }
+        }
+        _ => Held::Usable,
+    }
+}
+
+/// A file that may be empty: empty, in order where nothing reads it; empty
+/// or holding what its reader takes for none, a failure with the way to
+/// fill it where something reads it. Otherwise owner and mode judge it
+/// (`kept`).
+pub(super) fn judged(
     name: &str,
-    empty: bool,
+    held: &Held,
     mode: u32,
     reader: Option<(&str, String)>,
     kept: Finding,
 ) -> Finding {
-    match (empty, reader) {
-        (true, Some((reads, fill))) => Finding::fail(format!("{name} is empty, but {reads}"), fill),
-        (true, None) => Finding::ok(format!("{name} is empty, which means none ({mode:o})")),
-        (false, _) => kept,
+    match (held, reader) {
+        (Held::Nothing, Some((reads, fill))) => {
+            Finding::fail(format!("{name} is empty, but {reads}"), fill)
+        }
+        (Held::Nothing, None) => {
+            Finding::ok(format!("{name} is empty, which means none ({mode:o})"))
+        }
+        (Held::Unusable(what), Some((reads, fill))) => {
+            Finding::fail(format!("{name} {what}, but {reads}"), fill)
+        }
+        (Held::Usable | Held::Unusable(_), _) => kept,
     }
 }
 
@@ -181,8 +231,8 @@ fn optional(config: &Config, name: &str) -> Finding {
     if kept.level != Level::Ok {
         return kept;
     }
-    let empty = fs::read(&path).is_ok_and(|data| data.trim_ascii().is_empty());
-    judged(name, empty, metadata.mode() & 0o777, reads, kept)
+    let held = held(config, name, &path);
+    judged(name, &held, metadata.mode() & 0o777, reads, kept)
 }
 
 pub(super) fn files(config: &Config) -> Vec<Finding> {

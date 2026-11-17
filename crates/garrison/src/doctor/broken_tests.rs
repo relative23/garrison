@@ -14,7 +14,7 @@ use garrison_core::time;
 use garrison_testing::http::{json, serve};
 use garrison_testing::tls::serve_until;
 
-use super::{Finding, Level, host, policy, public};
+use super::{Finding, Level, files, host, policy, public};
 
 /// A host broken in one way, and what doctor must say of it.
 struct Broken {
@@ -173,7 +173,64 @@ fn policy_names_a_dropped_action() -> Broken {
     }
 }
 
-const HOSTS: [fn() -> Broken; 7] = [
+/// A file that may be empty, holding what `written` says, where a check
+/// reads it: what doctor says of `name`, judged as `optional` judges it once
+/// owner and mode are in order.
+fn filled(config: &garrison_core::config::Config, name: &str, written: &[u8]) -> Vec<Finding> {
+    let path = config.credentials_directory.join(name);
+    fs::create_dir_all(&config.credentials_directory).unwrap();
+    garrison_testing::write_private(&path, written);
+    let held = files::held(config, name, &path);
+    let kept = Finding::ok(format!("{name} is private (600)"));
+    vec![files::judged(
+        name,
+        &held,
+        0o600,
+        files::reader(config, name),
+        kept,
+    )]
+}
+
+/// The scrape credential written as `user:password`, where the prometheus
+/// check reads it: its reader takes that for none.
+fn metrics_credential_as_user_and_password() -> Broken {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    config
+        .collector
+        .providers
+        .push("type = \"prometheus\"".parse().unwrap());
+    Broken {
+        host: "a scrape credential written as user:password",
+        found: filled(&config, "metrics-credential", b"garrison:a-password\n"),
+        said: "metrics-credential holds no credential".into(),
+        fix: Some("garrison stalwart setup".into()),
+    }
+}
+
+/// The key of Spamhaus' Data Query Service of two words, where a list
+/// written without its key is asked with it.
+fn dqs_key_of_two_words() -> Broken {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    config.collector.providers.push(
+        "type = \"reputation\"\nhosts = [\"mail.example.test\"]\n\
+         lists = [\"zen.dq.spamhaus.net\"]\nlists_ipv6 = []"
+            .parse()
+            .unwrap(),
+    );
+    config.collector.dqs_key = Some(garrison_core::credentials::SecretSource::Credential(
+        "spamhaus-dqs-key".into(),
+    ));
+    Broken {
+        host: "a key of Spamhaus' Data Query Service of two words",
+        found: filled(&config, "spamhaus-dqs-key", b"two words\n"),
+        said: "spamhaus-dqs-key holds no key".into(),
+        fix: Some("install -m 600 /dev/null".into()),
+    }
+}
+
+const HOSTS: [fn() -> Broken; 9] = [
     events_database_is_a_folder,
     origin_with_a_port,
     issuer_answers_with_a_web_page,
@@ -181,6 +238,8 @@ const HOSTS: [fn() -> Broken; 7] = [
     policy_root_alone,
     policy_binds_nobody,
     policy_names_a_dropped_action,
+    metrics_credential_as_user_and_password,
+    dqs_key_of_two_words,
 ];
 
 /// What is wrong with what doctor said on `broken`, if anything.

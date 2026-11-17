@@ -1173,6 +1173,9 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` fails an access policy that binds nobody, or that names
   an action garrison.toml no longer has**, and names the `garrison access`
   command that mends it.
+- **`garrison doctor` fails `metrics-credential` and `spamhaus-dqs-key` where
+  a check reads them and they hold what the collector takes for none**, with
+  how to fill them.
 
 ## [0.1.2] - 2026-11-13
 
