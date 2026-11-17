@@ -910,6 +910,14 @@ Notable changes for operators and users. The format follows
   came in, and nothing said that rows were left out. Every row is judged
   now; the table shows the last 200, and the card says how many rows the
   receipt lists where there are more.
+- **A receipt's time is the same instant for every viewer.** A field or
+  column of a receipt with `format = "datetime"` went out as the job wrote
+  it, and a time written without its offset, such as `2026-11-17T03:00:00`,
+  was read in each viewer's own time zone, another instant for each, while
+  the receipt's own date refuses such a time. Such a text is now read as
+  the receipt's own date is, a time with its offset or a plain date as
+  00:00 UTC; any other text is not shown, and the card says which field or
+  column. Unix seconds stay as they were.
 - **Signature files that are no longer updated are a warning.** The
   antivirus check called the signature databases in order as soon as one
   file existed, and showed the age of the daily one without judging it. A

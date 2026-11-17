@@ -66,6 +66,20 @@ pub(super) fn date(value: &Value) -> Option<Written> {
     time::parse_written(text)
 }
 
+/// A `datetime` value as the card shows it, one instant for every viewer:
+/// a text is read as the receipt's own date is and written out in full
+/// (`2026-11-17T03:00:00+01:00`), while one without its offset, which a
+/// browser reads in its own time zone, or that is no time at all, is not
+/// shown (`Err` with the value). A number is Unix seconds and stays.
+pub(super) fn instant(value: Value) -> Result<Value, Value> {
+    if !value.is_string() {
+        return Ok(value);
+    }
+    date(&value)
+        .map(|written| Value::String(time::isoformat_written(written)))
+        .ok_or(value)
+}
+
 pub(super) fn format_of(name: &str) -> Option<Format> {
     Some(match name {
         "text" => Format::Text,

@@ -382,3 +382,65 @@ fn every_row_of_a_long_list_receipt_counts() {
     assert_eq!(table.rows.len(), 200);
     assert_eq!(table.rows[0], [json!(50)]);
 }
+
+/// A `datetime` text is read as the receipt's own date is: a time with its
+/// offset, written out in full, or a plain date, as 00:00 UTC. A time
+/// without its offset, which every browser reads in its own time zone, and
+/// any other text are not shown, and the card says so; Unix seconds stay as
+/// they are.
+#[test]
+fn a_datetime_text_without_its_offset_is_not_shown() {
+    let document = json!({
+        "date": "2026-10-29T11:00:00Z",
+        "zoned": "2026-10-29T03:00:00+01:00",
+        "utc": "2026-10-29T02:00:00Z",
+        "day": "2026-10-28",
+        "naive": "2026-10-29T03:00:00",
+        "seconds": 1_793_000_000,
+        "runs": [{"at": "2026-10-29T03:00:00"}, {"at": "2026-10-29T03:00:00+00:00"}, {"at": "soon"}],
+    });
+    let entries: Vec<String> = ["zoned", "utc", "day", "naive", "seconds"]
+        .iter()
+        .map(|key| format!("{{ key = \"{key}\", label = \"{key}\", format = \"datetime\" }}"))
+        .collect();
+    let observation = observe(
+        &document,
+        &format!(
+            "max_age_hours = 30\nfields = [{}]\nrows = [\"runs\"]\n\
+             columns = [{{ key = \"at\", label = \"At\", format = \"datetime\" }}]",
+            entries.join(", ")
+        ),
+    );
+    let shown: Vec<(&str, &Value)> = observation.fields[1..]
+        .iter()
+        .map(|field| (field.label.as_str(), &field.value))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            ("zoned", &json!("2026-10-29T03:00:00+01:00")),
+            ("utc", &json!("2026-10-29T02:00:00+00:00")),
+            ("day", &json!("2026-10-28T00:00:00+00:00")),
+            ("naive", &Value::Null),
+            ("seconds", &json!(1_793_000_000)),
+        ]
+    );
+    assert_eq!(observation.state, State::Ok);
+    assert_eq!(
+        observation.findings,
+        [
+            "naive is not shown: \"2026-10-29T03:00:00\" is no time with its offset, such as \
+             2026-11-17T03:00:00Z.",
+            "The column At is not shown in 2 rows: they hold no time with its offset, such as \
+             2026-11-17T03:00:00Z."
+        ]
+    );
+    assert_eq!(
+        observation.table.unwrap().rows,
+        [
+            vec![Value::Null],
+            vec![json!("2026-10-29T03:00:00+00:00")],
+            vec![Value::Null]
+        ]
+    );
+}

@@ -450,6 +450,11 @@ the receipt lists where there are more.
 
 Keys can be nested: `key = ["components", "stalwartlabs/stalwart", "installed"]`.
 Formats: `text`, `number`, `bytes`, `datetime`, `duration` (seconds), `boolean`, `url`.
+A `datetime` is a time with its offset (`2026-11-17T03:00:00+01:00` or
+`2026-11-17T02:00:00Z`) or a plain date, taken as 00:00 UTC, as the receipt's
+own `date` is read, or Unix seconds. A time written without its offset is not
+shown, since every viewer would read it in their own time zone, and the card
+says which field or column.
 
 ## Paths the collector cannot see
 

@@ -34,13 +34,15 @@ use crate::options::{Checked, Options, fail};
 
 mod keys;
 
-use keys::{Condition, Key, Selected, date, key, lookup, selected};
+use keys::{Condition, Key, Selected, date, instant, key, lookup, selected};
 
 const MAX_DOCUMENT: usize = 1024 * 1024;
 /// The table of a list receipt shows this many rows, the last ones, where a
 /// job that appends a row for each run puts the newest. Every row is judged.
 const MAX_ROWS: usize = 200;
 const DEFAULT_SCOPE: &str = "Historical result reported by the job; not a current test.";
+/// Why a `datetime` value is not shown.
+const NO_OFFSET: &str = "no time with its offset, such as 2026-11-17T03:00:00Z";
 
 #[derive(Debug)]
 pub struct Receipt {
@@ -173,7 +175,70 @@ impl Receipt {
         newest
     }
 
-    fn table(&self, items: &[Value]) -> Table {
+    /// The card's fields: when the receipt was reported, and the values its
+    /// `fields` select from an object. A `datetime` value that is no instant
+    /// is not shown, and `unshown` says so.
+    fn fields(
+        &self,
+        document: &Value,
+        reported: Option<Written>,
+        unshown: &mut Vec<String>,
+    ) -> Vec<Field> {
+        let mut fields = vec![Field::new(
+            "Reported at",
+            reported.map(time::isoformat_written),
+            Format::Datetime,
+        )];
+        if document.is_object() {
+            for field in &self.fields {
+                let mut value = lookup(document, &field.key);
+                if field.format == Format::Datetime {
+                    value = instant(value).unwrap_or_else(|read| {
+                        unshown.push(format!(
+                            "{} is not shown: {read} is {NO_OFFSET}.",
+                            field.label
+                        ));
+                        Value::Null
+                    });
+                }
+                fields.push(Field::new(field.label.clone(), value, field.format));
+            }
+        }
+        fields
+    }
+
+    /// The table of the rows it shows. A `datetime` cell that is no instant
+    /// is not shown, and `unshown` says in how many rows of which column.
+    fn table(&self, items: &[Value], unshown: &mut Vec<String>) -> Table {
+        let mut left = vec![0_usize; self.columns.len()];
+        let mut rows = Vec::with_capacity(items.len());
+        for item in items {
+            let mut row = Vec::with_capacity(self.columns.len());
+            for (column, left) in self.columns.iter().zip(left.iter_mut()) {
+                let mut value = lookup(item, &column.key);
+                if column.format == Format::Datetime {
+                    value = instant(value).unwrap_or_else(|_| {
+                        *left += 1;
+                        Value::Null
+                    });
+                }
+                row.push(value);
+            }
+            rows.push(row);
+        }
+        for (column, count) in self.columns.iter().zip(left) {
+            if count > 0 {
+                let (rows, they) = if count == 1 {
+                    ("row", "it holds")
+                } else {
+                    ("rows", "they hold")
+                };
+                unshown.push(format!(
+                    "The column {} is not shown in {count} {rows}: {they} {NO_OFFSET}.",
+                    column.label
+                ));
+            }
+        }
         Table {
             columns: self
                 .columns
@@ -183,15 +248,7 @@ impl Receipt {
                     format: column.format,
                 })
                 .collect(),
-            rows: items
-                .iter()
-                .map(|item| {
-                    self.columns
-                        .iter()
-                        .map(|column| lookup(item, &column.key))
-                        .collect()
-                })
-                .collect(),
+            rows,
         }
     }
 }
@@ -302,6 +359,11 @@ impl Provider for Receipt {
                 items.len()
             ));
         }
+        let fields = self.fields(&document, reported, &mut findings);
+        let table = items.as_ref().map(|items| {
+            let shown = &items[items.len().saturating_sub(MAX_ROWS)..];
+            self.table(shown, &mut findings)
+        });
         // Without a limit the receipt of a job that stopped running months
         // ago is as much in order as yesterday's: the card says so.
         if self.max_age_hours == 0 {
@@ -323,27 +385,12 @@ impl Provider for Receipt {
                 ),
             );
         }
-        let mut fields = vec![Field::new(
-            "Reported at",
-            reported.map(time::isoformat_written),
-            Format::Datetime,
-        )];
-        if document.is_object() {
-            fields.extend(self.fields.iter().map(|field| {
-                Field::new(
-                    field.label.clone(),
-                    lookup(&document, &field.key),
-                    field.format,
-                )
-            }));
-        }
         let mut observation = base(state)?
             .with_fields(fields)
             .with_findings(findings)
             .with_max_age(900);
-        if let Some(items) = &items {
-            let shown = &items[items.len().saturating_sub(MAX_ROWS)..];
-            observation = observation.with_table(self.table(shown));
+        if let Some(table) = table {
+            observation = observation.with_table(table);
         }
         let mut report = Report::of(observation);
         if let Some(seconds) = age.filter(|_| trusted) {
