@@ -6,6 +6,12 @@
 
 mod support;
 
+// The tests of one part each, beside this crate's root.
+#[path = "access/folder.rs"]
+mod folder;
+#[path = "access/links.rs"]
+mod links;
+
 use std::collections::BTreeSet;
 
 use garrison_testing::http::serve;
@@ -269,12 +275,14 @@ fn access_changes_keep_a_backup_and_write_the_policy() {
             "{arguments:?}: {}",
             text(&output.stderr)
         );
-        assert!(text(&output.stdout).contains("Saved "));
+        let said = text(&output.stdout);
+        assert!(said.contains("Saved "), "{said}");
+        // Without root the file cannot be made root's, and the note says
+        // which file the broker cannot read.
         if !rustix::process::geteuid().is_root() {
-            assert!(
-                text(&output.stdout)
-                    .contains("Note: could not set group garrison-broker on the policy file.")
-            );
+            let policy = directory.path().join("policy.json");
+            let note = format!("Note: the broker cannot read {}: ", policy.display());
+            assert!(said.contains(&note), "{said}");
         }
     }
     let written = std::fs::read_to_string(directory.path().join("policy.json")).unwrap();

@@ -381,6 +381,19 @@ Notable changes for operators and users. The format follows
   another user's folder or anything else of that name stays as it is. A
   copy that cannot be removed, the run's own included, is named with how to
   remove it, and the command then ends with 1.
+- **`garrison access` follows no link beside the policy.** Root runs it,
+  and `broker.policy` may name a folder that another user can write to,
+  such as a service's state directory. The command opened its lock through
+  a link put at `<policy>.lock`, which emptied the file the link named, such
+  as `/etc/passwd`, and copied the policy over the file a link at the
+  backup's name named and made it root's alone. Every file beside the
+  policy is now reached by its name in the policy's folder, never through a
+  link: a lock that is a link is refused and left as it is, a backup takes
+  a name that nothing has (`<timestamp>-1` and so on after the time), and
+  the new policy is written to a file of its own, made root's and readable
+  for the broker's group before it takes the policy's place. Each error
+  names the file it is about, where it named none, and says so where the
+  command was run without root; a save names the backup it kept.
 - **A backup's card shows that repository's check and restore alone.**
   `garrison backup-check` kept the last integrity check and test restore of
   the report before it, whatever repository or tool that report was of: a

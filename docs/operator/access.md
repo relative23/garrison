@@ -52,8 +52,14 @@ installation offers (`modules` in `garrison.toml`), their actions only with
 the maintenance module, and the refusal the user gets where none of those
 modules is offered.
 
-Every change keeps the previous file as `access-policy.json.<timestamp>.bak`.
-There is deliberately no web page that edits the policy.
+Every change keeps the previous file as `access-policy.json.<timestamp>.bak`,
+with `-1`, `-2` and so on after the time where that name is taken, readable
+by root alone, and says which; to undo a change, copy it back with `sudo cp`,
+which keeps the policy's owner and mode. The commands follow no link in the
+policy's folder and write over nothing there: a lock at
+`access-policy.json.lock` that is a link or no file is refused and left as it
+is, and so is a policy that is one. There is deliberately no web page that
+edits the policy.
 
 ## Accounts with permissions of their own
 
