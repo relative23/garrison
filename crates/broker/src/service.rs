@@ -28,7 +28,7 @@ mod refusal;
 
 pub use ids::is_job_id;
 use ids::{is_request_id, job_id};
-use limited::Limited;
+use limited::{Failing, Limited};
 
 /// Seconds after any job before the next one may start.
 const SETTLE_SECONDS: i64 = 30;
@@ -75,7 +75,7 @@ const NOT_RECORDED: &str = "The job's start could not be recorded in the audit; 
 const CHANGED: &str = "Authorization changed before execution; nothing was run.";
 const SIGNED_OUT: &str = "The sign-in ended before execution; nothing was run.";
 const UNCHECKED: &str = "Authorization could not be checked before execution: Stalwart did not \
-                         answer. Nothing was run.";
+                         complete the check, and the broker's journal says why. Nothing was run.";
 const LIMITED: &str = "Authorization could not be checked before execution: Stalwart refused the \
                        check for its rate limit (HTTP 429). Nothing was run.";
 const NOT_SET_UP: &str = "Access rights could not be checked before execution: Garrison is not \
@@ -99,6 +99,8 @@ pub struct Broker {
     owed: Mutex<Vec<Owed>>,
     /// When the journal last named Stalwart's rate limit.
     limited: Mutex<Limited>,
+    /// When the journal last named a check Stalwart did not complete.
+    failing: Mutex<Failing>,
     runner: Box<dyn Runner>,
     worker: Worker,
 }
@@ -126,6 +128,7 @@ impl Broker {
             store: Mutex::new(store),
             owed: Mutex::new(Vec::new()),
             limited: Mutex::new(Limited::default()),
+            failing: Mutex::new(Failing::default()),
             runner,
             worker,
         })
@@ -382,13 +385,30 @@ impl Broker {
     /// the rights are checked again first.
     fn execute(&self, identifier: &str, action: &Action, token: &str) {
         // Rights that changed and rights nobody could confirm both run
-        // nothing, and the record says which it was.
+        // nothing, and the record and the journal say which it was.
         let unconfirmed = match self.authority.authorize(token) {
             Ok(grant) if grant.allows_action(&action.id) => None,
-            Ok(_) | Err(Error::Denied(_)) => Some(CHANGED),
-            Err(Error::InvalidToken(_)) => Some(SIGNED_OUT),
-            Err(Error::Unavailable(reason)) => {
-                log::warn!("Rights for job {identifier} could not be checked: {reason}");
+            Ok(_) => {
+                log::info!(
+                    "Rights for job {identifier} changed before it started: {} is no longer \
+                     granted",
+                    action.id
+                );
+                Some(CHANGED)
+            }
+            Err(Error::Denied(reason)) => {
+                log::info!("Rights for job {identifier} changed before it started: {reason}");
+                Some(CHANGED)
+            }
+            Err(Error::InvalidToken(reason)) => {
+                log::info!("The sign-in of job {identifier} ended before it started: {reason}");
+                Some(SIGNED_OUT)
+            }
+            Err(Error::Unavailable(how)) => {
+                log::warn!(
+                    "Rights for job {identifier} could not be checked: Stalwart did not complete \
+                     the check ({how})"
+                );
                 Some(UNCHECKED)
             }
             Err(Error::Limited(whose)) => {
@@ -399,7 +419,10 @@ impl Broker {
                 Some(LIMITED)
             }
             Err(Error::Misconfigured(reason)) => {
-                log::error!("Access rights cannot be checked: {reason}");
+                log::error!(
+                    "Rights for job {identifier} could not be checked: Garrison is not set up to \
+                     check them ({reason})"
+                );
                 Some(NOT_SET_UP)
             }
             Err(Error::Unreadable(reason)) => {
@@ -456,6 +479,8 @@ mod concurrency_tests;
 mod failure_tests;
 #[cfg(test)]
 mod limit_tests;
+#[cfg(test)]
+mod outage_tests;
 #[cfg(test)]
 mod record_tests;
 #[cfg(test)]

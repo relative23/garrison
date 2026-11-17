@@ -13,8 +13,17 @@ impl Broker {
         self.authority
             .authorize(token)
             .map_err(|error| match error {
-                Error::InvalidToken(_) => refuse(401, "Sign-in required again"),
-                Error::Unavailable(_) => refuse(503, "Authorization is temporarily unavailable"),
+                // Stalwart no longer takes the token: the user's session ends.
+                Error::InvalidToken(reason) => {
+                    log::info!("Sign-in required again: {reason}");
+                    refuse(401, "Sign-in required again")
+                }
+                // Stalwart could not be reached or failed on its side, which
+                // passes; the journal names the request and how.
+                Error::Unavailable(how) => {
+                    self.failing(&how);
+                    refuse(503, "Authorization is temporarily unavailable")
+                }
                 Error::Limited(whose) => {
                     self.limited(&whose);
                     refuse(503, "Authorization is temporarily unavailable")
@@ -50,6 +59,19 @@ impl Broker {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .refused(whose, Instant::now());
+        if let Some(line) = line {
+            log::warn!("{line}");
+        }
+    }
+
+    /// Say that Stalwart did not complete a check, which `how` names, at most
+    /// once a minute.
+    fn failing(&self, how: &str) {
+        let line = self
+            .failing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .failed(how, Instant::now());
         if let Some(line) = line {
             log::warn!("{line}");
         }

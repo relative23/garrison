@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 use serde_json::Value;
 
+use super::limit_tests::{kept, kept_lines};
 use super::tests::{REQUEST, Systemd, Tokens, action, make, sent};
 use super::*;
 
@@ -195,34 +196,54 @@ fn a_result_the_audit_did_not_take_is_recorded_once_it_takes_records_again() {
     assert_eq!(broker.store().active().unwrap(), Vec::<Job>::new());
 }
 
+/// A job whose rights are not confirmed when it starts runs nothing, and its
+/// record and a line in the journal say why, each reason here the case's
+/// own, so that the line found is this job's.
 #[test]
 fn a_job_that_does_not_start_says_which_check_of_its_rights_failed() {
-    let cases: [(Result<Grant, Error>, &str); 5] = [
+    kept();
+    let cases: [(Result<Grant, Error>, &str, &str); 6] = [
         (
-            Err(Error::Unavailable("timeout".into())),
-            "Authorization could not be checked before execution: Stalwart did not answer. \
-             Nothing was run.",
+            Err(Error::Unavailable("UserInfo: timeout (case 1)".into())),
+            "Authorization could not be checked before execution: Stalwart did not complete the \
+             check, and the broker's journal says why. Nothing was run.",
+            "WARN Rights for job {} could not be checked: Stalwart did not complete the check \
+             (UserInfo: timeout (case 1))",
         ),
         (
-            Err(Error::Limited("the broker's key".into())),
+            Err(Error::Limited("the broker's key (case 2)".into())),
             "Authorization could not be checked before execution: Stalwart refused the check \
              for its rate limit (HTTP 429). Nothing was run.",
+            "WARN Rights for job {} could not be checked: Stalwart refused the broker's key (case \
+             2) for its rate limit (HTTP 429)",
         ),
         (
-            Err(Error::InvalidToken("expired".into())),
+            Err(Error::InvalidToken("expired (case 3)".into())),
             "The sign-in ended before execution; nothing was run.",
+            "INFO The sign-in of job {} ended before it started: expired (case 3)",
         ),
         (
-            Err(Error::Misconfigured("no policy".into())),
+            Err(Error::Misconfigured("no policy (case 4)".into())),
             "Access rights could not be checked before execution: Garrison is not set up to \
              check them, and the broker's journal says why. Nothing was run.",
+            "ERROR Rights for job {} could not be checked: Garrison is not set up to check them \
+             (no policy (case 4))",
         ),
         (
-            Err(Error::Denied("no role".into())),
+            Err(Error::Denied("no role (case 5)".into())),
             "Authorization changed before execution; nothing was run.",
+            "INFO Rights for job {} changed before it started: no role (case 5)",
+        ),
+        (
+            Err(Error::Unreadable("UserInfo: no subject (case 6)".into())),
+            "Authorization could not be checked before execution: Stalwart answered in a form \
+             this release of Garrison does not read, and the broker's journal names the answer. \
+             Nothing was run.",
+            "ERROR Rights for job {} could not be checked: Stalwart answered in a form this \
+             release of Garrison does not read (UserInfo: no subject (case 6))",
         ),
     ];
-    for (outcome, message) in cases {
+    for (outcome, message, line) in cases {
         let setup = make(true);
         let answer = submit(&setup.broker, "run_monitor", REQUEST).unwrap();
         let id = answer["job"]["id"].as_str().unwrap();
@@ -236,5 +257,7 @@ fn a_job_that_does_not_start_says_which_check_of_its_rights_failed() {
             (JobStatus::Failed, message)
         );
         assert!(setup.systemd.runs.lock().unwrap().is_empty());
+        let line = line.replace("{}", id);
+        assert_eq!(kept_lines(&line, "").len(), 1, "{line}");
     }
 }

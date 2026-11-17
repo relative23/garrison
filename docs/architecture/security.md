@@ -59,8 +59,11 @@ reads or without what was asked, or an error of a method other than
 a Stalwart release Garrison does not support yet may give, to UserInfo, where
 only 401 says that a token is no longer valid, or to the management API. Signed-in users
 stay signed in and see that their rights cannot be checked, nobody new can
-sign in, and the broker's journal names the cause as an error, the answer
-by the request it answered. A typo in the policy, or an upgrade of Stalwart,
+sign in, and the broker's journal names the cause and the request that met
+it: a broken setup and an answer this release does not read as an error,
+Stalwart that could not be reached or failed on its side, and its rate
+limit, as a warning, at once and then at most once a minute with how many
+more there were. A typo in the policy, or an upgrade of Stalwart,
 so does not sign everyone out.
 
 A configuration with unknown keys, modules or actions keeps the services

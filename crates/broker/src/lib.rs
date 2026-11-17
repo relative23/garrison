@@ -5,6 +5,7 @@
 pub mod client;
 pub mod polkit;
 pub mod protocol;
+mod quiet;
 pub mod runner;
 pub mod server;
 pub mod service;

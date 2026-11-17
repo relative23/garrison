@@ -1,48 +1,22 @@
-//! Stalwart's own rate limit, as the broker's journal says it. Where Stalwart
-//! answers a check of a user's rights 429, the broker answers 503 as when
-//! Stalwart is away; the journal names the limit at once, and then once a
-//! minute at most, with how many more were refused, so that a flood of
-//! checks does not fill it.
+//! Stalwart's own rate limit and its outages, as the broker's journal says
+//! them. Where Stalwart answers a check of a user's rights 429, or could not
+//! be reached or failed on its side, the broker answers 503; the journal
+//! names it at once, and then once a minute at most, with how many more
+//! there were, so that a flood of checks does not fill it.
 
-use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-/// At most one line in this long.
-const QUIET: Duration = Duration::from_secs(60);
+use crate::quiet::Quiet;
 
-/// When the journal last named the limit, and what was refused since.
+/// When the journal last named Stalwart's rate limit, and what it refused
+/// since.
 #[derive(Debug, Default)]
-pub(super) struct Limited {
-    said: Option<Instant>,
-    /// The refusals since that line, by whose budget they were.
-    since: BTreeMap<String, u64>,
-}
+pub(super) struct Limited(Quiet);
 
 impl Limited {
     /// The line for a refusal of `whose` budget at `now`, where one is due.
     pub(super) fn refused(&mut self, whose: &str, now: Instant) -> Option<String> {
-        if self
-            .said
-            .is_some_and(|said| now.saturating_duration_since(said) < QUIET)
-        {
-            *self.since.entry(whose.to_owned()).or_default() += 1;
-            return None;
-        }
-        self.said = Some(now);
-        let since = std::mem::take(&mut self.since);
-        let more = if since.is_empty() {
-            String::new()
-        } else {
-            let each: Vec<String> = since
-                .iter()
-                .map(|(whose, count)| format!("{count} to {whose}"))
-                .collect();
-            format!(
-                "; {} more since the last such line ({})",
-                since.values().sum::<u64>(),
-                each.join(", ")
-            )
-        };
+        let more = self.0.due(whose, "to", now)?;
         Some(format!(
             "Stalwart refused a check of a user's rights for its rate limit (HTTP 429 to \
              {whose}): rights cannot be checked, and users see \"Authorization is temporarily \
@@ -51,8 +25,28 @@ impl Limited {
     }
 }
 
+/// When the journal last named a check that Stalwart did not complete, and
+/// which failed since.
+#[derive(Debug, Default)]
+pub(super) struct Failing(Quiet);
+
+impl Failing {
+    /// The line for a check that Stalwart did not complete at `now`, where
+    /// one is due; `how` names the request and what met it.
+    pub(super) fn failed(&mut self, how: &str, now: Instant) -> Option<String> {
+        let more = self.0.due(how, "for", now)?;
+        Some(format!(
+            "Stalwart did not complete a check of a user's rights ({how}): rights cannot be \
+             checked, and users see \"Authorization is temporarily unavailable\", until it \
+             answers again{more}"
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[test]
@@ -90,5 +84,38 @@ mod tests {
             .unwrap();
         assert!(quiet.contains("HTTP 429 to the user's token"), "{quiet}");
         assert!(!quiet.contains("more since"), "{quiet}");
+    }
+
+    #[test]
+    fn a_check_stalwart_did_not_complete_is_said_at_once_and_then_once_a_minute() {
+        let mut failing = Failing::default();
+        let start = Instant::now();
+        let first = failing
+            .failed("UserInfo: Stalwart answered HTTP 503", start)
+            .unwrap();
+        assert_eq!(
+            first,
+            "Stalwart did not complete a check of a user's rights (UserInfo: Stalwart answered \
+             HTTP 503): rights cannot be checked, and users see \"Authorization is temporarily \
+             unavailable\", until it answers again"
+        );
+        let at = start + Duration::from_secs(30);
+        assert_eq!(
+            failing.failed("UserInfo: Stalwart is unavailable", at),
+            None
+        );
+        let later = failing
+            .failed(
+                "UserInfo: Stalwart is unavailable",
+                start + Duration::from_secs(60),
+            )
+            .unwrap();
+        assert!(
+            later.ends_with(
+                "until it answers again; 1 more since the last such line (1 for UserInfo: \
+                 Stalwart is unavailable)"
+            ),
+            "{later}"
+        );
     }
 }

@@ -96,7 +96,7 @@ fn failures_keep_their_meaning() {
     assert_eq!(
         authority.authorize(TOKEN),
         Err(Error::Unavailable(
-            "Native authorization is temporarily unavailable".into()
+            "UserInfo: Stalwart answered HTTP 502".into()
         ))
     );
     server.requests();
@@ -105,6 +105,36 @@ fn failures_keep_their_meaning() {
     let policy = &config.broker.policy;
     std::fs::set_permissions(policy, std::os::unix::fs::PermissionsExt::from_mode(0o666)).unwrap();
     assert!(matches!(authority.policy(), Err(Error::Misconfigured(_))));
+}
+
+/// Stalwart that could not be reached or failed on its side is named by the
+/// request that met it and how, which the broker's journal says: UserInfo
+/// with the user's token, the management API with the broker's key.
+#[test]
+fn an_outage_is_named_by_the_request_it_met() {
+    let identity = respond(&json!({"sub": "1", "email": "ann@example.test"}));
+    let failed = respond(&json!({"methodResponses": [["error", {"type": "serverFail"}, "0"]]}));
+    let (authority, server, _directory) = authority(vec![
+        answer(503, ""),
+        String::new(),
+        identity.clone(),
+        answer(500, ""),
+        identity,
+        failed,
+    ]);
+    let named = [
+        "UserInfo: Stalwart answered HTTP 503",
+        "UserInfo: Stalwart is unavailable",
+        "the management API: Stalwart answered HTTP 500",
+        "the management API: Stalwart could not complete the request",
+    ];
+    for how in named {
+        assert_eq!(
+            authority.authorize(TOKEN),
+            Err(Error::Unavailable(how.into()))
+        );
+    }
+    server.requests();
 }
 
 /// Stalwart's rate limit, named by whose budget met it: the user's token at

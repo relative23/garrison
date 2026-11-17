@@ -1151,6 +1151,20 @@ Notable changes for operators and users. The format follows
   now say that the query waited too long for another service's write and to
   try again in a moment (503), with nothing in the journal; a read of the
   status or of the coverage stopped by its own time says to try again too.
+- **The broker's journal says how Stalwart failed a check of a user's
+  rights.** Where Stalwart could not be reached or failed a check on its
+  side (a connection it did not answer, HTTP 5xx or 408, a request over its
+  five seconds, the JMAP error `serverFail`), users saw "Authorization is
+  temporarily unavailable" and nobody could sign in, and no journal said
+  why, though the operations guide sends the operator to the broker's. The
+  broker now writes "Stalwart did not complete a check of a user's rights",
+  with the request that met it, UserInfo or the management API, and how, at
+  once and then at most once a minute with how many more failed. A job
+  whose start meets it says that Stalwart did not complete the check, where
+  it said that Stalwart did not answer, also after an answer of HTTP 500,
+  and its line names how. The broker's journal also names a token that
+  Stalwart no longer takes, and a job that did not start because its
+  rights changed or its sign-in ended.
 
 ## [0.1.2] - 2026-11-13
 

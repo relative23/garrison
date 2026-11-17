@@ -112,20 +112,10 @@ impl Authority {
         })
     }
 
+    /// The grant of the token's user, or why there is none. An error met at
+    /// Stalwart names the request that met it where that tells something,
+    /// so that the broker's journal can say it.
     pub fn authorize(&self, token: &str) -> Result<Grant, Error> {
-        self.evaluate(token).map_err(|error| match error {
-            Error::Unavailable(_) => {
-                Error::Unavailable("Native authorization is temporarily unavailable".into())
-            }
-            error @ (Error::Limited(_)
-            | Error::InvalidToken(_)
-            | Error::Denied(_)
-            | Error::Unreadable(_)
-            | Error::Misconfigured(_)) => error,
-        })
-    }
-
-    fn evaluate(&self, token: &str) -> Result<Grant, Error> {
         let identity = self
             .provider
             .userinfo(token, None)
@@ -165,16 +155,15 @@ impl Authority {
 
 /// `error` with what met it, where that tells something: Stalwart's rate
 /// limit as that of `whose` budget, since Stalwart counts each token and key
-/// apart and says nothing of which it refused; an answer this release does
-/// not read by the `request` it answered, which the journal names.
+/// apart and says nothing of which it refused; Stalwart that could not be
+/// reached or failed on its side, and an answer this release does not read,
+/// by the `request` it met, which the journal names.
 fn asked(error: Error, whose: &str, request: &str) -> Error {
     match error {
         Error::Limited(_) => Error::Limited(whose.to_owned()),
+        Error::Unavailable(how) => Error::Unavailable(format!("{request}: {how}")),
         Error::Unreadable(reason) => Error::Unreadable(format!("{request}: {reason}")),
-        error @ (Error::Unavailable(_)
-        | Error::InvalidToken(_)
-        | Error::Denied(_)
-        | Error::Misconfigured(_)) => error,
+        error @ (Error::InvalidToken(_) | Error::Denied(_) | Error::Misconfigured(_)) => error,
     }
 }
 
