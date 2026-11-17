@@ -70,8 +70,9 @@ fn restore_directory() -> Result<(PathBuf, Option<File>), String> {
         .mode(0o700)
         .create(&path)
         .map_err(|error| format!("{}: {error}", path.display()))?;
-    // A file system without locks on folders restores all the same; the
-    // directory is then left alone only for `SETTLED`.
+    // Where folders cannot be locked (NFS may not), the restore goes on, but
+    // `leftover` then removes nothing: no lock tells a copy left behind
+    // from a live run's.
     let held = opened(&path).filter(|folder| {
         rustix::fs::flock(folder, FlockOperation::NonBlockingLockExclusive).is_ok()
     });
