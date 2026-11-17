@@ -908,6 +908,16 @@ Notable changes for operators and users. The format follows
   file existed, and showed the age of the daily one without judging it. A
   daily database older than 48 hours is now a warning, and files without a
   daily database among them are Unknown.
+- **A webmail plugin whose bundle cannot be checked is named.** The
+  webmail plugins card stayed in order where a plugin's bundle integrity
+  was "unknown", as long as no other bundle mismatched: a plugin that
+  Bulwark's registry does not list or lists twice, one without a recorded
+  SHA-256, and one whose bundle is missing, a link, unreadable or larger
+  than 2 MiB, which is what such a check is for. Each is now named with why
+  its integrity is not known, and the card is Partial beside a verified
+  bundle and Unknown where none could be checked; a mismatch stays a
+  failure and is named first. A registry that cannot be read is named with
+  why, where the card was Unknown without a word.
 - **The Maintenance page keeps following a job, and keeps its dialog.** One
   failed look at a started job ended the following for good, and the notice
   stayed at "Queued"; it now looks again, later each time, and says
