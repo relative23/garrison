@@ -183,6 +183,15 @@ Notable changes for operators and users. The format follows
   maintenance dialog where a refresh of the list changed the phrase it
   waits for. Such buttons now only say that they cannot act, keep the
   focus, and do nothing when pressed.
+- **Attacks & bans says when its checks could not be read.** Below its
+  summary the page shows what the collector's checks say of the module,
+  such as the sending addresses that send unusually much. Where the status
+  could not be read, that card was simply missing, as if there was nothing
+  to report, and after a refresh that failed the cards stayed without the
+  notice the dashboard and the status pages give. The page now says that
+  the module's checks could not be read and why, that a refresh failed and
+  of when the status is, or that the collector has produced none yet, as
+  every page that shows checks does.
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",

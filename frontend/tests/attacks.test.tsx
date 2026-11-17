@@ -74,6 +74,33 @@ describe("Attacks & bans", () => {
     expect(screen.getByText("What the evidence labels mean").tagName).toBe("SUMMARY");
   });
 
+  it("say that the module's checks could not be read when the status cannot be", async () => {
+    serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks() } });
+    renderView(<Attacks />, { status: new Error("The status database is not readable") });
+    await screen.findByRole("table", { name: "Addresses" });
+    // Where the collector's checks would be, such as the sending addresses.
+    const notice = screen.getByText("The collector's checks of this module could not be read.").closest("[role]");
+    expect(notice?.textContent).toContain("The status database is not readable");
+    expect(within(notice as HTMLElement).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("say that a refresh of the status failed above the checks they still show", async () => {
+    serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks() } });
+    const senders = observation({ id: "senders.accounts", title: "Sending addresses", modules: ["attacks"] });
+    renderView(<Attacks />, { status: status([senders]), refreshError: new Error("The broker is not reachable") });
+    await screen.findByRole("table", { name: "Addresses" });
+    const notice = screen.getByText(/The status could not be refreshed/).closest("[role]");
+    expect(notice?.textContent).toContain("The broker is not reachable");
+    expect(screen.getByText("Sending addresses")).toBeTruthy();
+  });
+
+  it("say when the collector has produced no status yet", async () => {
+    serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks() } });
+    renderView(<Attacks />, { status: status([], { available: false }) });
+    await screen.findByRole("table", { name: "Addresses" });
+    expect(screen.getByText("The collector has not produced a status snapshot yet.")).toBeTruthy();
+  });
+
   it("say that completeness is unknown when the coverage cannot be read", async () => {
     serve({
       "GET coverage": { status: 403, body: { detail: "This Garrison module is not authorized" } },

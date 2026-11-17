@@ -49,6 +49,7 @@
     "accounts": "Accounts under attack",
     "accountsNote": "A name someone tried is shown only where an account of that name exists. Other names are not recorded: they may be passwords typed into the wrong field.",
     "bans": "Stalwart's bans",
+    "checksUnread": "The collector's checks of this module could not be read.",
     "footer": "From recorded events between {{from}} and {{to}}. Each list shows at most 50 rows.",
     "networks": "Networks with several addresses",
     "sources": "Addresses",
