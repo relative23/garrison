@@ -78,22 +78,24 @@ brokers never repeat a job; pending jobs become "uncertain".
   the base64 of the whole message (ignoring every byte outside the alphabet,
   RFC 2045 section 6.8, so junk, boundaries and headers around a base64 body
   fall away), undoes quoted-printable, and reads a uuencode block wherever it
-  stands. Where a part begins or ends, how deeply it is nested and how its
-  headers are written are never read to decide this, so no boundary trick,
-  depth or header hides a document the scan would otherwise find. It does not
-  decode yEnc, which mail programs do not decode on their own, nor a body
-  wrapped again in a transfer encoding (base64 whose own bytes are another
-  base64 or uuencode body, as a base64-encoded forwarded message may be);
-  such a message passes as one without macros. A part that declares a
-  transfer encoding the filter does not decode is incomplete, below, not a
-  clean message. Anyone who can reach its loopback port can ask it about a
-  message, as with any milter.
+  stands. A body wrapped again in a transfer encoding (a base64-encoded
+  forwarded message with its own base64 attachment) is read as a message in
+  turn, three encodings deep as archives are opened three deep. Where a part
+  begins or ends, how deeply it is nested and how its headers are written are
+  never read to decide this, so no boundary trick, depth or header hides a
+  document the scan would otherwise find. It does not decode yEnc, which mail
+  programs do not decode on their own; such a message passes as one without
+  macros. A part that declares a transfer encoding the filter does not decode,
+  and nesting deeper than three, are incomplete, below, not a clean message.
+  Anyone who can reach its loopback port can ask it about a message, as with
+  any milter.
 - A message the macro filter could not scan completely is taken all the same
   unless the operator chose otherwise: one larger than `max_message_mib`,
   one whose archives unpack to more than 16 MiB a file or 64 MiB together or
   are compressed by another method than deflate (bzip2, LZMA and the like),
   one with a part that declares a transfer encoding the filter does not
-  decode or a uuencode block begun and not ended, and one whose scan was not
+  decode, a uuencode block begun and not ended, or a body nested in more than
+  three transfer encodings, and one whose scan was not
   done within 20 seconds. By default (`on_incomplete = "tag"`) it arrives with the
   header `X-Garrison-Scan: unscanned`, and it is up to a Sieve rule or the
   mail program to act on that; `"defer"` and `"refuse"` keep it out.

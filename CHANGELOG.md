@@ -165,10 +165,8 @@ Notable changes for operators and users. The format follows
   stands. No boundary, nesting depth or header is read to decide this, so
   none of them hides a document. A part that declares a transfer encoding the
   scan cannot decode, or a uuencode block begun and not ended, is marked
-  unscanned (`on_incomplete`), not passed as clean. yEnc, and a document
-  wrapped again in a transfer encoding (base64 whose own bytes are another
-  base64 body), stay named limits (see
-  [configuration](docs/operator/configuration.md#milter)).
+  unscanned (`on_incomplete`), not passed as clean. yEnc stays a named limit
+  (see [configuration](docs/operator/configuration.md#milter)).
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",
