@@ -153,7 +153,8 @@ fn a_reading_kept_without_the_key_is_made_again_once_there_is_one() {
 /// memory: the cards of a check that keeps its reading show that reading,
 /// without a word of the key, until the check reads Stalwart again. So the
 /// collector's journal says only that each card says so when its check next
-/// reads Stalwart.
+/// reads Stalwart. The blocklist and reverse-name cards are not among them:
+/// their check reads Stalwart again in the next run.
 #[test]
 fn a_reading_kept_with_the_key_stands_until_its_check_reads_stalwart_again() {
     let work = tempfile::tempdir().unwrap();
@@ -173,12 +174,5 @@ fn a_reading_kept_with_the_key_stands_until_its_check_reads_stalwart_again() {
         }
     }
     let standing: Vec<String> = standing.into_iter().collect();
-    assert_eq!(
-        standing,
-        [
-            "flow.spam-domains",
-            "reputation.blocklists",
-            "reputation.reverse"
-        ]
-    );
+    assert_eq!(standing, ["flow.spam-domains"]);
 }
