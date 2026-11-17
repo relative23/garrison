@@ -13,6 +13,7 @@ use clap::Subcommand;
 use garrison_authz::policy::{Policy, is_profile_name, parse_policy};
 use garrison_authz::{Authority, Error, SUPPORTED};
 use garrison_core::config::Config;
+use garrison_core::files::read_protected;
 use garrison_stalwart::jmap::{JmapClient, Object};
 use garrison_stalwart::oidc::is_subject;
 use garrison_stalwart::permissions::native_rights;
@@ -27,6 +28,8 @@ use defaults::{administrator_roles, default_profiles};
 use folder::{Current, Folder};
 
 const POLICY_GROUP: &str = "garrison-broker";
+/// As much of the policy as the broker reads.
+const MAX_POLICY: usize = 65536;
 
 fn profile_name(value: &str) -> Result<String, String> {
     if is_profile_name(value) {
@@ -40,7 +43,7 @@ fn profile_name(value: &str) -> Result<String, String> {
 pub(crate) enum Command {
     /// Create the policy and bind native administrator roles.
     Init {
-        /// Replace an existing policy (a backup of it is kept).
+        /// Replace an existing policy with the default one (a backup of it is kept).
         #[arg(long)]
         force: bool,
     },
@@ -72,6 +75,8 @@ pub(crate) enum Command {
         /// The OIDC subject, for a local account its numeric account ID.
         subject: String,
     },
+    /// Give the profiles the actions garrison.toml has now, as init does.
+    Update,
 }
 
 /// JSON with two-space indentation and a final newline.
@@ -91,14 +96,8 @@ pub(crate) fn group_id(name: &str) -> Option<u32> {
 /// Validate, back up the previous file and put the new one in its place.
 fn save(config: &Config, folder: &Folder, policy: &Policy) -> Result<(), String> {
     let document = policy.to_document();
-    let ids: BTreeSet<&str> = config
-        .broker
-        .actions
-        .iter()
-        .map(|action| action.id.as_str())
-        .collect();
     // Never write an invalid policy.
-    parse_policy(&document, &ids).map_err(|error| error.to_string())?;
+    parse_policy(&document, &action_ids(config)).map_err(|error| error.to_string())?;
     let path = &config.broker.policy;
     let kept = match folder.current()? {
         Current::File(previous) => Some(folder.back_up(&previous)?),
@@ -164,14 +163,100 @@ fn said(error: Error) -> String {
     }
 }
 
+/// Whether there is a file at the policy's name to read.
+fn there(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(folder::missing(path)),
+        Ok(kind) if !kind.is_file() => Err(not_a_file(path)),
+        _ => Ok(()),
+    }
+}
+
 fn load(config: &Config) -> Result<Policy, String> {
     let path = &config.broker.policy;
-    match fs::symlink_metadata(path) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(folder::missing(path)),
-        Ok(kind) if !kind.is_file() => return Err(not_a_file(path)),
-        _ => {}
-    }
-    authority(config).policy().map_err(said)
+    there(path)?;
+    authority(config).policy().map_err(|error| {
+        let gone = gone(config);
+        if gone.is_empty() {
+            return said(error);
+        }
+        format!(
+            "The access policy {} names {}, which garrison.toml no longer has: run `garrison \
+             access update`, which takes {} out of the profiles.",
+            path.display(),
+            gone.join(", "),
+            if gone.len() == 1 { "it" } else { "them" }
+        )
+    })
+}
+
+/// The actions the policy's profiles name, as it is written; none where it
+/// cannot be read.
+fn named(config: &Config) -> BTreeSet<String> {
+    let Ok(raw) = read_protected(&config.broker.policy, MAX_POLICY) else {
+        return BTreeSet::new();
+    };
+    let profiles = raw["profiles"].as_object().into_iter().flatten();
+    profiles
+        .filter_map(|(_, profile)| profile["actions"].as_array())
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The actions the policy names that garrison.toml no longer has.
+fn gone(config: &Config) -> Vec<String> {
+    let configured = action_ids(config);
+    named(config)
+        .into_iter()
+        .filter(|action| !configured.contains(action.as_str()))
+        .collect()
+}
+
+fn action_ids(config: &Config) -> BTreeSet<&str> {
+    config
+        .broker
+        .actions
+        .iter()
+        .map(|action| action.id.as_str())
+        .collect()
+}
+
+/// The policy as it is written, actions that garrison.toml no longer has
+/// among them, which `update` takes out.
+fn written(config: &Config) -> Result<Policy, String> {
+    let path = &config.broker.policy;
+    there(path)?;
+    let raw = read_protected(path, MAX_POLICY)
+        .map_err(|error| format!("Garrison access policy: {error}"))?;
+    let named = named(config);
+    let mut known = action_ids(config);
+    known.extend(named.iter().map(String::as_str));
+    parse_policy(&raw, &known).map_err(|error| error.to_string())
+}
+
+/// The profiles get the actions of garrison.toml, as `defaults::follow`
+/// gives them.
+fn update(config: &Config) -> Result<u8, String> {
+    locked(config, false, |folder| {
+        let mut policy = written(config)?;
+        let changes = defaults::follow(config, &mut policy);
+        if changes.is_empty() {
+            say("The profiles have the actions garrison.toml names; nothing to change.");
+            return Ok(0);
+        }
+        for change in &changes {
+            say(change);
+        }
+        save(config, folder, &policy)?;
+        say(
+            "Run the installer again now: it writes the polkit rule for these actions and \
+             restarts the broker, which reads them only when it starts. Until then a broker \
+             that does not know an action the policy names lets nobody use Garrison.",
+        );
+        Ok(0)
+    })
 }
 
 fn native(config: &Config) -> Result<JmapClient, String> {
@@ -300,6 +385,7 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
             })
         }
         Command::Check { subject } => check(config, subject),
+        Command::Update => update(config),
     }
 }
 

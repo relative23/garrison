@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use garrison_authz::policy::Profile;
+use garrison_authz::policy::{ACTION_PERMISSIONS, Policy, Profile};
 use garrison_core::config::Config;
 use garrison_core::modules::ModuleId;
 use garrison_stalwart::jmap::Object;
@@ -132,4 +132,60 @@ pub(super) fn administrator_roles(config: &Config) -> Result<BTreeMap<String, St
         }
     }
     Ok(result)
+}
+
+/// The default profiles whose actions follow garrison.toml: `init` gives
+/// them every action and those marked `operator = true`.
+const FOLLOWING: [&str; 2] = ["administrator", "operator"];
+
+/// Whether `profile` may hold actions at all: the policy refuses actions in
+/// a profile without the maintenance module or without the right to start
+/// them.
+fn holds_actions(profile: &Profile) -> bool {
+    profile.modules.contains(&ModuleId::Actions)
+        && ACTION_PERMISSIONS
+            .iter()
+            .all(|name| profile.required.contains(*name))
+}
+
+/// Give the default profiles the actions `init` gives them, as
+/// garrison.toml has them now, where they may hold actions, and take from
+/// every profile the actions garrison.toml no longer has. What changed,
+/// one line for each profile.
+pub(super) fn follow(config: &Config, policy: &mut Policy) -> Vec<String> {
+    let configured: BTreeSet<String> = config
+        .broker
+        .actions
+        .iter()
+        .map(|action| action.id.clone())
+        .collect();
+    let defaults = default_profiles(config);
+    let mut changes = Vec::new();
+    for (name, profile) in &mut policy.profiles {
+        let wanted = match defaults.get(name) {
+            Some(default) if FOLLOWING.contains(&name.as_str()) && holds_actions(profile) => {
+                default.actions.clone()
+            }
+            _ => profile.actions.intersection(&configured).cloned().collect(),
+        };
+        let added: Vec<&str> = wanted
+            .difference(&profile.actions)
+            .map(String::as_str)
+            .collect();
+        let taken: Vec<&str> = profile
+            .actions
+            .difference(&wanted)
+            .map(String::as_str)
+            .collect();
+        let said: Vec<String> = [(added, "added"), (taken, "taken out")]
+            .into_iter()
+            .filter(|(actions, _)| !actions.is_empty())
+            .map(|(actions, what)| format!("{} {what}", actions.join(", ")))
+            .collect();
+        if !said.is_empty() {
+            changes.push(format!("Profile {name}: {}.", said.join(", ")));
+        }
+        profile.actions = wanted;
+    }
+    changes
 }

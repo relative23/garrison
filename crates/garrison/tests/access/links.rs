@@ -46,8 +46,18 @@ fn same(settings: &str) -> String {
     settings.to_owned()
 }
 
+/// An action added after the policy was written.
+fn added(settings: &str) -> String {
+    format!(
+        "{settings}\n[[actions]]\nid = \"install_updates\"\ntitle = \"Install updates\"\n\
+         description = \"Installs the pending updates.\"\nconfirmation = \"INSTALL UPDATES\"\n\
+         unit = \"updates.service\"\noperation = \"start\"\ncooldown_seconds = 0\n\
+         timeout_seconds = 60\n"
+    )
+}
+
 /// Every command of `garrison access` that writes the policy.
-const WRITING: [Writing; 5] = [
+const WRITING: [Writing; 6] = [
     Writing {
         arguments: &["access", "init", "--force"],
         answers: roles,
@@ -72,6 +82,11 @@ const WRITING: [Writing; 5] = [
         arguments: &["access", "deny", "7", "--undo"],
         answers: none,
         settings: same,
+    },
+    Writing {
+        arguments: &["access", "update"],
+        answers: none,
+        settings: added,
     },
 ];
 
@@ -237,6 +252,11 @@ fn every_command_of_access_writes_as_above_or_only_reads() {
         .skip_while(|line| *line != "Commands:")
         .skip(1)
         .take_while(|line| !line.is_empty())
+        // A command's line, not a description's continuation.
+        .filter(|line| {
+            line.strip_prefix("  ")
+                .is_some_and(|rest| !rest.starts_with(' '))
+        })
         .filter_map(|line| line.split_whitespace().next())
         .filter(|command| *command != "help")
         .collect();

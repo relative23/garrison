@@ -7,6 +7,8 @@
 mod support;
 
 // The tests of one part each, beside this crate's root.
+#[path = "access/actions.rs"]
+mod actions;
 #[path = "access/folder.rs"]
 mod folder;
 #[path = "access/links.rs"]

@@ -409,6 +409,22 @@ Notable changes for operators and users. The format follows
   now writes the default profiles without a binding, says so on standard
   error with the `garrison access bind-role` that binds the administrators'
   role, and ends with 1.
+- **An action added after `garrison access init` reaches its users.**
+  `init` gives the `administrator` profile every action of `[[actions]]`
+  and the `operator` profile those marked `operator = true`, as
+  `garrison.toml` has them then, and nothing changed them later: an action
+  added afterwards was granted to nobody and missing from the Maintenance
+  page, and one taken out left a policy that names it, so that nobody could
+  use Garrison and every `garrison access` command and the installer
+  refused it. `garrison access update` gives the two profiles the actions
+  as `garrison.toml` names them now and takes from every profile those it
+  no longer has; role bindings, accounts and denials stay, and the previous
+  file is kept. A policy that names an action `garrison.toml` no longer has
+  is said so, with `update` as the way out. The broker reads `[[actions]]`
+  only when it starts: after `update`, run the installer again or restart
+  the broker, as [access](docs/operator/access.md#when-the-actions-change)
+  says, which also says what `init --force` drops and how the policy file
+  is written.
 - **A backup's card shows that repository's check and restore alone.**
   `garrison backup-check` kept the last integrity check and test restore of
   the report before it, whatever repository or tool that report was of: a
