@@ -213,6 +213,27 @@ fn the_history_is_read_every_ten_minutes_and_its_absence_is_unknown() {
 }
 
 #[test]
+fn the_limits_apply_at_once_to_a_reading_kept_from_before() {
+    // The reading is kept for ten minutes; the limits are those configured
+    // now, not those of the run that read the history.
+    let memory = Remembered::default();
+    let events = [queued("anna@example.test", 60, 20, "192.0.2.1")];
+    let first = observed(&provider(), &events, 20, &memory, 0);
+    assert_eq!(first.state, State::Ok);
+    let strict = Senders::new(&table("type = \"senders\"\nburst = 10")).unwrap();
+    let kept = observed(&strict, &[], 20, &memory, 60);
+    assert_eq!(
+        (kept.state, kept.findings.clone()),
+        (
+            State::Warning,
+            vec!["anna@example.test: 20 recipients within one hour.".to_owned()]
+        )
+    );
+    // Still the reading of the first run.
+    assert_dated(&kept, 0, EVERY);
+}
+
+#[test]
 fn the_limits_can_be_set_and_are_checked() {
     let strict = Senders::new(&table(
         "type = \"senders\"\nburst = 10\nmodules = [\"alerts\"]",

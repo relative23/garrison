@@ -78,6 +78,16 @@ impl Sent {
     }
 }
 
+/// What the tests were sent to and from: results for another listener,
+/// recipient or sender are not these tests'.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+struct Aim {
+    host: String,
+    port: u16,
+    recipient: String,
+    sender: String,
+}
+
 /// The last result of each test, as the status database keeps them.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 struct Tests {
@@ -86,6 +96,10 @@ struct Tests {
     /// The macro test, where the operator switched it on.
     #[serde(default)]
     macros: Option<Sent>,
+    /// What they were sent to. An earlier release kept none; its results are
+    /// taken as made for the configuration as it is.
+    #[serde(default)]
+    aim: Option<Aim>,
 }
 
 #[derive(Debug)]
@@ -235,9 +249,9 @@ impl MailTest {
     }
 
     /// For how long results kept at `kept` are used: until the first test is
-    /// due again, and not at all once the macro test was switched on or off.
+    /// due again, and not at all where they are not this configuration's.
     fn wait(&self, kept: i64, tests: &Tests) -> i64 {
-        if tests.macros.is_some() != self.macros {
+        if !self.fits(tests) {
             return 0;
         }
         [
@@ -255,8 +269,7 @@ impl MailTest {
     /// The tests that are due, sent now; the others stay as they were kept.
     fn tested(&self, context: &Context<'_>, before: Option<(i64, Tests)>) -> Tests {
         let now = context.now.as_second();
-        // Results from before the macro test was switched are not these tests.
-        let before = before.filter(|(_, tests)| tests.macros.is_some() == self.macros);
+        let before = before.filter(|(_, tests)| self.fits(tests));
         let result = |test: Test, kept: fn(&Tests) -> Option<&Sent>| {
             let stays = before.as_ref().and_then(|(at, tests)| {
                 let sent = kept(tests)?;
@@ -289,7 +302,26 @@ impl MailTest {
             macros: self
                 .macros
                 .then(|| result(Test::Macro, |tests| tests.macros.as_ref())),
+            aim: Some(self.aim()),
         }
+    }
+
+    /// What this configuration sends the tests to and from.
+    fn aim(&self) -> Aim {
+        Aim {
+            host: self.host.clone(),
+            port: self.port,
+            recipient: self.recipient.clone(),
+            sender: self.sender.clone(),
+        }
+    }
+
+    /// Whether results kept are of the tests this configuration asks for:
+    /// not where the macro test was switched since, nor where they were sent
+    /// to another listener or recipient or from another sender.
+    fn fits(&self, tests: &Tests) -> bool {
+        tests.macros.is_some() == self.macros
+            && tests.aim.as_ref().is_none_or(|aim| *aim == self.aim())
     }
 }
 

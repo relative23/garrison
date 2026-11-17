@@ -113,7 +113,9 @@ that a signed-in account hands in names the message's sender address and
 not the account. An account that sends under several of its addresses shows
 once for each, and each has its own usual number. A mailbox with many
 aliases can so stay below a threshold that it would pass as one account;
-lower `factor` or `burst` where that matters.
+lower `factor` or `burst` where that matters. The limits apply at once: a
+change of them judges the next run's card, also over the reading of up to
+ten minutes before.
 
 The table lists the 20 addresses that need a look first, with messages,
 recipients, their usual number a day, the busiest hour, bounces and the IP
@@ -392,6 +394,10 @@ where a milter defers it, as a scanner that cannot scan does
 (clamav-milter's `OnFail Defer` while clamd is down), and where it cannot
 reach a milter whose entry says to defer then, as setup writes Garrison's
 filter for `when_unreachable = "defer"`.
+The results are those of the tests as configured: a change of
+`recipient`, `sender`, `host`, `port` or `macro_document` sends the tests
+anew in the next run, and nothing kept for what was configured before is
+shown.
 
 With `macro_document = true` a third message carries a document that a macro
 filter takes for one with macros (it holds none, only the name a macro

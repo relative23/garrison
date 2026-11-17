@@ -204,6 +204,18 @@ Notable changes for operators and users. The format follows
   they now have a column of their own. A milter that deferred every message
   it was shown since yesterday, as clamav-milter does while clamd is down,
   left the card in order; it is now a warning.
+- **The test messages' results are those of the listener and the mailbox
+  configured.** After a change of `recipient`, `sender`, `host` or `port`,
+  the Test messages card showed the results kept for the old ones under the
+  new names until each test was due again, a day later by default and up to
+  a week. Such a change now sends the tests anew in the next run, as a
+  change of `macro_document` already did; results kept by an earlier
+  release count as made for the configuration as it is.
+- **The sending addresses' limits apply at once.** A change of
+  `min_recipients`, `factor`, `burst` or `bounces` reached the card only
+  with the next reading of the event history, up to ten minutes later,
+  since the reading kept the reasons found with the limits of its time. The
+  card now applies the limits configured in each run.
 - **The dashboard's signature age is that of the database the card
   judges.** Where an old `daily.cvd` lies beside the `daily.cld` that the
   updates keep current, the Signature databases card judged the newer file

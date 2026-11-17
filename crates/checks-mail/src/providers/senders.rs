@@ -58,7 +58,6 @@ struct Sender {
     bounces: u64,
     /// The IP addresses its mail was handed in from.
     clients: u64,
-    reasons: Vec<String>,
 }
 
 /// What the status database keeps of the last reading.
@@ -175,7 +174,7 @@ impl Senders {
     }
 
     /// Read the last 15 days of the history at `now`.
-    fn read(&self, db: &Connection, now: i64) -> rusqlite::Result<Read> {
+    fn read(db: &Connection, now: i64) -> rusqlite::Result<Read> {
         let since = now - (USUAL_DAYS + 1) * DAY;
         let today = now - DAY;
         // A day's volume is in order only over a history that holds the day.
@@ -238,33 +237,20 @@ impl Senders {
                 entry.bounces += 1;
             }
         }
-        let mut senders: Vec<Sender> = sums
+        let senders: Vec<Sender> = sums
             .into_iter()
             .filter(|(_, sums)| sums.messages > 0)
-            .map(|(address, sums)| {
-                let mut sender = Sender {
-                    address,
-                    messages: sums.messages,
-                    recipients: sums.recipients,
-                    usual: (known >= KNOWN_DAYS)
-                        .then(|| sums.before / u64::try_from(known).unwrap_or(1).max(1)),
-                    busiest_hour: sums.hours.values().copied().max().unwrap_or(0),
-                    bounces: sums.bounces,
-                    clients: sums.clients.len() as u64,
-                    reasons: Vec::new(),
-                };
-                sender.reasons = self.reasons(&sender);
-                sender
+            .map(|(address, sums)| Sender {
+                address,
+                messages: sums.messages,
+                recipients: sums.recipients,
+                usual: (known >= KNOWN_DAYS)
+                    .then(|| sums.before / u64::try_from(known).unwrap_or(1).max(1)),
+                busiest_hour: sums.hours.values().copied().max().unwrap_or(0),
+                bounces: sums.bounces,
+                clients: sums.clients.len() as u64,
             })
             .collect();
-        // What needs a look first, then the busiest; names settle the rest.
-        senders.sort_by(|left, right| {
-            let (quiet, other) = (left.reasons.is_empty(), right.reasons.is_empty());
-            quiet
-                .cmp(&other)
-                .then_with(|| right.recipients.cmp(&left.recipients))
-                .then_with(|| left.address.cmp(&right.address))
-        });
         Ok(Read {
             senders,
             truncated,
@@ -275,7 +261,7 @@ impl Senders {
     }
 
     /// The last reading, or a new one where that is due: every ten minutes.
-    fn known(&self, context: &Context<'_>) -> Kept<Read> {
+    fn known(context: &Context<'_>) -> Kept<Read> {
         let problem = |problem: String| Read {
             problem: Some(problem),
             ..Read::default()
@@ -285,11 +271,9 @@ impl Senders {
             MEMORY,
             |_, _| EVERY,
             |_| match reading(&context.events_database, Duration::from_secs(2)) {
-                Ok(Some(db)) => self
-                    .read(&db, context.now.as_second())
-                    .unwrap_or_else(|error| {
-                        problem(format!("the event history could not be read: {error}"))
-                    }),
+                Ok(Some(db)) => Self::read(&db, context.now.as_second()).unwrap_or_else(|error| {
+                    problem(format!("the event history could not be read: {error}"))
+                }),
                 Ok(None) => problem("no events are recorded yet".to_owned()),
                 Err(error) => problem(format!("the event history could not be opened: {error}")),
             },
@@ -307,17 +291,29 @@ impl Provider for Senders {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let kept = self.known(context);
+        let kept = Self::known(context);
         let read = &kept.answer;
-        let unusual: Vec<&Sender> = read
+        // The limits as configured now, also over a reading kept from before.
+        let mut judged: Vec<(&Sender, Vec<String>)> = read
             .senders
             .iter()
-            .filter(|sender| !sender.reasons.is_empty())
+            .map(|sender| (sender, self.reasons(sender)))
+            .collect();
+        // What needs a look first, then the busiest; names settle the rest.
+        judged.sort_by(|(left, why), (right, other)| {
+            why.is_empty()
+                .cmp(&other.is_empty())
+                .then_with(|| right.recipients.cmp(&left.recipients))
+                .then_with(|| left.address.cmp(&right.address))
+        });
+        let unusual: Vec<&(&Sender, Vec<String>)> = judged
+            .iter()
+            .filter(|(_, reasons)| !reasons.is_empty())
             .collect();
         let mut findings: Vec<String> = unusual
             .iter()
             .take(5)
-            .map(|sender| format!("{}: {}.", sender.address, sender.reasons.join("; ")))
+            .map(|(sender, reasons)| format!("{}: {}.", sender.address, reasons.join("; ")))
             .collect();
         if unusual.len() > 5 {
             findings.push(format!("And {} more addresses.", unusual.len() - 5));
@@ -379,11 +375,10 @@ impl Provider for Senders {
                 column("Bounces", Format::Number),
                 column("IP addresses", Format::Number),
             ],
-            rows: read
-                .senders
+            rows: judged
                 .iter()
                 .take(ROWS)
-                .map(|sender| {
+                .map(|(sender, _)| {
                     vec![
                         json!(sender.address),
                         json!(sender.messages),

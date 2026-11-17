@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
@@ -7,10 +7,14 @@ use super::*;
 use crate::context::Context;
 use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
 
-/// A mail server for one session per reply: it answers the message of each
-/// session with the reply given for it and returns what it was sent. A reply
-/// that begins with `at RCPT: ` is given to the recipient instead, so that
-/// the session never comes to its message.
+/// A reply for [`server`] that is no reply: the session is taken and never
+/// greeted, until the client gives up on it.
+pub(super) const SILENT: &str = "(silent)";
+
+/// A mail server for one session per reply, on one port for all of them: it
+/// answers the message of each session with the reply given for it and
+/// returns what it was sent. A reply that begins with `at RCPT: ` is given to
+/// the recipient instead, so that the session never comes to its message.
 pub(super) fn server<const SESSIONS: usize>(
     replies: [&'static str; SESSIONS],
 ) -> (u16, thread::JoinHandle<Vec<String>>) {
@@ -20,9 +24,14 @@ pub(super) fn server<const SESSIONS: usize>(
         let mut sessions = Vec::new();
         for answer in replies {
             let (stream, _) = listener.accept().unwrap();
+            let mut seen = String::new();
+            if answer == SILENT {
+                let _ = BufReader::new(stream).read_to_string(&mut seen);
+                sessions.push(seen);
+                continue;
+            }
             let mut writer = stream.try_clone().unwrap();
             let mut reader = BufReader::new(stream);
-            let mut seen = String::new();
             writer
                 .write_all(b"220 mail.example.test ESMTP\r\n")
                 .unwrap();
