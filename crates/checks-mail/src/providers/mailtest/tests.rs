@@ -2,6 +2,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::thread;
 
+use super::session::{queue_id, reply};
 use super::*;
 use crate::context::{Context, Memory};
 use crate::testing::{Canned, Remembered, assert_dated, config, now, table};
