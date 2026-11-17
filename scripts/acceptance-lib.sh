@@ -52,7 +52,9 @@ case $distro in
     debian-13)
         image=garrison-acceptance:debian-13
         expected="Debian GNU/Linux 13"
-        packages=true
+        # The image keeps no package lists; a host's update job fetches
+        # them, and the updates card reads what apt knows from them.
+        packages='apt-get update -q >/dev/null'
         clamav=$apt_clamav
         clamd_config=$apt_clamd ;;
     # Virtual machines only.
