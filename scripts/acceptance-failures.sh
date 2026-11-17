@@ -216,7 +216,7 @@ scenario_concurrent() {
     running "after two installers at once" "$new"
 }
 
-# Installers killed at any point, then one more run.
+# Installers, rollbacks and restores killed at any point, then one more run.
 # shellcheck source=scripts/acceptance-failures-unfinished.sh
 . "$(dirname "$0")/acceptance-failures-unfinished.sh"
 
@@ -331,6 +331,8 @@ old=$(inside 'cat /root/previous/VERSION')
 new=$(inside 'cat /root/release/VERSION')
 running "installed" "$old"
 for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check failed_start crash_loop migrated_then_failed concurrent \
+    upgrade_killed upgrade_resumed rollback_killed restore_killed restore_refused restore_refused_config restore_policy \
+    restore_policy_link restore_room rollback_after_restore elsewhere_unloadable elsewhere_purge rollback_refused \
     interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere unwritten \
     rotation collect_beside}; do
     "scenario_$scenario"

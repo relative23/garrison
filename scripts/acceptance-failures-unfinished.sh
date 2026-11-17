@@ -1,7 +1,8 @@
 # shellcheck shell=sh
-# Sourced by scripts/acceptance-failures.sh: installers killed at any point,
-# early or as they back up, wait for the services to settle or switch back,
-# then one more run. They use that script's helpers and its `old` and `new`.
+# Sourced by scripts/acceptance-failures.sh: installers, rollbacks and
+# restores killed at any point, then the same command again, and what a
+# restore checks before anything stops. They use that script's helpers and
+# its `old` and `new`.
 # shellcheck disable=SC2154
 
 scenario_interrupted() {
@@ -68,13 +69,314 @@ scenario_killed_late() {
             deploy/systemd/garrison-web.service &&
         grep -q absent.toml deploy/systemd/garrison-web.service &&
         find . -type f ! -name SHA256SUMS | sed "s|^\./||" | sort | xargs sha256sum > SHA256SUMS'
+    earlier=$(inside 'readlink -f /opt/garrison/previous 2>/dev/null || true')
     for pause in 0 1; do
         killed_once '/root/falling/bin/garrison install' 'switching back to the previous release' "sleep $pause" \
             'the previous release is running'
         installer '/root/release/bin/garrison install'
         running "after a kill $pause s into the switch back" "$new"
+        # Neither the release that fell nor the one that ran: the release
+        # before, which a rollback returns to.
+        check "after a kill $pause s into the switch back, previous is what it was before" \
+            "test \"\$(readlink -f /opt/garrison/previous 2>/dev/null || true)\" = '$earlier'"
     done
     check "no event was lost" "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -ge $before"
     check "no partly unpacked release is left" '! ls -A /opt/garrison/releases | grep -q "^\."'
     check "the state to restore is complete" 'test -d "$(readlink -f /var/backups/garrison/last-pre-upgrade)/etc"'
+}
+
+# The command `1` run in the background, killed with its children as SIGKILL
+# kills them once the shell condition `2` holds and `3` more seconds have
+# passed, before it said `4`. Its children go too: `garrison upgrade` waits
+# for the installer it started.
+killed_at() {
+    if ! inside "umask 077 && rm -f /root/late.log && { $1 > /root/late.log 2>&1 & echo \$! > /root/late.pid; } &&
+        for i in \$(seq 1800); do { $2; } && break; sleep 0.1; done && { $2; } && sleep $3 &&
+        p=\$(cat /root/late.pid) && kill -KILL \$(cat /proc/\$p/task/\$p/children 2>/dev/null) \$p &&
+        ! grep -q -F '$4' /root/late.log"; then
+        inside 'cat /root/late.log' || true
+        echo "FAIL  the command was not killed once \"$2\" held and before it said \"$4\""
+        exit 1
+    fi
+}
+
+# A shell condition: `current` names release $1.
+current_is() {
+    printf '%s' "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$1'"
+}
+
+# What `previous` resolves to, or nothing.
+previous_now() { inside 'readlink -f /opt/garrison/previous 2>/dev/null || true'; }
+
+# A copy of the release under test whose web service never comes up: its
+# start waits until the start timeout ends it, as a service that never
+# reports ready does.
+hanging_release() {
+    inside 'rm -rf /root/hanging && cp -a /root/release /root/hanging && cd /root/hanging &&
+        printf "%s+hanging\n" "$(cat VERSION)" > VERSION &&
+        sed -i "s|^\[Service\]$|[Service]\nExecStartPre=/bin/sleep 300|; s|^TimeoutStartSec=30$|TimeoutStartSec=10|" \
+            deploy/systemd/garrison-web.service &&
+        grep -q "^ExecStartPre=/bin/sleep 300$" deploy/systemd/garrison-web.service &&
+        grep -q "^TimeoutStartSec=10$" deploy/systemd/garrison-web.service &&
+        find . -type f ! -name SHA256SUMS | sed "s|^\./||" | sort | xargs sha256sum > SHA256SUMS'
+    inside 'cat /root/hanging/VERSION'
+}
+
+scenario_upgrade_killed() {
+    step "An upgrade killed once current named the new release, which does not start, then one more run"
+    upgraded
+    hanging=$(hanging_release)
+    earlier=$(previous_now)
+    killed_at '/root/hanging/bin/garrison install' "$(current_is "$hanging")" 2 'did not start'
+    check "the killed upgrade had switched current" \
+        "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$hanging'"
+    refused "the next run switches back to the release that ran" '/root/hanging/bin/garrison install' \
+        "the previous release is running"
+    running "after the killed upgrade" "$new"
+    check "previous is what it was before the upgrade" "test \"\$(readlink -f /opt/garrison/previous 2>/dev/null || true)\" = '$earlier'"
+    check "nothing is left unfinished" 'test ! -e /opt/garrison/unfinished.json'
+}
+
+scenario_upgrade_resumed() {
+    step "An upgrade with garrison upgrade killed once current named the new release, then garrison upgrade again"
+    # The release before the one under test runs again, installed from its
+    # archive: only `garrison upgrade` refuses a release that is not newer.
+    installer '/root/previous/bin/garrison install'
+    archive=$(basename "$release")
+    copy_in "$release" "/root/$archive"
+    copy_in "$release.minisig" "/root/$archive.minisig"
+    last=$(inside 'readlink -f /var/backups/garrison/last-pre-upgrade')
+    killed_at "garrison upgrade /root/$archive" "$(current_is "$new")" 2 ' is running. Roll back with'
+    check "the killed upgrade had switched current" \
+        "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$new'"
+    says "garrison upgrade again finishes the upgrade it began" "garrison upgrade /root/$archive" \
+        "Garrison $new is running. Roll back with: garrison install --rollback"
+    running "after the killed garrison upgrade" "$new"
+    check "previous names the release the upgrade began from" \
+        "test \"\$(basename \"\$(readlink -f /opt/garrison/previous)\")\" = '$old'"
+    check "the state to restore is the one from before the upgrade, not a copy made since" \
+        "test \"\$(readlink -f /var/backups/garrison/last-pre-upgrade)\" != '$last' &&
+            test \"\$(ls -d /var/backups/garrison/pre-upgrade-* | sort | tail -n 1)\" = \"\$(readlink -f /var/backups/garrison/last-pre-upgrade)\""
+    inside "rm /root/$archive /root/$archive.minisig"
+}
+
+scenario_rollback_killed() {
+    step "Rollbacks killed once they switched the links, then the same rollback again"
+    for with in '' ' --restore-state'; do
+        upgraded
+        killed_at "/opt/garrison/current/bin/garrison install --rollback$with" "$(current_is "$old")" 2 'Rolled back to'
+        says "running the rollback$with again finishes it" \
+            "/opt/garrison/current/bin/garrison install --rollback$with" "Rolled back to $old."
+        running "after the killed rollback$with" "$old"
+        check "previous names the release the rollback$with left" \
+            "test \"\$(basename \"\$(readlink -f /opt/garrison/previous)\")\" = '$new'"
+        check "nothing is left unfinished" 'test ! -e /opt/garrison/unfinished.json'
+    done
+    upgraded
+}
+
+scenario_restore_killed() {
+    step "A restore killed as it puts the state back, then the same restore again"
+    upgraded
+    installer '/opt/garrison/current/bin/garrison backup --to /root/kept-for-restore' >/dev/null
+    # The checks store another batch: the state moves on after the backup.
+    services "after the backup to restore"
+    before=$(events)
+    killed_at '/opt/garrison/current/bin/garrison restore --from /root/kept-for-restore' \
+        'grep -q -F "Restoring Garrison state from" /root/late.log' 0 'Restored the state'
+    first=$(inside 'ls -d /var/backups/garrison/pre-restore-* | sort | tail -n 1')
+    # A copy made within the same second would take the first one's name.
+    inside 'sleep 1.1'
+    says "running the restore again finishes it and names the copy from before the first run" \
+        '/opt/garrison/current/bin/garrison restore --from /root/kept-for-restore' "The state from before is in $first."
+    check "that copy holds the state from before the first run" \
+        "test \$(sqlite3 $first/ingest/events.sqlite 'SELECT count(*) FROM events') -eq $before"
+    check "the next run made no copy of what the first had put back" \
+        "test \"\$(ls -d /var/backups/garrison/pre-restore-* | sort | tail -n 1)\" = '$first'"
+    running "after the killed restore" "$new"
+    inside 'rm -r /root/kept-for-restore'
+}
+
+# The web service's process, to show that a refusal stopped nothing.
+web_pid() { inside 'systemctl show -p MainPID --value garrison-web.service'; }
+
+scenario_restore_refused() {
+    step "A restore whose policy the configuration no longer takes is refused before anything stops"
+    upgraded
+    installer '/opt/garrison/current/bin/garrison backup --to /root/policy-state' >/dev/null
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.refused &&
+        cp -p /etc/garrison/access-policy.json /root/access-policy.refused &&
+        sed -i "/^\[\[actions\]\]$/,/^timeout_seconds = 30$/d" /etc/garrison/garrison.toml &&
+        ! grep -q run_check /etc/garrison/garrison.toml &&
+        sed -i "s/\"actions\": \[\"run_check\"\]/\"actions\": []/" /etc/garrison/access-policy.json &&
+        ! grep -q run_check /etc/garrison/access-policy.json'
+    check "the configuration without the action is valid" '/opt/garrison/current/bin/garrison check-config'
+    pid=$(web_pid)
+    copies=$(inside 'ls -d /var/backups/garrison/pre-restore-* 2>/dev/null | wc -l')
+    refused "a restore whose policy grants an action the configuration no longer has is refused" \
+        '/opt/garrison/current/bin/garrison restore --from /root/policy-state' "nothing was changed"
+    check "and nothing stopped or changed: the web service ran on, no copy, the live policy as it was" "
+        test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid' &&
+            test \$(ls -d /var/backups/garrison/pre-restore-* 2>/dev/null | wc -l) -eq $copies &&
+            ! grep -q run_check /etc/garrison/access-policy.json"
+    inside 'cat /root/garrison.toml.refused > /etc/garrison/garrison.toml &&
+        cat /root/access-policy.refused > /etc/garrison/access-policy.json && rm -r /root/policy-state'
+    running "after the refused restore" "$new"
+}
+
+scenario_restore_refused_config() {
+    step "A restore under a configuration that check-config refuses is refused before anything stops"
+    upgraded
+    installer '/opt/garrison/current/bin/garrison backup --to /root/config-state' >/dev/null
+    # Written since the services started: they run on what they loaded.
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.refused && mkdir -p /home/jobs &&
+        printf "\n[[providers]]\ntype = \"receipt\"\nid = \"nightly\"\ntitle = \"Nightly job\"\npath = \"/home/jobs/nightly.json\"\nmodules = [\"services\"]\nmax_age_hours = 24\n" \
+            >> /etc/garrison/garrison.toml'
+    pid=$(web_pid)
+    refused "a restore under a configuration check-config refuses is refused" \
+        '/opt/garrison/current/bin/garrison restore --from /root/config-state' "nothing was changed"
+    check "and nothing stopped" "test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
+    inside 'cat /root/garrison.toml.refused > /etc/garrison/garrison.toml && rm -r /home/jobs /root/config-state'
+    running "after the restore under a refused configuration" "$new"
+}
+
+scenario_rollback_refused() {
+    step "A rollback whose state from before the upgrade the configuration no longer takes is refused before anything stops"
+    upgraded
+    # The action the policy from before the upgrade grants is taken out.
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.refused &&
+        cp -p /etc/garrison/access-policy.json /root/access-policy.refused &&
+        grep -q run_check "$(readlink -f /var/backups/garrison/last-pre-upgrade)/access-policy.json" &&
+        sed -i "/^\[\[actions\]\]$/,/^timeout_seconds = 30$/d" /etc/garrison/garrison.toml &&
+        sed -i "s/\"actions\": \[\"run_check\"\]/\"actions\": []/" /etc/garrison/access-policy.json'
+    pid=$(web_pid)
+    refused "a rollback whose state brings a policy the configuration does not take is refused" \
+        '/opt/garrison/current/bin/garrison install --rollback --restore-state' "Nothing was changed"
+    check "and nothing stopped or changed: the release under test runs on, the live policy as it was" "
+        test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid' &&
+            test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$new' &&
+            ! grep -q run_check /etc/garrison/access-policy.json"
+    inside 'cat /root/garrison.toml.refused > /etc/garrison/garrison.toml &&
+        cat /root/access-policy.refused > /etc/garrison/access-policy.json'
+    running "after the refused rollback" "$new"
+}
+
+scenario_restore_policy() {
+    step "A restore puts the access policy back root's, readable for the broker's group alone"
+    upgraded
+    catalog='printf "%s\n" "{\"op\": \"catalog\", \"token\": \"acceptance-token-0123456789abcdef\"}" |
+        timeout 10 runuser -u garrison -- /usr/local/bin/acceptance-connect /run/garrison/broker.sock'
+    installer '/opt/garrison/current/bin/garrison backup --to /root/policy-back' >/dev/null
+    # As on a new host, where no policy exists yet.
+    inside 'mv /etc/garrison/access-policy.json /root/access-policy.away'
+    says "a restore without a live policy puts the backup's back" \
+        '/opt/garrison/current/bin/garrison restore --from /root/policy-back' "Restored the state"
+    check "the policy is root's, readable for the broker's group alone" \
+        'test "$(stat -c "%U %G %a" /etc/garrison/access-policy.json)" = "root garrison-broker 640"'
+    check "the broker grants by it" "$catalog | grep -q run_check"
+    inside 'rm /root/access-policy.away && rm -r /root/policy-back'
+    running "after the restored policy" "$new"
+}
+
+scenario_restore_policy_link() {
+    step "A restore where broker.policy names a link is refused, and the link's target stays"
+    upgraded
+    installer '/opt/garrison/current/bin/garrison backup --to /root/policy-link' >/dev/null
+    inside 'printf "kept\n" > /root/victim && chmod 644 /root/victim &&
+        cp -p /etc/garrison/garrison.toml /root/garrison.toml.link && mkdir -p /etc/garrison-link &&
+        ln -s /root/victim /etc/garrison-link/access.json &&
+        printf "\n[broker]\npolicy = \"/etc/garrison-link/access.json\"\n" >> /etc/garrison/garrison.toml'
+    pid=$(web_pid)
+    refused "a restore where broker.policy names a link is refused" \
+        '/opt/garrison/current/bin/garrison restore --from /root/policy-link' "not a file of its own"
+    check "and the link's target is as it was, and nothing stopped" "
+        test \"\$(cat /root/victim)\" = kept && test \"\$(stat -c %a /root/victim)\" = 644 &&
+            test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
+    inside 'cat /root/garrison.toml.link > /etc/garrison/garrison.toml && rm -r /etc/garrison-link /root/victim /root/policy-link'
+    running "after the policy named by a link" "$new"
+}
+
+scenario_rollback_after_restore() {
+    step "A rollback that fails once the state from before the upgrade went back says what went back"
+    upgraded
+    # The web service refuses to start while current names the release the
+    # rollback returns to, and only then.
+    inside_input 'cat > /usr/local/bin/acceptance-refuse-release && chmod 755 /usr/local/bin/acceptance-refuse-release' <<'REFUSE'
+#!/bin/sh
+! test "$(basename "$(readlink -f /opt/garrison/current)")" = "$(cat /run/garrison-acceptance-refused)"
+REFUSE
+    inside "printf '%s\n' '$old' > /run/garrison-acceptance-refused &&
+        mkdir -p /etc/systemd/system/garrison-web.service.d &&
+        printf '[Service]\nExecStartPre=+/usr/local/bin/acceptance-refuse-release\n' \
+            > /etc/systemd/system/garrison-web.service.d/acceptance-refuse.conf && systemctl daemon-reload"
+    refused "a rollback that failed after the state went back names the databases that went back" \
+        '/opt/garrison/current/bin/garrison install --rollback --restore-state' "went back to their copies in"
+    inside 'rm /run/garrison-acceptance-refused /etc/systemd/system/garrison-web.service.d/acceptance-refuse.conf &&
+        rmdir /etc/systemd/system/garrison-web.service.d && systemctl daemon-reload'
+    running "after the failed rollback" "$new"
+}
+
+scenario_elsewhere_unloadable() {
+    step "With the policy kept elsewhere, a configuration that does not load stops the upgrade"
+    # The release before the one under test runs, and the upgrade is to come.
+    installer '/root/previous/bin/garrison install'
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.elsewhere && mkdir -p /etc/garrison-policy &&
+        mv /etc/garrison/access-policy.json /etc/garrison-policy/access.json &&
+        printf "\n[broker]\npolicy = \"/etc/garrison-policy/access.json\"\n" >> /etc/garrison/garrison.toml &&
+        cp -p /etc/garrison/garrison.toml /root/garrison.toml.named'
+    installer '/root/previous/bin/garrison install'
+    backups=$(inside 'ls /var/backups/garrison | wc -l')
+    # A setting no release loads, as a typo while preparing the upgrade.
+    inside 'sed -i "1i nonsense_setting = 1" /etc/garrison/garrison.toml'
+    refused "an upgrade over a configuration that does not load is refused, the policy kept elsewhere" \
+        '/root/release/bin/garrison install' "the running release was not touched"
+    check "and changes nothing: the release that ran is current, nothing backed up" "
+        test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$old' &&
+            test \$(ls /var/backups/garrison | wc -l) -eq $backups"
+    # Where the configuration loads and names a policy that is not there.
+    inside 'cat /root/garrison.toml.named > /etc/garrison/garrison.toml &&
+        mv /etc/garrison-policy/access.json /root/access.json.away'
+    refused "an upgrade whose access policy is missing is refused" \
+        '/root/release/bin/garrison install' "the running release was not touched"
+    check "and changes nothing either" "
+        test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$old' &&
+            test \$(ls /var/backups/garrison | wc -l) -eq $backups"
+    inside 'mv /root/access.json.away /etc/garrison/access-policy.json && rmdir /etc/garrison-policy &&
+        cat /root/garrison.toml.elsewhere > /etc/garrison/garrison.toml'
+    upgraded
+    running "after the configuration that did not load" "$new"
+}
+
+scenario_elsewhere_purge() {
+    step "A purge says where it cannot find a policy kept elsewhere"
+    upgraded
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.purge &&
+        sed -i "1i nonsense_setting = 1" /etc/garrison/garrison.toml'
+    says "a purge's dry run says that garrison.toml does not load and names what it then leaves" \
+        '/opt/garrison/current/bin/garrison uninstall --purge --dry-run' "does not load, so an access policy it names outside /etc/garrison"
+    inside 'cat /root/garrison.toml.purge > /etc/garrison/garrison.toml'
+    running "after the purge's dry run" "$new"
+}
+
+scenario_restore_room() {
+    step "A restore whose copies do not fit beside the databases is refused before anything stops"
+    upgraded
+    installer '/opt/garrison/current/bin/garrison backup --to /root/room-state' >/dev/null
+    # The copy of the event history grows to some 10 MiB, more than the small
+    # file system that the receiver's folder lies on below.
+    inside "sqlite3 /root/room-state/ingest/events.sqlite 'CREATE TABLE padding(x);
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 10000)
+        INSERT INTO padding SELECT randomblob(1000) FROM n;'"
+    inside 'systemctl stop garrison-ingest.service && cp -a /var/lib/garrison/ingest /root/ingest-room &&
+        mount -t tmpfs -o size=8m garrison-room /var/lib/garrison/ingest &&
+        cp -a /root/ingest-room/. /var/lib/garrison/ingest/ && rm -r /root/ingest-room &&
+        systemctl start garrison-ingest.service'
+    pid=$(web_pid)
+    refused "a restore whose copy does not fit beside its database is refused" \
+        '/opt/garrison/current/bin/garrison restore --from /root/room-state' "nothing was changed"
+    check "and nothing stopped" "test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
+    inside 'systemctl stop garrison-ingest.service && cp -a /var/lib/garrison/ingest /root/ingest-room &&
+        umount /var/lib/garrison/ingest && cp -a /root/ingest-room/. /var/lib/garrison/ingest/ &&
+        rm -r /root/ingest-room /root/room-state && systemctl start garrison-ingest.service'
+    running "after the restore that did not fit" "$new"
 }
