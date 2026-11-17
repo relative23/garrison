@@ -193,10 +193,57 @@ fn an_accepted_test_file_and_spam_delivered_as_mail_are_failures() {
     assert_eq!(
         results(&waited),
         [
-            "refused: 451 4.7.1 try later",
+            "not tested: 451 4.7.1 try later",
             "accepted; the event history never showed how it was filed",
         ]
     );
+}
+
+/// What Stalwart answers at the end of a message that a milter deferred or
+/// that it could not hand to a milter (measured on Stalwart 1.1.0, O-12).
+const DEFERRED: &str = "451 4.3.5 Unable to accept message at this time.";
+
+#[test]
+fn a_message_the_server_defers_is_not_tested_and_is_tried_again_within_the_hour() {
+    // A scanner that cannot scan defers each message, and so does Stalwart
+    // where a milter it names cannot be reached: no test was judged.
+    let with_macros = |port: u16| {
+        MailTest::new(&table(&format!(
+            "type = \"mail-test\"\nrecipient = \"garrison-test@example.test\"\nport = {port}\n\
+             macro_document = true"
+        )))
+        .unwrap()
+    };
+    let (port, handle) = server([
+        DEFERRED,
+        DEFERRED,
+        DEFERRED,
+        "550 virus",
+        "550 spam",
+        "550 macro",
+    ]);
+    let memory = Remembered::default();
+    let deferred = collected(&with_macros(port), &memory, 0, &[]);
+    let not_tested = format!("not tested: {DEFERRED}");
+    assert_eq!(
+        (deferred.state, results(&deferred)),
+        (State::Unknown, vec![not_tested.as_str(); 3])
+    );
+    assert_eq!(
+        deferred.findings,
+        [
+            "Antivirus test file (EICAR): not tested: 451 4.3.5 Unable to accept message at this \
+             time.",
+            "Spam test text (GTUBE): not tested: 451 4.3.5 Unable to accept message at this time.",
+            "Office document with macros (test document): not tested: 451 4.3.5 Unable to accept \
+             message at this time.",
+        ]
+    );
+    // Tried again after an hour, not a day.
+    assert_dated(&deferred, 0, AGAIN);
+    let again = collected(&with_macros(port), &memory, AGAIN, &[]);
+    assert_eq!(again.state, State::Ok, "{:?}", again.findings);
+    assert_eq!(handle.join().unwrap().len(), 6);
 }
 
 #[test]

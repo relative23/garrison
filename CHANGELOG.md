@@ -188,6 +188,14 @@ Notable changes for operators and users. The format follows
   sent data without an end of line filled the collector's memory until
   systemd ended it, and the run with it. A line is now read up to 2 KiB,
   and such a reply is "the server's reply is too long".
+- **A test message the server deferred is no longer counted as refused.**
+  The mail test took any reply from 400 to 599 to its message for a
+  refusal. Where clamd was down and clamav-milter deferred every message,
+  as its default `OnFail Defer` has it, or where a milter Stalwart names
+  could not be reached, Stalwart answered 451 (measured with Stalwart
+  1.1.0), and the Test messages card was in order for a day although
+  nothing had been scanned. A temporary reply (4xx) is now "not tested",
+  Unknown, and that test is tried again after an hour.
 - **The dashboard's signature age is that of the database the card
   judges.** Where an old `daily.cvd` lies beside the `daily.cld` that the
   updates keep current, the Signature databases card judged the newer file

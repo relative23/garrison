@@ -380,9 +380,14 @@ shows how an accepted one was filed. The check runs only where you name a
 harmless message there.
 
 Each test is sent again `every_hours` after it was sent. One that did not
-happen, because no session came about or the server turned it away before
-the message, is "not tested": it alone is tried again after an hour, and the
-table says when each test was sent.
+happen, because no session came about, the server turned it away before
+the message or it deferred the message with a temporary reply (4xx), is
+"not tested": it alone is tried again after an hour, and the table says when
+each test was sent. A deferral is no verdict: Stalwart defers a message
+where a milter defers it, as a scanner that cannot scan does
+(clamav-milter's `OnFail Defer` while clamd is down), and where it cannot
+reach a milter whose entry says to defer then, as setup writes Garrison's
+filter for `when_unreachable = "defer"`.
 
 With `macro_document = true` a third message carries a document that a macro
 filter takes for one with macros (it holds none, only the name a macro

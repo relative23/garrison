@@ -4,8 +4,11 @@
 //! Only where an operator names a recipient. At most once in the configured
 //! hours, the provider hands both to the local SMTP listener the way a
 //! stranger would, without signing in. A test that did not happen, because
-//! no session came about or the server turned it away before the message,
-//! is no result to keep that long: it alone is tried again after an hour.
+//! no session came about, the server turned it away before the message or
+//! only deferred the message (4xx), is no result to keep that long: it alone
+//! is tried again after an hour. Stalwart defers a message where a milter
+//! defers it, as a scanner that cannot scan does, or where it cannot reach
+//! one whose entry says to defer then: a deferral is no verdict.
 //!
 //! A scanner must refuse the test file while the session lasts. The spam
 //! text is refused there too, or accepted and then filed as spam, which the
@@ -67,10 +70,11 @@ struct Sent {
 }
 
 impl Sent {
-    /// Whether the test happened: the server refused the message itself or
-    /// took it. A session that did not come that far tested nothing.
+    /// Whether the test happened: the server took the message itself or
+    /// refused it for good (5xx). A session that did not come that far, and
+    /// a message the server only deferred (4xx), tested nothing.
     fn happened(&self) -> bool {
-        self.at_data && (self.code == 250 || (400..600).contains(&self.code))
+        self.at_data && (self.code == 250 || (500..600).contains(&self.code))
     }
 }
 
@@ -179,7 +183,7 @@ impl MailTest {
     /// say of it.
     fn judged(context: &Context<'_>, test: Test, sent: &Sent, at: i64) -> (State, String) {
         if !sent.happened() {
-            // Refused before the message, or no session.
+            // Refused before the message, deferred, or no session.
             return (State::Unknown, format!("not tested: {}", sent.reply));
         }
         if sent.code != 250 {
@@ -332,7 +336,10 @@ impl Provider for MailTest {
         let findings: Vec<String> = results
             .iter()
             .filter(|(_, _, (state, _))| *state != State::Ok)
-            .map(|(test, _, (_, said))| format!("{}: {said}.", test.label()))
+            // A reply that ends its sentence ends the finding with it.
+            .map(|(test, _, (_, said))| {
+                format!("{}: {}.", test.label(), said.trim_end_matches('.'))
+            })
             .collect();
         let stated = |at: i64| time::Timestamp::from_second(at).ok().map(time::isoformat);
         let column = |label: &str, format: Format| Column {
@@ -352,7 +359,7 @@ impl Provider for MailTest {
         .with_scope(format!(
             "Garrison handed the test messages to the local SMTP listener without signing in, \
              addressed to {}. Each test is sent again {} hours after it was sent; one that did \
-             not happen is tried again after an hour.",
+             not happen, as one the server deferred, is tried again after an hour.",
             self.recipient,
             self.every / 3600
         ))
