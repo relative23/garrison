@@ -7,6 +7,7 @@ mod files;
 mod host;
 mod milter;
 mod notify;
+mod policy;
 mod public;
 
 use garrison_core::config::Config;

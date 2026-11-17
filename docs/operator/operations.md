@@ -32,8 +32,9 @@ sudo garrison self-check     # database integrity
 `doctor` changes nothing. It checks the release and the services, when the
 collector last finished a run (none for ten minutes is a problem, as for the
 watch), the settings the units do not follow and the secrets they would not
-hand to the services, as `check-config` names them, that the access policy
-and the credentials are private, the clock,
+hand to the services, as `check-config` names them, that the credentials
+are private and that the broker may read the access policy, which only root
+may change, the clock,
 free space, the SELinux module and the last Stalwart event on this host,
 then, as a visitor
 would, Garrison's certificate and answer under its own name and on the port

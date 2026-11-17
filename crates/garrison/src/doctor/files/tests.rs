@@ -1,30 +1,12 @@
 use super::super::Level;
 use super::*;
 
-/// The access policy is looked at where the configuration names it,
-/// which is where the broker reads it.
+/// A check's path that the collector's unit hides from it is named, as
+/// root may read what the collector may not.
 #[test]
-fn the_policy_is_judged_where_the_configuration_names_it() {
+fn a_checks_path_the_collector_cannot_see_is_named() {
     let directory = tempfile::tempdir().unwrap();
     let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
-    let policy = &files(&config)[0];
-    assert_eq!(
-        policy.what,
-        format!(
-            "the access policy is missing: {}",
-            config.broker.policy.display()
-        )
-    );
-    // Root may read a policy that the broker's unit hides from it.
-    let mut hidden = config.clone();
-    hidden.broker.policy = "/home/doctor-test/policy.json".into();
-    let found = files(&hidden);
-    let named = found
-        .iter()
-        .find(|finding| finding.what.contains("(ProtectHome=true)"))
-        .unwrap();
-    assert_eq!(named.level, Level::Fail, "{}", named.line());
-    // And a check's path that the collector's unit hides from it.
     let mut check = config.clone();
     check.collector.providers.push(
         "type = \"bulwark\"\nadmin_directory = \"/root/bulwark\""
@@ -61,10 +43,6 @@ fn each_file_names_what_makes_it_and_what_keeps_it_private() {
         finding.fix.clone().unwrap()
     };
     let missing = files(&config);
-    assert_eq!(
-        fix(&missing, "the access policy is missing"),
-        "Run `garrison access init`, which makes it."
-    );
     for name in KEYS {
         assert_eq!(
             fix(&missing, &format!("{name} is missing")),
@@ -72,32 +50,17 @@ fn each_file_names_what_makes_it_and_what_keeps_it_private() {
             "{name}"
         );
     }
-    // A folder in the policy's place, and files that are this user's.
-    fs::create_dir_all(&config.broker.policy).unwrap();
+    // A file that is this user's.
     let key = config.credentials_directory.join("broker-native-key");
     fs::create_dir_all(&config.credentials_directory).unwrap();
     fs::write(&key, garrison_testing::NATIVE_KEY).unwrap();
     let present = files(&config);
-    assert_eq!(
-        fix(&present, "the access policy is a link or a folder"),
-        "Remove it; then `garrison access init` makes the file itself there."
-    );
     assert_eq!(
         fix(&present, &format!("{} is not root-owned", key.display())),
         format!(
             "Make it root's with mode 600: chown root {0} && chmod 600 {0}",
             key.display()
         )
-    );
-    fs::remove_dir(&config.broker.policy).unwrap();
-    fs::write(&config.broker.policy, "{}").unwrap();
-    let policy = files(&config);
-    assert_eq!(
-        fix(
-            &policy,
-            &format!("{} is not root-owned", config.broker.policy.display())
-        ),
-        "Run the installer again; it sets owner and mode."
     );
 }
 

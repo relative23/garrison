@@ -6,6 +6,7 @@
 //! that mends it, or, where it could not look, why.
 
 use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 
 use garrison_core::config::Database;
@@ -13,7 +14,7 @@ use garrison_core::time;
 use garrison_testing::http::{json, serve};
 use garrison_testing::tls::serve_until;
 
-use super::{Finding, Level, host, public};
+use super::{Finding, Level, host, policy, public};
 
 /// A host broken in one way, and what doctor must say of it.
 struct Broken {
@@ -118,11 +119,33 @@ fn issuer_states_another_name() -> Broken {
     }
 }
 
-const HOSTS: [fn() -> Broken; 4] = [
+/// The access policy root's alone, as `chmod 600` or a backup put back
+/// with `mv` leaves it: the broker, in its own group, may not read it.
+fn policy_root_alone() -> Broken {
+    let (names, broker) = policy::accounts(
+        "root:x:0:0::/root:/bin/sh\ngarrison-broker:x:990:991::/:/usr/sbin/nologin\n",
+        "root:x:0:\ngarrison-broker:x:991:\n",
+    );
+    let file = policy::Seen {
+        uid: 0,
+        gid: 0,
+        mode: 0o600,
+    };
+    let path = Path::new("/etc/garrison/access-policy.json");
+    Broken {
+        host: "an access policy root:root 0600",
+        found: vec![policy::readable(path, file, &[], broker.as_ref(), &names)],
+        said: "may not read the access policy".into(),
+        fix: Some("chown root:garrison-broker /etc/garrison/access-policy.json".into()),
+    }
+}
+
+const HOSTS: [fn() -> Broken; 5] = [
     events_database_is_a_folder,
     origin_with_a_port,
     issuer_answers_with_a_web_page,
     issuer_states_another_name,
+    policy_root_alone,
 ];
 
 /// What is wrong with what doctor said on `broken`, if anything.

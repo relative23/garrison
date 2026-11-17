@@ -1,6 +1,6 @@
 //! What this host shows about Garrison: the release, the services, the last
-//! collection run, files that must stay private, the clock, free space,
-//! SELinux and recent events.
+//! collection run, the access policy, files that must stay private, the
+//! clock, free space, SELinux and recent events.
 
 use std::fs;
 use std::path::Path;
@@ -269,6 +269,7 @@ pub(super) fn checks(config: &Config) -> Vec<Finding> {
     let mut findings = vec![release()];
     findings.extend(services());
     findings.extend(collection(config));
+    findings.extend(super::policy::checks(config));
     findings.extend(super::files::files(config));
     findings.push(clock());
     findings.extend(space());

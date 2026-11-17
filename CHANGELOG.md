@@ -1167,6 +1167,9 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` fails an `issuer` that is not the name Stalwart gives
   itself**, with which every sign-in fails at Garrison's callback, and says
   what to set.
+- **`garrison doctor` fails an access policy the broker may not read**, such
+  as one root's alone after `chmod 600`, with which nobody can sign in, and
+  gives the `chown` and `chmod` that mend it.
 
 ## [0.1.2] - 2026-11-13
 
