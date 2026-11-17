@@ -1004,6 +1004,18 @@ Notable changes for operators and users. The format follows
   Service. The Ansible role ran setup only where the broker's key file was
   missing; it now runs it where any of the three key files is missing or
   empty, and a run with every key in place still changes nothing.
+- **Setup says that Stalwart refused the administrator.** A wrong
+  password, an unknown user or an API key that Stalwart does not know made
+  `garrison stalwart setup` end with "x:ApiKey/get: HTTP 401", which named
+  neither the administrator nor what to check. It now says that Stalwart
+  refused the administrator and to check the user name and the password,
+  or the API key; where Stalwart knows the credential but does not take it
+  from this host's address (HTTP 403), as for an API key whose networks
+  leave this host out, it says that. Setup changes nothing in either case.
+  A user without Stalwart's administrator rights got as far as the first
+  API key, whose permissions Stalwart does not let it grant, and setup
+  named only Stalwart's refusal; it now says to run setup as an
+  administrator who holds them.
 - **The metrics exporter's card says what makes the credential it lacks.**
   It said "No scrape credential is configured." where the file was empty,
   held no credential or could not be read, and named neither the file nor

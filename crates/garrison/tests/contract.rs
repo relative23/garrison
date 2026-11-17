@@ -11,7 +11,9 @@
 // Helpers fail the test by panicking, like the test itself.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::path::PathBuf;
 use std::process::{Command, Output};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use clients::{
     assert_foreign_client_kept, assert_sign_in_check, oauth_client, register_foreign_client,
@@ -27,6 +29,98 @@ use serde_json::json;
 mod clients;
 #[path = "contract/keys.rs"]
 mod keys;
+#[path = "contract/refused.rs"]
+mod refused;
+
+/// The tests of this target share Garrison's objects in the lab, one key
+/// of each description and one webhook, so they run one at a time.
+static LAB: Mutex<()> = Mutex::new(());
+
+/// The lab, for this test alone while the guard lives.
+fn lab() -> (MutexGuard<'static, ()>, Lab) {
+    let guard = LAB.lock().unwrap_or_else(PoisonError::into_inner);
+    (guard, Lab::from_environment())
+}
+
+/// Garrison's keys, webhook and sign-in client out of the lab, and the
+/// files out of `credentials`, as before a first setup.
+fn forget(lab: &Lab, credentials: &std::path::Path) {
+    for kind in ["ApiKey", "WebHook", "OAuthClient"] {
+        let list = lab.call(&format!("x:{kind}/get"), &json!({"ids": null}));
+        for item in list["list"].as_array().unwrap() {
+            let ours = match kind {
+                "ApiKey" => item["description"]
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("garrison ")),
+                "OAuthClient" => item["clientId"] == "https://admin.example.test/oauth-client.json",
+                _ => item["httpHeaders"]["X-Garrison"] == "events",
+            };
+            if ours {
+                lab.call(&format!("x:{kind}/set"), &json!({"destroy": [item["id"]]}));
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(credentials);
+}
+
+/// A configuration in a folder of its own and the lab's administrator in a
+/// file, for setup runs whose webhook delivers to `webhook`; the keys also
+/// allow the lab's gateway.
+struct Setup {
+    _folder: tempfile::TempDir,
+    directory: PathBuf,
+    credential: String,
+    webhook: String,
+    gateway: String,
+}
+
+impl Setup {
+    fn new(lab: &Lab, webhook: &str) -> Setup {
+        let folder = tempfile::tempdir().unwrap();
+        let directory = folder.path().to_owned();
+        let settings = config_text(&directory, &lab.url);
+        std::fs::write(directory.join("garrison.toml"), settings).unwrap();
+        let admin = std::env::var("GARRISON_LAB_ADMIN").unwrap();
+        let (user, secret) = admin.split_once(':').unwrap();
+        let credential = directory.join("admin.json");
+        let document = json!({"username": user, "secret": secret}).to_string();
+        write_private(&credential, document.as_bytes());
+        Setup {
+            _folder: folder,
+            credential: credential.to_str().unwrap().to_owned(),
+            webhook: webhook.to_owned(),
+            gateway: format!(
+                "{}/32",
+                std::env::var("GARRISON_LAB_CALLBACK_HOST").unwrap()
+            ),
+            directory,
+        }
+    }
+
+    /// `stalwart setup` with this administrator, webhook and gateway, then `more`.
+    fn arguments(&self, more: &[&str]) -> Vec<String> {
+        let base = [
+            "stalwart",
+            "setup",
+            "--admin-credential",
+            &self.credential,
+            "--webhook-url",
+            &self.webhook,
+            "--allow-network",
+            &self.gateway,
+        ];
+        base.iter()
+            .chain(more)
+            .map(|&word| word.to_owned())
+            .collect()
+    }
+
+    fn run(&self, more: &[&str]) -> Output {
+        let arguments = self.arguments(more);
+        let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+        run(&self.directory, &arguments)
+    }
+}
 
 fn run(directory: &std::path::Path, arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_garrison"))
@@ -49,10 +143,11 @@ fn text(output: &Output) -> String {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn setup_is_idempotent_and_access_init_finds_the_administrators() {
-    let mut lab = Lab::from_environment();
+    let (_guard, mut lab) = lab();
     let admin = std::env::var("GARRISON_LAB_ADMIN").unwrap();
     let (user, secret) = admin.split_once(':').unwrap();
     let directory = tempfile::tempdir().unwrap();
+    forget(&lab, &directory.path().join("credentials"));
     std::fs::write(
         directory.path().join("garrison.toml"),
         config_text(directory.path(), &lab.url),

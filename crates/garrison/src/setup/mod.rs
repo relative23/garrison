@@ -128,8 +128,29 @@ impl Admin {
                 | Error::Denied(why)
                 | Error::Misconfigured(why) => format!("{method}: {why}"),
             })?;
-        if answer.status != 200 {
-            return Err(format!("{method}: HTTP {}", answer.status));
+        match answer.status {
+            200 => {}
+            // A wrong password, an unknown user and an API key Stalwart does
+            // not know (measured on Stalwart 1.1.0).
+            401 => {
+                return Err(
+                    "Stalwart refused the administrator (HTTP 401): check the user name \
+                            and the password, or the API key."
+                        .into(),
+                );
+            }
+            // A credential Stalwart knows, from an address it does not take
+            // it from: an API key's networks, or a block of the address.
+            403 => {
+                return Err(
+                    "Stalwart refused the administrator from this host's address (HTTP \
+                            403): its API key may not allow that address, or Stalwart blocked \
+                            the address after failed sign-ins, which operations.md (\"Sign-in \
+                            fails\") says how to lift."
+                        .into(),
+                );
+            }
+            status => return Err(format!("{method}: HTTP {status}")),
         }
         let document = json::parse(&answer.body, MAX_ANSWER)
             .map_err(|error| unreadable(method, &error.to_string()))?;

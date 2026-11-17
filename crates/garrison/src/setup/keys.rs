@@ -72,7 +72,7 @@ pub(super) fn ensure(
     };
     let created: Created<NewSecret> = admin
         .call("x:ApiKey/set", &Set::create(key))
-        .map_err(|error| format!("{error} (Stalwart did not return the new API key secret)"))?;
+        .map_err(|error| refused(&error, description))?;
     let new = created.created.get(NEW);
     let new = new.ok_or("Stalwart did not return the new API key secret")?;
     write_secret(&target, &new.secret)?;
@@ -85,6 +85,21 @@ pub(super) fn ensure(
         step: format!("{done} API key '{description}' -> {}", target.display()),
         replaced: existing.into_iter().map(|item| item.id).collect(),
     })
+}
+
+/// What setup says where Stalwart made no new key. A user without
+/// administrator rights reads the list of keys, its own, but may not grant
+/// a key the permissions it lacks: JMAP's `forbidden`, as Stalwart answers
+/// it (measured on Stalwart 1.1.0).
+fn refused(error: &str, description: &str) -> String {
+    if error.contains(r#""type":"forbidden""#) {
+        return format!(
+            "Stalwart refused the administrator the API key '{description}', since it may not \
+             grant the key's permissions: run setup as an administrator who holds them, as one \
+             with Stalwart's administrator role ({error})"
+        );
+    }
+    format!("{error} (Stalwart did not return the new API key secret)")
 }
 
 /// Remove the keys that new ones replaced.
@@ -234,6 +249,21 @@ mod tests {
                 format!("{OLD}\n"),
                 false
             )
+        );
+    }
+
+    /// A user without administrator rights may read the keys, its own, but
+    /// not make Garrison's: setup says to run it as an administrator.
+    #[test]
+    fn an_account_that_may_not_grant_the_permissions_is_told_so() {
+        let refusal = r#"x:ApiKey/set: {"new":{"description":"You are not authorized to grant permissions: sysRoleGet","type":"forbidden"}}"#;
+        assert!(refused(refusal, "garrison broker").starts_with(
+            "Stalwart refused the administrator the API key 'garrison broker', since it may \
+                 not grant the key's permissions: run setup as an administrator who holds them"
+        ));
+        assert_eq!(
+            refused("x:ApiKey/set: Stalwart is unavailable", "garrison broker"),
+            "x:ApiKey/set: Stalwart is unavailable (Stalwart did not return the new API key secret)"
         );
     }
 
