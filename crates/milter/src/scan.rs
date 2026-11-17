@@ -112,26 +112,45 @@ pub enum Outcome {
     Incomplete(Gap),
 }
 
-/// The message with its quoted-printable undone: `=XX` is a byte, `=` at a
-/// line's end joins the lines.
+/// The message with its quoted-printable undone: `=XX` is a byte in either
+/// hexadecimal case, and `=` at a line's end joins the lines. A transport
+/// may pad an encoded line with space and tab before the break; RFC 2045
+/// section 6.7 rule 3 has the decoder strip it, so `=` then white space then
+/// the line's end is a soft break as well.
 fn unquoted(message: &[u8]) -> Vec<u8> {
+    let hex = |byte: u8| char::from(byte).to_digit(16);
     let mut plain = Vec::with_capacity(message.len());
     let mut at = 0;
     while at < message.len() {
-        let hex = |byte: u8| char::from(byte).to_digit(16);
-        match (message[at], message.get(at + 1), message.get(at + 2)) {
-            (b'=', Some(b'\r'), Some(b'\n')) => at += 3,
-            (b'=', Some(b'\n'), _) => at += 2,
-            (b'=', Some(high), Some(low)) if hex(*high).is_some() && hex(*low).is_some() => {
-                let value = hex(*high).unwrap_or(0) * 16 + hex(*low).unwrap_or(0);
-                plain.push(u8::try_from(value).unwrap_or(b'='));
-                at += 3;
+        if message[at] == b'=' {
+            // A soft line break: `=`, then any space or tab a transport
+            // added, then the line's end. None of it reaches the output.
+            let mut end = at + 1;
+            while matches!(message.get(end), Some(b' ' | b'\t')) {
+                end += 1;
             }
-            (byte, _, _) => {
-                plain.push(byte);
-                at += 1;
+            match (message.get(end), message.get(end + 1)) {
+                (Some(b'\r'), Some(b'\n')) => {
+                    at = end + 2;
+                    continue;
+                }
+                (Some(b'\n'), _) => {
+                    at = end + 1;
+                    continue;
+                }
+                _ => {}
+            }
+            // `=XX`: the high hexadecimal digit then the low, either case.
+            if let (Some(high), Some(low)) = (message.get(at + 1), message.get(at + 2))
+                && let (Some(high), Some(low)) = (hex(*high), hex(*low))
+            {
+                plain.push(u8::try_from(high * 16 + low).unwrap_or(b'='));
+                at += 3;
+                continue;
             }
         }
+        plain.push(message[at]);
+        at += 1;
     }
     plain
 }
@@ -172,12 +191,13 @@ fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
             return Some(found);
         }
     }
-    // Quoted-printable is undone last: it is how text travels, and rarely a file.
-    if contains(message, b"=\n")
-        || contains(message, b"=\r\n")
-        || contains(message, b"=50=4B")
-        || contains(message, b"=D0=CF")
-    {
+    // Quoted-printable is undone last: it is how text travels, and rarely a
+    // file. The one escape is `=`; a message without it decodes to itself,
+    // which was scanned already. A message that holds `=` is read undone,
+    // however the sender wrote the encoding: lower-case hexadecimal, one
+    // long line, or only some bytes escaped are all a conforming client
+    // decodes to the document, so the scan must read them too.
+    if contains(message, b"=") {
         return work.scanned(&unquoted(message), DEPTH);
     }
     None
@@ -185,6 +205,8 @@ fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
 
 #[cfg(test)]
 mod bounds_tests;
+#[cfg(test)]
+mod encoding_tests;
 #[cfg(test)]
 mod incomplete_tests;
 #[cfg(test)]

@@ -58,6 +58,26 @@ fn two_thousand_headers_over_the_same_data_are_unpacked_in_time() {
 }
 
 #[test]
+fn a_megabyte_quoted_printable_body_is_undone_in_time() {
+    // About a megabyte of a body where every byte is written `=XX`, so the
+    // whole of it is undone and then scanned. The work stays proportional.
+    let mut data = b"Content-Transfer-Encoding: quoted-printable\r\n\r\n".to_vec();
+    for index in 0..350_000_u32 {
+        let byte = index.wrapping_mul(2_654_435_761).to_le_bytes()[0];
+        data.push(b'=');
+        data.push(b"0123456789ABCDEF"[usize::from(byte >> 4)]);
+        data.push(b"0123456789ABCDEF"[usize::from(byte & 0x0f)]);
+        if index % 20 == 19 {
+            data.extend_from_slice(b"=\r\n");
+        }
+    }
+    assert!(data.len() > 1024 * 1024, "{}", data.len());
+    let began = Instant::now();
+    assert_eq!(macros(&data), Outcome::Clean);
+    assert!(began.elapsed() < in_time(), "{:?}", began.elapsed());
+}
+
+#[test]
 fn a_megabyte_of_headers_of_stored_files_is_tried_in_time() {
     // Each file is tried as deflate whatever its header says, here 34 953
     // of them: each try ends at the next header's first bytes.

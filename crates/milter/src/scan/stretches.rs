@@ -67,7 +67,13 @@ impl<'a> Iterator for Stretches<'a> {
             if line.is_empty() {
                 continue;
             }
-            if line.iter().all(|byte| is_symbol(*byte) || *byte == b'=') {
+            // A base64 decoder ignores white space between the symbols
+            // (RFC 2045 section 6.8), so a line of symbols that a transport
+            // broke up with space or tab is base64 all the same.
+            if line
+                .iter()
+                .all(|byte| is_symbol(*byte) || *byte == b'=' || byte.is_ascii_whitespace())
+            {
                 let symbols = line.iter().filter(|byte| is_symbol(**byte)).count();
                 begun.get_or_insert((start, 0)).1 += symbols;
             } else if let Some((from, symbols)) = begun.take()
@@ -150,8 +156,11 @@ mod tests {
             if line.is_empty() {
                 continue;
             }
-            if line.iter().all(|byte| is_symbol(*byte) || *byte == b'=') {
-                run.extend(line.iter().copied().filter(|byte| *byte != b'='));
+            if line
+                .iter()
+                .all(|byte| is_symbol(*byte) || *byte == b'=' || byte.is_ascii_whitespace())
+            {
+                run.extend(line.iter().copied().filter(|byte| is_symbol(*byte)));
             } else {
                 close(&mut run);
             }
