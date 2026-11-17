@@ -181,6 +181,13 @@ minutes. They count; none of them is a verdict, except where it says so.
   many deliveries went out to hosts that offered TLS, on the DNS & TLS page,
   with the sender domains and hosts without TLS.
 
+The lists by domain, of spam and ham, of the failing senders and of mail
+without TLS, are made from the newest 50 000 events of each kind in the
+seven days, and show the 20 busiest rows. A card whose list read only the
+newest events says so and is Partial where it would be OK; one that shows
+the 20 busiest of more says how many there are. The counts by day and the
+numbers of mail with and without TLS count every event of the week.
+
 A summary is in order only over a history that holds the week. While the
 event receiver has not reported for five minutes or runs without storing
 what Stalwart sends, or where it lost events within these seven days (it was

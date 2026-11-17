@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 mod cards;
 mod read;
 
-use read::{DAY, DAYS, Week};
+use read::{DAY, DAYS, Limits, Week};
 
 use super::history;
 
@@ -150,6 +150,11 @@ impl Flow {
 
     /// The week as the event history has it now.
     fn counted(context: &Context<'_>) -> Read {
+        Self::counted_within(context, &Limits::WEEK)
+    }
+
+    /// The week as the event history has it now, its lists within `limits`.
+    fn counted_within(context: &Context<'_>, limits: &Limits) -> Read {
         let now = context.now.as_second();
         let problem = |problem: String| Read {
             problem: Some(problem),
@@ -163,7 +168,7 @@ impl Flow {
             Err(why) => (HashMap::new(), Some(why)),
         };
         match reading(&context.events_database, Duration::from_secs(2)) {
-            Ok(Some(db)) => match read::week(&db, now, &accounts) {
+            Ok(Some(db)) => match read::week(&db, now, &accounts, limits) {
                 Ok(week) => Read {
                     uncovered: history::uncovered(
                         &db,
@@ -202,7 +207,9 @@ impl Flow {
             title,
             modules: [module],
             evidence: Evidence::Probe,
-            state: if unknown.is_some() || (incomplete.is_some() && state == State::Ok) {
+            state: if unknown.is_some()
+                || (incomplete.is_some() && matches!(state, State::Ok | State::Partial))
+            {
                 State::Unknown
             } else {
                 state
@@ -220,6 +227,22 @@ impl Flow {
             )]),
             (None, None) => observation,
         })
+    }
+}
+
+impl Flow {
+    /// The cards of the configured checks over `read`.
+    fn cards(&self, context: &Context<'_>, read: &Read) -> Collected {
+        let mut report = Report::default();
+        for check in &self.checks {
+            match check.as_str() {
+                "spam" => self.spam(context, read, &mut report)?,
+                "milter" => self.milter(context, read, &mut report)?,
+                "authentication" => self.authentication(context, read, &mut report)?,
+                _ => self.tls(context, read, &mut report)?,
+            }
+        }
+        Ok(report)
     }
 }
 
@@ -246,35 +269,21 @@ impl Provider for Flow {
 
     fn collect(&self, context: &Context<'_>) -> Collected {
         let kept = Self::known(context);
-        let read = &kept.answer;
-        let mut report = Report::default();
-        for check in &self.checks {
-            match check.as_str() {
-                "spam" => self.spam(context, read, &mut report)?,
-                "milter" => self.milter(context, read, &mut report)?,
-                "authentication" => self.authentication(context, read, &mut report)?,
-                _ => self.tls(context, read, &mut report)?,
-            }
-        }
+        let mut report = self.cards(context, &kept.answer)?;
         // Every card is as old as the reading it is made from.
         report.observations = report
             .observations
             .into_iter()
             .map(|observation| kept.dated(observation))
             .collect();
-        if read.week.truncated
-            && let Some(first) = report.observations.first_mut()
-        {
-            first.findings.push(format!(
-                "More events were recorded in the last {DAYS} days than the lists by domain count."
-            ));
-        }
         Ok(report)
     }
 }
 
 #[cfg(test)]
 mod accounts_tests;
+#[cfg(test)]
+mod cut_tests;
 #[cfg(test)]
 mod history_tests;
 #[cfg(test)]

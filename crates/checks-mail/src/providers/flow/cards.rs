@@ -7,6 +7,7 @@ use garrison_core::observations::{Column, Field, Format, State, Table};
 use garrison_core::time;
 use serde_json::{Value, json};
 
+use super::read::Week;
 use super::{Flow, Read};
 use crate::context::{Context, ProviderError, Report};
 
@@ -30,6 +31,29 @@ fn share(part: u64, whole: u64) -> String {
     (part * 100 + whole / 2)
         .checked_div(whole)
         .map_or_else(|| "–".to_owned(), |per_cent| format!("{per_cent} %"))
+}
+
+/// What the lists of a card left out, as findings, and whether they read
+/// only a part of the week: `kinds` are the event types they read, `lists`
+/// each list with its name in the reading, the rows it shows and what they
+/// are. A list that shows its busiest rows is no part: the rows it shows
+/// are whole.
+fn left_out(week: &Week, kinds: &[&str], lists: &[(&str, usize, &str)]) -> (bool, Vec<String>) {
+    let part = kinds.iter().any(|kind| week.cut.contains(*kind));
+    let mut findings = Vec::new();
+    if part {
+        findings.push(
+            "The list counts only the newest events of each kind it reads; more were recorded in \
+             these seven days."
+                .to_owned(),
+        );
+    }
+    for (list, shown, what) in lists {
+        if let Some(all) = week.listed.get(*list) {
+            findings.push(format!("The {shown} busiest of {all} {what} are listed."));
+        }
+    }
+    (part, findings)
 }
 
 /// The day a second belongs to, as `2026-11-11`.
@@ -102,6 +126,17 @@ impl Flow {
                 rows,
             });
         report.observations.push(by_day);
+        self.spam_domains(context, read, report)
+    }
+
+    /// The same by the domain of the mailbox, where the week had any.
+    fn spam_domains(
+        &self,
+        context: &Context<'_>,
+        read: &Read,
+        report: &mut Report,
+    ) -> Result<(), ProviderError> {
+        let week = &read.week;
         if !week.filed.is_empty() {
             let rows = week
                 .filed
@@ -118,6 +153,11 @@ impl Flow {
             // Without the domains it is about, the card is not in order; the
             // mail is counted under "unknown".
             let unread = read.domains_unread.as_ref();
+            let (part, cut) = left_out(
+                week,
+                &["message-ingest.ham", "message-ingest.spam"],
+                &[("filed", week.filed.len(), "domains")],
+            );
             let mut by_domain = self
                 .observation(
                     context,
@@ -127,6 +167,8 @@ impl Flow {
                     ModuleId::Spam,
                     if unread.is_some() {
                         State::Unknown
+                    } else if part {
+                        State::Partial
                     } else {
                         State::Ok
                     },
@@ -144,6 +186,7 @@ impl Flow {
             by_domain.findings.extend(
                 unread.map(|why| format!("The domains of the mailboxes are not known: {why}.")),
             );
+            by_domain.findings.extend(cut);
             report.observations.push(by_domain);
         }
         Ok(())
@@ -281,13 +324,19 @@ impl Flow {
             });
         report.observations.push(checks);
         if !week.failing.is_empty() {
+            let (part, cut) = left_out(
+                week,
+                &["smtp.spf-from-fail", "smtp.dmarc-fail"],
+                &[("failing", week.failing.len(), "sender domains")],
+            );
             let rows = week
                 .failing
                 .iter()
                 .map(|(domain, spf, dmarc)| vec![json!(domain), json!(spf), json!(dmarc)])
                 .collect();
-            let senders = self
-                .observation(context, read, "failing-senders", "Sender domains that fail the checks", ModuleId::Spam, State::Ok)?
+            let state = if part { State::Partial } else { State::Ok };
+            let mut senders = self
+                .observation(context, read, "failing-senders", "Sender domains that fail the checks", ModuleId::Spam, state)?
                 .with_scope(
                     "Domains whose mail failed SPF or DMARC in the last seven days: forged senders, or a \
                      sender whose own records are wrong. A domain without a record is not listed.",
@@ -296,6 +345,7 @@ impl Flow {
                     columns: vec![column("Sender domain", Format::Text), column("SPF failures", Format::Number), column("DMARC failures", Format::Number)],
                     rows,
                 });
+            senders.findings.extend(cut);
             report.observations.push(senders);
         }
         Ok(())
@@ -318,8 +368,25 @@ impl Flow {
         for (host, count) in &week.plain_out {
             rows.push(vec![json!("outgoing"), json!(host), json!(count)]);
         }
-        let observation = self
-            .observation(context, read, "tls", "TLS in transit", ModuleId::DnsTls, State::Ok)?
+        let (part, cut) = left_out(
+            week,
+            &[
+                "smtp.mail-from",
+                "delivery.start-tls-unavailable",
+                "delivery.start-tls-error",
+            ],
+            &[
+                (
+                    "plain_in",
+                    week.plain_in.len(),
+                    "sender domains without TLS",
+                ),
+                ("plain_out", week.plain_out.len(), "hosts without TLS"),
+            ],
+        );
+        let state = if part { State::Partial } else { State::Ok };
+        let mut observation = self
+            .observation(context, read, "tls", "TLS in transit", ModuleId::DnsTls, state)?
             .with_scope(
                 "Mail of the last seven days between this server and others: incoming on port 25 with \
                  and without STARTTLS, and outgoing deliveries to hosts that offered TLS or did not.",
@@ -336,6 +403,7 @@ impl Flow {
                 columns: vec![column("Direction", Format::Text), column("Sender domain or host", Format::Text), column("Without TLS", Format::Number)],
                 rows,
             });
+        observation.findings.extend(cut);
         report.observations.push(observation);
         Ok(())
     }

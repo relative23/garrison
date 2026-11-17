@@ -223,6 +223,16 @@ Notable changes for operators and users. The format follows
   be read: interrupted", which blamed the history. Stalwart is now asked
   first; the counts stand, and only the card by domain says where the
   domains are not known.
+- **The mail flow's lists say what they left out, and its TLS numbers are
+  of one week.** Past 50 000 events of a kind in the week, the TLS card set
+  the newest 50 000 MAIL FROMs against the newest 50 000 STARTTLS events,
+  which reach back to other times, so mail that had TLS counted as mail
+  without it and its domains were listed as plain, on a card in order; the
+  one word of the cut went to the first card in name order and spoke only
+  of the lists. The numbers of incoming mail with and without TLS now count
+  all of the week in one query, a card whose list read only the newest
+  events says so and is Partial where it would be in order, and a list that
+  shows its 20 busiest rows of more says how many there are.
 - **The test messages' results are those of the listener and the mailbox
   configured.** After a change of `recipient`, `sender`, `host` or `port`,
   the Test messages card showed the results kept for the old ones under the
