@@ -13,7 +13,8 @@
 // wall clock counts the sleep but may be set back or ahead. The larger misses
 // no sleep and no clock set back. A wall clock set ahead counts as time
 // waited: a check turns stale sooner, or the page asks for its session
-// sooner, never later.
+// sooner, never later. eslint.config.js keeps every other file from reading
+// the browser's clocks.
 import { useSyncExternalStore } from "react";
 
 /** How often the views that watch the time look at it again. */

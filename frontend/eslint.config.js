@@ -26,6 +26,18 @@ const NO_TRANS_VALUES = {
   message: "Pass dynamic text as a component's child (<phrase/>), not as Trans values.",
 };
 
+// The browser's clocks are read in src/lib/clock.ts alone, which gives only
+// how long the page has waited: a time the server sent is never compared
+// with the browser's own clock, which may run hours ahead of the host's or
+// behind it. tests/browser-clock.test.tsx holds every page to the same.
+const CLOCK = "Read the time through src/lib/clock.ts; a server's time is never compared with the browser's clock.";
+const ONE_CLOCK = [
+  { selector: "MemberExpression[object.name='Date'][property.name='now']", message: CLOCK },
+  { selector: "MemberExpression[object.name='performance'][property.name='now']", message: CLOCK },
+  { selector: "NewExpression[callee.name='Date'][arguments.length=0]", message: CLOCK },
+  { selector: "CallExpression[callee.name='Date']", message: CLOCK },
+];
+
 export default tseslint.config(
   { ignores: ["dist", "coverage", "node_modules", "src/api/schema.gen.ts"] },
   js.configs.recommended,
@@ -41,8 +53,11 @@ export default tseslint.config(
       "no-restricted-syntax": ["error", NO_HTML],
     },
   },
+  { files: ["src/**/*.ts"], rules: { "no-restricted-syntax": ["error", NO_HTML, ...ONE_CLOCK] } },
   {
     files: ["src/**/*.tsx"],
-    rules: { "no-restricted-syntax": ["error", NO_HTML, NO_TRANS_VALUES, ...NO_LITERAL_TEXT] },
+    rules: { "no-restricted-syntax": ["error", NO_HTML, NO_TRANS_VALUES, ...NO_LITERAL_TEXT, ...ONE_CLOCK] },
   },
+  // The one file that reads the browser's clocks.
+  { files: ["src/lib/clock.ts"], rules: { "no-restricted-syntax": ["error", NO_HTML] } },
 );
