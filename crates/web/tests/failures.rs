@@ -27,7 +27,7 @@ use garrison_testing::{credentials, policy_document, write_policy, write_private
 use garrison_web::security::Broker;
 use serde_json::{Value, json as value};
 use support::brokers::{
-    another, closing, failing, garbled, gone, late, ungranting, unreading, unsent, unstated,
+    ahead, another, closing, failing, garbled, gone, late, ungranting, unreading, unsent, unstated,
 };
 use support::rights::{
     Expected, at_stalwart, at_the_broker, ended, granting, identity, journal, kept, listed,
@@ -134,7 +134,8 @@ fn at_the_broker_row(given: &Result<Value, CallError>, why: &str) -> (u8, Expect
             kept(
                 502,
                 "The broker returned an invalid authorization",
-                "ERROR The broker answered a check of a user's rights with no grant",
+                "ERROR The broker answered a check of a user's rights with a grant this web \
+                 service does not read: the two read different configurations",
             ),
         ),
         Ok(grant) => (
@@ -463,6 +464,12 @@ fn at_the_broker_cases() -> Vec<AtTheBroker> {
             "a grant the web service does not read",
             ungranting,
             Ok(value!({"subject": "1"})),
+            "",
+        ),
+        AtTheBroker(
+            "a grant of an action this web service does not have",
+            ahead,
+            Ok(support::grant("1", &["dashboard", "actions"], &["run_new"])),
             "",
         ),
         AtTheBroker(

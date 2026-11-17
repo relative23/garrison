@@ -230,8 +230,10 @@ impl Gate {
         };
         parse_grant(self.ask(&request)?, &ids).map_err(|_| {
             log::error!(
-                "The broker answered a check of a user's rights with no grant this web service \
-                 reads; restart garrison-web and garrison-broker, so that both run this release"
+                "The broker answered a check of a user's rights with a grant this web service \
+                 does not read: the two read different configurations, as after an action was \
+                 added to garrison.toml and only garrison-broker restarted, or run different \
+                 releases; restart garrison-web and garrison-broker"
             );
             ApiError::new(502, "The broker returned an invalid authorization")
         })

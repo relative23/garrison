@@ -124,6 +124,16 @@ pub(crate) fn ungranting(_: &Path) -> Arc<dyn Broker> {
     Arc::new(Fixed(Ok(value!({"subject": "1"}))))
 }
 
+/// A broker that grants an action the web service's configuration does not
+/// have, as one restarted alone after an action was added to garrison.toml.
+pub(crate) fn ahead(_: &Path) -> Arc<dyn Broker> {
+    Arc::new(Fixed(Ok(grant(
+        "1",
+        &["dashboard", "actions"],
+        &["run_new"],
+    ))))
+}
+
 pub(crate) fn another(_: &Path) -> Arc<dyn Broker> {
     Arc::new(Fixed(Ok(grant("2", &["dashboard"], &[]))))
 }

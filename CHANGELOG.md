@@ -1206,7 +1206,10 @@ Notable changes for operators and users. The format follows
   a minute. A broker that failed inside ("Internal broker error") now shows
   a reference that the web service's journal names, and a grant the web
   service cannot read, or one of another account than the session's, gets a
-  line there too. The web service's line for a sign-in the rights check
+  line there too, which names both causes of a grant it cannot read: the
+  two services read different configurations, as after an action was added
+  and only the broker restarted, or run different releases. The web
+  service's line for a sign-in the rights check
   rejected names the broker's words: "Sign-in rejected by authorization
   (HTTP 503: Authorization is temporarily unavailable)".
 - **A sign-in that Garrison cannot keep ends on the sign-in page.** Where
