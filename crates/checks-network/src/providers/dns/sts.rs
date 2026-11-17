@@ -115,12 +115,11 @@ pub(super) fn policy(
                     &roots.cloned().unwrap_or_else(fetch::roots),
                     context.now,
                 )
-                .and_then(|answer| {
-                    if answer.status == 200 {
-                        parse(&answer.body)
-                    } else {
-                        Err(format!("the server answered {}", answer.status))
-                    }
+                .and_then(|answer| match (answer.status, answer.cut) {
+                    (200, None) => parse(&answer.body),
+                    // What came before a cut is no policy to judge by.
+                    (200, Some(cut)) => Err(cut),
+                    (status, _) => Err(format!("the server answered {status}")),
                 }),
                 unasked: false,
             }

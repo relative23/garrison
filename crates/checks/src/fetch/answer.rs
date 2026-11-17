@@ -16,6 +16,11 @@ pub struct Answer {
     pub status: u16,
     headers: Vec<(String, String)>,
     pub body: String,
+    /// Why the body is not all that the server sent, where it is not: the
+    /// answer is longer than the client reads, or its body unpacks to more.
+    /// A caller that reads the body decides whether what came before the
+    /// cut is of use.
+    pub cut: Option<String>,
 }
 
 impl Answer {
@@ -76,22 +81,38 @@ pub(super) fn parse(data: &[u8]) -> Option<Answer> {
     let packed = headers.iter().any(|(key, value)| {
         key.eq_ignore_ascii_case("content-encoding") && value.eq_ignore_ascii_case("gzip")
     });
+    let mut cut = None;
     if packed {
-        body = unpack(&body);
+        let more;
+        (body, more) = unpack(&body);
+        cut = more.then(|| {
+            format!(
+                "its body unpacks to more than the {} MiB that are read",
+                UNPACKED / 1024 / 1024
+            )
+        });
     }
     Some(Answer {
         status,
         headers,
         body: String::from_utf8_lossy(&body).into_owned(),
+        cut,
     })
 }
 
-/// A gzip body as far as it unpacks: one cut off at the size limit ends early,
-/// and what came before the cut still counts.
-fn unpack(data: &[u8]) -> Vec<u8> {
+/// A gzip body as far as it unpacks, and whether it unpacks to more than
+/// the size limit: one cut off ends early, and what came before the cut
+/// still counts.
+fn unpack(data: &[u8]) -> (Vec<u8>, bool) {
     let mut body = Vec::new();
-    let _ = GzDecoder::new(data).take(UNPACKED).read_to_end(&mut body);
-    body
+    // One byte past the limit tells a body that ends there from a longer one.
+    let _ = GzDecoder::new(data)
+        .take(UNPACKED + 1)
+        .read_to_end(&mut body);
+    let most = usize::try_from(UNPACKED).unwrap_or(usize::MAX);
+    let more = body.len() > most;
+    body.truncate(most);
+    (body, more)
 }
 
 /// A chunked body joined, and whether its last, empty chunk was there.

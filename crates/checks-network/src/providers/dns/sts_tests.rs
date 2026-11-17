@@ -259,3 +259,70 @@ fn a_policy_not_fetched_for_the_runs_time_is_fetched_in_the_next_run() {
     served.requests();
     assert_eq!(read.unwrap().unwrap().mode, "enforce");
 }
+
+/// A policy file longer than the client reads is not read: what came
+/// before the cut is no policy, and a policy cut before its `mx` lines
+/// would seem to leave the mail host out.
+#[test]
+fn a_policy_longer_than_is_read_cannot_be_read() {
+    let policy = format!(
+        "version: STSv1\nmode: enforce\n{}mx: mail.example.test\nmax_age: 86400\n",
+        "padding without a colon\n".repeat(13_000)
+    );
+    let answer = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{policy}",
+        policy.len()
+    );
+    // The server answers whatever the client reads of it.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!(
+        "http://{}/.well-known/mta-sts.txt",
+        listener.local_addr().unwrap()
+    );
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        // The whole request first: a socket closed on what it did not read
+        // is reset.
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            if stream.read(&mut byte).unwrap_or(0) == 0 {
+                break;
+            }
+            request.push(byte[0]);
+        }
+        let _ = stream.write_all(answer.as_bytes());
+    });
+    let zone: BTreeMap<(String, u16), Vec<Vec<u8>>> = [
+        (
+            ("example.test", 15),
+            vec![host(&[0, 10], "mail.example.test")],
+        ),
+        (("_mta-sts.example.test", 16), vec![text("v=STSv1; id=1")]),
+    ]
+    .into_iter()
+    .map(|((name, kind), records)| ((name.to_owned(), kind), records))
+    .collect();
+    let (address, handle) = resolver(zone, None, 2);
+    let zone_file = "example.test. IN MX 10 mail.example.test.\n\
+                     _mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n";
+    let domain = tests::collected_with(
+        &json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+        address,
+        Some(url),
+    )
+    .remove(0);
+    handle.join().unwrap();
+    assert_eq!(policy_result(&domain), json!("not readable"));
+    assert_eq!(
+        (domain.state, domain.findings.clone()),
+        (
+            State::Warning,
+            vec![
+                "example.test publishes an MTA-STS record, but its policy could not be read: the \
+                 answer is longer than the 256 KiB that are read."
+                    .to_owned()
+            ]
+        )
+    );
+}

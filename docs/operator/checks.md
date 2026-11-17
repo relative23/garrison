@@ -250,7 +250,9 @@ check asks the resolver for them and compares:
   read from `https://mta-sts.<domain>/.well-known/mta-sts.txt`, once an hour.
   A policy that cannot be read, or that does not name one of the domain's
   mail hosts, is a warning, also beside records that could not be read or
-  were not asked: senders that honour it stop delivering.
+  were not asked: senders that honour it stop delivering. A policy file
+  longer than 256 KiB, or one that unpacks to more than 4 MiB, is not read,
+  as what comes before the cut is no policy to judge by.
 - A record whose name is longer than DNS takes, 253 octets as written, as a
   long domain's DKIM or TLSA record may be, says "no DNS name" and is not
   asked: no server can publish it, so a needed one is a warning.

@@ -729,6 +729,12 @@ Notable changes for operators and users. The format follows
   could not be reached. They now say that Stalwart did not complete the
   request and how, such as "(Stalwart answered HTTP 503)" or "(Stalwart is
   unavailable)" for a connection it did not take.
+- **An MTA-STS policy longer than is read is not judged by its start.** The
+  HTTPS client reads 256 KiB of an answer and unpacks a compressed body to
+  4 MiB, and left what came after out without a word: a policy whose `mx`
+  lines came later was said to leave the mail host out. The client now
+  says where it cut, and such a policy counts as one that cannot be read,
+  with that reason.
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not

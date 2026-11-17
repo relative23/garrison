@@ -379,3 +379,59 @@ fn a_certificates_fault_is_named_in_plain_words() {
         "the certificate is not valid: BadSignature"
     );
 }
+
+/// A server on loopback that answers one request with `answer`, however
+/// little of it the client reads.
+fn answering(answer: Vec<u8>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        // The whole request first: a socket closed on what it did not read
+        // is reset.
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            if stream.read(&mut byte).unwrap_or(0) == 0 {
+                break;
+            }
+            request.push(byte[0]);
+        }
+        let _ = stream.write_all(&answer);
+    });
+    url
+}
+
+/// An answer is read up to 256 KiB, and a compressed body unpacked up to
+/// 4 MiB: where the server sent more, the answer says so, and what came
+/// before the cut is all there is of the body.
+#[test]
+fn an_answer_cut_at_a_limit_says_so() {
+    let body = "x".repeat(300 * 1024);
+    let long = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let read = get(&answering(long.into_bytes()), &roots()).unwrap();
+    assert_eq!(
+        read.cut.as_deref(),
+        Some("the answer is longer than the 256 KiB that are read")
+    );
+    assert!(read.body.len() < 256 * 1024, "{}", read.body.len());
+    let whole = get(
+        &answering(garrison_testing::http::answer(200, "x").into_bytes()),
+        &roots(),
+    );
+    assert_eq!(whole.unwrap().cut, None);
+    // Four MiB of zeros and one byte more, packed into a few kilobytes.
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(&vec![0; 4 * 1024 * 1024 + 1]).unwrap();
+    let mut packed = b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n".to_vec();
+    packed.extend_from_slice(&gzip.finish().unwrap());
+    let unpacked = parse(&packed).unwrap();
+    assert_eq!(
+        unpacked.cut.as_deref(),
+        Some("its body unpacks to more than the 4 MiB that are read")
+    );
+    assert_eq!(unpacked.body.len(), 4 * 1024 * 1024);
+}
