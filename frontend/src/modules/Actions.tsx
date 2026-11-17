@@ -42,10 +42,11 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job) =>
     setError(null);
     dialog.current?.showModal();
   };
+  const ready = typed === action.confirmation;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    // One start at a time; Start stays focusable meanwhile.
-    if (busy) return;
+    // Only with the phrase, and one start at a time; Start stays focusable.
+    if (!ready || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -92,10 +93,11 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job) =>
             <Button variant="outline" onClick={() => dialog.current?.close()}>
               {t("actions.cancel")}
             </Button>
-            {/* aria-disabled while it starts, not disabled: a disabled
-                button would drop the focus, and a start that fails would
-                leave the keyboard nowhere. */}
-            <Button type="submit" disabled={typed !== action.confirmation} aria-disabled={busy || undefined}>
+            {/* aria-disabled, not disabled, until the phrase is typed and
+                while it starts: a disabled button would drop the focus, so a
+                start that fails, or a refresh of the catalog that changes
+                the phrase, would leave the keyboard nowhere. */}
+            <Button type="submit" aria-disabled={!ready || busy || undefined}>
               {busy ? t("actions.starting") : t("actions.start")}
             </Button>
           </div>

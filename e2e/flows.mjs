@@ -1,18 +1,18 @@
 // What a user does, in a real Chrome against the preview
 // (`cargo run -p garrison-web --example preview`): signing in, every page,
 // moving through the menu, also on a phone and from the keyboard, searching
-// the event history, going Back, the page search on a phone, saving
-// settings, running a maintenance action from the keyboard, what each page
-// shows when a request fails (also over HTTP/2, as nginx serves Garrison),
-// a browser whose clock runs hours ahead or behind, the checks of a computer
-// that slept, a profile that grants the dashboard alone, a change of rights
-// while a page is open, two tabs that follow what the other does, and
-// signing out. Along the way nothing may write an error to the console, no
-// request to the preview may fail but those a step makes fail, and axe may
-// find nothing on any page (WCAG 2.2 AA, light and dark, as the system
-// switches the page between them); a page starts in the theme its user
-// chose, from its first frame on, and without a session or a choice in the
-// system's.
+// the event history and paging through it from the keyboard, going Back, the
+// page search on a phone, saving settings, running a maintenance action from
+// the keyboard, what each page shows when a request fails (also over HTTP/2,
+// as nginx serves Garrison), a browser whose clock runs hours ahead or
+// behind, the checks of a computer that slept, a profile that grants the
+// dashboard alone, a change of rights while a page is open, two tabs that
+// follow what the other does, and signing out. Along the way nothing may
+// write an error to the console, no request to the preview may fail but
+// those a step makes fail, and axe may find nothing on any page (WCAG 2.2
+// AA, light and dark, as the system switches the page between them); a page
+// starts in the theme its user chose, from its first frame on, and without a
+// session or a choice in the system's.
 //
 // It is a check, not a measurement: it exits with 1 and lists what failed.
 // `measure.mjs` measures the same pages with Lighthouse, by hand.
@@ -23,6 +23,7 @@ import { chromium } from "playwright";
 
 import { skewed, slept } from "./clocks.mjs";
 import { failingRequests } from "./failures.mjs";
+import { paging } from "./paging.mjs";
 import { rightsChange, twoTabs } from "./tabs.mjs";
 import { chosenTheme, firstPaint } from "./themes.mjs";
 
@@ -199,6 +200,8 @@ try {
   await page.getByRole("searchbox").fill("example");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   expect((await searched).status() === 200, "the event history answers a search");
+
+  await paging(shared, page);
 
   step = "menu on a phone";
   await page.setViewportSize(PHONE);
@@ -415,5 +418,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `Passed: sign-in, ${PAGES.length} pages, menu, search, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, failures, HTTP/2, a clock ahead and behind, a computer that slept, a viewer, a change of rights, two tabs and sign-out.`,
+  `Passed: sign-in, ${PAGES.length} pages, menu, search, paging, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, failures, HTTP/2, a clock ahead and behind, a computer that slept, a viewer, a change of rights, two tabs and sign-out.`,
 );

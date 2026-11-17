@@ -175,6 +175,14 @@ Notable changes for operators and users. The format follows
   down the time the session has left, which the session's answer of the
   API gives in the new field `expiresIn`, and then asks the server, whose
   answer says whether the session has ended.
+- **Paging through a list keeps the keyboard's place.** "Older" and
+  "Newest" under Event history, Deliveries and Sessions turned disabled
+  while the next page loaded and at either end of the list, and a button
+  that turns disabled drops the focus to the page, in Chrome and Firefox
+  alike: each step from the keyboard left it nowhere. So did Start in a
+  maintenance dialog where a refresh of the list changed the phrase it
+  waits for. Such buttons now only say that they cannot act, keep the
+  focus, and do nothing when pressed.
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",

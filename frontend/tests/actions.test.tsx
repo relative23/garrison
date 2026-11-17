@@ -30,9 +30,17 @@ describe("maintenance actions", () => {
     });
     renderView(<Actions />);
     await loaded();
-    expect(confirmWith("run health checks").disabled).toBe(true);
+    // Start cannot act yet, and stays where the keyboard is: a disabled
+    // button would drop the focus it holds.
+    const early = confirmWith("run health checks");
+    expect(early.disabled).toBe(false);
+    expect(early.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(early);
+    fireEvent.submit(early.closest("form") as HTMLFormElement);
+    await act(async () => undefined);
+    expect(server.requests("POST actions")).toHaveLength(0);
     const start = confirmWith("RUN HEALTH CHECKS");
-    expect(start.disabled).toBe(false);
+    expect(start.hasAttribute("aria-disabled")).toBe(false);
     fireEvent.click(start);
     expect(await screen.findByText("Job 01234567: Queued — Waiting to start")).toBeTruthy();
     const [sent] = server.requests("POST actions");

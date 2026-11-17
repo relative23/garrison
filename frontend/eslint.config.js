@@ -19,6 +19,14 @@ const NO_LITERAL_TEXT = [
   },
 ];
 
+// A control that turns disabled while it has the focus drops it to the page,
+// in Chrome and Firefox alike; one that cannot act is aria-disabled and
+// refuses the action instead, and keeps the keyboard where it was.
+const NO_DISABLED = {
+  selector: "JSXAttribute[name.name='disabled']",
+  message: "Use aria-disabled and refuse the action: a disabled control drops the focus it holds.",
+};
+
 // <Trans> parses its translation as markup, values included; dynamic text goes
 // in as the child of a self-closing component tag such as <phrase/> instead.
 const NO_TRANS_VALUES = {
@@ -56,7 +64,7 @@ export default tseslint.config(
   { files: ["src/**/*.ts"], rules: { "no-restricted-syntax": ["error", NO_HTML, ...ONE_CLOCK] } },
   {
     files: ["src/**/*.tsx"],
-    rules: { "no-restricted-syntax": ["error", NO_HTML, NO_TRANS_VALUES, ...NO_LITERAL_TEXT, ...ONE_CLOCK] },
+    rules: { "no-restricted-syntax": ["error", NO_HTML, NO_TRANS_VALUES, NO_DISABLED, ...NO_LITERAL_TEXT, ...ONE_CLOCK] },
   },
   // The one file that reads the browser's clocks.
   { files: ["src/lib/clock.ts"], rules: { "no-restricted-syntax": ["error", NO_HTML] } },

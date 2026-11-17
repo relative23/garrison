@@ -14,6 +14,14 @@ function pages(call: Call) {
 
 const queries = (calls: Call[]) => calls.map((call) => call.query.toString());
 
+/** Whether the pager's button `name` can act: one that cannot stays in the
+ * keyboard's reach, since a disabled button drops the focus it holds. */
+function available(name: string): boolean {
+  const button = screen.getByRole<HTMLButtonElement>("button", { name });
+  expect(button.disabled).toBe(false);
+  return button.getAttribute("aria-disabled") !== "true";
+}
+
 describe("event history", () => {
   it("pages back and starts again at the newest for a new filter", async () => {
     const server = serve({ "GET coverage": { body: coverage() }, "GET events": pages });
@@ -21,7 +29,7 @@ describe("event history", () => {
     await screen.findByText("Newest event");
     fireEvent.click(screen.getByRole("button", { name: "Older" }));
     await screen.findByText("Older event");
-    expect(screen.getByRole("button", { name: "Older" })).toHaveProperty("disabled", true);
+    expect(available("Older")).toBe(false);
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "  alice@example.test " } });
     fireEvent.submit(screen.getByRole("search"));
     await screen.findByText("Newest event");
@@ -45,16 +53,41 @@ describe("event history", () => {
     const server = serve({ "GET coverage": { body: coverage() }, "GET events": pages });
     renderView(<Logs />);
     await screen.findByText("Newest event");
-    expect(screen.getByRole("button", { name: "Older" })).toHaveProperty("disabled", false);
+    expect(available("Older")).toBe(true);
     server.answer("GET events", { status: 503, body: { detail: "The event history is busy." } });
     fireEvent.change(screen.getByRole("combobox", { name: "Category" }), { target: { value: "auth" } });
     expect(await screen.findByText("The event history is busy.")).toBeTruthy();
     // Neither the other filter's rows nor its cursor to older pages.
     expect(screen.queryByText("Newest event")).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.getByRole("button", { name: "Older" })).toHaveProperty("disabled", true);
+    expect(available("Older")).toBe(false);
     // How many entries this filter has is not known: no count, not zero.
     expect(screen.queryByText(/^Showing/)).toBeNull();
+  });
+
+  it("keeps the pager's buttons in the keyboard's reach while they cannot act, and then they do nothing", async () => {
+    let answer: () => void = () => undefined;
+    const server = serve({
+      "GET coverage": { body: coverage() },
+      "GET events": async (call) => {
+        if (call.query.has("before")) await new Promise<void>((resolve) => (answer = resolve));
+        return pages(call);
+      },
+    });
+    renderView(<Logs />);
+    await screen.findByText("Newest event");
+    // On the newest page, Newest has nowhere to go.
+    expect(available("Newest")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Newest" }));
+    // While the older page loads, its cursor to the next one is not known.
+    fireEvent.click(screen.getByRole("button", { name: "Older" }));
+    await screen.findByText("Loading…");
+    expect(available("Older")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Older" }));
+    await act(async () => answer());
+    await screen.findByText("Older event");
+    expect(available("Newest")).toBe(true);
+    expect(queries(server.requests("GET events"))).toEqual(["limit=50", "before=cursor-1&limit=50"]);
   });
 
   it("gives no count while the list loads", async () => {

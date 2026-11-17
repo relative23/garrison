@@ -237,11 +237,14 @@ export function Pager({ cursors, page }: { cursors: Cursors; page: { items: unkn
   return (
     <div className="flex items-center justify-between text-sm text-muted-foreground">
       <span>{shown}</span>
+      {/* aria-disabled, not disabled, where a button cannot act: a disabled
+          button drops the focus it holds, and these hold it while the next
+          page loads and at either end of the list. */}
       <div className="flex gap-2">
-        <Button variant="outline" size="sm" disabled={newest} onClick={cursors.newest}>
+        <Button variant="outline" size="sm" aria-disabled={newest || undefined} onClick={() => !newest && cursors.newest()}>
           {t("events.newest")}
         </Button>
-        <Button variant="outline" size="sm" disabled={!next} onClick={() => next && cursors.older(next)}>
+        <Button variant="outline" size="sm" aria-disabled={!next || undefined} onClick={() => next && cursors.older(next)}>
           {t("events.older")}
         </Button>
       </div>
