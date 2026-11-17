@@ -25,11 +25,9 @@ mod defaults;
 mod folder;
 
 use defaults::{Roles, administrator_roles, default_profiles};
-use folder::{Current, Folder};
+use folder::{Current, Folder, MAX_POLICY};
 
 const POLICY_GROUP: &str = "garrison-broker";
-/// As much of the policy as the broker reads.
-const MAX_POLICY: usize = 65536;
 
 fn profile_name(value: &str) -> Result<String, String> {
     if is_profile_name(value) {
@@ -100,7 +98,7 @@ fn save(config: &Config, folder: &Folder, policy: &Policy) -> Result<(), String>
     parse_policy(&document, &action_ids(config)).map_err(|error| error.to_string())?;
     let path = &config.broker.policy;
     let kept = match folder.current()? {
-        Current::File(previous) => Some(folder.back_up(&previous)?),
+        Current::File => Some(folder.back_up(&folder.content()?)?),
         Current::Missing => None,
         Current::Other => return Err(not_a_file(path)),
     };
@@ -283,7 +281,7 @@ fn init(config: &Config, force: bool) -> Result<u8, String> {
     // Under the lock, so that nothing that came meanwhile is replaced
     // without --force, and before Stalwart is asked.
     let done = locked(config, true, |folder| {
-        let there = matches!(folder.current()?, Current::File(_));
+        let there = matches!(folder.current()?, Current::File);
         if !force && there {
             return Ok(None);
         }

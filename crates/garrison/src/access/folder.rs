@@ -4,8 +4,10 @@
 //! Root runs the command, and `broker.policy` may name a folder that other
 //! users can write to. So every file in it is reached from the folder's own
 //! descriptor by its name: no link there is followed, nothing that is there
-//! is written over, and owner and mode are set on the file the command made
-//! before it takes the policy's name.
+//! is written over or taken for the command's own (a lock is one only where
+//! the command's user owns it under that one name), the policy is read no
+//! further than a policy can be, and owner and mode are set on the file the
+//! command made before it takes the policy's name.
 
 use std::ffi::OsString;
 use std::fs::File;
@@ -17,11 +19,14 @@ use garrison_core::time;
 use rustix::fs::{AtFlags, CWD, FlockOperation, Gid, Mode, OFlags, Uid};
 use rustix::io::Errno;
 
+/// As much of the policy as the broker reads: a larger file is no policy.
+pub(super) const MAX_POLICY: usize = 65536;
+
 /// What is at the policy's name.
 pub(super) enum Current {
     Missing,
-    /// A regular file, with what it holds.
-    File(Vec<u8>),
+    /// A regular file.
+    File,
     /// A link, a folder or anything else that is no file of its own.
     Other,
 }
@@ -130,45 +135,84 @@ impl Folder {
                 path.display()
             ));
         }
-        // A lock file someone else made would let them hold it: it becomes
-        // this command's own.
-        let owner = rustix::process::geteuid();
-        if status.st_uid != owner.as_raw() {
-            rustix::fs::fchown(&file, Some(owner), None).map_err(|error| failed(&path, error))?;
+        // A file that another user put there, or that has another name too,
+        // a hard link to a file elsewhere, is no lock of the command's:
+        // taking it would change that file, and its owner could hold it.
+        if status.st_uid != rustix::process::geteuid().as_raw() {
+            return Err(format!(
+                "{} is another user's file, not the lock of `garrison access`: remove it, then \
+                 run the command again.",
+                path.display()
+            ));
         }
+        if status.st_nlink != 1 {
+            return Err(format!(
+                "{} has another name too (a hard link), so it is not the lock of `garrison \
+                 access`: remove it, then run the command again.",
+                path.display()
+            ));
+        }
+        // One that an earlier release made may be readable for others.
         rustix::fs::fchmod(&file, Mode::RUSR | Mode::WUSR).map_err(|error| failed(&path, error))?;
         rustix::fs::flock(&file, FlockOperation::LockExclusive)
             .map_err(|error| failed(&path, error))?;
         Ok(file)
     }
 
-    /// What is at the policy's name now.
+    /// What is at the policy's name now, looked at without reading it.
     pub(super) fn current(&self) -> Result<Current, String> {
         let path = self.at(&self.name);
+        let status = match rustix::fs::statat(
+            &self.descriptor,
+            self.name.as_os_str(),
+            AtFlags::SYMLINK_NOFOLLOW,
+        ) {
+            Ok(status) => status,
+            Err(Errno::NOENT) => return Ok(Current::Missing),
+            Err(error) => return Err(failed(&path, error)),
+        };
+        let kind = rustix::fs::FileType::from_raw_mode(status.st_mode);
+        Ok(if kind == rustix::fs::FileType::RegularFile {
+            Current::File
+        } else {
+            Current::Other
+        })
+    }
+
+    /// What the file at the policy's name holds, for its backup: read
+    /// without following a link and no further than a policy can be, so
+    /// that a larger file, which is no policy, is said to be one.
+    pub(super) fn content(&self) -> Result<Vec<u8>, String> {
+        let path = self.at(&self.name);
         let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
-        let file = match rustix::fs::openat(
+        let opened = rustix::fs::openat(
             &self.descriptor,
             self.name.as_os_str(),
             flags,
             Mode::empty(),
-        ) {
-            Ok(file) => File::from(file),
-            Err(Errno::NOENT) => return Ok(Current::Missing),
-            Err(Errno::LOOP) => return Ok(Current::Other),
-            Err(error) => return Err(failed(&path, error)),
-        };
+        );
+        let file = File::from(opened.map_err(|error| failed(&path, error))?);
         if !file
             .metadata()
             .map_err(|error| failed(&path, error))?
             .is_file()
         {
-            return Ok(Current::Other);
+            return Err(format!("{} is no file", path.display()));
         }
         let mut data = Vec::new();
         (&file)
+            .take(MAX_POLICY as u64 + 1)
             .read_to_end(&mut data)
             .map_err(|error| failed(&path, error))?;
-        Ok(Current::File(data))
+        if data.len() > MAX_POLICY {
+            return Err(format!(
+                "{} is larger than a policy can be ({} KiB), so it is no policy of `garrison \
+                 access`: move it away, then run the command again.",
+                path.display(),
+                MAX_POLICY / 1024
+            ));
+        }
+        Ok(data)
     }
 
     /// Keep `data`, the policy before a change, in a new backup beside it,

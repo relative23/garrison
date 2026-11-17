@@ -1,8 +1,9 @@
 //! Every file `garrison access` makes or changes beside the policy is
-//! reached by its name in the policy's folder, never through a link that
-//! another user of that folder put there, and nothing is written over what
-//! is there: root runs these commands, and `broker.policy` may name a folder
-//! that others can write.
+//! reached by its name in the policy's folder, never through a link, symbolic
+//! or hard, that another user of that folder put there, nothing is written
+//! over what is there, and the policy is read no further than a policy can
+//! be: root runs these commands, and `broker.policy` may name a folder that
+//! others can write.
 
 use std::os::unix::fs::{MetadataExt, symlink};
 use std::path::{Path, PathBuf};
@@ -159,6 +160,8 @@ impl Target {
     fn new(outside: &Path, name: &str) -> Target {
         let path = outside.join(name);
         let text = format!("what {name} points to\n");
+        // Made anew, so that it has the mode of a new file.
+        let _ = std::fs::remove_file(&path);
         std::fs::write(&path, &text).unwrap();
         let mode = std::fs::metadata(&path).unwrap().mode();
         Target { path, text, mode }
@@ -170,8 +173,16 @@ impl Target {
     }
 }
 
+/// How a name is planted: a symbolic link to a file outside the folder, or
+/// a hard link to it, a second name of that very file.
+#[derive(Clone, Copy, Debug)]
+enum Link {
+    Symbolic,
+    Hard,
+}
+
 /// What went wrong when `writing` ran with links at `planted`, if anything.
-fn through_links(writing: &Writing, planted: &[String], outside: &Path) -> Vec<String> {
+fn through_links(writing: &Writing, planted: &[String], outside: &Path, how: Link) -> Vec<String> {
     let what = writing.arguments.join(" ");
     let targets: Vec<Target> = planted
         .iter()
@@ -183,28 +194,34 @@ fn through_links(writing: &Writing, planted: &[String], outside: &Path) -> Vec<S
     let answers = if refused { none() } else { (writing.answers)() };
     let (directory, output) = ran(writing, answers, |folder| {
         for (name, target) in planted.iter().zip(&targets) {
-            symlink(&target.path, folder.join(name)).unwrap();
+            match how {
+                Link::Symbolic => symlink(&target.path, folder.join(name)).unwrap(),
+                Link::Hard => std::fs::hard_link(&target.path, folder.join(name)).unwrap(),
+            }
         }
     });
     let mut wrong: Vec<String> = planted
         .iter()
         .zip(&targets)
         .filter(|(_, target)| !target.unchanged())
-        .map(|(name, _)| format!("{what}: wrote through a link at {name}"))
+        .map(|(name, _)| format!("{what}: changed what a {how:?} link at {name} names"))
         .collect();
     let lock = directory.path().join(lock);
     let said = text(&output.stderr);
     if refused {
         // A lock that is not the command's own is refused and left as it is.
         let refused = output.status.code() == Some(1) && said.contains(&lock.display().to_string());
-        let kept = std::fs::symlink_metadata(&lock).is_ok_and(|kind| kind.is_symlink());
+        let kept = std::fs::symlink_metadata(&lock).is_ok_and(|kind| match how {
+            Link::Symbolic => kind.is_symlink(),
+            Link::Hard => kind.is_file() && kind.nlink() == 2,
+        });
         if !refused || !kept {
             wrong.push(format!(
-                "{what}: a link at the lock was not refused: {said}"
+                "{what}: a {how:?} link at the lock was not refused: {said}"
             ));
         }
     } else if output.status.code() != Some(0) {
-        wrong.push(format!("{what}: with links at {planted:?}: {said}"));
+        wrong.push(format!("{what}: with {how:?} links at {planted:?}: {said}"));
     }
     wrong
 }
@@ -232,17 +249,47 @@ fn no_file_beside_the_policy_is_reached_through_a_link() {
         alone.push(".policy.json.pending".to_owned());
         alone.sort();
         alone.dedup();
-        // Each name alone, so that every one is reached, and the backups at once.
-        for name in &alone {
-            wrong.extend(through_links(
-                writing,
-                std::slice::from_ref(name),
-                outside.path(),
-            ));
+        // Each name alone, so that every one is reached, and the backups at
+        // once; as symbolic and as hard links.
+        for how in [Link::Symbolic, Link::Hard] {
+            for name in &alone {
+                let one = std::slice::from_ref(name);
+                wrong.extend(through_links(writing, one, outside.path(), how));
+            }
+            wrong.extend(through_links(writing, &backups, outside.path(), how));
         }
-        wrong.extend(through_links(writing, &backups, outside.path()));
     }
     assert_eq!(wrong, Vec::<String>::new());
+}
+
+/// The policy is read only for its backup, and then no further than a
+/// policy can be, which is what the broker reads: a larger file, as a
+/// sparse one of many GiB that another user put there, is no policy, and
+/// stays as it is.
+#[test]
+fn the_policy_is_read_no_further_than_a_policy_can_be() {
+    let writing = &WRITING[0];
+    assert_eq!(writing.arguments, ["access", "init", "--force"]);
+    let size = 16 << 20;
+    let (directory, output) = ran(writing, (writing.answers)(), |folder| {
+        let large = std::fs::File::create(folder.join("policy.json")).unwrap();
+        large.set_len(size).unwrap();
+    });
+    let said = text(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains("is larger than a policy can be (64 KiB), so it is no policy"),
+        "{said}"
+    );
+    let policy = directory.path().join("policy.json");
+    assert_eq!(std::fs::metadata(&policy).unwrap().len(), size);
+    let backups: Vec<String> = std::fs::read_dir(directory.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("policy.json."))
+        .filter(|name| name != "policy.json.lock")
+        .collect();
+    assert_eq!(backups, Vec::<String>::new());
 }
 
 /// The commands that only read the policy.

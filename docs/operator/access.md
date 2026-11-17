@@ -78,9 +78,11 @@ with `-1`, `-2` and so on after the time where that name is taken, readable
 by root alone, and says which; to undo a change, copy it back with `sudo cp`,
 which keeps the policy's owner and mode. The commands follow no link in the
 policy's folder and write over nothing there: a lock at
-`access-policy.json.lock` that is a link or no file is refused and left as it
-is, and so is a policy that is one. There is deliberately no web page that
-edits the policy.
+`access-policy.json.lock` that is a link, no file, another user's file or a
+second name of another file (a hard link) is refused and left as it is, and
+so is a policy that is a link or no file; a policy larger than the broker
+reads (64 KiB) is no policy, and `init --force` leaves it as it is too.
+There is deliberately no web page that edits the policy.
 
 ## When the actions change
 

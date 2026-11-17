@@ -388,8 +388,10 @@ Notable changes for operators and users. The format follows
   as `/etc/passwd`, and copied the policy over the file a link at the
   backup's name named and made it root's alone. Every file beside the
   policy is now reached by its name in the policy's folder, never through a
-  link: a lock that is a link is refused and left as it is, a backup takes
-  a name that nothing has (`<timestamp>-1` and so on after the time), and
+  link: a lock that is a link, another user's file or a second name of
+  another file (a hard link) is refused and left as it is, the policy is
+  read no further than the broker reads it (64 KiB), a backup takes a name
+  that nothing has (`<timestamp>-1` and so on after the time), and
   the new policy is written to a file of its own, made root's and readable
   for the broker's group before it takes the policy's place. Each error
   names the file it is about, where it named none, and says so where the
