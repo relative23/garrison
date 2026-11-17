@@ -9,6 +9,7 @@
 //! may still be held.
 
 use std::net::{IpAddr, SocketAddr};
+use std::path::{Path, PathBuf};
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Column, Evidence, Format, Observation, Required, State, Table};
@@ -28,9 +29,15 @@ use zone::{Expected, Verdict, expected, mx_hosts, needed, plain, verdict};
 
 const RESOLV_CONF: &str = "/etc/resolv.conf";
 
-/// The first resolver the host itself uses.
-pub(super) fn system_resolver() -> Option<SocketAddr> {
-    let text = std::fs::read_to_string(RESOLV_CONF).ok()?;
+/// What a check that asks a resolver says where neither its `resolver`
+/// option nor this host names one, and what mends it.
+pub(super) const NO_RESOLVER: &str =
+    "this host names no resolver in /etc/resolv.conf; name one with `resolver`";
+
+/// The first resolver the host itself uses: the first that
+/// `/etc/resolv.conf` names, or for tests the file at `path`.
+pub(super) fn system_resolver(path: Option<&Path>) -> Option<SocketAddr> {
+    let text = std::fs::read_to_string(path.unwrap_or(Path::new(RESOLV_CONF))).ok()?;
     dns::resolvers(&text)
         .first()
         .map(|address| (*address, 53).into())
@@ -135,6 +142,9 @@ pub struct Dns {
     /// The authorities a policy's server is checked against: the system's,
     /// unless a test gives its own.
     roots: Option<crate::fetch::Roots>,
+    /// Where the tests keep a resolv.conf of their own; otherwise it is
+    /// `/etc/resolv.conf`.
+    resolv_conf: Option<PathBuf>,
 }
 
 impl Dns {
@@ -145,6 +155,7 @@ impl Dns {
             max_domains: max_domains(&options)?,
             policy_url: None,
             roots: None,
+            resolv_conf: None,
         })
     }
 
@@ -156,8 +167,17 @@ impl Dns {
         self
     }
 
+    /// For tests: read the host's resolver from `path`.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_resolv_conf(mut self, path: &Path) -> Self {
+        self.resolv_conf = Some(path.to_owned());
+        self
+    }
+
     fn resolver(&self) -> Option<SocketAddr> {
-        self.resolver.or_else(system_resolver)
+        self.resolver
+            .or_else(|| system_resolver(self.resolv_conf.as_deref()))
     }
 
     fn unknown(
@@ -299,9 +319,8 @@ impl Provider for Dns {
             }
         };
         let Some(resolver) = self.resolver() else {
-            report
-                .observations
-                .push(self.unknown(context, "This host names no resolver in /etc/resolv.conf.")?);
+            let finding = format!("Not asked: {NO_RESOLVER}.");
+            report.observations.push(self.unknown(context, &finding)?);
             return Ok(report);
         };
         let mut silent = None;

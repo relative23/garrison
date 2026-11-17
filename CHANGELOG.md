@@ -719,6 +719,9 @@ Notable changes for operators and users. The format follows
   answer, long after it was mended. Such a reading is now made again in the
   next run, which asks Stalwart alone, one request a minute while it lasts,
   as one made without the key is once there is one.
+- **The DNS and reputation cards name the option that gives them a
+  resolver.** Where `/etc/resolv.conf` names no resolver, they said only
+  that; they now add "name one with `resolver`".
 - **A fault of a server's certificate is named as what it is.** The
   checks and the notifications called every fault of a certificate "not
   valid for this name", with the TLS library's own text after it, or "not

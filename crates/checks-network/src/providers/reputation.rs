@@ -16,7 +16,7 @@ use std::net::{IpAddr, SocketAddr};
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Field, Format};
 
-use super::dns::{mail_hosts, resolver_option, system_resolver};
+use super::dns::{NO_RESOLVER, mail_hosts, resolver_option, system_resolver};
 use super::domains::max_domains;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::dns::{self, Kind};
@@ -75,6 +75,9 @@ pub struct Reputation {
     modules: BTreeSet<ModuleId>,
     /// How long the lists are asked in all; tests shorten it.
     patience: std::time::Duration,
+    /// Where the tests keep a resolv.conf of their own; otherwise it is
+    /// `/etc/resolv.conf`.
+    resolv_conf: Option<std::path::PathBuf>,
 }
 
 /// Say in `said` that the addresses of `kind` of `host` could not be read,
@@ -115,6 +118,7 @@ impl Reputation {
             lists_ipv6: names(raw, "lists_ipv6", &LISTS_IPV6, Before::Ipv6)?,
             modules: options.modules(&["dns_tls"])?,
             patience: PATIENCE,
+            resolv_conf: None,
         })
     }
 
@@ -123,6 +127,14 @@ impl Reputation {
     #[must_use]
     pub fn with_patience(mut self, patience: std::time::Duration) -> Self {
         self.patience = patience;
+        self
+    }
+
+    /// For tests: read the host's resolver from `path`.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_resolv_conf(mut self, path: &std::path::Path) -> Self {
+        self.resolv_conf = Some(path.to_owned());
         self
     }
 
@@ -168,7 +180,7 @@ impl Reputation {
 
     /// Ask `resolver` about every address of the mail hosts.
     fn read(&self, context: &Context<'_>, resolver: Option<SocketAddr>) -> Result<Read, String> {
-        let resolver = resolver.ok_or("this host names no resolver in /etc/resolv.conf")?;
+        let resolver = resolver.ok_or(NO_RESOLVER)?;
         let (mut hosts, rest) = match self.hosts(context) {
             Ok(found) => found,
             Err(unread) => return Ok(*unread),
@@ -285,7 +297,9 @@ impl Reputation {
     /// reason to have none, and for one made without the collector's key
     /// where this run has it.
     fn known(&self, context: &Context<'_>) -> Kept<Read> {
-        let resolver = self.resolver.or_else(system_resolver);
+        let resolver = self
+            .resolver
+            .or_else(|| system_resolver(self.resolv_conf.as_deref()));
         let made = self.made(resolver);
         let missing = dqs::missing(&context.dqs_key);
         let keyed = context.native_key.is_some();
