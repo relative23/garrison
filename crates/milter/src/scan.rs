@@ -35,8 +35,10 @@
 use std::time::Instant;
 
 mod marks;
+mod parts;
 mod stretches;
 mod unpack;
+mod uu;
 
 use marks::contains;
 use stretches::Stretches;
@@ -84,6 +86,9 @@ pub enum Gap {
     Deadline,
     /// The message is larger than what is scanned at all.
     Size,
+    /// A part declares a transfer encoding the scan does not decode, or a
+    /// uuencode block that began and did not end.
+    Encoding,
 }
 
 impl Gap {
@@ -96,6 +101,7 @@ impl Gap {
             Gap::Method => "an archive in it is packed in a way the scan does not read",
             Gap::Deadline => "the scan's time ran out",
             Gap::Size => "it is larger than the configured max_message_mib",
+            Gap::Encoding => "a part is encoded in a way the scan does not read",
         }
     }
 }
@@ -191,16 +197,23 @@ fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
             return Some(found);
         }
     }
-    // Quoted-printable is undone last: it is how text travels, and rarely a
+    // Quoted-printable is undone next: it is how text travels, and rarely a
     // file. The one escape is `=`; a message without it decodes to itself,
     // which was scanned already. A message that holds `=` is read undone,
     // however the sender wrote the encoding: lower-case hexadecimal, one
     // long line, or only some bytes escaped are all a conforming client
     // decodes to the document, so the scan must read them too.
-    if contains(message, b"=") {
-        return work.scanned(&unquoted(message), DEPTH);
+    if contains(message, b"=")
+        && let Some(found) = work.scanned(&unquoted(message), DEPTH)
+    {
+        return Some(found);
     }
-    None
+    // Last, the little of MIME a receiver reads: each part decoded by the
+    // encoding its own headers declare. This catches what the passes above
+    // cannot see without the headers — base64 a sender broke up with
+    // characters outside its alphabet, uuencode — and marks a part the scan
+    // cannot decode as a gap instead of letting it pass as clean.
+    work.scanned_parts(message)
 }
 
 #[cfg(test)]
@@ -209,5 +222,7 @@ mod bounds_tests;
 mod encoding_tests;
 #[cfg(test)]
 mod incomplete_tests;
+#[cfg(test)]
+mod parts_tests;
 #[cfg(test)]
 pub(crate) mod tests;

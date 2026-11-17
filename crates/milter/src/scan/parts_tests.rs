@@ -1,0 +1,162 @@
+//! The MIME part reader against a sender who writes the headers on purpose to
+//! mislead it, and against ordinary mail that must stay clean. A document is
+//! found whichever way its encoding header is written; a part the scan cannot
+//! decode is Incomplete, never a silent clean; and prose that merely looks
+//! like an encoding is left alone.
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+
+use super::tests::plain_document;
+use super::*;
+use crate::sample::document;
+
+/// The base64 of `data` with a `!` (outside the alphabet) after every
+/// twentieth symbol: a conforming decoder ignores it (RFC 2045 section 6.8).
+fn base64_junk(data: &[u8]) -> Vec<u8> {
+    let encoded = STANDARD.encode(data);
+    let mut body = Vec::new();
+    for (index, byte) in encoded.bytes().enumerate() {
+        body.push(byte);
+        if index % 20 == 19 {
+            body.push(b'!');
+        }
+    }
+    body
+}
+
+/// A uuencoded begin/end block of `data`.
+fn uuencode(data: &[u8]) -> Vec<u8> {
+    let character = |value: u8| {
+        let raw = (value & 0x3f) + 0x20;
+        if raw == 0x20 { 0x60 } else { raw }
+    };
+    let mut out = b"begin 644 a.docm\r\n".to_vec();
+    for line in data.chunks(45) {
+        out.push(character(u8::try_from(line.len()).unwrap_or(0)));
+        for group in line.chunks(3) {
+            let first = group[0];
+            let second = group.get(1).copied().unwrap_or(0);
+            let third = group.get(2).copied().unwrap_or(0);
+            out.push(character(first >> 2));
+            out.push(character(((first << 4) | (second >> 4)) & 0x3f));
+            out.push(character(((second << 2) | (third >> 6)) & 0x3f));
+            out.push(character(third & 0x3f));
+        }
+        out.extend_from_slice(b"\r\n");
+    }
+    out.extend_from_slice(b"`\r\nend\r\n");
+    out
+}
+
+/// yEnc, which no mail program the project knows decodes: a named limit.
+fn yencode(data: &[u8]) -> Vec<u8> {
+    let mut out = format!("=ybegin line=128 size={} name=a.docm\r\n", data.len()).into_bytes();
+    let mut column = 0;
+    for &byte in data {
+        let encoded = byte.wrapping_add(42);
+        if matches!(encoded, 0x00 | 0x0a | 0x0d | 0x3d) {
+            out.push(b'=');
+            out.push(encoded.wrapping_add(64));
+            column += 2;
+        } else {
+            out.push(encoded);
+            column += 1;
+        }
+        if column >= 128 {
+            out.extend_from_slice(b"\r\n");
+            column = 0;
+        }
+    }
+    out.extend_from_slice(format!("\r\n=yend size={}\r\n", data.len()).as_bytes());
+    out
+}
+
+#[test]
+fn a_document_is_read_however_its_encoding_header_is_written() {
+    let bodies = [
+        // Another case.
+        b"Subject: x\r\nCONTENT-transfer-Encoding: BASE64\r\n\r\n".to_vec(),
+        // Folded onto a continuation line.
+        b"Subject: x\r\nContent-Transfer-Encoding:\r\n base64\r\n\r\n".to_vec(),
+        // Followed by a comment.
+        b"Subject: x\r\nContent-Transfer-Encoding: base64 (RFC 2045)\r\n\r\n".to_vec(),
+    ];
+    for mut message in bodies {
+        message.extend_from_slice(&base64_junk(&document()));
+        assert_eq!(macros(&message), Outcome::Macros(Found::Zipped));
+    }
+}
+
+#[test]
+fn two_disagreeing_encodings_do_not_hide_a_document() {
+    // A reading under one of the two reveals the document.
+    let mut hiding =
+        b"Content-Transfer-Encoding: 7bit\r\nContent-Transfer-Encoding: base64\r\n\r\n".to_vec();
+    hiding.extend_from_slice(&base64_junk(&document()));
+    assert_eq!(macros(&hiding), Outcome::Macros(Found::Zipped));
+    // When neither reading finds a document, the disagreement itself is a
+    // reason the message was not scanned as one thing.
+    let mut clean =
+        b"Content-Transfer-Encoding: base64\r\nContent-Transfer-Encoding: 7bit\r\n\r\n".to_vec();
+    clean.extend_from_slice(&base64_junk(&plain_document()));
+    assert_eq!(macros(&clean), Outcome::Incomplete(Gap::Encoding));
+}
+
+#[test]
+fn a_part_in_an_encoding_the_scan_cannot_read_is_incomplete() {
+    // An unknown transfer encoding: the body cannot be read, so the message
+    // is not a clean one, whatever the body holds.
+    for document in [document(), plain_document()] {
+        let mut message = b"Content-Transfer-Encoding: x-custom\r\n\r\n".to_vec();
+        message.extend_from_slice(&base64_junk(&document));
+        assert_eq!(macros(&message), Outcome::Incomplete(Gap::Encoding));
+    }
+    // The encodings that keep the bytes as they are do not make a clean
+    // message incomplete.
+    for cte in ["7bit", "8bit", "binary", "base64"] {
+        let mut message = format!("Content-Transfer-Encoding: {cte}\r\n\r\n").into_bytes();
+        message.extend_from_slice(&STANDARD.encode(plain_document()).into_bytes());
+        assert_eq!(macros(&message), Outcome::Clean, "{cte}");
+    }
+}
+
+#[test]
+fn a_uuencode_block_cut_short_is_incomplete() {
+    // Ninety bytes that are not a document, uuencoded, with the end cut off.
+    let filler: Vec<u8> = (0..90u8).collect();
+    let whole = uuencode(&filler);
+    let cut_at = whole
+        .windows(3)
+        .position(|window| window == b"`\r\n")
+        .unwrap();
+    let mut message = b"Content-Type: text/plain\r\n\r\n".to_vec();
+    message.extend_from_slice(&whole[..cut_at]);
+    assert_eq!(macros(&message), Outcome::Incomplete(Gap::Encoding));
+    // The same block whole is clean: it holds no macro.
+    let mut ok = b"Content-Type: text/plain\r\n\r\n".to_vec();
+    ok.extend_from_slice(&whole);
+    assert_eq!(macros(&ok), Outcome::Clean);
+}
+
+#[test]
+fn prose_that_resembles_an_encoding_stays_clean() {
+    // "begin" at a line's start, but no octal mode and no uuencode line
+    // after it; words that look a little like base64; punctuation throughout.
+    let prose = b"Subject: Trip\r\nContent-Type: text/plain\r\n\r\n\
+        begin the trip tomorrow, please.\r\n\
+        begin 644 notes\r\n\
+        Dear team, this is a short update, nothing attached.\r\n\
+        VGhpcyBsb29rcyBhIGxpdHRsZQ, but has punctuation.\r\n\
+        Regards.\r\n";
+    assert_eq!(macros(prose), Outcome::Clean);
+}
+
+#[test]
+fn a_yenc_body_is_a_named_limit() {
+    // yEnc is decoded by no mail program the project knows; a macro document
+    // so encoded passes as clean, a limit named in the documents.
+    let mut message = b"Subject: x\r\nContent-Type: application/octet-stream\r\n\r\n".to_vec();
+    message.extend_from_slice(&yencode(&document()));
+    assert_eq!(macros(&message), Outcome::Clean);
+}

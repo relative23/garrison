@@ -2,6 +2,9 @@
 
 use std::time::{Duration, Instant};
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+
 use super::tests::message;
 use super::*;
 use crate::sample::{archive, document};
@@ -75,6 +78,85 @@ fn a_megabyte_quoted_printable_body_is_undone_in_time() {
     let began = Instant::now();
     assert_eq!(macros(&data), Outcome::Clean);
     assert!(began.elapsed() < in_time(), "{:?}", began.elapsed());
+}
+
+#[test]
+fn a_megabyte_of_base64_with_junk_is_read_in_time() {
+    // A part declared base64 whose symbols a sender broke up with a character
+    // outside the alphabet: the part reader decodes it once, dropping the
+    // junk, so a megabyte stays proportional.
+    let filler: Vec<u8> = (0..750_000_u32)
+        .map(|index| index.wrapping_mul(2_654_435_761).to_le_bytes()[0])
+        .collect();
+    let encoded = STANDARD.encode(&filler);
+    let mut message = b"Content-Transfer-Encoding: base64\r\n\r\n".to_vec();
+    for (index, byte) in encoded.bytes().enumerate() {
+        message.push(byte);
+        if index % 20 == 19 {
+            message.push(b'!');
+        }
+    }
+    assert!(message.len() > 1024 * 1024, "{}", message.len());
+    let began = Instant::now();
+    assert_eq!(macros(&message), Outcome::Clean);
+    assert!(began.elapsed() < in_time(), "{:?}", began.elapsed());
+}
+
+#[test]
+fn multiparts_nested_deeper_than_the_scan_follows_end_in_time() {
+    // Twenty multiparts one inside the next, deeper than the reader descends:
+    // it stops, it does not recurse without bound, and it does not panic.
+    let mut data = document();
+    for level in 0..20 {
+        let boundary = format!("b{level}");
+        let mut outer = format!(
+            "Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n--{boundary}\r\n"
+        )
+        .into_bytes();
+        outer.extend_from_slice(&data);
+        outer.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        data = outer;
+    }
+    let began = Instant::now();
+    let _ = macros(&data);
+    assert!(began.elapsed() < in_time(), "{:?}", began.elapsed());
+}
+
+#[test]
+fn a_boundary_declared_and_never_used_is_harmless() {
+    // A multipart whose declared boundary never appears as a delimiter: the
+    // reader finds no parts, and the other passes read the body as they are.
+    let mut message =
+        b"Content-Type: multipart/mixed; boundary=\"never\"\r\n\r\nNothing here matches.\r\n"
+            .to_vec();
+    message.extend_from_slice(&message_body_base64(&document()));
+    let began = Instant::now();
+    assert_eq!(macros(&message), Outcome::Macros(Found::Zipped));
+    assert!(began.elapsed() < in_time(), "{:?}", began.elapsed());
+}
+
+#[test]
+fn a_megabyte_of_begin_lines_is_tried_in_time() {
+    // Many lines that open a uuencode block but are followed by no valid data
+    // line: each is given up at once, so the work stays proportional.
+    let mut message = b"Content-Type: text/plain\r\n\r\n".to_vec();
+    while message.len() < 1024 * 1024 {
+        message.extend_from_slice(b"begin 644 notes\r\nnot a uuencode data line at all\r\n");
+    }
+    let began = Instant::now();
+    assert_eq!(macros(&message), Outcome::Clean);
+    assert!(began.elapsed() < in_time(), "{:?}", began.elapsed());
+}
+
+/// The base64 of `data`, folded into lines, as a mail program writes it.
+fn message_body_base64(data: &[u8]) -> Vec<u8> {
+    let encoded = STANDARD.encode(data);
+    let mut body = Vec::new();
+    for chunk in encoded.as_bytes().chunks(76) {
+        body.extend_from_slice(chunk);
+        body.extend_from_slice(b"\r\n");
+    }
+    body
 }
 
 #[test]

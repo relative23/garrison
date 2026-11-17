@@ -25,8 +25,31 @@ const LENIENT: GeneralPurpose = GeneralPurpose::new(
         .with_decode_allow_trailing_bits(true),
 );
 
-fn is_symbol(byte: u8) -> bool {
+pub(super) fn is_symbol(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/')
+}
+
+/// Decode every base64 symbol in `data`, piece by piece, ignoring anything
+/// else: white space, padding and bytes outside the alphabet, which a
+/// decoder passes over (RFC 2045 section 6.8). `symbols` is how many symbols
+/// `data` holds, so the buffer is sized to about three quarters of them.
+pub(super) fn decode_symbols(data: &[u8], symbols: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(symbols / 4 * 3 + 3);
+    let mut piece: Vec<u8> = Vec::with_capacity(PIECE);
+    for symbol in data.iter().copied().filter(|byte| is_symbol(*byte)) {
+        piece.push(symbol);
+        if piece.len() == PIECE {
+            append(&piece, &mut out);
+            piece.clear();
+        }
+    }
+    let whole = piece.len() - piece.len() % 4;
+    append(&piece[..whole], &mut out);
+    // Two or three symbols more are one or two bytes; one alone is none.
+    if piece.len() - whole >= 2 {
+        append(&piece[whole..], &mut out);
+    }
+    out
 }
 
 /// The stretches of a message: lines that are base64 and nothing else, in
@@ -101,24 +124,7 @@ impl Stretch<'_> {
         // Exactly what the symbols hold, with the room the decoder asks for
         // a last group: a buffer that grew as it was filled would hold up
         // to twice as much.
-        let mut data = Vec::with_capacity(self.symbols / 4 * 3 + 3);
-        let mut piece: Vec<u8> = Vec::with_capacity(PIECE);
-        // Between the symbols of a stretch stand only padding and the ends
-        // of lines.
-        for symbol in self.lines.iter().copied().filter(|byte| is_symbol(*byte)) {
-            piece.push(symbol);
-            if piece.len() == PIECE {
-                append(&piece, &mut data);
-                piece.clear();
-            }
-        }
-        let whole = piece.len() - piece.len() % 4;
-        append(&piece[..whole], &mut data);
-        // Two or three symbols more are one or two bytes; one alone is none.
-        if piece.len() - whole >= 2 {
-            append(&piece[whole..], &mut data);
-        }
-        data
+        decode_symbols(self.lines, self.symbols)
     }
 }
 

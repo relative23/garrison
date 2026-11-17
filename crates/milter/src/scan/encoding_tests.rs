@@ -201,6 +201,13 @@ const WRAPPINGS: &[Wrapping] = &[
         "message/rfc822 with an inner base64 part",
         rfc822_inner_base64,
     ),
+    (
+        "base64 with characters outside its alphabet",
+        base64_with_junk,
+    ),
+    ("uuencode part", uuencode_part),
+    ("uuencode block in a text body", uu_in_text),
+    ("base64 with junk in a multipart", base64_junk_multipart),
 ];
 
 #[test]
@@ -273,29 +280,49 @@ fn uuencode(data: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Encodings a conforming encoder would not write for a MIME part. Only a
-/// lenient decoder reconstructs them, and a milter that does not parse MIME
-/// cannot tell such a body from ordinary text without reading the part's
-/// declared encoding. They are a named limit (configuration.md and the known
-/// limits in security.md); a macro document so wrapped passes as clean, as
-/// one in a password-protected archive does. This test holds that limit so a
-/// change to it is noticed.
-#[test]
-fn encodings_outside_the_mime_set_are_a_documented_limit() {
-    // base64 interrupted by a character outside its alphabet.
-    let encoded = STANDARD.encode(document());
-    let mut junk = Vec::new();
+/// base64 broken up with a character outside its alphabet. RFC 2045 section
+/// 6.8 has a decoder ignore it, and a conforming client rebuilds the
+/// document, so the scan must read it too.
+fn base64_with_junk(data: &[u8]) -> Vec<u8> {
+    with_header("base64", &base64_junk(data))
+}
+
+/// The base64 of `data` with a `!` after every twentieth symbol.
+fn base64_junk(data: &[u8]) -> Vec<u8> {
+    let encoded = STANDARD.encode(data);
+    let mut body = Vec::new();
     for (index, byte) in encoded.bytes().enumerate() {
-        junk.push(byte);
+        body.push(byte);
         if index % 20 == 19 {
-            junk.push(b'!');
+            body.push(b'!');
         }
     }
-    assert_eq!(macros(&with_header("base64", &junk)), Outcome::Clean);
-    // A uuencoded attachment (uuencode is not one of MIME's transfer
-    // encodings).
-    assert_eq!(
-        macros(&with_header("x-uuencode", &uuencode(&document()))),
-        Outcome::Clean
+    body
+}
+
+/// A part declared uuencode, carrying a begin/end block.
+fn uuencode_part(data: &[u8]) -> Vec<u8> {
+    with_header("x-uuencode", &uuencode(data))
+}
+
+/// A uuencode begin/end block in a plain text body, as such files have
+/// travelled since before MIME.
+fn uu_in_text(data: &[u8]) -> Vec<u8> {
+    let mut out = b"Subject: x\r\nContent-Type: text/plain\r\n\r\nSee the attachment.\r\n".to_vec();
+    out.extend_from_slice(&uuencode(data));
+    out
+}
+
+/// A multipart message whose one attachment is base64 broken up with junk.
+fn base64_junk_multipart(data: &[u8]) -> Vec<u8> {
+    let mut out =
+        b"Subject: x\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n"
+            .to_vec();
+    out.extend_from_slice(b"--b\r\nContent-Type: text/plain\r\n\r\nPlease see the attachment.\r\n");
+    out.extend_from_slice(
+        b"--b\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n\r\n",
     );
+    out.extend_from_slice(&base64_junk(data));
+    out.extend_from_slice(b"\r\n--b--\r\n");
+    out
 }
