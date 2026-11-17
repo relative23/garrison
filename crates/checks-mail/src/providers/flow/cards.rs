@@ -150,7 +150,9 @@ impl Flow {
     }
 
     /// The scanner's verdicts by day. A host without a milter has none, and
-    /// then no card either.
+    /// then no card either. A reply of the milter's own may refuse a message
+    /// or defer it, and Stalwart's event does not say which (measured with
+    /// Stalwart 1.1.0), so it is counted apart, as neither.
     pub(super) fn milter(
         &self,
         context: &Context<'_>,
@@ -160,30 +162,45 @@ impl Flow {
         let week = &read.week;
         let of = |kind: &str| week.of(&format!("milter.action-{kind}"));
         let (accepted, rejected, discarded) = (of("accept"), of("reject"), of("discard"));
-        let deferred: Vec<u64> = of("temp-fail")
-            .iter()
-            .zip(of("reply-code"))
-            .map(|(left, right)| left + right)
-            .collect();
+        let (deferred, replied) = (of("temp-fail"), of("reply-code"));
         let unreached: Vec<u64> = (0..week.days.len())
             .map(|day| NOT_REACHED.iter().map(|kind| week.of(kind)[day]).sum())
             .collect();
-        let all = [&accepted, &rejected, &discarded, &deferred, &unreached];
+        let all = [
+            &accepted, &rejected, &discarded, &deferred, &replied, &unreached,
+        ];
         if read.problem.is_none() && all.iter().all(|days| days.iter().all(|count| *count == 0)) {
             return Ok(());
         }
         // Since yesterday: a scanner that was away for a moment shows for a day.
-        let recent: u64 = unreached.iter().rev().take(2).sum();
-        let (state, findings) = if recent > 0 {
-            (
-                State::Warning,
-                vec![format!(
-                    "The milter could not be reached {recent} times since yesterday. What Stalwart does \
-                     with mail then, defer it or let it pass unscanned, is the milter's setting there."
-                )],
-            )
+        let recent = |days: &[u64]| -> u64 { days.iter().rev().take(2).sum() };
+        let mut findings = Vec::new();
+        let unreached_lately = recent(&unreached);
+        if unreached_lately > 0 {
+            findings.push(format!(
+                "The milter could not be reached {unreached_lately} times since yesterday. What \
+                 Stalwart does with mail then, defer it or let it pass unscanned, is the milter's \
+                 setting there."
+            ));
+        }
+        // A deferral is no verdict: a milter that deferred everything judged
+        // nothing, as a scanner does that cannot scan.
+        let deferred_lately = recent(&deferred);
+        let answered_lately: u64 = [&accepted, &rejected, &discarded, &replied]
+            .iter()
+            .map(|days| recent(days))
+            .sum();
+        if deferred_lately > 0 && answered_lately == 0 {
+            findings.push(format!(
+                "The milter deferred all {deferred_lately} messages it was shown since yesterday \
+                 and passed or refused none, so their senders were asked to try again later. A \
+                 scanner that cannot scan answers so, as clamav-milter does while clamd is down."
+            ));
+        }
+        let state = if findings.is_empty() {
+            State::Ok
         } else {
-            (State::Ok, Vec::new())
+            State::Warning
         };
         let rows = week
             .days
@@ -197,15 +214,20 @@ impl Flow {
                     json!(rejected[day]),
                     json!(discarded[day]),
                     json!(deferred[day]),
+                    json!(replied[day]),
                     json!(unreached[day]),
                 ]
             })
             .collect();
         let mut observation = self
             .observation(context, read, "milter", "Milter verdicts", ModuleId::Antivirus, state)?
-            .with_scope("What the scanner behind the milter said of the mail it was shown on each of the last seven days (UTC).")
+            .with_scope(
+                "What the scanner behind the milter said of the mail it was shown on each of the last \
+                 seven days (UTC). A reply of the milter's own may refuse a message or defer it; \
+                 Stalwart's event does not say which.",
+            )
             .with_table(Table {
-                columns: ["Day", "Accepted", "Rejected", "Discarded", "Deferred", "Not reached"]
+                columns: ["Day", "Accepted", "Rejected", "Discarded", "Deferred", "Own reply", "Not reached"]
                     .iter()
                     .enumerate()
                     .map(|(index, label)| column(label, if index == 0 { Format::Text } else { Format::Number }))

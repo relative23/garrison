@@ -196,6 +196,14 @@ Notable changes for operators and users. The format follows
   1.1.0), and the Test messages card was in order for a day although
   nothing had been scanned. A temporary reply (4xx) is now "not tested",
   Unknown, and that test is tried again after an hour.
+- **The milter verdicts card counts a milter's own replies apart, and
+  warns where a milter judged nothing.** It counted a reply of the milter's
+  own as deferred, though such a reply refuses a message as well: Garrison's
+  macro filter refuses with one, so its refusals showed as deferrals.
+  Stalwart's event for it names no code (measured with Stalwart 1.1.0), so
+  they now have a column of their own. A milter that deferred every message
+  it was shown since yesterday, as clamav-milter does while clamd is down,
+  left the card in order; it is now a warning.
 - **The dashboard's signature age is that of the database the card
   judges.** Where an old `daily.cvd` lies beside the `daily.cld` that the
   updates keep current, the Signature databases card judged the newer file

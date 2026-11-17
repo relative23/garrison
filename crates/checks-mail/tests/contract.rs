@@ -6,7 +6,9 @@
 //! down), and a milter Stalwart cannot reach whose entry has
 //! `tempFailOnError`, as `garrison stalwart setup` writes Garrison's filter
 //! for `when_unreachable = "defer"`: Stalwart defers each test message at its
-//! end, and the card says "not tested", Unknown.
+//! end, and the card says "not tested", Unknown. Beside it, the events
+//! Stalwart records of what a milter answered, by which the mail flow's
+//! milter card counts.
 //! Needs `GARRISON_LAB_SMTP` and `GARRISON_LAB_CALLBACK_HOST` besides the
 //! lab variables, as `cargo xtask lab start` prints them; run with `cargo
 //! test --workspace --test contract -- --ignored`.
@@ -14,9 +16,10 @@
 // Helpers fail the test by panicking, like the test itself.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
-use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use garrison_checks::context::Provider;
 use garrison_checks::testing::{Canned, context, table};
@@ -24,7 +27,7 @@ use garrison_checks_mail::providers::MailTest;
 use garrison_core::observations::{Observation, State};
 use garrison_milter::protocol::{self, Command, Reply};
 use garrison_testing::lab::Lab;
-use serde_json::json;
+use serde_json::{Value, json};
 
 /// One test at a time: each sets Stalwart's milters for the lab as a whole.
 fn one_at_a_time() -> MutexGuard<'static, ()> {
@@ -132,4 +135,233 @@ fn a_test_message_that_stalwart_defers_is_not_tested() {
     for result in results(&unreached) {
         assert!(result.starts_with("not tested: 4"), "{result}");
     }
+}
+
+/// The events Stalwart posts to a webhook on `host`, as they come.
+fn webhook(host: &str) -> (u16, Arc<Mutex<Vec<Value>>>) {
+    let listener = TcpListener::bind((host, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let kept = Arc::clone(&events);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            let mut reader = BufReader::new(stream);
+            let mut length = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = value.trim().parse().unwrap_or(0);
+                }
+            }
+            let mut body = vec![0; length];
+            if reader.read_exact(&mut body).is_err() {
+                continue;
+            }
+            if let Ok(batch) = serde_json::from_slice::<Value>(&body) {
+                let arrived = batch["events"].as_array().cloned().unwrap_or_default();
+                kept.lock().unwrap().extend(arrived);
+            }
+            let _ = reader
+                .into_inner()
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        }
+    });
+    (port, events)
+}
+
+/// A milter on `host` that answers each message's end with what `reply`
+/// holds at that moment.
+fn milter_answering(host: &str, reply: Arc<Mutex<Reply>>) -> u16 {
+    let listener = TcpListener::bind((host, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let reply = Arc::clone(&reply);
+            std::thread::spawn(move || {
+                while let Ok(Some(command)) = protocol::read(&mut stream) {
+                    let answer = match command {
+                        Command::Negotiate { .. } => Reply::Negotiate {
+                            actions: 0,
+                            protocol: 0,
+                        },
+                        Command::EndOfBody => reply.lock().unwrap().clone(),
+                        Command::Quit => break,
+                        Command::Abort | Command::Other(b'D') => continue,
+                        _ => Reply::Continue,
+                    };
+                    if protocol::write(&mut stream, &answer).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    port
+}
+
+/// What Stalwart answers at the end of one message with `subject`.
+fn handed_in(smtp: &str, subject: &str) -> String {
+    let mut session = garrison_testing::smtp::Smtp::connect(smtp);
+    for command in [
+        "EHLO contract.example.net",
+        "MAIL FROM:<sender@contract.example.net>",
+        "RCPT TO:<admin@example.test>",
+    ] {
+        let reply = session.command(command);
+        assert!(reply.starts_with("250"), "{command}: {reply}");
+    }
+    assert!(session.command("DATA").starts_with("354"));
+    let answer = session.command(&format!(
+        "From: <sender@contract.example.net>\r\nTo: <admin@example.test>\r\n\
+         Subject: {subject}\r\n\r\nA message for the milter.\r\n."
+    ));
+    session.command("QUIT");
+    answer.trim_end().to_owned()
+}
+
+/// What Stalwart answered at the end of one message with `subject`, and the
+/// milter events it posted for it; both printed for the record.
+fn recorded(smtp: &str, events: &Mutex<Vec<Value>>, subject: &str) -> (String, Vec<Value>) {
+    let before = events.lock().unwrap().len();
+    let said = handed_in(smtp, subject);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while events.lock().unwrap().len() == before && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    // The rest of a batch, if it was split.
+    std::thread::sleep(Duration::from_secs(2));
+    let arrived: Vec<Value> = events.lock().unwrap()[before..].to_vec();
+    (said, arrived)
+}
+
+/// A webhook to `port` on `host` for every milter event Stalwart records.
+fn milter_webhook(lab: &mut Lab, host: &str, port: u16) {
+    let kinds: Value = [
+        "milter.action-accept",
+        "milter.action-reject",
+        "milter.action-discard",
+        "milter.action-temp-fail",
+        "milter.action-reply-code",
+        "milter.action-connection-failure",
+        "milter.timeout",
+        "milter.io-error",
+        "milter.disconnected",
+    ]
+    .into_iter()
+    .map(|name| (name.to_owned(), json!(true)))
+    .collect();
+    lab.create(
+        "WebHook",
+        &json!({
+            "url": format!("http://{host}:{port}/"),
+            "events": kinds,
+            "eventsPolicy": "include",
+            "level": "trace",
+            "timeout": 5000,
+            "throttle": 500,
+            "discardAfter": 60000,
+            "lossy": false,
+            "signatureKey": {"@type": "Value", "secret": garrison_testing::lab::random_hex(32)},
+            "httpAuth": {"@type": "Unauthenticated"},
+            "httpHeaders": {},
+            "allowInvalidCerts": false,
+            "enable": true,
+        }),
+    );
+}
+
+/// What the mail flow's milter card counts by: the event Stalwart records
+/// for each answer of a milter. A reply of the milter's own is one event
+/// whether it refuses or defers, and names no code, so the card counts it
+/// apart; a milter that cannot be reached is one of the events the card
+/// warns of.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn stalwart_records_what_a_milter_answered() {
+    let _one = one_at_a_time();
+    let mut lab = Lab::from_environment();
+    let smtp = std::env::var("GARRISON_LAB_SMTP").expect("GARRISON_LAB_SMTP");
+    let callback = std::env::var("GARRISON_LAB_CALLBACK_HOST").expect("GARRISON_LAB_CALLBACK_HOST");
+    let (hook, events) = webhook(&callback);
+    milter_webhook(&mut lab, &callback, hook);
+    let reply = Arc::new(Mutex::new(Reply::Accept));
+    let port = milter_answering(&callback, Arc::clone(&reply));
+    milter_entry(&mut lab, &callback, port);
+    for (subject, answer, code, kind) in [
+        ("accepted", Reply::Accept, "250", "milter.action-accept"),
+        (
+            "deferred",
+            Reply::TempFail,
+            "451",
+            "milter.action-temp-fail",
+        ),
+        (
+            "refused with 550",
+            Reply::Refuse("550 5.7.1 Refused by the contract test.".into()),
+            "550",
+            "milter.action-reply-code",
+        ),
+        (
+            "refused with 451",
+            Reply::Refuse("451 4.7.1 Not now, says the contract test.".into()),
+            "451",
+            "milter.action-reply-code",
+        ),
+    ] {
+        *reply.lock().unwrap() = answer;
+        let (said, arrived) = recorded(&smtp, &events, subject);
+        eprintln!(
+            "{subject}: SMTP {said:?}; events {}",
+            Value::Array(arrived.clone())
+        );
+        assert!(said.starts_with(code), "{subject}: {said}");
+        let types: Vec<&str> = arrived
+            .iter()
+            .filter_map(|event| event["type"].as_str())
+            .collect();
+        assert_eq!(types, [kind], "{subject}");
+        // Nothing in it that the receiver keeps and that would tell a
+        // refusal from a deferral.
+        for field in ["code", "details", "reason"] {
+            assert!(
+                arrived[0]["data"].get(field).is_none(),
+                "{subject}: {field}"
+            );
+        }
+    }
+    // The milter gone, its entry left: one of the events the card warns of.
+    let closed = TcpListener::bind((callback.as_str(), 0)).unwrap();
+    let gone = closed.local_addr().unwrap().port();
+    drop(closed);
+    let (kind, entry) = lab.created.pop().unwrap();
+    lab.call(&format!("x:{kind}/set"), &json!({"destroy": [entry]}));
+    milter_entry(&mut lab, &callback, gone);
+    let (said, arrived) = recorded(&smtp, &events, "unreached");
+    eprintln!(
+        "unreached: SMTP {said:?}; events {}",
+        Value::Array(arrived.clone())
+    );
+    assert!(said.starts_with('4'), "{said}");
+    let types: Vec<&str> = arrived
+        .iter()
+        .filter_map(|event| event["type"].as_str())
+        .collect();
+    assert!(
+        !types.is_empty()
+            && types.iter().all(|kind| {
+                [
+                    "milter.action-connection-failure",
+                    "milter.timeout",
+                    "milter.io-error",
+                    "milter.disconnected",
+                ]
+                .contains(kind)
+            }),
+        "{types:?}"
+    );
 }
