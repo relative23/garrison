@@ -63,13 +63,17 @@ pub struct Run {
 pub const MAX_REPORT: usize = 256 * 1024;
 
 /// The report of one repository. A part that was not run this time keeps
-/// what the run before wrote.
+/// what the run before wrote of the same repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
     pub tool: Tool,
     /// The repository as the tool was given it, without a password in it.
     pub repository: String,
+    /// The repository's own ID, as the tool gives it: what tells one
+    /// repository from another under the same name. None where the tool
+    /// gave none, and in a report that an earlier release wrote.
+    pub repository_id: Option<String>,
     pub snapshots: Option<Snapshots>,
     /// Why the snapshots could not be listed, where they could not.
     pub problem: Option<String>,
@@ -106,6 +110,26 @@ pub fn restic_snapshots(output: &str) -> Result<(u64, Option<String>), String> {
         .and_then(|made| time::Timestamp::from_second(made.as_second()).ok())
         .map(time::isoformat);
     Ok((listed.len() as u64, newest))
+}
+
+/// A repository ID as restic and borg give it: hex digits, 64 of them as
+/// both write it today.
+fn repository_id(id: Option<&str>) -> Option<String> {
+    id.filter(|id| (1..=128).contains(&id.len()) && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .map(str::to_owned)
+}
+
+/// `restic cat config`: the repository's ID.
+#[must_use]
+pub fn restic_id(output: &str) -> Option<String> {
+    repository_id(serde_json::from_str::<Value>(output).ok()?["id"].as_str())
+}
+
+/// `borg list --json`: the repository's ID, from the `repository` object
+/// that borg's documentation gives every `--json` output.
+#[must_use]
+pub fn borg_id(output: &str) -> Option<String> {
+    repository_id(serde_json::from_str::<Value>(output).ok()?["repository"]["id"].as_str())
 }
 
 /// `restic stats --json --mode raw-data`: the stored size.
@@ -170,6 +194,31 @@ mod tests {
         assert_eq!(restic_size("Fatal: wrong password"), None);
     }
 
+    /// Each tool's own ID of the repository, as restic 0.18.1 prints it for
+    /// `cat config` and borg's documentation gives it for `--json` output.
+    #[test]
+    fn each_tool_names_its_repository_by_its_own_id() {
+        let config = r#"{"version": 2, "id": "139de707e448df51604eff1421234e88408f17ad8210378fffd0d5ee4f018c80", "chunker_polynomial": "27e6426c4ae9ff"}"#;
+        assert_eq!(
+            restic_id(config).as_deref(),
+            Some("139de707e448df51604eff1421234e88408f17ad8210378fffd0d5ee4f018c80")
+        );
+        assert_eq!(borg_id(BORG).as_deref(), Some("477c"));
+        for unread in [
+            r#"{"message_type":"exit_error","code":12,"message":"Fatal: wrong password"}"#,
+            r#"{"id": "not hex"}"#,
+            r#"{"id": ""}"#,
+            "Fatal: repository does not exist",
+        ] {
+            assert_eq!(restic_id(unread), None, "{unread}");
+        }
+        assert_eq!(borg_id(r#"{"archives": []}"#), None);
+        assert_eq!(
+            restic_id(&format!(r#"{{"id": "{}"}}"#, "a".repeat(129))),
+            None
+        );
+    }
+
     #[test]
     fn borg_names_its_archives_in_utc_and_its_size() {
         assert_eq!(
@@ -211,6 +260,7 @@ mod tests {
         let report = Report {
             tool: Tool::Restic,
             repository: "/srv/restic".to_owned(),
+            repository_id: Some("477c".to_owned()),
             snapshots: Some(Snapshots {
                 at: "2026-11-11T19:20:00+00:00".to_owned(),
                 count: 2,

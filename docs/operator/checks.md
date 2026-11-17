@@ -200,13 +200,18 @@ backup job already has (`RESTIC_REPOSITORY`, `RESTIC_PASSWORD_FILE`,
 `BORG_REPO`, `BORG_PASSPHRASE` and the like), or takes the repository with
 `--repo`. It writes `/var/lib/garrison/backup-check/<tool>.json`, which the
 provider reads. The report names the repository as the tool was given it,
-without what signs in to it; one that restic reads from the file
-`RESTIC_REPOSITORY_FILE` names is named by that file, and an empty
-`RESTIC_REPOSITORY` or `BORG_REPO` names none, as the tools take it. A run
-keeps the last check and restore of the report before it only where that
-report is of the same tool and the same repository: under a report of
-another, as where a second unit names another repository or `--report`
-names one file for restic and borg, it starts without them and says so. A
+without what signs in to it (one that restic reads from the file
+`RESTIC_REPOSITORY_FILE` names by that file; an empty `RESTIC_REPOSITORY`
+or `BORG_REPO` names none, as the tools take it), and holds the
+repository's own ID, which restic gives with `restic cat config` and borg
+with its listing. A run keeps the last check and restore of the report
+before it only where that report is of the same tool and the same ID,
+whatever the repository's name: another repository under the same name,
+as another disk mounted at its place or a file that now names another one,
+starts without them, and so does a run for which the tool gives no ID, as
+where it cannot open the repository; the command says so. A report that an
+earlier release wrote holds no ID: its check and restore are kept once
+where tool and name are the same, and the ID is recorded with them. A
 report that is a link or no plain file, is larger than 256 KiB, is not one
 JSON object as the command writes it, or can be changed by a user other
 than root makes the check Unknown. The command reads the report it wrote

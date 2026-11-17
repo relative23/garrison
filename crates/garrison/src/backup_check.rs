@@ -5,7 +5,7 @@
 //! environment (`RESTIC_REPOSITORY`, `RESTIC_PASSWORD_FILE`, `BORG_REPO`,
 //! `BORG_PASSPHRASE` and the like): the command adds no secret of its own
 //! and keeps none. Every run lists the snapshots and reads the repository's
-//! size. `--verify` also runs the tool's integrity check, `--restore PATH`
+//! size and its own ID. `--verify` also runs the tool's integrity check, `--restore PATH`
 //! restores that path from the newest snapshot into a directory of its own
 //! and removes it again, after what interrupted restores left. The report
 //! keeps the last check and the last restore until the next one.
@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use garrison_collector::backups::{
-    MAX_REPORT, Report, Run, Snapshots, Tool, borg_archives, borg_size, named, restic_size,
-    restic_snapshots,
+    MAX_REPORT, Report, Run, Snapshots, Tool, borg_archives, borg_id, borg_size, named, restic_id,
+    restic_size, restic_snapshots,
 };
 use garrison_core::files::{atomic_write, read_json};
 use garrison_core::{json, time};
@@ -102,6 +102,14 @@ fn now() -> String {
         .map_or_else(|_| time::isoformat(now), time::isoformat)
 }
 
+/// What a listing gave: the snapshots, the repository's own ID where the
+/// tool gave one, and for borg the newest archive's name.
+struct Listed {
+    snapshots: Snapshots,
+    id: Option<String>,
+    newest: Option<String>,
+}
+
 /// One tool's way of being asked.
 struct Repository {
     tool: Tool,
@@ -123,8 +131,9 @@ impl Repository {
         archive.map_or_else(|| repo.to_owned(), |archive| format!("{repo}::{archive}"))
     }
 
-    /// The snapshots and the size, and for borg the newest archive's name.
-    fn snapshots(&self) -> Result<(Snapshots, Option<String>), String> {
+    /// The snapshots and the size, the repository's ID, and for borg the
+    /// newest archive's name.
+    fn snapshots(&self) -> Result<Listed, String> {
         let at = now();
         match self.tool {
             Tool::Restic => {
@@ -138,15 +147,20 @@ impl Repository {
                 let mut arguments = self.restic();
                 arguments.extend(["stats", "--json", "--mode", "raw-data", "--no-lock"]);
                 let size_bytes = restic_size(&run(self.tool, &arguments, None).stdout);
-                Ok((
-                    Snapshots {
+                // The listing does not name the repository; its config does.
+                let mut arguments = self.restic();
+                arguments.extend(["cat", "config", "--no-lock"]);
+                let config = run(self.tool, &arguments, None);
+                Ok(Listed {
+                    snapshots: Snapshots {
                         at,
                         count,
                         newest,
                         size_bytes,
                     },
-                    None,
-                ))
+                    id: config.ok.then(|| restic_id(&config.stdout)).flatten(),
+                    newest: None,
+                })
             }
             Tool::Borg => {
                 let repo = self.borg(None);
@@ -159,15 +173,16 @@ impl Repository {
                 let (count, newest, name) = borg_archives(&listed.stdout)?;
                 arguments[0] = "info";
                 let size_bytes = borg_size(&run(self.tool, &arguments, None).stdout);
-                Ok((
-                    Snapshots {
+                Ok(Listed {
+                    snapshots: Snapshots {
                         at,
                         count,
                         newest,
                         size_bytes,
                     },
-                    name,
-                ))
+                    id: borg_id(&listed.stdout),
+                    newest: name,
+                })
             }
         }
     }
@@ -226,24 +241,66 @@ fn named_in_file(tool: Tool) -> Option<String> {
     Some(format!("(named in {})", Path::new(&file).display()))
 }
 
-/// The last report where it is one of `tool` for `repository`. Of another
-/// tool or repository nothing is kept, since the card would show it as this
-/// repository's, and that is said where it held a check or a restore.
-fn kept(path: &Path, before: Report, tool: Tool, repository: &str) -> Option<Report> {
-    if before.tool == tool && before.repository == repository {
-        return Some(before);
-    }
-    if before.verify.is_some() || before.restore.is_some() {
-        complain(&format!(
-            "The last report, {}, is of the {} repository {}, and this run asks the {} \
-             repository {repository}: its last integrity check and test restore are not kept.",
-            path.display(),
-            before.tool.name(),
-            before.repository,
+/// The last report where it is one of the repository this run asks, as
+/// the tool's own ID for it says, whatever the repository's name: of
+/// another, and where the tool gave this run no ID, nothing is kept, since
+/// the card would show it as this repository's. A report that an earlier
+/// release wrote holds no ID: it is kept this once where tool and name are
+/// the same, and the ID that this run records comes with it. Each is said
+/// where the report held a check or a restore.
+fn kept(path: &Path, before: Report, tool: Tool, name: &str, id: Option<&str>) -> Option<Report> {
+    let held = before.verify.is_some() || before.restore.is_some();
+    let say = |why: &str| {
+        if held {
+            complain(&format!("The last report, {}, {why}", path.display()));
+        }
+    };
+    let lost = "its last integrity check and test restore are not kept.";
+    let Some(id) = id else {
+        say(&format!(
+            "is not known to be of this repository, since {} gave no ID for it: {lost}",
             tool.name()
         ));
+        return None;
+    };
+    match before.repository_id.as_deref() {
+        Some(theirs) if before.tool == tool && theirs == id => Some(before),
+        None if before.tool == tool && before.repository == name => {
+            say(&format!(
+                "holds no repository ID, as an earlier release wrote it: its last integrity \
+                 check and test restore are kept this once as those of {name}, whose ID {id} \
+                 is recorded with them."
+            ));
+            Some(before)
+        }
+        theirs => {
+            say(&format!(
+                "is of the {} repository {} (ID {}), and this run asks the {} repository \
+                 {name} (ID {id}): {lost}",
+                before.tool.name(),
+                before.repository,
+                theirs.unwrap_or("not recorded"),
+                tool.name()
+            ));
+            None
+        }
     }
-    None
+}
+
+/// What a run says of its listing.
+fn listing(tool: Tool, snapshots: &Snapshots) -> String {
+    let noun = if tool == Tool::Restic {
+        "snapshot"
+    } else {
+        "archive"
+    };
+    format!(
+        "{}: {} {noun}{}, the newest of {}.",
+        tool.name(),
+        snapshots.count,
+        if snapshots.count == 1 { "" } else { "s" },
+        snapshots.newest.as_deref().unwrap_or("no date")
+    )
 }
 
 pub(crate) fn run_check(asked: &Asked) -> u8 {
@@ -279,12 +336,16 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
             .as_deref()
             .unwrap_or("(named in the tool's own configuration)"),
     );
+    let listed = repository.snapshots();
+    let id = listed.as_ref().ok().and_then(|listed| listed.id.clone());
     // What the last run wrote of this repository stays, where this one does
     // not run that part.
-    let before = last_report(&path).and_then(|before| kept(&path, before, tool, &name));
+    let before =
+        last_report(&path).and_then(|before| kept(&path, before, tool, &name, id.as_deref()));
     let mut report = Report {
         tool,
         repository: name,
+        repository_id: id,
         snapshots: None,
         problem: None,
         verify: before.as_ref().and_then(|before| before.verify.clone()),
@@ -292,22 +353,11 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
     };
     let mut failed = false;
     let mut newest = None;
-    match repository.snapshots() {
-        Ok((snapshots, name)) => {
-            let noun = if tool == Tool::Restic {
-                "snapshot"
-            } else {
-                "archive"
-            };
-            say(&format!(
-                "{}: {} {noun}{}, the newest of {}.",
-                tool.name(),
-                snapshots.count,
-                if snapshots.count == 1 { "" } else { "s" },
-                snapshots.newest.as_deref().unwrap_or("no date")
-            ));
-            report.snapshots = Some(snapshots);
-            newest = name;
+    match listed {
+        Ok(listed) => {
+            say(&listing(tool, &listed.snapshots));
+            report.snapshots = Some(listed.snapshots);
+            newest = listed.newest;
         }
         Err(problem) => {
             failed = true;
