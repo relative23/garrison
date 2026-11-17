@@ -1149,8 +1149,11 @@ Notable changes for operators and users. The format follows
   history's coverage, the status and the metric history answered "Internal
   error", and the web service's journal got an error for each request. They
   now say that the query waited too long for another service's write and to
-  try again in a moment (503), with nothing in the journal; a read of the
-  status or of the coverage stopped by its own time says to try again too.
+  try again in a moment (503); a read of the status or of the coverage
+  stopped by its own time says to try again too. The journal of the service
+  whose reader waited says so once a minute at the most, naming the
+  database and how many more readers waited since: "A reader of … waited 2 s
+  for its writer and gave up".
 - **The broker's journal says how Stalwart failed a check of a user's
   rights.** Where Stalwart could not be reached or failed a check on its
   side (a connection it did not answer, HTTP 5xx or 408, a request over its

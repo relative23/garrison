@@ -23,7 +23,9 @@ pub const WAITED: &str =
 /// What a read of another service's database that was stopped answers: one
 /// that waited out the writer's commit, [`WAITED`], or one that ran out of
 /// its own time, `slow`, which says what the user can do. Neither is a fault
-/// of the service, so neither needs the journal; `None` for any other error.
+/// of the service, so neither gets a line here; a reader that waited out the
+/// writer has said so itself, once a minute for each database
+/// (`garrison_core::sqlite`). `None` for any other error.
 #[must_use]
 pub fn stopped(cause: &rusqlite::Error, slow: &'static str) -> Option<ApiError> {
     if held_by_the_writer(cause) {

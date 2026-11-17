@@ -5,12 +5,13 @@
 //! reader would need write access to the shared-memory file, which would weaken
 //! the boundary.
 
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions, Permissions};
 use std::ops::Deref;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use rusqlite::config::DbConfig;
@@ -146,6 +147,57 @@ const FOR_THE_WRITER: Duration = Duration::from_secs(2);
 /// How long a reader whose request may go away sleeps between two tries
 /// for the writer's lock, and so how soon it sees that it has gone.
 const RETRY: Duration = Duration::from_millis(10);
+/// At most one line in this long for the readers of one database that
+/// waited out its writer.
+const QUIET: Duration = Duration::from_secs(60);
+
+/// When the journal last said that a reader waited out the writer of each
+/// database, and how many more did since.
+static WAITED: Mutex<BTreeMap<PathBuf, (Instant, u64)>> = Mutex::new(BTreeMap::new());
+
+/// The line for a reader of `path` that waited out its writer at `now`,
+/// where one is due: at once, and then at most once a minute for that
+/// database, with how many more there were.
+fn waited_line(
+    said: &mut BTreeMap<PathBuf, (Instant, u64)>,
+    path: &Path,
+    now: Instant,
+) -> Option<String> {
+    let since = match said.get_mut(path) {
+        Some((at, more)) if now.saturating_duration_since(*at) < QUIET => {
+            *more += 1;
+            return None;
+        }
+        Some((_, more)) => *more,
+        None => 0,
+    };
+    said.insert(path.to_owned(), (now, 0));
+    let more = if since == 0 {
+        String::new()
+    } else {
+        format!("; {since} more since the last such line")
+    };
+    Some(format!(
+        "A reader of {} waited {} s for its writer and gave up: the writer held the database \
+         longer than a reader waits{more}",
+        path.display(),
+        FOR_THE_WRITER.as_secs()
+    ))
+}
+
+/// Say that a reader of `path` waited out its writer: a writer that keeps
+/// its database for good looks to each reader as one that commits slowly,
+/// and the journal is where an operator finds it.
+fn waited_out(path: &Path) {
+    let line = waited_line(
+        &mut WAITED.lock().unwrap_or_else(PoisonError::into_inner),
+        path,
+        Instant::now(),
+    );
+    if let Some(line) = line {
+        log::warn!("{line}");
+    }
+}
 
 /// Open a read-only snapshot whose queries stop after `budget`, or `None` when
 /// the database does not exist yet.
@@ -174,11 +226,16 @@ pub fn reading_until(
     // has gone: a wait for the lock checks no progress handler.
     let waiting = Arc::clone(&gone);
     let mut since = Instant::now();
+    let database = path.to_owned();
     db.busy_handler(Some(move |tries: i32| {
         if tries == 0 {
             since = Instant::now();
         }
-        if waiting.load(Ordering::Relaxed) || since.elapsed() >= FOR_THE_WRITER {
+        if waiting.load(Ordering::Relaxed) {
+            return false;
+        }
+        if since.elapsed() >= FOR_THE_WRITER {
+            waited_out(&database);
             return false;
         }
         std::thread::sleep(RETRY);

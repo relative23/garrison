@@ -1,14 +1,52 @@
 //! A reader of another service's database and that service's writer: a
 //! snapshot that holds the writer's commit back, the reader's own time, a
 //! request that went away, and a writer that holds its lock longer than a
-//! reader waits.
+//! reader waits, which the journal names.
 
-use std::sync::mpsc;
+use std::sync::{Mutex, Once, PoisonError, mpsc};
 use std::thread;
 use std::time::Duration;
 
 use super::tests::MIGRATIONS;
 use super::*;
+
+/// The lines this test binary writes to its journal.
+struct Journal(Mutex<Vec<String>>);
+
+impl log::Log for Journal {
+    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        let line = format!("{} {}", record.level(), record.args());
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(line);
+    }
+
+    fn flush(&self) {}
+}
+
+static JOURNAL: Journal = Journal(Mutex::new(Vec::new()));
+static KEPT: Once = Once::new();
+
+/// The kept lines that hold `words`; the first call starts keeping them.
+fn kept(words: &str) -> Vec<String> {
+    KEPT.call_once(|| {
+        log::set_logger(&JOURNAL).unwrap();
+        log::set_max_level(log::LevelFilter::Info);
+    });
+    JOURNAL
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|line| line.contains(words))
+        .cloned()
+        .collect()
+}
 
 /// With the rollback journal, which a database another service reads uses,
 /// a reader's snapshot holds the writer's commit back: the writer waits for
@@ -123,6 +161,7 @@ fn reader_queries_stop_once_their_request_is_gone() {
 /// seconds. Once the request it reads for has gone, it waits no more.
 #[test]
 fn a_reader_that_waits_for_the_writer_stops_once_its_request_is_gone() {
+    kept("");
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("items.sqlite");
     let writer = open_writer(&path, MIGRATIONS, Sharing::WithReaders, 0o600).unwrap();
@@ -164,6 +203,9 @@ fn a_reader_that_waits_for_the_writer_stops_once_its_request_is_gone() {
     thread::sleep(Duration::from_millis(300));
     writer.execute_batch("COMMIT").unwrap();
     assert_eq!(staying.recv_timeout(Duration::from_secs(5)), Ok(Ok(1)));
+    // Neither waited the writer out, so neither leaves a line.
+    let lines = kept(&format!("A reader of {}", path.display()));
+    assert!(lines.is_empty(), "{lines:?}");
 }
 
 /// A reader that waits out the writer's lock is told so by its error, and
@@ -175,6 +217,7 @@ fn a_reader_that_waits_out_the_writer_is_told_so() {
     let path = directory.path().join("items.sqlite");
     let writer = open_writer(&path, MIGRATIONS, Sharing::WithReaders, 0o600).unwrap();
     writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    kept("");
     let started = Instant::now();
     let error = reading(&path, Duration::from_secs(60)).unwrap_err();
     assert!(
@@ -189,6 +232,17 @@ fn a_reader_that_waits_out_the_writer_is_told_so() {
         held_by_the_writer(&cause) && !out_of_time(&cause),
         "{cause}"
     );
+    // The journal names the database, where an operator finds a writer
+    // that does not let go.
+    let lines = kept(&format!("A reader of {} waited", path.display()));
+    assert_eq!(
+        lines,
+        [format!(
+            "WARN A reader of {} waited 2 s for its writer and gave up: the writer held the \
+             database longer than a reader waits",
+            path.display()
+        )]
+    );
     writer.execute_batch("COMMIT").unwrap();
     let failure = |code| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None);
     for other in [
@@ -197,4 +251,31 @@ fn a_reader_that_waits_out_the_writer_is_told_so() {
     ] {
         assert!(!held_by_the_writer(&failure(other)), "{other}");
     }
+}
+
+/// One line at once for each database, and then at most one a minute, with
+/// how many readers waited out its writer since.
+#[test]
+fn readers_that_wait_out_a_writer_are_said_once_a_minute_for_each_database() {
+    let mut said = BTreeMap::new();
+    let events = Path::new("/var/lib/garrison/ingest/events.sqlite");
+    let status = Path::new("/var/lib/garrison/collector/status.sqlite");
+    let start = Instant::now();
+    assert_eq!(
+        waited_line(&mut said, events, start).unwrap(),
+        "A reader of /var/lib/garrison/ingest/events.sqlite waited 2 s for its writer and gave \
+         up: the writer held the database longer than a reader waits"
+    );
+    for second in [1, 30, 59] {
+        let at = start + Duration::from_secs(second);
+        assert_eq!(waited_line(&mut said, events, at), None);
+    }
+    assert!(waited_line(&mut said, status, start + Duration::from_secs(59)).is_some());
+    let later = waited_line(&mut said, events, start + QUIET).unwrap();
+    assert!(
+        later.ends_with("; 3 more since the last such line"),
+        "{later}"
+    );
+    let quiet = waited_line(&mut said, events, start + QUIET * 3).unwrap();
+    assert!(!quiet.contains("more since"), "{quiet}");
 }
