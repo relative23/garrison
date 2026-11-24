@@ -1699,6 +1699,9 @@ Notable changes for operators and users. The format follows
   while Stalwart may still ask it**, which left Stalwart deferring all
   incoming mail; they say why the filter keeps running and that `garrison
   stalwart setup` takes it out.
+- **The installer loads the SELinux module again where its last load
+  failed**, where it took the module as loaded and nginx answered 502; its
+  warning says how `semodule` ended where it said nothing.
 - **An uninstallation's test of nginx no longer renames Garrison's
   snippets**, so a run cut short there no longer leaves nginx unable to
   start, and a dry run changes nothing.
