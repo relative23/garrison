@@ -143,11 +143,13 @@ event_types! {
     /// Everything else that is recorded: logins, security, the server itself.
     Other {
         AuthFailed => "auth.failed",
+        AuthMfaRequired => "auth.mfa-required",
         SecurityAbuseBan => "security.abuse-ban",
         SecurityAuthenticationBan => "security.authentication-ban",
         SecurityLoiterBan => "security.loiter-ban",
         SecurityScanBan => "security.scan-ban",
         SecurityIpBlocked => "security.ip-blocked",
+        SecurityIpUnauthorized => "security.ip-unauthorized",
         MessageIngestDuplicate => "message-ingest.duplicate",
         MessageIngestError => "message-ingest.error",
         MessageIngestHam => "message-ingest.ham",

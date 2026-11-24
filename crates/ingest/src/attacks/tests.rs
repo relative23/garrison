@@ -184,6 +184,50 @@ fn refusals_of_a_blocked_network_count_by_address_and_network() {
     assert_eq!(json!(never.sources[0])["refused"], json!(0));
 }
 
+/// Stalwart refuses a sign-in with the right password and no second factor,
+/// and one with a credential from an address it does not allow, each with an
+/// event of its own (measured on 1.2.0): both are failed sign-ins of their
+/// address, and of their account where Stalwart names it.
+#[test]
+fn sign_ins_refused_for_a_second_factor_or_an_address_are_failed_sign_ins() {
+    let events = [
+        event(
+            1,
+            "auth.mfa-required",
+            &format!("{DAY}10:00:00Z"),
+            &json!({"remoteIp": "198.51.100.120", "listenerId": "http", "accountId": 3,
+                    "accountName": "anna@example.test", "reason": "MFA token required"}),
+        ),
+        event(
+            2,
+            "security.ip-unauthorized",
+            &format!("{DAY}10:00:01Z"),
+            &json!({"remoteIp": "198.51.100.77", "listenerId": "http", "accountId": 1,
+                    "reason": "IP address not allowed."}),
+        ),
+    ];
+    let day = summary(&events, MIDNIGHT, MIDNIGHT + 86_399);
+    // The key's account exists, named by its ID alone: no unknown account.
+    assert_eq!(
+        (
+            json!(day.totals)["failedSignIns"].clone(),
+            json!(day.totals)["unknownAccounts"].clone()
+        ),
+        (json!(2), json!(0))
+    );
+    assert_eq!(
+        json!(day.accounts),
+        json!([{"name": "anna@example.test", "failedSignIns": 1, "sources": 1,
+                "lastSeen": MIDNIGHT + 36_000}])
+    );
+    let addresses: Vec<&str> = day
+        .sources
+        .iter()
+        .map(|source| source.address.as_str())
+        .collect();
+    assert_eq!(addresses, ["198.51.100.77", "198.51.100.120"]);
+}
+
 #[test]
 fn a_name_that_is_no_account_is_never_stored_or_shown() {
     let directory = tempfile::tempdir().unwrap();

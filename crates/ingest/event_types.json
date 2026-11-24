@@ -3,6 +3,10 @@
   "label": "Authentication failed",
   "explanation": "A login attempt was rejected due to incorrect credentials; repeated failures from the same IP may trigger an authentication ban."
  },
+ "auth.mfa-required": {
+  "label": "Missing MFA token for authentication",
+  "explanation": "MFA token is required for authentication but was not provided"
+ },
  "delivery.attempt-end": {
   "label": "Delivery attempt ended",
   "explanation": "The outbound delivery attempt has finished, either successfully or with a temporary/permanent failure recorded."
@@ -298,6 +302,10 @@
  "security.ip-blocked": {
   "label": "Blocked IP address",
   "explanation": "Rejected connection from blocked IP address"
+ },
+ "security.ip-unauthorized": {
+  "label": "Unauthorized IP address",
+  "explanation": "IP address is not authorized to authenticate using this credential"
  },
  "security.loiter-ban": {
   "label": "Banned due to loitering",

@@ -22,6 +22,15 @@ pub const MAX_EVENTS: usize = 100_000;
 /// The rows of each list.
 pub const MAX_ROWS: usize = 50;
 
+/// The sign-ins Stalwart refused: a wrong password or name, the right
+/// password without its second factor, and a credential used from an
+/// address it does not allow.
+const SIGN_INS: [EventType; 3] = [
+    EventType::AuthFailed,
+    EventType::AuthMfaRequired,
+    EventType::SecurityIpUnauthorized,
+];
+
 const BANS: [(EventType, &str); 4] = [
     (EventType::SecurityAuthenticationBan, "authentication"),
     (EventType::SecurityAbuseBan, "abuse"),
@@ -128,6 +137,8 @@ pub struct Attacks {
 struct Fields {
     remote_ip: Option<String>,
     account_name: Option<String>,
+    /// An existing account, which a refusal may name by its ID alone.
+    account_id: Option<serde_json::Value>,
     listener_id: Option<String>,
 }
 
@@ -235,29 +246,30 @@ impl Sums {
         self.sources.entry(address.to_owned()).or_default()
     }
 
+    /// One refused sign-in, of its account where it names one.
+    fn failed_sign_in(&mut self, at: i64, address: &str, fields: &Fields) {
+        self.totals.failed_sign_ins += 1;
+        let seen = self.sources.entry(address.to_owned()).or_default();
+        seen.source.failed_sign_ins += 1;
+        match (&fields.account_name, &fields.account_id) {
+            (Some(name), _) => {
+                seen.accounts.insert(name.clone());
+                let tried = self.accounts.entry(name.clone()).or_default();
+                tried.failed += 1;
+                tried.sources.insert(address.to_owned());
+                tried.last_seen = tried.last_seen.max(at);
+            }
+            (None, Some(_)) => {}
+            (None, None) => self.totals.unknown_accounts += 1,
+        }
+    }
+
     /// Every kind the summary counts, read for the stretch.
     fn of(db: &Connection, stretch: (i64, i64)) -> Result<Self> {
         let mut sums = Sums::default();
-        sums.read(
-            db,
-            EventType::AuthFailed,
-            stretch,
-            |sums, at, address, fields| {
-                sums.totals.failed_sign_ins += 1;
-                let seen = sums.source(address);
-                seen.source.failed_sign_ins += 1;
-                match &fields.account_name {
-                    Some(name) => {
-                        seen.accounts.insert(name.clone());
-                        let tried = sums.accounts.entry(name.clone()).or_default();
-                        tried.failed += 1;
-                        tried.sources.insert(address.to_owned());
-                        tried.last_seen = tried.last_seen.max(at);
-                    }
-                    None => sums.totals.unknown_accounts += 1,
-                }
-            },
-        )?;
+        for kind in SIGN_INS {
+            sums.read(db, kind, stretch, Sums::failed_sign_in)?;
+        }
         sums.read(
             db,
             EventType::TlsHandshakeError,

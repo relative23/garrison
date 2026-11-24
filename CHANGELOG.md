@@ -132,6 +132,10 @@ Notable changes for operators and users. The format follows
   refuses, before anything stops, until the address is written into
   `garrison.toml` again. See
   [configuration](docs/operator/configuration.md#an-address-that-is-a-secret).
+- **Attacks & bans counts a sign-in that Stalwart refused for a missing
+  second factor, or from an address its credential does not allow, as a
+  failed sign-in.** It counts to its address, and to its account where
+  Stalwart names one.
 - **Attacks & bans counts the connections Stalwart refused from an address
   it blocks.** They are counted by address and network, beside the bans.
 - **Attacks & bans names the /64 that Stalwart 1.2.0 blocks with a banned
