@@ -1695,6 +1695,10 @@ Notable changes for operators and users. The format follows
 - **A restore that was interrupted is finished by running it again**, and
   names the copy of the state its first run made; where Garrison ran since,
   it copies the state as it is first.
+- **The installer and an uninstallation no longer stop the macro filter
+  while Stalwart may still ask it**, which left Stalwart deferring all
+  incoming mail; they say why the filter keeps running and that `garrison
+  stalwart setup` takes it out.
 - **An uninstallation's test of nginx no longer renames Garrison's
   snippets**, so a run cut short there no longer leaves nginx unable to
   start, and a dry run changes nothing.

@@ -287,6 +287,8 @@ case "$method $path" in
                 done
                 answered "$call" '{}' ;;
             *x:WebHook/get*) respond "$call" '{"id": "w1", "httpHeaders": {"X-Garrison": "events"}}' ;;
+            # The milters a scenario puts in /root/stand-in-milters.
+            *x:MtaMilter/get*) respond "$call" "$(cat /root/stand-in-milters 2>/dev/null)" ;;
             */get*) respond "$call" '' ;;
             */set*) answered "$call" '{}' ;;
         esac ;;

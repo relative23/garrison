@@ -385,6 +385,26 @@ scenario_rotation() {
     running "after the rotation" "$new"
 }
 
+scenario_milter_asked() {
+    step "The installer does not stop a macro filter that Stalwart still asks"
+    upgraded
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.milter &&
+        printf "\n[milter]\n" >> /etc/garrison/garrison.toml'
+    installer '/root/release/bin/garrison install'
+    check "the filter runs with the [milter] section" 'systemctl is-active --quiet garrison-milter.service'
+    # An entry of Stalwart's at the filter's port that setup did not note,
+    # and the section gone.
+    inside 'printf "%s" "{\"id\": \"m1\", \"host\": \"127.0.0.1\", \"port\": 8096, \"enable\": true}" \
+            > /root/stand-in-milters && cat /root/garrison.toml.milter > /etc/garrison/garrison.toml'
+    says "the next installer run says why the filter keeps running" '/root/release/bin/garrison install' \
+        "keeps running: Stalwart asks its milter entry m1 at 127.0.0.1:8096"
+    check "and the filter runs on" 'systemctl is-active --quiet garrison-milter.service'
+    inside 'rm /root/stand-in-milters'
+    installer '/root/release/bin/garrison install'
+    check "once nothing asks it, the next run stops it" '! systemctl is-active --quiet garrison-milter.service'
+    running "after the filter Stalwart asked" "$new"
+}
+
 scenario_milter_sandbox() {
     step "The macro filter's unit writes nowhere: no /tmp of its own, not the host's shared memory"
     upgraded
@@ -437,7 +457,7 @@ for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check base_hidden fai
     rollback_refused_config rollback_room \
     interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere \
     policy_foreign unwritten \
-    rotation milter_sandbox collect_beside restore_leftovers access_links access_folder access_actions}; do
+    rotation milter_asked milter_sandbox collect_beside restore_leftovers access_links access_folder access_actions}; do
     "scenario_$scenario"
 done
 
