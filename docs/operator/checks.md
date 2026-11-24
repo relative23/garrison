@@ -199,7 +199,9 @@ minutes. They count; none of them is a verdict, except where it says so.
   page. A milter that could not be reached since yesterday is a warning,
   and so is a deferral of every message the milters were shown since
   yesterday, as a scanner gives that cannot scan, also where another milter
-  passed them first. A reply of the milter's own, with which Garrison's
+  passed them first. The history names no milter, so a message is told by
+  its session: a session in which a milter deferred anything counts as
+  deferred. A reply of the milter's own, with which Garrison's
   macro filter refuses a message, is counted apart: Stalwart's event does
   not say whether it refused or deferred, so a milter that defers with one
   is not warned of. A host without a milter has no such card.

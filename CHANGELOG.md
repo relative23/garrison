@@ -1088,7 +1088,8 @@ Notable changes for operators and users. The format follows
   said to run setup again, or that Stalwart did not answer, long after it
   was mended. Such a reading is now made again in the
   next run, which asks Stalwart alone, one request a minute while it lasts,
-  as one made without the key is once there is one.
+  and reads anew where it answers otherwise, as one made without the key is
+  once there is one.
 - **The DNS and reputation cards name the option that gives them a
   resolver.** Where `/etc/resolv.conf` names no resolver, they said only
   that; they now add "name one with `resolver`".

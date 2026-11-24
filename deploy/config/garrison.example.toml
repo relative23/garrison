@@ -126,7 +126,8 @@ type = "dns"
 
 # Hands the antivirus test file (EICAR) and the spam test text (GTUBE) to the
 # local SMTP listener once a day, the way a stranger would. Name a mailbox
-# made for it: a test that goes wrong leaves a harmless message there.
+# made for it: it gets a harmless message in each round in which the server
+# refuses a test, a day by default, and one from a test that goes wrong.
 # With the [milter] section above, `macro_document = true` adds a harmless
 # document that the macro filter must refuse.
 # [[providers]]
