@@ -44,7 +44,7 @@ pub enum SqliteError {
 
 /// How the writer shares its database.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Sharing {
+pub(crate) enum Sharing {
     /// Read by another service user: rollback journal.
     WithReaders,
     /// Read only by the writing service: write-ahead log.
@@ -55,7 +55,7 @@ pub enum Sharing {
 ///
 /// A new file is created with `mode` before SQLite writes to it, so it is never
 /// readable with a wider mode. Callers serialize access to the connection.
-pub fn open_writer(
+pub(crate) fn open_writer(
     path: &Path,
     migrations: &[Migration],
     sharing: Sharing,

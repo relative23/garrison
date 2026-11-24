@@ -62,12 +62,6 @@ pub fn object<T: de::DeserializeOwned>(value: Value) -> Result<T, String> {
     serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
-/// Whether an object holds exactly these keys: none missing and no other,
-/// so nothing is read that the reader does not know.
-pub fn has_exactly(object: &Map<String, Value>, keys: &[&str]) -> bool {
-    object.len() == keys.len() && keys.iter().all(|key| object.contains_key(*key))
-}
-
 /// A JSON value whose objects were checked for duplicate keys while parsing.
 struct Strict(Value);
 
@@ -177,18 +171,6 @@ mod tests {
         ] {
             assert!(is_set(&set), "{set}");
         }
-    }
-
-    #[test]
-    fn exactly_the_named_keys_means_none_missing_and_no_other() {
-        let object = json!({"a": 1, "b": null});
-        let object = object.as_object().unwrap();
-        assert!(has_exactly(object, &["a", "b"]));
-        assert!(has_exactly(object, &["b", "a"]));
-        assert!(!has_exactly(object, &["a"]));
-        assert!(!has_exactly(object, &["a", "b", "c"]));
-        assert!(!has_exactly(object, &["a", "c"]));
-        assert!(has_exactly(&Map::new(), &[]));
     }
 
     #[test]

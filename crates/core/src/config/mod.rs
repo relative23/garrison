@@ -58,7 +58,7 @@ pub struct IngestConfig {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CollectorConfig {
-    pub state_directory: PathBuf,
+    pub(crate) state_directory: PathBuf,
     pub native_key: SecretSource,
     pub metrics_credential: Option<SecretSource>,
     /// Where the key of Spamhaus' Data Query Service is read from, for the
@@ -217,7 +217,7 @@ impl Action {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BrokerConfig {
     pub socket: PathBuf,
-    pub state_directory: PathBuf,
+    pub(crate) state_directory: PathBuf,
     pub native_key: SecretSource,
     pub policy: PathBuf,
     pub allowed_peers: Vec<String>,
@@ -226,7 +226,9 @@ pub struct BrokerConfig {
 }
 
 impl BrokerConfig {
-    pub fn action(&self, id: &str) -> Option<&Action> {
+    /// The action of `id`, as the tests of the configuration look it up.
+    #[cfg(test)]
+    pub(crate) fn action(&self, id: &str) -> Option<&Action> {
         self.actions.iter().find(|action| action.id == id)
     }
 }
@@ -288,7 +290,7 @@ impl Database {
     }
 
     /// The web service reads the event history and the status snapshots.
-    pub const fn has_readers(self) -> bool {
+    pub(crate) const fn has_readers(self) -> bool {
         matches!(self, Database::Events | Database::Status)
     }
 
