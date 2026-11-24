@@ -277,16 +277,26 @@ impl HostCare {
     )]
     fn disk(&self, context: &Context<'_>) -> Made {
         let source = self.disk_path.display().to_string();
-        let Ok(filesystem) = rustix::fs::statvfs(&self.disk_path) else {
-            return Ok(self
-                .observation(
-                    context,
-                    "disk-forecast",
-                    "Disk forecast",
-                    State::Unknown,
-                    &source,
-                )?
-                .with_findings(vec!["The file system could not be read.".to_owned()]));
+        // A file system of the kernel's, such as /proc, keeps no size, and
+        // its free space of none is nothing to carry forward.
+        let measured = match rustix::fs::statvfs(&self.disk_path) {
+            Ok(filesystem) if filesystem.f_blocks > 0 => Ok(filesystem),
+            Ok(_) => Err("The file system gives no size."),
+            Err(_) => Err("The file system could not be read."),
+        };
+        let filesystem = match measured {
+            Ok(filesystem) => filesystem,
+            Err(why) => {
+                return Ok(self
+                    .observation(
+                        context,
+                        "disk-forecast",
+                        "Disk forecast",
+                        State::Unknown,
+                        &source,
+                    )?
+                    .with_findings(vec![why.to_owned()]));
+            }
         };
         let free = filesystem.f_bavail.saturating_mul(filesystem.f_frsize);
         // The readings of another file system say nothing of this one. The

@@ -85,13 +85,17 @@ impl Host {
                 .map_err(|error| format!("{name} could not be read: {error}."))
         };
         let parsed = |name: &str| format!("{name} holds no value this check reads.");
-        let disk = rustix::fs::statvfs(&self.disk_path).map_err(|error| {
-            format!(
-                "The file system at {} could not be measured: {}.",
-                self.disk_path.display(),
-                io::Error::from(error)
-            )
-        });
+        let at = self.disk_path.display();
+        let disk = rustix::fs::statvfs(&self.disk_path)
+            .map_err(|error| {
+                let error = io::Error::from(error);
+                format!("The file system at {at} could not be measured: {error}.")
+            })
+            // A file system of the kernel's, such as /proc, keeps no size.
+            .and_then(|stats| match stats.f_blocks {
+                0 => Err(format!("The file system at {at} gives no size.")),
+                _ => Ok(stats),
+            });
         Reading {
             memory: text("meminfo").map(|text| meminfo(&text)),
             load: text("loadavg").and_then(|text| loadavg(&text).ok_or_else(|| parsed("loadavg"))),
@@ -124,9 +128,15 @@ fn memory(memory: &BTreeMap<String, u64>) -> (Option<u64>, Option<u64>) {
     (total.filter(|total| *total > 0), available)
 }
 
-/// Whether the disk (also one of unknown size) runs short.
+/// Whether the disk, of a size that is known, runs short.
 fn disk_short(disk: &Disk) -> bool {
-    disk.total == 0 || ratio(disk.free, disk.total) < 0.15
+    ratio(disk.free, disk.total) < 0.15
+}
+
+/// The share of free inodes, where the file system counts them: btrfs,
+/// which makes them as it needs them, gives no count.
+fn inodes_free(disk: &Disk) -> Option<f64> {
+    (disk.inodes_total > 0).then(|| 100.0 * ratio(disk.inodes_free, disk.inodes_total))
 }
 
 /// Whether the memory runs short, where meminfo gives both its total and
@@ -217,10 +227,7 @@ impl Provider for Host {
                 .collect::<Vec<_>>()
                 .join(" / ")
         });
-        let inodes = disk.map(|disk| {
-            let free = 100.0 * ratio(disk.inodes_free, disk.inodes_total.max(1));
-            format!("{free:.1}%")
-        });
+        let inodes = disk.and_then(inodes_free).map(|free| format!("{free:.1}%"));
         let source = format!(
             "{proc}/meminfo, loadavg, uptime; statvfs({disk})",
             proc = self.proc.display(),
@@ -309,8 +316,16 @@ mod tests {
             (disk_short(&disk(14, 100)), judged(9, 100)),
             (true, Some(true))
         );
-        // A disk of unknown size is a warning; memory of none is not judged.
-        assert_eq!((disk_short(&disk(0, 0)), judged(0, 0)), (true, None));
+        // Memory of none is not judged; a disk of no size is not read as
+        // one (`a_count_the_file_system_does_not_keep_is_unknown`).
+        assert_eq!(judged(0, 0), None);
+        let counted = |inodes_free, inodes_total| Disk {
+            inodes_free,
+            inodes_total,
+            ..disk(15, 100)
+        };
+        assert_eq!(inodes_free(&counted(250, 1000)), Some(25.0));
+        assert_eq!(inodes_free(&counted(0, 0)), None);
     }
 
     #[test]
@@ -353,6 +368,57 @@ mod tests {
         assert!((report.gauges["disk_free_gib"] - free).abs() < 0.01);
         assert!((report.gauges["ram_used_gib"] - 0.5).abs() < f64::EPSILON);
         assert!((report.gauges["load_1m"] - 0.5).abs() < f64::EPSILON);
+    }
+
+    /// A count that a file system does not keep is unknown, never 0: btrfs
+    /// gives no inode count, and /proc, a file system of the kernel's, no
+    /// size either (statfs, measured 2026-11-24), so the card shows no
+    /// share of free inodes there and neither judges nor shows the disk of
+    /// /proc. Where this test's own folder lies on btrfs, as on the host it
+    /// was written on, its card shows no share of free inodes.
+    #[test]
+    fn a_count_the_file_system_does_not_keep_is_unknown() {
+        let card = |disk_path: &std::path::Path| {
+            let directory = tempfile::tempdir().unwrap();
+            let proc = directory.path();
+            fs::write(
+                proc.join("meminfo"),
+                "MemTotal: 1048576 kB\nMemAvailable: 524288 kB\n",
+            )
+            .unwrap();
+            fs::write(proc.join("loadavg"), "0.50 0.40 0.30 1/100 1234\n").unwrap();
+            fs::write(proc.join("uptime"), "3600.9 100.0\n").unwrap();
+            let raw = format!(
+                "proc = \"{}\"\ndisk_path = \"{}\"",
+                proc.display(),
+                disk_path.display()
+            );
+            let host = Host::new(&table(&raw)).unwrap();
+            let (config, runner) = (config(proc), Canned(String::new()));
+            host.collect(&context(&config, &runner)).unwrap()
+        };
+        let report = card(std::path::Path::new("/proc"));
+        let proc = &report.observations[0];
+        assert_eq!(
+            (proc.state, proc.findings.as_slice()),
+            (
+                State::Partial,
+                &["The file system at /proc gives no size.".to_owned()][..]
+            )
+        );
+        let field = |card: &Observation, label: &str| {
+            let field = card.fields.iter().find(|field| field.label == label);
+            field.unwrap().value.clone()
+        };
+        for label in ["Disk total", "Disk free", "Free inodes"] {
+            assert_eq!(field(proc, label), serde_json::Value::Null, "{label}");
+        }
+        assert!(!report.gauges.contains_key("disk_free_gib"));
+        let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let counted = rustix::fs::statvfs(here).unwrap().f_files > 0;
+        let own = card(here);
+        let inodes = field(&own.observations[0], "Free inodes");
+        assert_eq!(inodes.is_string(), counted, "{inodes}");
     }
 
     /// A `disk_path` that cannot be measured, as one that is not there,
