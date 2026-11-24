@@ -4,7 +4,7 @@
 
 use std::fs;
 use std::os::unix::fs::DirBuilderExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -14,7 +14,9 @@ use garrison_core::systemd::SYSTEMCTL;
 use garrison_core::{sqlite, time};
 use rusqlite::OptionalExtension;
 
-use super::{Finding, counted};
+use super::Finding;
+use super::states::host as states;
+use super::states::selinux as selinux_states;
 use crate::units;
 
 const SERVICES: [&str; 5] = units::RUNNING;
@@ -39,26 +41,17 @@ pub(super) fn release_in(base: &Path) -> Finding {
         fs::read_to_string(base.join(link).join("VERSION")).map(|text| text.trim().to_owned())
     };
     match (version("current"), version("previous")) {
-        (Ok(current), Ok(previous)) => {
-            Finding::ok(format!("release {current}, previous {previous}"))
-        }
-        (Ok(current), Err(_)) => Finding::ok(format!("release {current}, no previous release")),
-        (Err(_), _) => Finding::fail(
-            format!("no installed release in {}", base.join("current").display()),
-            "Run the installer from the release archive.",
-        ),
+        (Ok(current), previous) => Finding::ok(states::release(&current, previous.ok().as_deref())),
+        (Err(_), _) => Finding::fail(states::no_release(&base.join("current"))),
     }
 }
 
 /// What systemd's answer says of `unit`.
 pub(super) fn service(unit: &str, answer: Option<&str>) -> Finding {
     match answer {
-        Some("active") => Finding::ok(format!("{unit} is active")),
-        Some(state) => Finding::fail(
-            format!("{unit} is {state}"),
-            format!("journalctl -u {unit} -n 50 shows why."),
-        ),
-        None => Finding::unknown(format!("{unit}: systemctl gave no answer")),
+        Some("active") => Finding::ok(states::active(unit)),
+        Some(state) => Finding::fail(states::inactive(unit, state)),
+        None => Finding::unknown(states::unanswered_service(unit)),
     }
 }
 
@@ -69,56 +62,24 @@ fn services() -> Vec<Finding> {
         .collect()
 }
 
-/// `1 minute ago` for a number of seconds; less than a minute is 0.
-fn ago(seconds: i64) -> String {
-    let minutes = usize::try_from(seconds / 60).unwrap_or(0);
-    format!("{} ago", counted(minutes, "minute", "minutes"))
-}
-
 /// What the newest snapshot says of the collector, judged as the watch
 /// judges it: stopped after ten minutes without a finished run.
 pub(super) fn finished(last: Result<Option<i64>, String>, now: time::Timestamp) -> Finding {
-    let why = format!(
-        "`systemctl status {} {}` and `garrison check-config` say why.",
-        units::COLLECT,
-        units::COLLECT_TIMER
-    );
     let seconds = |last: i64| now.as_second() - last;
     match last {
-        Err(error) => Finding::unknown(format!(
-            "when the collector last finished a run: the status database cannot be read ({error})"
-        )),
-        Ok(None) => Finding::warn(
-            "no collection run has finished yet",
-            format!("The collector runs every minute; if this stays, {why}"),
-        ),
+        Err(error) => Finding::unknown(states::collection_unreadable(&error)),
+        Ok(None) => Finding::warn(states::no_collection()),
         // A damaged or hand-edited database: no age, and no stop either.
-        Ok(Some(last)) if watch::stopped(last, now).is_none() => Finding::unknown(format!(
-            "when the collector last finished a run: the newest status snapshot is dated \
-             {last}, which is no time"
-        )),
-        Ok(Some(last)) if watch::stopped(last, now) == Some(true) => Finding::fail(
-            format!(
-                "no collection run has finished since {}, {}",
-                time::Timestamp::from_second(last)
-                    .map_or_else(|_| last.to_string(), time::isoformat),
-                ago(seconds(last))
-            ),
-            format!("Until one does, Garrison checks nothing and reports nothing: {why}"),
-        ),
-        Ok(Some(last)) if -seconds(last) > AHEAD => Finding::warn(
-            format!(
-                "the newest status snapshot is dated {} minutes ahead of this host's clock, so its \
-                 age is not known",
-                -seconds(last) / 60
-            ),
-            "The clock went back after it was written; `timedatectl` shows whether it is \
-             synchronized.",
-        ),
-        Ok(Some(last)) => Finding::ok(format!(
-            "the last collection run finished {}",
-            ago(seconds(last))
-        )),
+        Ok(Some(last)) if watch::stopped(last, now).is_none() => {
+            Finding::unknown(states::collection_undated(last))
+        }
+        Ok(Some(last)) if watch::stopped(last, now) == Some(true) => {
+            Finding::fail(states::collection_stopped(last, seconds(last)))
+        }
+        Ok(Some(last)) if -seconds(last) > AHEAD => {
+            Finding::warn(states::snapshot_ahead(-seconds(last)))
+        }
+        Ok(Some(last)) => Finding::ok(states::collection_recent(seconds(last))),
     }
 }
 
@@ -127,14 +88,8 @@ pub(super) fn finished(last: Result<Option<i64>, String>, now: time::Timestamp) 
 fn last_result(answer: Option<&str>) -> Option<Finding> {
     match answer {
         Some("success") => None,
-        Some(result) if !result.is_empty() => Some(Finding::warn(
-            format!("the last collection run ended with {result}"),
-            format!("journalctl -u {} -n 50 shows why.", units::COLLECT),
-        )),
-        _ => Some(Finding::unknown(format!(
-            "{}: systemctl gave no answer about its last run",
-            units::COLLECT
-        ))),
+        Some(result) if !result.is_empty() => Some(Finding::warn(states::run_failed(result))),
+        _ => Some(Finding::unknown(states::run_unknown())),
     }
 }
 
@@ -163,12 +118,9 @@ fn clock() -> Finding {
 /// What timedatectl's answer says of the clock.
 pub(super) fn synchronized(answer: Option<&str>) -> Finding {
     match answer {
-        Some("yes") => Finding::ok("the clock is synchronized"),
-        Some("no") => Finding::warn(
-            "the clock is not synchronized",
-            "Sign-in tokens and certificates depend on the time: enable a time service (timedatectl set-ntp true).",
-        ),
-        _ => Finding::unknown("clock synchronization: timedatectl gave no answer"),
+        Some("yes") => Finding::ok(states::synchronized()),
+        Some("no") => Finding::warn(states::unsynchronized()),
+        _ => Finding::unknown(states::clock_unknown()),
     }
 }
 
@@ -183,25 +135,14 @@ pub(super) fn room(path: &str) -> Finding {
             Err(rustix::io::Errno::NOENT) if at.parent().is_some() => {
                 at = at.parent().unwrap_or(at);
             }
-            Err(error) => return Finding::unknown(format!("free space of {path}: {error}")),
+            Err(error) => return Finding::unknown(states::space_unknown(path, error)),
         }
     };
     let free = stat.f_bavail.saturating_mul(stat.f_frsize) >> 20;
-    let shown = if at == Path::new(path) {
-        path.to_owned()
-    } else {
-        format!(
-            "{path} does not exist yet; {}, where it will be made,",
-            at.display()
-        )
-    };
     if free >= 1024 {
-        Finding::ok(format!("{shown} has {free} MiB free"))
+        Finding::ok(states::room(path, at, free))
     } else {
-        Finding::warn(
-            format!("{shown} has only {free} MiB free"),
-            "Databases and backups grow; make room before the next upgrade.",
-        )
+        Finding::warn(states::little_room(path, at, free))
     }
 }
 
@@ -243,20 +184,33 @@ fn module_port(text: &str) -> Option<u16> {
 
 const SEMODULE: &str = "/usr/sbin/semodule";
 
+/// Why the module SELinux has loaded could not be read.
+#[derive(Debug)]
+pub(super) enum Unread {
+    /// No name could be drawn for the folder to extract it into.
+    Unnamed(getrandom::Error),
+    /// That folder could not be made.
+    Folder(PathBuf, std::io::Error),
+    /// `semodule` extracted no module, with what it said.
+    Unextracted(String),
+    /// `semodule` did not run.
+    Unrun(std::io::Error),
+    /// The module names no port.
+    NoPort,
+}
+
 /// The module SELinux has loaded, as `semodule` extracts it into a folder
 /// of doctor's own, or why there is none to read. The installer's file
 /// names the port of its last load that succeeded, or, where an earlier
 /// release wrote it before loading, of a load that may have failed.
-fn loaded_module() -> Result<String, String> {
+fn loaded_module() -> Result<String, Unread> {
     let mut random = [0u8; 8];
-    getrandom::fill(&mut random)
-        .map_err(|error| format!("no folder name could be drawn ({error})"))?;
+    getrandom::fill(&mut random).map_err(Unread::Unnamed)?;
     let name = garrison_core::hex::encode(&random);
     let folder = std::env::temp_dir().join(format!("garrison-doctor-{name}"));
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&folder)
-        .map_err(|error| format!("{}: {error}", folder.display()))?;
+    if let Err(error) = fs::DirBuilder::new().mode(0o700).create(&folder) {
+        return Err(Unread::Folder(folder, error));
+    }
     let extracted = Command::new(SEMODULE)
         .args(["-c", "-E", "garrison"])
         .current_dir(&folder)
@@ -265,11 +219,10 @@ fn loaded_module() -> Result<String, String> {
     let _ = fs::remove_dir_all(&folder);
     match (text, extracted) {
         (Ok(text), _) => Ok(text),
-        (Err(_), Ok(output)) => Err(format!(
-            "`semodule -c -E garrison` extracted no module ({})",
-            String::from_utf8_lossy(&output.stderr).trim()
+        (Err(_), Ok(output)) => Err(Unread::Unextracted(
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         )),
-        (Err(_), Err(error)) => Err(format!("`semodule` did not run ({error})")),
+        (Err(_), Err(error)) => Err(Unread::Unrun(error)),
     }
 }
 
@@ -287,70 +240,48 @@ fn selinux(config: &Config) -> Option<Finding> {
 /// it could not be read, where `semodule -l` lists it.
 pub(super) fn selinux_at(
     places: &SeLinux<'_>,
-    loaded: Option<Result<String, String>>,
+    loaded: Option<Result<String, Unread>>,
     port: u16,
 ) -> Option<Finding> {
     let enforcing = fs::read_to_string(places.enforce).ok()?.trim() == "1";
     let everywhere = fs::read_to_string(places.everywhere)
         .is_ok_and(|value| value.split_whitespace().next() == Some("1"));
     if everywhere {
-        return Some(Finding::ok(
-            "SELinux lets nginx connect to every port (httpd_can_network_connect)",
-        ));
+        return Some(Finding::ok(selinux_states::everywhere()));
     }
     let Some(loaded) = loaded else {
         return Some(if enforcing {
-            Finding::fail(
-                "SELinux is enforcing and the module garrison is not loaded, so nginx cannot reach \
-                 Garrison",
-                "Run the installer again; it loads the module.",
-            )
+            Finding::fail(selinux_states::unloaded())
         } else {
-            Finding::warn(
-                "SELinux is permissive and the module garrison is not loaded",
-                "Run the installer again.",
-            )
+            Finding::warn(selinux_states::unloaded_permissive())
         });
     };
-    let labelled = loaded.and_then(|text| {
-        module_port(&text).ok_or_else(|| "the loaded module names no port".to_owned())
-    });
+    let labelled = loaded.and_then(|text| module_port(&text).ok_or(Unread::NoPort));
     Some(match labelled {
-        Ok(labelled) if labelled == port => Finding::ok(format!(
-            "the SELinux module garrison is loaded and lets nginx reach the web service on port \
-             {port}"
-        )),
+        Ok(labelled) if labelled == port => Finding::ok(selinux_states::port_reached(port)),
         Ok(labelled) => {
-            let what = format!(
-                "the SELinux module garrison lets nginx reach port {labelled}, not {port} \
-                 (web.port)"
-            );
             // The installer loads nothing while its file is the one it
             // would write, as an earlier release left it after a load that
             // failed: then only a load by hand does.
             let written = fs::read_to_string(places.module)
                 .ok()
                 .and_then(|text| module_port(&text));
-            let fix = if written == Some(port) {
-                format!(
-                    "Load the module the installer wrote for web.port: semodule -i {}",
-                    places.module
-                )
-            } else {
-                "Run the installer again; it loads the module for web.port.".to_owned()
-            };
-            if enforcing {
-                Finding::fail(format!("{what}, so nginx answers 502"), fix)
-            } else {
-                Finding::warn(
-                    format!("{what}; SELinux is permissive and only logs the denial"),
-                    fix,
-                )
+            match (written == Some(port), enforcing) {
+                (true, true) => {
+                    Finding::fail(selinux_states::load_failed(labelled, port, places.module))
+                }
+                (true, false) => Finding::warn(selinux_states::load_failed_permissive(
+                    labelled,
+                    port,
+                    places.module,
+                )),
+                (false, true) => Finding::fail(selinux_states::other_port(labelled, port)),
+                (false, false) => {
+                    Finding::warn(selinux_states::other_port_permissive(labelled, port))
+                }
             }
         }
-        Err(why) => Finding::unknown(format!(
-            "which port the SELinux module garrison lets nginx reach: {why}"
-        )),
+        Err(why) => Finding::unknown(selinux_states::port_unknown(&why)),
     })
 }
 
@@ -379,44 +310,19 @@ pub(super) fn events(config: &Config) -> Finding {
     let path = config.database(Database::Events);
     let newest = match newest_event(&path) {
         Ok(newest) => newest,
-        Err(error) => {
-            return Finding::unknown(format!(
-                "when the last Stalwart event arrived: the events database {} cannot be read \
-                 ({error})",
-                path.display()
-            ));
-        }
+        Err(error) => return Finding::unknown(states::events_unreadable(&path, &error)),
     };
     let now = time::now().as_second();
     match newest {
         // A damaged or hand-edited history: no age, neither recent nor old.
         Some(seconds) if time::Timestamp::from_second(seconds).is_err() => {
-            Finding::unknown(format!(
-                "when the last Stalwart event arrived: the newest event is recorded at \
-                 {seconds}, which is no time"
-            ))
+            Finding::unknown(states::event_undated(seconds))
         }
         // As for the newest snapshot: it arrived before the clock went back.
-        Some(at) if at - now > AHEAD => Finding::warn(
-            format!(
-                "the last Stalwart event is recorded {} minutes ahead of this host's clock, so \
-                 when it arrived is not known",
-                (at - now) / 60
-            ),
-            "The clock went back after it arrived; `timedatectl` shows whether it is \
-             synchronized.",
-        ),
-        Some(at) if now - at <= QUIET => {
-            Finding::ok(format!("the last Stalwart event arrived {}", ago(now - at)))
-        }
-        Some(at) => Finding::warn(
-            format!("no Stalwart event for {} hours", (now - at) / 3600),
-            "Check the webhook in the Stalwart WebUI, or run `garrison stalwart setup` again.",
-        ),
-        None => Finding::warn(
-            "no Stalwart event recorded yet",
-            "Stalwart sends events through the webhook that `garrison stalwart setup` creates.",
-        ),
+        Some(at) if at - now > AHEAD => Finding::warn(states::event_ahead(at - now)),
+        Some(at) if now - at <= QUIET => Finding::ok(states::event_recent(now - at)),
+        Some(at) => Finding::warn(states::quiet(now - at)),
+        None => Finding::warn(states::no_event()),
     }
 }
 

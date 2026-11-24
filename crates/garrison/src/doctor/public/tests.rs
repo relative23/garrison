@@ -93,14 +93,18 @@ fn the_answer_about_the_sign_in_client_is_read_as_stalwart_gives_it() {
         let found = sign_in(&config, &roots);
         server.finish();
         assert_eq!(found.level, level, "{}", found.line());
-        assert!(found.what.contains(said), "{}", found.line());
+        assert!(found.state.text.contains(said), "{}", found.line());
         match fix {
             Some(fix) => assert!(
-                found.fix.as_deref().is_some_and(|text| text.contains(fix)),
+                found
+                    .state
+                    .fix
+                    .as_deref()
+                    .is_some_and(|text| text.contains(fix)),
                 "{}",
                 found.line()
             ),
-            None => assert_eq!(found.fix, None),
+            None => assert_eq!(found.state.fix, None),
         }
     }
 }
@@ -123,7 +127,7 @@ fn the_issuer_stalwart_names_itself_is_the_one_garrison_takes() {
         &serde_json::json!({"issuer": "https://mail.example.test"}),
     ));
     assert_eq!(
-        (same.level, same.what.as_str()),
+        (same.level, same.state.text.as_str()),
         (
             Level::Ok,
             "Stalwart names itself https://mail.example.test, as deployment.issuer does"
@@ -133,7 +137,7 @@ fn the_issuer_stalwart_names_itself_is_the_one_garrison_takes() {
         &serde_json::json!({"issuer": "https://other.example.test"}),
     ));
     assert_eq!(
-        (other.level, other.what.as_str()),
+        (other.level, other.state.text.as_str()),
         (
             Level::Fail,
             "Stalwart names itself https://other.example.test, but deployment.issuer is \
@@ -141,7 +145,7 @@ fn the_issuer_stalwart_names_itself_is_the_one_garrison_takes() {
         )
     );
     assert_eq!(
-        other.fix.as_deref(),
+        other.state.fix.as_deref(),
         Some(
             "Set issuer = \"https://other.example.test\" under [deployment] and restart \
              garrison-web, or make mail.example.test Stalwart's Default Hostname and reload its \
@@ -153,7 +157,7 @@ fn the_issuer_stalwart_names_itself_is_the_one_garrison_takes() {
         &serde_json::json!({"issuer": "https://other.example.test/"}),
     ));
     assert_eq!(
-        slashed.fix.as_deref(),
+        slashed.state.fix.as_deref(),
         Some("Make mail.example.test Stalwart's Default Hostname and reload its settings.")
     );
     for (response, why) in [
@@ -169,8 +173,12 @@ fn the_issuer_stalwart_names_itself_is_the_one_garrison_takes() {
     ] {
         let unread = issuer_of(response);
         assert_eq!(unread.level, Level::Unknown, "{}", unread.line());
-        assert!(unread.what.contains(why), "{}", unread.what);
-        assert!(unread.what.ends_with(SUPPORTED), "{}", unread.what);
+        assert!(unread.state.text.contains(why), "{}", unread.state.text);
+        assert!(
+            unread.state.text.ends_with(garrison_stalwart::SUPPORTED),
+            "{}",
+            unread.state.text
+        );
     }
     let directory = tempfile::tempdir().unwrap();
     let away = issuer(&garrison_testing::config(
@@ -179,9 +187,9 @@ fn the_issuer_stalwart_names_itself_is_the_one_garrison_takes() {
     ));
     assert_eq!(away.level, Level::Unknown);
     assert!(
-        away.what.contains("Stalwart did not answer at"),
+        away.state.text.contains("Stalwart did not answer at"),
         "{}",
-        away.what
+        away.state.text
     );
 }
 
@@ -236,6 +244,7 @@ fn a_502_names_the_restart_where_nothing_listens_on_web_port() {
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(
             found[0]
+                .state
                 .fix
                 .as_deref()
                 .is_some_and(|text| text.contains(fix)),
@@ -293,5 +302,9 @@ fn only_the_exporters_own_answer_is_taken_for_it() {
 #[test]
 fn an_ipv6_origin_is_named_in_brackets() {
     let found = certificate("https://[::1]:1", &roots());
-    assert!(found.what.starts_with("TLS to [::1]:1: "), "{}", found.what);
+    assert!(
+        found.state.text.starts_with("TLS to [::1]:1: "),
+        "{}",
+        found.state.text
+    );
 }

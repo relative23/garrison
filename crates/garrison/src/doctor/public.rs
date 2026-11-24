@@ -12,13 +12,14 @@ use garrison_collector::providers::signin;
 use garrison_collector::providers::tls::probe;
 use garrison_core::config::Config;
 use garrison_core::json;
-use garrison_core::observations::State;
+use garrison_core::observations::State as Observed;
 use garrison_core::time;
 use garrison_stalwart::http::Request;
-use garrison_stalwart::{Error, SUPPORTED, oidc, sign_in_page};
+use garrison_stalwart::{oidc, sign_in_page};
 use rustls::RootCertStore;
 
 use super::Finding;
+use super::states::public as states;
 use garrison_collector::fetch::{Answer, get, origin, roots};
 
 /// Fewer days than this before the certificate expires earn a warning.
@@ -54,25 +55,12 @@ pub(super) fn certificate(origin: &str, roots: &Arc<RootCertStore>) -> Finding {
         format!("{host}:{port}")
     };
     match probe(name, port, name, false, roots, time::now()) {
-        Ok(probed) if probed.days < 0 => Finding::fail(
-            format!(
-                "the certificate of {shown} expired on {}",
-                probed.expires_at
-            ),
-            "Renew it (certbot renew) and reload nginx.",
-        ),
-        Ok(probed) if probed.days < WARN_DAYS => Finding::warn(
-            format!("the certificate of {shown} expires in {} days", probed.days),
-            "Check that certificate renewal runs.",
-        ),
-        Ok(probed) => Finding::ok(format!(
-            "{shown} presents a trusted certificate for {} more days ({})",
-            probed.days, probed.protocol
-        )),
-        Err(failure) => Finding::fail(
-            format!("TLS to {shown}: {}", failure.0),
-            "Check DNS, the certificate and the nginx server block for this name.",
-        ),
+        Ok(probed) if probed.days < 0 => Finding::fail(states::expired(&shown, &probed.expires_at)),
+        Ok(probed) if probed.days < WARN_DAYS => {
+            Finding::warn(states::expiring(&shown, probed.days))
+        }
+        Ok(probed) => Finding::ok(states::trusted(&shown, probed.days, probed.protocol)),
+        Err(failure) => Finding::fail(states::tls_failed(&shown, failure.0)),
     }
 }
 
@@ -87,16 +75,12 @@ pub(super) fn interface(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Find
     let url = format!("{}/api/session", config.deployment.public_origin);
     match get(&url, roots) {
         Ok(answer) if visitor_answer(answer.status, &answer.body) => {
-            let mut findings = vec![Finding::ok(format!(
-                "Garrison answers at {}",
-                config.deployment.public_origin
+            let mut findings = vec![Finding::ok(states::answers(
+                &config.deployment.public_origin,
             ))];
             findings.push(match answer.header("strict-transport-security") {
-                Some(_) => Finding::ok("nginx sends Strict-Transport-Security"),
-                None => Finding::warn(
-                    "no Strict-Transport-Security header",
-                    "Include /etc/nginx/snippets/garrison.conf in the server block; it sets the header.",
-                ),
+                Some(_) => Finding::ok(states::hsts()),
+                None => Finding::warn(states::no_hsts()),
             });
             findings
         }
@@ -104,38 +88,16 @@ pub(super) fn interface(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Find
         Ok(answer) if matches!(answer.status, 502..=504) => {
             let port = config.web.port;
             let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-            let fix = if TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok() {
-                format!(
-                    "Something listens on 127.0.0.1:{port}: the lines above name an include or an \
-                     SELinux module for another port."
-                )
-            } else {
-                format!(
-                    "Nothing listens on 127.0.0.1:{port}: `systemctl restart {0}` starts the web \
-                     service on web.port, and `systemctl status {0}` says why it does not run.",
-                    crate::units::WEB
-                )
-            };
             vec![Finding::fail(
-                format!(
-                    "{url} answers {}: nginx does not reach Garrison's web service on \
-                     127.0.0.1:{port}",
-                    answer.status
-                ),
-                fix,
+                if TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok() {
+                    states::unreached(&url, answer.status, port)
+                } else {
+                    states::web_down(&url, answer.status, port)
+                },
             )]
         }
-        Ok(answer) => vec![Finding::fail(
-            format!(
-                "{url} answers {} instead of Garrison's answer to a visitor",
-                answer.status
-            ),
-            "The server block for this name must include /etc/nginx/snippets/garrison.conf.",
-        )],
-        Err(error) => vec![Finding::fail(
-            format!("{url}: {error}"),
-            "Check DNS, the certificate and the nginx server block for this name.",
-        )],
+        Ok(answer) => vec![Finding::fail(states::other_answer(&url, answer.status))],
+        Err(error) => vec![Finding::fail(states::unanswered(&url, error))],
     }
 }
 
@@ -181,14 +143,13 @@ pub(super) fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Findin
                     if matches!(answer.status, 403 | 404 | 410)
                         || (answer.status == 200 && !exported(&answer.body)) =>
                 {
-                    Finding::ok(format!("{origin} does not serve Stalwart's metrics"))
+                    Finding::ok(states::metrics_private(origin))
                 }
-                Ok(answer) if answer.status == 200 || challenged(&answer) => Finding::fail(
-                    format!("{url} answers {}: Stalwart's metrics exporter is public", answer.status),
-                    "Add `include /etc/nginx/snippets/garrison-stalwart-server*.conf;` to that server block.",
-                ),
-                Ok(answer) => Finding::unknown(format!("{url} answers {}", answer.status)),
-                Err(error) => Finding::unknown(format!("{url}: {error}")),
+                Ok(answer) if answer.status == 200 || challenged(&answer) => {
+                    Finding::fail(states::metrics_public(&url, answer.status))
+                }
+                Ok(answer) => Finding::unknown(states::metrics_unread(&url, answer.status)),
+                Err(error) => Finding::unknown(states::metrics_unanswered(&url, error)),
             }
         })
         .collect()
@@ -215,12 +176,7 @@ pub(super) fn sign_in(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
     );
     let answer = match get(&url, roots) {
         Ok(answer) => answer,
-        Err(error) => {
-            return Finding::fail(
-                format!("{url}: {error}"),
-                "Check that the issuer is reachable from this host.",
-            );
-        }
+        Err(error) => return Finding::fail(states::client_unanswered(&url, error)),
     };
     let host = origin(&config.deployment.issuer);
     let stalwarts = Some(answer.status)
@@ -233,38 +189,20 @@ pub(super) fn sign_in(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
                 || value.get("error").is_some_and(serde_json::Value::is_string)
         });
     match (answer.status, stalwarts) {
-        (_, Some(value)) if value["verified"] == true => {
-            Finding::ok("Stalwart knows Garrison's sign-in client as registered")
-        }
+        (_, Some(value)) if value["verified"] == true => Finding::ok(states::registered()),
         (_, Some(value)) => {
             let reason = value["description"]
                 .as_str()
-                .or_else(|| value["error"].as_str())
-                .unwrap_or("no reason given");
-            Finding::fail(
-                format!("Stalwart refuses Garrison's sign-in client {client}: {reason}"),
-                "Run `garrison stalwart setup` again.",
-            )
+                .or_else(|| value["error"].as_str());
+            Finding::fail(states::client_refused(&client, reason))
         }
-        (429, None) => Finding::unknown(format!(
-            "whether Stalwart knows Garrison's sign-in client: {host} answered 429 (Stalwart's \
-             rate limit); ask again in a minute"
+        (429, None) => Finding::unknown(states::client_limited(host)),
+        (502..=504, None) => Finding::fail(states::client_unreached(host, answer.status)),
+        (status, None) => Finding::fail(states::not_stalwart(
+            host,
+            status,
+            answer.header("content-type"),
         )),
-        (502..=504, None) => Finding::fail(
-            format!(
-                "{host} answers {} for Garrison's sign-in client: its proxy does not reach \
-                 Stalwart",
-                answer.status
-            ),
-            format!("See that Stalwart runs and that the proxy for {host} reaches it."),
-        ),
-        (status, None) => Finding::fail(
-            format!(
-                "{host} answers {status} ({}) for Garrison's sign-in client, not Stalwart's JSON",
-                answer.header("content-type").unwrap_or("no content type")
-            ),
-            format!("The proxy for {host} must pass /api/auth/client and /api/auth to Stalwart."),
-        ),
     }
 }
 
@@ -290,27 +228,13 @@ fn stated_issuer(url: &str) -> Result<String, String> {
     let answer = Request::get(url)
         .limit(DISCOVERY_LIMIT)
         .send()
-        .map_err(|error| match error {
-            Error::Unavailable(why) => format!("Stalwart did not answer at {url} ({why})"),
-            Error::Limited(why) => format!("Stalwart's rate limit ({why}); ask again in a minute"),
-            Error::Unreadable(why)
-            | Error::Denied(why)
-            | Error::InvalidToken(why)
-            | Error::Misconfigured(why) => {
-                format!("{url}: {why}, which this release of Garrison does not read; {SUPPORTED}")
-            }
-        })?;
+        .map_err(|error| states::undiscovered(url, error))?;
     Some(answer.status)
         .filter(|status| *status == 200)
         .and_then(|_| json::parse(&answer.body, DISCOVERY_LIMIT).ok())
         .and_then(|document| document.get("issuer")?.as_str().map(str::to_owned))
         .filter(|issuer| issuer.len() <= 256 && issuer.bytes().all(|byte| byte.is_ascii_graphic()))
-        .ok_or_else(|| {
-            format!(
-                "{url} answered {} without an issuer this release of Garrison reads; {SUPPORTED}",
-                answer.status
-            )
-        })
+        .ok_or_else(|| states::no_issuer(url, answer.status))
 }
 
 /// The issuer Stalwart names itself, asked of its own listener: every
@@ -325,29 +249,16 @@ pub(super) fn issuer(config: &Config) -> Finding {
     );
     let stated = match stated_issuer(&url) {
         Ok(stated) => stated,
-        Err(why) => return Finding::unknown(format!("which issuer Stalwart names itself: {why}")),
+        Err(why) => return Finding::unknown(states::issuer_unknown(&why)),
     };
     if stated == *configured {
-        return Finding::ok(format!(
-            "Stalwart names itself {stated}, as deployment.issuer does"
-        ));
+        return Finding::ok(states::same_issuer(&stated));
     }
-    let host = configured.strip_prefix("https://").unwrap_or(configured);
-    let fix = if kept_as_written(&stated) {
-        format!(
-            "Set issuer = \"{stated}\" under [deployment] and restart garrison-web, or make \
-             {host} Stalwart's Default Hostname and reload its settings."
-        )
+    Finding::fail(if kept_as_written(&stated) {
+        states::other_issuer(&stated, configured)
     } else {
-        format!("Make {host} Stalwart's Default Hostname and reload its settings.")
-    };
-    Finding::fail(
-        format!(
-            "Stalwart names itself {stated}, but deployment.issuer is {configured}, so every \
-             sign-in fails at Garrison's callback"
-        ),
-        fix,
-    )
+        states::other_issuer_hostname(&stated, configured)
+    })
 }
 
 /// Stalwart's sign-in page as a visitor's browser loads it, with the files it
@@ -356,9 +267,9 @@ pub(super) fn sign_in_page(config: &Config, roots: &Arc<RootCertStore>) -> Findi
     // Asked by hand: no run's time to keep, the certificate judged by the clock.
     let examined = signin::check(&config.deployment, signin::Asking::by_hand(roots));
     match examined.state {
-        State::Ok => Finding::ok(examined.what),
-        State::Failed => Finding::fail(examined.what, examined.fix.unwrap_or_default()),
-        _ => Finding::unknown(examined.what),
+        Observed::Ok => Finding::ok(states::page_shown(examined.what)),
+        Observed::Failed => Finding::fail(states::page_failed(examined.what, examined.fix)),
+        _ => Finding::unknown(states::page_unknown(examined.what)),
     }
 }
 

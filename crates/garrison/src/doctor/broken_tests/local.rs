@@ -148,7 +148,7 @@ pub(super) fn selinux_module_for_another_port() -> Broken {
         everywhere: &everywhere,
         module: &module,
     };
-    let loaded = fs::read_to_string(&module).map_err(|error| error.to_string());
+    let loaded = fs::read_to_string(&module).map_err(host::Unread::Unrun);
     Broken {
         host: "an SELinux module that labels another port than web.port",
         found: host::selinux_at(&places, Some(loaded), 9443)

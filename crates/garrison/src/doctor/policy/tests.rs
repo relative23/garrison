@@ -56,7 +56,7 @@ fn the_broker_is_who_the_hosts_accounts_say() {
 fn the_policy_is_judged_as_the_broker_meets_it() {
     let kept = judged(0, 991, 0o640);
     assert_eq!(
-        (kept.level, kept.what.as_str()),
+        (kept.level, kept.state.text.as_str()),
         (
             Level::Ok,
             "the broker may read the access policy, which only root may change \
@@ -64,18 +64,19 @@ fn the_policy_is_judged_as_the_broker_meets_it() {
         )
     );
     assert_eq!(judged(0, 991, 0o440).level, Level::Ok);
-    let fix = format!("chown root:garrison-broker {PATH} && chmod 640 {PATH}");
+    let fix = format!("Run `chown root:garrison-broker {PATH} && chmod 640 {PATH}`.");
     for (gid, mode) in [(0, 0o600), (0, 0o640), (991, 0o600), (10, 0o640)] {
         let found = judged(0, gid, mode);
         assert_eq!(found.level, Level::Fail, "{}", found.line());
         assert!(
             found
-                .what
+                .state
+                .text
                 .starts_with("garrison-broker may not read the access policy ("),
             "{}",
-            found.what
+            found.state.text
         );
-        assert_eq!(found.fix.as_deref(), Some(fix.as_str()));
+        assert_eq!(found.state.fix.as_deref(), Some(fix.as_str()));
     }
     // One the broker does not take is named with why.
     for (uid, mode, why) in [
@@ -88,25 +89,27 @@ fn the_policy_is_judged_as_the_broker_meets_it() {
         assert_eq!(found.level, Level::Fail, "{}", found.line());
         assert!(
             found
-                .what
+                .state
+                .text
                 .starts_with("the broker does not take the access policy ("),
             "{}",
-            found.what
+            found.state.text
         );
-        assert!(found.what.contains(why), "{}", found.what);
-        assert_eq!(found.fix.as_deref(), Some(fix.as_str()));
+        assert!(found.state.text.contains(why), "{}", found.state.text);
+        assert_eq!(found.state.fix.as_deref(), Some(fix.as_str()));
     }
     // One the broker owns it takes, as read_protected does: a warning.
     let owned = judged(990, 991, 0o600);
     assert_eq!(owned.level, Level::Warn, "{}", owned.line());
     assert!(
         owned
-            .what
+            .state
+            .text
             .starts_with("garrison-broker owns the access policy (garrison-broker:garrison-broker"),
         "{}",
-        owned.what
+        owned.state.text
     );
-    assert_eq!(owned.fix.as_deref(), Some(fix.as_str()));
+    assert_eq!(owned.state.fix.as_deref(), Some(fix.as_str()));
 }
 
 /// A folder above the policy that the broker may not enter hides it as a
@@ -133,12 +136,20 @@ fn a_folder_the_broker_may_not_enter_hides_the_policy() {
     assert_eq!(hidden.level, Level::Fail);
     assert!(
         hidden
-            .what
+            .state
+            .text
             .starts_with("garrison-broker may not enter /srv/private (root:root, mode 700)"),
         "{}",
-        hidden.what
+        hidden.state.text
     );
-    assert!(hidden.fix.as_deref().unwrap().contains("broker.policy"));
+    assert!(
+        hidden
+            .state
+            .fix
+            .as_deref()
+            .unwrap()
+            .contains("broker.policy")
+    );
     let unknown = readable(path, file, &[], None, &names);
     assert_eq!(unknown.level, Level::Unknown, "{}", unknown.line());
 }
@@ -152,7 +163,7 @@ fn the_policy_is_judged_where_the_configuration_names_it() {
     let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
     let found = checks(&config);
     assert_eq!(
-        (found[0].what.clone(), found[0].fix.as_deref()),
+        (found[0].state.text.clone(), found[0].state.fix.as_deref()),
         (
             format!(
                 "the access policy is missing: {}",
@@ -163,7 +174,7 @@ fn the_policy_is_judged_where_the_configuration_names_it() {
     );
     fs::create_dir_all(&config.broker.policy).unwrap();
     assert_eq!(
-        checks(&config)[0].fix.as_deref(),
+        checks(&config)[0].state.fix.as_deref(),
         Some("Remove it; then `garrison access init` makes the file itself there.")
     );
     // Root may read a policy that the broker's unit hides from it.
@@ -171,7 +182,7 @@ fn the_policy_is_judged_where_the_configuration_names_it() {
     hidden.broker.policy = "/home/doctor-test/policy.json".into();
     let named = checks(&hidden)
         .into_iter()
-        .find(|finding| finding.what.contains("(ProtectHome=true)"))
+        .find(|finding| finding.state.text.contains("(ProtectHome=true)"))
         .unwrap();
     assert_eq!(named.level, Level::Fail, "{}", named.line());
 }
@@ -188,14 +199,14 @@ fn the_policy_grants_what_the_broker_reads() {
     garrison_testing::write_policy(&config, &document);
     let bound = content(&config);
     assert_eq!(
-        (bound.level, bound.what.as_str()),
+        (bound.level, bound.state.text.as_str()),
         (Level::Ok, "the access policy binds 2 roles and 0 accounts")
     );
     document["roleBindings"] = serde_json::json!({});
     garrison_testing::write_policy(&config, &document);
     let unbound = content(&config);
     assert_eq!(
-        (unbound.level, unbound.what.as_str()),
+        (unbound.level, unbound.state.text.as_str()),
         (
             Level::Fail,
             "the access policy binds no role and no account, so nobody can sign in"
@@ -203,6 +214,7 @@ fn the_policy_grants_what_the_broker_reads() {
     );
     assert!(
         unbound
+            .state
             .fix
             .as_deref()
             .unwrap()
@@ -218,7 +230,11 @@ fn the_policy_grants_what_the_broker_reads() {
     garrison_testing::write_policy(&config, &dropped);
     let named = content(&config);
     assert_eq!(
-        (named.level, named.what.as_str(), named.fix.as_deref()),
+        (
+            named.level,
+            named.state.text.as_str(),
+            named.state.fix.as_deref()
+        ),
         (
             Level::Fail,
             "the access policy names actions garrison.toml does not have (run_reports), so \
@@ -232,7 +248,7 @@ fn the_policy_grants_what_the_broker_reads() {
     let unread = content(&config);
     assert_eq!(unread.level, Level::Fail);
     assert_eq!(
-        unread.what,
+        unread.state.text,
         "the access policy does not read (schemaVersion must be 1), so nobody can sign in"
     );
 }
@@ -298,8 +314,8 @@ fn a_closed_folder_on_the_way_to_the_default_place_is_opened() {
         mode: 0o700,
     };
     for (folder, fix) in [
-        ("/etc/garrison", "chmod 755 /etc/garrison"),
-        ("/etc", "chmod 755 /etc"),
+        ("/etc/garrison", "Run `chmod 755 /etc/garrison`."),
+        ("/etc", "Run `chmod 755 /etc`."),
         (
             "/srv/private",
             "Move the policy to /etc/garrison/access-policy.json and set broker.policy to it.",
@@ -314,7 +330,7 @@ fn a_closed_folder_on_the_way_to_the_default_place_is_opened() {
             &names,
         );
         assert_eq!(found.level, Level::Fail, "{}", found.line());
-        assert_eq!(found.fix.as_deref(), Some(fix), "{folder}");
+        assert_eq!(found.state.fix.as_deref(), Some(fix), "{folder}");
     }
 }
 
@@ -451,8 +467,8 @@ fn the_folders_behind_a_linked_folder_are_judged() {
     mode(&closed, 0o755);
     assert_eq!(found.level, Level::Fail, "{}", found.line());
     assert!(
-        found.what.contains(&closed.display().to_string()),
+        found.state.text.contains(&closed.display().to_string()),
         "{}",
-        found.what
+        found.state.text
     );
 }

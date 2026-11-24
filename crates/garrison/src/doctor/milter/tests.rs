@@ -21,7 +21,7 @@ fn row(id: &str, port: u16, defer: bool) -> Value {
 fn said(findings: &[Finding]) -> Vec<(Level, &str)> {
     findings
         .iter()
-        .map(|finding| (finding.level, finding.what.as_str()))
+        .map(|finding| (finding.level, finding.state.text.as_str()))
         .collect()
 }
 
@@ -35,7 +35,7 @@ fn a_filter_that_does_not_answer_fails_with_where_to_look() {
     assert_eq!(answering(8096, Ok(())).level, Level::Ok);
     let silent = answering(8096, Err("Connection refused".to_owned()));
     assert_eq!(
-        (silent.level, silent.what.as_str()),
+        (silent.level, silent.state.text.as_str()),
         (
             Level::Fail,
             "the macro milter does not answer on 127.0.0.1:8096: Connection refused"
@@ -79,7 +79,10 @@ fn stalwart_is_held_to_the_entry_the_configuration_makes() {
              127.0.0.1:8097"
         )]
     );
-    assert_eq!(moved[0].fix.as_deref(), Some(SETUP));
+    assert_eq!(
+        moved[0].state.fix.as_deref(),
+        Some("Run `garrison stalwart setup`.")
+    );
     // The filter down: Stalwart asks it where nothing answers.
     let down = configured_as((8096, true), &entered, &[], &at(&[]));
     assert_eq!(
@@ -107,9 +110,9 @@ fn stalwart_is_held_to_the_entry_the_configuration_makes() {
         assert_eq!(none.len(), 1, "{:?}", said(&none));
         assert_eq!(none[0].level, Level::Warn);
         assert!(
-            none[0].what.starts_with("Stalwart has no entry"),
+            none[0].state.text.starts_with("Stalwart has no entry"),
             "{}",
-            none[0].what
+            none[0].state.text
         );
     }
 }
@@ -136,8 +139,15 @@ fn an_entry_switched_off_asked_too_early_or_twice_is_named() {
         let found = configured_as((8096, true), &read(&json!([entry])), &[], &at(&[8096]));
         assert_eq!(found.len(), 1, "{:?}", said(&found));
         assert_eq!(found[0].level, Level::Warn);
-        assert!(found[0].what.contains(words), "{}", found[0].what);
-        assert_eq!(found[0].fix.as_deref(), Some(SETUP));
+        assert!(
+            found[0].state.text.contains(words),
+            "{}",
+            found[0].state.text
+        );
+        assert_eq!(
+            found[0].state.fix.as_deref(),
+            Some("Run `garrison stalwart setup`.")
+        );
     }
     let twice = read(&json!([row("m", 8096, true), row("n", 8096, true)]));
     let found = configured_as((8096, true), &twice, &[], &at(&[8096]));
@@ -165,25 +175,33 @@ fn a_filter_the_configuration_dropped_is_judged_by_what_stalwart_holds() {
              longer has"
         )]
     );
-    assert!(still[0].fix.as_deref().unwrap().starts_with(SETUP));
+    assert!(
+        still[0]
+            .state
+            .fix
+            .as_deref()
+            .unwrap()
+            .starts_with("Run `garrison stalwart setup`.")
+    );
     // The filter stopped: nothing tells the entry for the filter's, and
     // Stalwart asks it in vain, which setup refuses to leave so.
     let stopped = judged(None, &entered, &[], &at(&[]));
     assert_eq!(stopped.len(), 1, "{:?}", said(&stopped));
     assert!(
         stopped[0]
-            .what
+            .state
+            .text
             .ends_with(", where nothing answers: Stalwart defers all incoming mail"),
         "{}",
-        stopped[0].what
+        stopped[0].state.text
     );
-    assert_eq!(stopped[0].fix.as_deref(), Some(entries::REMOVE));
+    assert_eq!(stopped[0].state.fix.as_deref(), Some(entries::REMOVE));
     let unasked = unasked(None, "Stalwart did not answer");
     assert_eq!(unasked.level, Level::Unknown);
     assert!(
-        unasked.what.ends_with(": Stalwart did not answer"),
+        unasked.state.text.ends_with(": Stalwart did not answer"),
         "{}",
-        unasked.what
+        unasked.state.text
     );
 }
 
@@ -200,23 +218,29 @@ fn an_entry_the_running_filter_answers_is_the_filters() {
     assert_eq!(moving.len(), 1, "{:?}", said(&moving));
     assert!(
         moving[0]
-            .what
+            .state
+            .text
             .starts_with("Stalwart asks the macro milter at 127.0.0.1:8096, but"),
         "{}",
-        moving[0].what
+        moving[0].state.text
     );
-    assert_eq!(moving[0].fix.as_deref(), Some(SETUP));
+    assert_eq!(
+        moving[0].state.fix.as_deref(),
+        Some("Run `garrison stalwart setup`.")
+    );
     let beside = read(&json!([row("g", 8096, true), row("o", 9000, true)]));
     let found = judged(None, &beside, &[8096], &at(&[8096]));
     assert_eq!(found.len(), 2, "{:?}", said(&found));
     assert!(
-        found[0].what.contains("127.0.0.1:9000 (entry o)"),
+        found[0].state.text.contains("127.0.0.1:9000 (entry o)"),
         "{}",
-        found[0].what
+        found[0].state.text
     );
-    assert_eq!(found[0].fix.as_deref(), Some(entries::REMOVE));
+    assert_eq!(found[0].state.fix.as_deref(), Some(entries::REMOVE));
     assert!(
-        found[1].fix.as_deref().unwrap().starts_with(AFTER),
+        found[1].state.fix.as_deref().unwrap().starts_with(
+            "Run `garrison stalwart setup` once the milters named above are out of Stalwart."
+        ),
         "{}",
         found[1].line()
     );
@@ -362,12 +386,14 @@ fn no_entry_stalwart_asks_in_vain_goes_unsaid() {
                 let resolves = format!("{host}:{port}").to_socket_addrs().is_ok();
                 let garrisons = configured == Some(port) && resolves;
                 let address = format!("{host}:{port}");
-                let line = found.iter().find(|finding| finding.what.contains(&address));
+                let line = found
+                    .iter()
+                    .find(|finding| finding.state.text.contains(&address));
                 let fault = match line {
                     None => Some("no line names it"),
                     Some(finding) if finding.level == Level::Ok => Some("its line says ok"),
                     Some(finding) => {
-                        let fix = finding.fix.as_deref().unwrap_or_default();
+                        let fix = finding.state.fix.as_deref().unwrap_or_default();
                         if garrisons && !fix.contains("garrison stalwart setup") {
                             Some("setup mends it, and its fix does not name setup")
                         } else if !garrisons && !fix.contains("Stalwart WebUI") {

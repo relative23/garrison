@@ -10,9 +10,11 @@ pub(crate) mod milter;
 mod notify;
 pub(crate) mod policy;
 mod public;
+mod states;
 
 use garrison_core::config::Config;
 
+use crate::state::State;
 use crate::{complain, placeholder, say};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,43 +25,39 @@ enum Level {
     Unknown,
 }
 
-#[derive(Debug)]
+/// What a check found: how it stands, and the state that says it.
+#[derive(Debug, PartialEq, Eq)]
 struct Finding {
     level: Level,
-    what: String,
-    fix: Option<String>,
+    state: State,
 }
 
 impl Finding {
-    fn ok(what: impl Into<String>) -> Self {
+    fn ok(state: State) -> Self {
         Self {
             level: Level::Ok,
-            what: what.into(),
-            fix: None,
+            state,
         }
     }
 
-    fn warn(what: impl Into<String>, fix: impl Into<String>) -> Self {
+    fn warn(state: State) -> Self {
         Self {
             level: Level::Warn,
-            what: what.into(),
-            fix: Some(fix.into()),
+            state,
         }
     }
 
-    fn fail(what: impl Into<String>, fix: impl Into<String>) -> Self {
+    fn fail(state: State) -> Self {
         Self {
             level: Level::Fail,
-            what: what.into(),
-            fix: Some(fix.into()),
+            state,
         }
     }
 
-    fn unknown(what: impl Into<String>) -> Self {
+    fn unknown(state: State) -> Self {
         Self {
             level: Level::Unknown,
-            what: what.into(),
-            fix: None,
+            state,
         }
     }
 
@@ -70,10 +68,7 @@ impl Finding {
             Level::Fail => "FAIL",
             Level::Unknown => "?   ",
         };
-        match &self.fix {
-            Some(fix) => format!("{mark}  {}\n      {fix}", self.what),
-            None => format!("{mark}  {}", self.what),
-        }
+        format!("{mark}  {}", self.state)
     }
 }
 
@@ -84,16 +79,11 @@ fn origins(config: &Config) -> Vec<Finding> {
     ]
     .into_iter()
     .filter(|(_, origin)| placeholder(origin))
-    .map(|(key, origin)| {
-        Finding::fail(
-            format!("{key} is still the placeholder {origin}"),
-            "Set the real address in /etc/garrison/garrison.toml.",
-        )
-    })
+    .map(|(key, origin)| Finding::fail(states::placeholder(key, origin)))
     .collect()
 }
 
-fn summary(findings: &[Finding]) -> String {
+fn summary(findings: &[Finding]) -> State {
     let count = |level| {
         findings
             .iter()
@@ -105,19 +95,12 @@ fn summary(findings: &[Finding]) -> String {
         count(Level::Warn),
         count(Level::Unknown),
     );
-    let checks = counted(findings.len(), "check", "checks");
-    if failed + warned + unknown == 0 {
-        if findings.len() == 1 {
-            "The 1 check is in order.".into()
-        } else {
-            format!("All {checks} are in order.")
-        }
+    if failed > 0 {
+        states::problems(failed, warned, unknown, findings.len())
+    } else if warned + unknown > 0 {
+        states::no_problem(warned, unknown, findings.len())
     } else {
-        format!(
-            "{}, {}, {unknown} unknown, of {checks}.",
-            counted(failed, "problem", "problems"),
-            counted(warned, "warning", "warnings"),
-        )
+        states::in_order(findings.len())
     }
 }
 
@@ -127,7 +110,7 @@ fn unfollowed(config: &Config) -> Vec<Finding> {
     let include = crate::unfollowed::installed_include();
     crate::unfollowed::settings(config, include.as_deref())
         .into_iter()
-        .map(|setting| Finding::warn(setting.what, setting.fix))
+        .map(|setting| Finding::warn(states::unfollowed(setting)))
         .collect()
 }
 
@@ -140,7 +123,7 @@ fn secrets(config: &Config) -> (Vec<Finding>, bool) {
         .any(|secret| secret.setting.starts_with("notifications."));
     let findings = unloaded
         .into_iter()
-        .map(|secret| Finding::fail(secret.what, secret.fix))
+        .map(|secret| Finding::fail(states::unloaded(secret)))
         .collect();
     (findings, channels)
 }
@@ -151,21 +134,16 @@ fn secrets(config: &Config) -> (Vec<Finding>, bool) {
 fn lists(config: &Config) -> Vec<Finding> {
     let refused = crate::dqs::refused(config)
         .into_iter()
-        .map(|(what, fix)| Finding::fail(what, fix));
+        .map(|said| Finding::fail(states::dqs_unasked(said)));
     let warned = crate::dqs::warned(config)
         .into_iter()
-        .map(|(what, fix)| Finding::warn(what, fix));
+        .map(|said| Finding::warn(states::dqs_key_written(said)));
     refused.chain(warned).collect()
-}
-
-/// `1 problem`, `2 problems`.
-fn counted(number: usize, one: &str, more: &str) -> String {
-    format!("{number} {}", if number == 1 { one } else { more })
 }
 
 pub(crate) fn run(config: &Config) -> u8 {
     if !rustix::process::geteuid().is_root() {
-        complain("Run as root: the checks read files only root may read.");
+        complain(&states::not_root().to_string());
         return 2;
     }
     let mut findings = origins(config);
@@ -201,7 +179,10 @@ mod tests {
         let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
         let found = unfollowed(&config);
         assert!(found.iter().all(|finding| finding.level == Level::Warn));
-        let said: Vec<&str> = found.iter().map(|finding| finding.what.as_str()).collect();
+        let said: Vec<&str> = found
+            .iter()
+            .map(|finding| finding.state.text.as_str())
+            .collect();
         for start in [
             "web.state_directory is ",
             "collector.state_directory is ",
@@ -232,7 +213,8 @@ mod tests {
         assert_eq!(
             found[0].line(),
             "FAIL  broker.native_key is credential:key, but garrison-broker.service loads this \
-             secret only as credential:broker-native-key\n      Write broker.native_key = \
+             secret only as credential:broker-native-key [doctor-secret-unloaded]\n      Write \
+             broker.native_key = \
              \"credential:broker-native-key\" and keep the secret in \
              /etc/garrison/credentials/broker-native-key."
         );
@@ -259,7 +241,7 @@ mod tests {
         let found = lists(&config);
         let lines: Vec<(Level, String)> = found
             .iter()
-            .map(|finding| (finding.level, finding.what.clone()))
+            .map(|finding| (finding.level, finding.state.text.clone()))
             .collect();
         assert_eq!(
             lines,
@@ -291,31 +273,33 @@ mod tests {
         );
     }
 
+    /// A line is its level's mark and its state; the last line, the state the
+    /// levels' counts make.
     #[test]
     fn every_finding_says_how_it_stands_and_what_to_do() {
-        assert_eq!(Finding::ok("fine").line(), "ok    fine");
-        assert_eq!(
-            Finding::fail("broken", "Fix it.").line(),
-            "FAIL  broken\n      Fix it."
-        );
-        assert_eq!(Finding::unknown("unclear").line(), "?     unclear");
+        let state = || states::host::unsynchronized();
+        for (finding, mark) in [
+            (Finding::ok(state()), "ok    "),
+            (Finding::warn(state()), "warn  "),
+            (Finding::fail(state()), "FAIL  "),
+            (Finding::unknown(state()), "?     "),
+        ] {
+            assert_eq!(finding.line(), format!("{mark}{}", state()));
+        }
         let findings = [
-            Finding::ok("a"),
-            Finding::warn("b", "c"),
-            Finding::unknown("d"),
+            Finding::ok(state()),
+            Finding::warn(state()),
+            Finding::unknown(state()),
         ];
+        assert_eq!(summary(&findings), states::no_problem(1, 1, 3));
         assert_eq!(
-            summary(&findings),
-            "0 problems, 1 warning, 1 unknown, of 3 checks."
+            summary(&[Finding::fail(state()), Finding::ok(state())]),
+            states::problems(1, 0, 0, 2)
         );
+        assert_eq!(summary(&[Finding::ok(state())]), states::in_order(1));
         assert_eq!(
-            summary(&[Finding::fail("e", "f"), Finding::ok("a")]),
-            "1 problem, 0 warnings, 0 unknown, of 2 checks."
-        );
-        assert_eq!(summary(&[Finding::ok("a")]), "The 1 check is in order.");
-        assert_eq!(
-            summary(&[Finding::ok("a"), Finding::ok("b")]),
-            "All 2 checks are in order."
+            summary(&[Finding::ok(state()), Finding::ok(state())]),
+            states::in_order(2)
         );
     }
 }

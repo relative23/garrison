@@ -29,13 +29,8 @@ struct Broken {
 /// The hosts where one claim does not hold.
 type Hosts = &'static [fn() -> Broken];
 
-const PLACES: [(&str, &str, Hosts); 24] = [
-    (
-        "host.rs",
-        "a release, and the one before",
-        &[local::no_release],
-    ),
-    ("host.rs", "a release, none before", &[local::no_release]),
+const PLACES: [(&str, &str, Hosts); 23] = [
+    ("host.rs", "a release is installed", &[local::no_release]),
     ("host.rs", "a unit is active", &[local::unit_failed]),
     (
         "host.rs",
@@ -165,7 +160,7 @@ fn fault(broken: &Broken) -> Option<String> {
     let Some(finding) = broken
         .found
         .iter()
-        .find(|finding| finding.what.contains(&broken.said))
+        .find(|finding| finding.state.text.contains(&broken.said))
     else {
         return Some(format!(
             "{}: no line says {:?}:\n{}",
@@ -180,6 +175,7 @@ fn fault(broken: &Broken) -> Option<String> {
     match &broken.fix {
         Some(fix)
             if !finding
+                .state
                 .fix
                 .as_deref()
                 .is_some_and(|text| text.contains(fix.as_str())) =>
