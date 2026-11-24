@@ -120,18 +120,19 @@ fn free(port: u16) -> Result<(), String> {
 
 /// Root starts the filter anew where it does not run, or runs with an older
 /// configuration than there is now, or is to move (`force`); then it must
-/// answer on `port`.
-fn started(port: u16, force: bool) -> Result<(), String> {
+/// answer on `port`. Whether it was started anew.
+fn started(port: u16, force: bool) -> Result<bool, String> {
+    let mut restarted = false;
     if managed() {
         systemctl(&["enable", "--quiet"]);
         if force || !systemctl(&["is-active", "--quiet"]) || !current() {
-            systemctl(&["restart"]);
+            restarted = systemctl(&["restart"]);
         }
     }
     let mut problem = String::new();
     for _ in 0..10 {
         match garrison_milter::answers(port, Duration::from_secs(2)) {
-            Ok(()) => return Ok(()),
+            Ok(()) => return Ok(restarted),
             Err(error) => problem = error,
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -198,8 +199,9 @@ fn unread(error: String) -> String {
 
 /// Before setup changes anything: Stalwart asks no entry in vain that is
 /// not the filter's, and where the configuration has the filter, it
-/// answers, or can move to its port.
-pub(super) fn prepare(admin: &Admin, config: &Config) -> Result<(), String> {
+/// answers, or can move to its port. What was done, where the filter was
+/// started anew.
+pub(super) fn prepare(admin: &Admin, config: &Config) -> Result<Option<String>, String> {
     let stored = admin.list::<Entry>("MtaMilter").map_err(unread)?;
     let port = config.milter.as_ref().map(|milter| milter.port);
     let listening = listening().map_err(|error| format!("{error}. Nothing was changed"))?;
@@ -212,9 +214,11 @@ pub(super) fn prepare(admin: &Admin, config: &Config) -> Result<(), String> {
         return Err(refused(&stranded));
     }
     match port {
-        None => Ok(()),
-        Some(port) if moving(&listening, port) => free(port),
-        Some(port) => started(port, false),
+        None => Ok(None),
+        Some(port) if moving(&listening, port) => free(port).map(|()| None),
+        Some(port) => Ok(started(port, false)?.then(|| {
+            format!("started the macro milter with garrison.toml as it is now (127.0.0.1:{port})")
+        })),
     }
 }
 

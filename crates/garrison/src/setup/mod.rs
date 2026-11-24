@@ -155,7 +155,10 @@ fn configure(
     networks: &Enabled,
 ) -> Result<(), String> {
     let (directory, rotate) = (&config.credentials_directory, asked.rotate);
-    milter::prepare(admin, config)?;
+    let started = milter::prepare(admin, config)?;
+    if let Some(step) = &started {
+        say(&format!("- {step}"));
+    }
     let found = keys::find(admin, directory, &[&BROKER, &COLLECTOR], rotate)?;
     let hook = webhook::find(admin)?;
     let client = client::find(admin, config)?;
@@ -213,7 +216,8 @@ fn configure(
         Err(asked) => Some(asked),
     };
     let retired = milter::retire(config)?;
-    if !keys_changed && steps.is_empty() && stale.is_empty() && retired.is_empty() {
+    let changed = started.is_some() || keys_changed || !steps.is_empty();
+    if !changed && stale.is_empty() && retired.is_empty() {
         say(UNCHANGED);
         return Ok(());
     }
