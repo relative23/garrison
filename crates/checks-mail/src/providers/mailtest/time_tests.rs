@@ -42,7 +42,11 @@ const NOT_SENT: &str = "not tested: not sent: the collection run's time was used
 #[test]
 fn a_server_that_never_greets_costs_one_wait_and_the_next_run_sends_the_rest() {
     // One listener for both runs: it never greets the first session.
-    let (port, handle) = server([SILENT, "550 5.7.1 Message rejected as spam"]);
+    let (port, handle) = server([
+        SILENT,
+        "550 5.7.1 Message rejected as spam",
+        "250 2.0.0 Message queued with id c.",
+    ]);
     let provider = provider(port);
     let memory = Remembered::default();
     let (first, took) = collected(
@@ -59,15 +63,55 @@ fn a_server_that_never_greets_costs_one_wait_and_the_next_run_sends_the_rest() {
     );
     assert_eq!(first.state, State::Unknown);
     // The next run, a minute later, sends what this one had no time for,
-    // and only that: two sessions in all.
+    // and the harmless message after its refusal: three sessions in all.
     let (next, _) = collected(&provider, &memory, 60, Deadline::NONE);
-    assert_eq!(handle.join().unwrap().len(), 2);
+    assert_eq!(handle.join().unwrap().len(), 3);
     assert_eq!(
         results(&next),
         [
             "not tested: the server was silent for 10 s",
-            "refused: 550 5.7.1 Message rejected as spam"
+            "refused: 550 5.7.1 Message rejected as spam",
+            "accepted"
         ]
+    );
+}
+
+#[test]
+fn a_harmless_message_the_run_had_no_time_for_is_sent_in_the_next_run_alone() {
+    // The spam text's session uses up the run's time, so the harmless
+    // message after the test file's refusal is not sent.
+    let (port, handle) = server([
+        "550 5.7.1 Virus found",
+        SILENT,
+        "250 2.0.0 Message queued with id c.",
+    ]);
+    let provider = provider(port).within(Duration::from_secs(1));
+    let memory = Remembered::default();
+    let (first, _) = collected(
+        &provider,
+        &memory,
+        0,
+        Deadline::within(Duration::from_millis(500)),
+    );
+    let unsure = "not tested: refused, and no harmless message got through to compare: 550 5.7.1 \
+                  Virus found";
+    let late = "not tested: the request was not done in its time";
+    assert_eq!(
+        (first.state, results(&first)),
+        (State::Unknown, vec![unsure, late, NOT_SENT])
+    );
+    // The next run sends it alone, and the refusal counts.
+    let (next, _) = collected(&provider, &memory, 60, Deadline::NONE);
+    assert_eq!(
+        results(&next),
+        ["refused: 550 5.7.1 Virus found", late, "accepted"]
+    );
+    let sessions = handle.join().unwrap();
+    assert_eq!(sessions.len(), 3);
+    assert!(
+        sessions[2].contains("Harmless message (control)"),
+        "{}",
+        sessions[2]
     );
 }
 

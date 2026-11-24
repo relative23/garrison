@@ -10,6 +10,10 @@ pub(super) enum Test {
     Gtube,
     /// A document that a macro filter takes for one with macros.
     Macro,
+    /// A message that carries nothing to refuse, sent beside a test the
+    /// server refused: only where the server takes it is that refusal the
+    /// test's.
+    Control,
 }
 
 /// Who a test message is from and for, and when it was written.
@@ -29,6 +33,7 @@ impl Test {
             Test::Eicar => "Antivirus test file (EICAR)",
             Test::Gtube => "Spam test text (GTUBE)",
             Test::Macro => "Office document with macros (test document)",
+            Test::Control => "Harmless message (control)",
         }
     }
 
@@ -36,7 +41,9 @@ impl Test {
     /// for the test only where it is the whole subject.
     fn subject(self) -> String {
         match self {
-            Test::Eicar | Test::Macro => format!("Garrison mail test: {}", self.label()),
+            Test::Eicar | Test::Macro | Test::Control => {
+                format!("Garrison mail test: {}", self.label())
+            }
             Test::Gtube => self.body(),
         }
     }
@@ -60,6 +67,10 @@ impl Test {
             Test::Macro => "The attached document is harmless: it holds no macro,\r\n\
                             only the name a macro project has in a document."
                 .to_owned(),
+            Test::Control => "This message carries nothing to refuse. Garrison sends it beside \
+                              a test\r\nthe server refused, to tell a verdict from a server \
+                              that refuses all mail."
+                .to_owned(),
         }
     }
 
@@ -69,6 +80,7 @@ impl Test {
             Test::Eicar => "eicar",
             Test::Gtube => "gtube",
             Test::Macro => "macro",
+            Test::Control => "control",
         }
     }
 

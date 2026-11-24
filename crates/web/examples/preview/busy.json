@@ -1193,7 +1193,7 @@
     "checkedAt": "2026-10-29T12:00:00+00:00",
     "source": "SMTP to 127.0.0.1:25",
     "kind": "details",
-    "scope": "Garrison handed the test messages to the local SMTP listener without signing in, addressed to garrison-test@example.org; the next test follows 24 hours after this one.",
+    "scope": "Garrison handed the test messages to the local SMTP listener without signing in, addressed to garrison-test@example.org. A refusal counts only where the server takes a harmless message sent after it. Each test is sent again 24 hours after it was sent; one that did not happen or does not count, as one the server deferred, is tried again after an hour.",
     "fields": [],
     "table": {
       "columns": [
@@ -1217,7 +1217,8 @@
           "Office document with macros (test document)",
           "2026-10-29T04:10:01+00:00",
           "refused: 550 5.7.1 Message refused: an attached Office document contains macros."
-        ]
+        ],
+        ["Harmless message (control)", "2026-10-29T04:10:01+00:00", "accepted"]
       ]
     },
     "findings": [],

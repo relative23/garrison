@@ -18,6 +18,13 @@
 //! other filters look. A test that goes wrong leaves a harmless message in
 //! the recipient's mailbox, which is why that mailbox is one made for it.
 //!
+//! A refusal is a verdict only where the server takes mail that carries
+//! nothing to refuse: a scanner that fails closed, as clamav-milter with
+//! `OnFail Reject` while clamd is down, another milter or a policy of the
+//! server refuses every message at its end. So a run in which the server
+//! refused a test sends a harmless message after it, which lands in that
+//! mailbox where the server takes it.
+//!
 //! Where the operator switches it on (`macro_document = true`), a third
 //! message carries a document that a macro filter such as Garrison's milter
 //! takes for one with macros; it must be refused like the test file.
@@ -46,6 +53,10 @@ const MEMORY: &str = "mailtest";
 const VERDICT_WITHIN: i64 = 900;
 /// A test that did not happen is tried again after this long.
 const AGAIN: i64 = 3600;
+/// What a refusal of the harmless message means.
+const REFUSES_ALL: &str = "The server refuses mail that carries nothing to refuse, as \
+                           clamav-milter does with `OnFail Reject` while clamd is down, so no \
+                           refusal of a test counts.";
 
 /// How the server answered one test, as the status database keeps it.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -73,7 +84,17 @@ impl Sent {
     /// refused it for good (5xx). A session that did not come that far, and
     /// a message the server only deferred (4xx), tested nothing.
     fn happened(&self) -> bool {
-        self.at_data && (self.code == 250 || (500..600).contains(&self.code))
+        self.taken() || self.refused()
+    }
+
+    /// Whether the server took the message itself.
+    fn taken(&self) -> bool {
+        self.at_data && self.code == 250
+    }
+
+    /// Whether the server refused the message itself for good.
+    fn refused(&self) -> bool {
+        self.at_data && (500..600).contains(&self.code)
     }
 }
 
@@ -95,10 +116,26 @@ struct Tests {
     /// The macro test, where the operator switched it on.
     #[serde(default)]
     macros: Option<Sent>,
+    /// The harmless message, while a test is refused at its end.
+    #[serde(default)]
+    control: Option<Sent>,
     /// What they were sent to. An earlier release kept none; its results are
     /// taken as made for the configuration as it is.
     #[serde(default)]
     aim: Option<Aim>,
+}
+
+impl Tests {
+    /// Each test that was sent, the harmless message not among them.
+    fn sent(&self) -> impl Iterator<Item = (Test, &Sent)> {
+        [
+            (Test::Eicar, Some(&self.eicar)),
+            (Test::Gtube, Some(&self.gtube)),
+            (Test::Macro, self.macros.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(test, sent)| Some((test, sent?)))
+    }
 }
 
 #[derive(Debug)]
@@ -197,20 +234,49 @@ impl MailTest {
         })
     }
 
-    /// The result of one test that was sent at `at`: its state and what to
-    /// say of it.
-    fn judged(context: &Context<'_>, test: Test, sent: &Sent, at: i64) -> (State, String) {
+    /// The result of one test that was sent at `at`, beside the harmless
+    /// message `control`: its state and what to say of it.
+    fn judged(
+        context: &Context<'_>,
+        test: Test,
+        sent: &Sent,
+        at: i64,
+        control: Option<&Sent>,
+    ) -> (State, String) {
         if !sent.happened() {
             // Refused before the message, deferred, or no session.
             return (State::Unknown, format!("not tested: {}", sent.reply));
         }
-        if sent.code != 250 {
-            return (State::Ok, format!("refused: {}", sent.reply));
+        if test == Test::Control {
+            return if sent.taken() {
+                (State::Ok, "accepted".to_owned())
+            } else {
+                (State::Unknown, format!("refused: {}", sent.reply))
+            };
+        }
+        if sent.refused() {
+            return match control {
+                Some(control) if control.taken() => (State::Ok, format!("refused: {}", sent.reply)),
+                Some(control) if control.refused() => (
+                    State::Unknown,
+                    format!(
+                        "not tested: refused like a harmless message: {}",
+                        sent.reply
+                    ),
+                ),
+                _ => (
+                    State::Unknown,
+                    format!(
+                        "not tested: refused, and no harmless message got through to compare: {}",
+                        sent.reply
+                    ),
+                ),
+            };
         }
         let unfiltered = match test {
             Test::Eicar => Some("accepted: no scanner refused the test file"),
             Test::Macro => Some("accepted: no filter refused the test document"),
-            Test::Gtube => None,
+            Test::Gtube | Test::Control => None,
         };
         if let Some(said) = unfiltered {
             return (State::Failed, said.to_owned());
@@ -258,14 +324,15 @@ impl Provider for MailTest {
             |before| self.tested(context, before),
         );
         let tests = &kept.answer;
-        let mut sent = vec![(Test::Eicar, &tests.eicar), (Test::Gtube, &tests.gtube)];
-        sent.extend(tests.macros.as_ref().map(|sent| (Test::Macro, sent)));
-        // Each test with when it was sent and what became of it.
-        let results: Vec<(Test, i64, (State, String))> = sent
-            .into_iter()
+        let control = tests.control.as_ref();
+        // Each test with when it was sent and what became of it, the harmless
+        // message last.
+        let results: Vec<(Test, i64, (State, String))> = tests
+            .sent()
+            .chain(control.map(|sent| (Test::Control, sent)))
             .map(|(test, sent)| {
                 let at = sent.at.unwrap_or(kept.at);
-                (test, at, Self::judged(context, test, sent, at))
+                (test, at, Self::judged(context, test, sent, at, control))
             })
             .collect();
         let state = if results
@@ -286,7 +353,12 @@ impl Provider for MailTest {
             .filter(|(_, _, (state, _))| *state != State::Ok)
             // A reply that ends its sentence ends the finding with it.
             .map(|(test, _, (_, said))| {
-                format!("{}: {}.", test.label(), said.trim_end_matches('.'))
+                let finding = format!("{}: {}.", test.label(), said.trim_end_matches('.'));
+                if *test == Test::Control && control.is_some_and(Sent::refused) {
+                    format!("{finding} {REFUSES_ALL}")
+                } else {
+                    finding
+                }
             })
             .collect();
         let stated = |at: i64| time::Timestamp::from_second(at).ok().map(time::isoformat);
@@ -306,8 +378,9 @@ impl Provider for MailTest {
         })?
         .with_scope(format!(
             "Garrison handed the test messages to the local SMTP listener without signing in, \
-             addressed to {}. Each test is sent again {} hours after it was sent; one that did \
-             not happen, as one the server deferred, is tried again after an hour.",
+             addressed to {}. A refusal counts only where the server takes a harmless message \
+             sent after it. Each test is sent again {} hours after it was sent; one that did not \
+             happen or does not count, as one the server deferred, is tried again after an hour.",
             self.recipient,
             self.every / 3600
         ))

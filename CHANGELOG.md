@@ -300,6 +300,10 @@ Notable changes for operators and users. The format follows
   1.1.0), and the Test messages card was in order for a day although
   nothing had been scanned. A temporary reply (4xx) is now "not tested",
   Unknown, and that test is tried again after an hour.
+- **The Test messages card is no longer in order where the server refuses
+  every message.** A refusal counts only where the server takes a harmless
+  message sent after it, which lands in the test mailbox once a day by
+  default.
 - **The milter verdicts card counts a milter's own replies apart, and
   warns where a milter judged nothing.** It counted a reply of the milter's
   own as deferred, though such a reply refuses a message as well: Garrison's
