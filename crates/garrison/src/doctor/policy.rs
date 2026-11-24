@@ -178,11 +178,11 @@ pub(super) fn readable(
     broker: Option<&Reader>,
     names: &Names,
 ) -> Finding {
-    let shown = format!("{}, mode {:o}", names.of(file), file.mode);
+    let owner = names.of(file);
     let Some(broker) = broker else {
         let why = refusals(file, None);
         if !why.is_empty() {
-            return Finding::fail(states::refused(&shown, &why, path));
+            return Finding::fail(states::refused(&owner, file.mode, &why, path));
         }
         return Finding::unknown(states::no_broker());
     };
@@ -190,16 +190,16 @@ pub(super) fn readable(
         return Finding::fail(closed(folder, *seen, names));
     }
     if !may(file, broker, 0o4) {
-        return Finding::fail(states::unreadable(&shown, path));
+        return Finding::fail(states::unreadable(&owner, file.mode, path));
     }
     let why = refusals(file, Some(broker));
     if !why.is_empty() {
-        return Finding::fail(states::refused(&shown, &why, path));
+        return Finding::fail(states::refused(&owner, file.mode, &why, path));
     }
     if file.uid == broker.uid && broker.uid != 0 {
-        return Finding::warn(states::broker_owner(&shown, path));
+        return Finding::warn(states::broker_owner(&owner, file.mode, path));
     }
-    Finding::ok(states::readable(&shown))
+    Finding::ok(states::readable(&owner, file.mode))
 }
 
 /// The actions the policy's profiles name that garrison.toml does not have,

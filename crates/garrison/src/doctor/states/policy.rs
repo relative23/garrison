@@ -12,6 +12,11 @@ pub(in crate::doctor) const GROUP_WRITES: &str = "its group may change it";
 pub(in crate::doctor) const OTHERS_READ: &str = "others may read it";
 pub(in crate::doctor) const OTHERS_WRITE: &str = "others may change it";
 
+/// Owner and group, `owner:group`, and mode of a file or a folder.
+fn seen(owner: &str, mode: u32) -> String {
+    format!("{owner}, mode {mode:o}")
+}
+
 /// What makes the policy at `path` root's, readable for the broker's group
 /// alone, as the installer keeps it.
 fn chown(path: &Path) -> String {
@@ -36,9 +41,10 @@ pub(in crate::doctor) fn not_a_file(path: &Path) -> State {
         .with_fix("Remove it; then `garrison access init` makes the file itself there.")
 }
 
-/// The broker does not take the policy at `path`, seen as `shown`, for
-/// each of `why`.
-pub(in crate::doctor) fn refused(shown: &str, why: &[&str], path: &Path) -> State {
+/// The broker does not take the policy at `path`, owned so with `mode`,
+/// for each of `why`.
+pub(in crate::doctor) fn refused(owner: &str, mode: u32, why: &[&str], path: &Path) -> State {
+    let shown = seen(owner, mode);
     let text = format!(
         "the broker does not take the access policy ({shown}): {}, so nobody can sign in: \
          {}",
@@ -57,9 +63,10 @@ pub(in crate::doctor) fn no_broker() -> State {
 /// The broker may not enter `folder`, owned as `owner` with `mode`.
 fn closed(folder: &Path, owner: &str, mode: u32) -> String {
     format!(
-        "{BROKER} may not enter {} ({owner}, mode {mode:o}), so it cannot read the access policy \
-         and nobody can sign in",
-        folder.display()
+        "{BROKER} may not enter {} ({}), so it cannot read the access policy and nobody can sign \
+         in",
+        folder.display(),
+        seen(owner, mode)
     )
 }
 
@@ -78,7 +85,8 @@ pub(in crate::doctor) fn folder_closed_elsewhere(folder: &Path, owner: &str, mod
     ))
 }
 
-pub(in crate::doctor) fn unreadable(shown: &str, path: &Path) -> State {
+pub(in crate::doctor) fn unreadable(owner: &str, mode: u32, path: &Path) -> State {
+    let shown = seen(owner, mode);
     let text = format!(
         "{BROKER} may not read the access policy ({shown}), so nobody can sign in: {}",
         path.display()
@@ -86,7 +94,8 @@ pub(in crate::doctor) fn unreadable(shown: &str, path: &Path) -> State {
     State::new("doctor-policy-unreadable", text).with_fix(chown(path))
 }
 
-pub(in crate::doctor) fn broker_owner(shown: &str, path: &Path) -> State {
+pub(in crate::doctor) fn broker_owner(owner: &str, mode: u32, path: &Path) -> State {
+    let shown = seen(owner, mode);
     let text = format!(
         "{BROKER} owns the access policy ({shown}), which the installer keeps root's, so \
          that only root may change what it grants"
@@ -94,7 +103,8 @@ pub(in crate::doctor) fn broker_owner(shown: &str, path: &Path) -> State {
     State::new("doctor-policy-broker-owner", text).with_fix(chown(path))
 }
 
-pub(in crate::doctor) fn readable(shown: &str) -> State {
+pub(in crate::doctor) fn readable(owner: &str, mode: u32) -> State {
+    let shown = seen(owner, mode);
     let text =
         format!("the broker may read the access policy, which only root may change ({shown})");
     State::new("doctor-policy-readable", text)
@@ -159,7 +169,6 @@ pub(super) fn rows() -> Vec<(State, &'static str)> {
 #[cfg(test)]
 fn taken() -> Vec<(State, &'static str)> {
     let path = Path::new("/etc/garrison/access-policy.json");
-    let shown = "root:root, mode 600";
     vec![
         (
             missing(path),
@@ -174,7 +183,8 @@ fn taken() -> Vec<(State, &'static str)> {
         ),
         (
             refused(
-                "root:garrison-broker, mode 664",
+                "root:garrison-broker",
+                0o664,
                 &[GROUP_WRITES, OTHERS_READ],
                 path,
             ),
@@ -202,21 +212,21 @@ fn taken() -> Vec<(State, &'static str)> {
              Move the policy to /etc/garrison/access-policy.json and set broker.policy to it.",
         ),
         (
-            unreadable(shown, path),
+            unreadable("root:root", 0o600, path),
             "garrison-broker may not read the access policy (root:root, mode 600), so nobody can \
              sign in: /etc/garrison/access-policy.json [doctor-policy-unreadable]\n      Run \
              `chown root:garrison-broker /etc/garrison/access-policy.json && chmod 640 \
              /etc/garrison/access-policy.json`.",
         ),
         (
-            broker_owner("garrison-broker:garrison-broker, mode 600", path),
+            broker_owner("garrison-broker:garrison-broker", 0o600, path),
             "garrison-broker owns the access policy (garrison-broker:garrison-broker, mode 600), \
              which the installer keeps root's, so that only root may change what it grants \
              [doctor-policy-broker-owner]\n      Run `chown root:garrison-broker \
              /etc/garrison/access-policy.json && chmod 640 /etc/garrison/access-policy.json`.",
         ),
         (
-            readable("root:garrison-broker, mode 640"),
+            readable("root:garrison-broker", 0o640),
             "the broker may read the access policy, which only root may change \
              (root:garrison-broker, mode 640) [doctor-policy-readable]",
         ),

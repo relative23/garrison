@@ -57,62 +57,43 @@ fn the_policy_is_judged_as_the_broker_meets_it() {
     let path = Path::new(PATH);
     assert_eq!(
         judged(0, 991, 0o640),
-        Finding::ok(states::readable("root:garrison-broker, mode 640"))
+        Finding::ok(states::readable("root:garrison-broker", 0o640))
     );
     assert_eq!(
         judged(0, 991, 0o440),
-        Finding::ok(states::readable("root:garrison-broker, mode 440"))
+        Finding::ok(states::readable("root:garrison-broker", 0o440))
     );
-    for (gid, mode, shown) in [
-        (0, 0o600, "root:root, mode 600"),
-        (0, 0o640, "root:root, mode 640"),
-        (991, 0o600, "root:garrison-broker, mode 600"),
-        (10, 0o640, "root:wheel, mode 640"),
+    for (gid, mode, owner) in [
+        (0, 0o600, "root:root"),
+        (0, 0o640, "root:root"),
+        (991, 0o600, "root:garrison-broker"),
+        (10, 0o640, "root:wheel"),
     ] {
         assert_eq!(
             judged(0, gid, mode),
-            Finding::fail(states::unreadable(shown, path)),
-            "{shown}"
+            Finding::fail(states::unreadable(owner, mode, path)),
+            "{owner} {mode:o}"
         );
     }
     // One the broker does not take is named with why.
-    for (uid, mode, why, shown) in [
-        (
-            0,
-            0o644,
-            states::OTHERS_READ,
-            "root:garrison-broker, mode 644",
-        ),
-        (
-            0,
-            0o646,
-            states::OTHERS_WRITE,
-            "root:garrison-broker, mode 646",
-        ),
-        (
-            0,
-            0o660,
-            states::GROUP_WRITES,
-            "root:garrison-broker, mode 660",
-        ),
-        (
-            1000,
-            0o640,
-            states::FOREIGN,
-            "1000:garrison-broker, mode 640",
-        ),
+    for (uid, mode, why, owner) in [
+        (0, 0o644, states::OTHERS_READ, "root:garrison-broker"),
+        (0, 0o646, states::OTHERS_WRITE, "root:garrison-broker"),
+        (0, 0o660, states::GROUP_WRITES, "root:garrison-broker"),
+        (1000, 0o640, states::FOREIGN, "1000:garrison-broker"),
     ] {
         assert_eq!(
             judged(uid, 991, mode),
-            Finding::fail(states::refused(shown, &[why], path)),
-            "{shown}"
+            Finding::fail(states::refused(owner, mode, &[why], path)),
+            "{owner} {mode:o}"
         );
     }
     // One the broker owns it takes, as read_protected does: a warning.
     assert_eq!(
         judged(990, 991, 0o600),
         Finding::warn(states::broker_owner(
-            "garrison-broker:garrison-broker, mode 600",
+            "garrison-broker:garrison-broker",
+            0o600,
             path
         ))
     );
@@ -308,12 +289,13 @@ fn check_config_says_what_the_broker_meets() {
     assert_eq!(verdict(&judged(0, 991, 0o640)), Met::Taken(None));
     assert_eq!(
         verdict(&judged(0, 0, 0o600)),
-        Met::Refused(line(states::unreadable("root:root, mode 600", path)))
+        Met::Refused(line(states::unreadable("root:root", 0o600, path)))
     );
     assert_eq!(
         verdict(&judged(990, 991, 0o600)),
         Met::Taken(Some(line(states::broker_owner(
-            "garrison-broker:garrison-broker, mode 600",
+            "garrison-broker:garrison-broker",
+            0o600,
             path
         ))))
     );
