@@ -33,8 +33,8 @@ struct Private<'a> {
     kept: String,
 }
 
-/// Root-owned and readable by nobody else.
-fn private(path: &Path, file: &Private<'_>) -> Finding {
+/// Owned by `owner`, root on a real host, and readable by nobody else.
+fn private(path: &Path, file: &Private<'_>, owner: u32) -> Finding {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return Finding::fail(
             format!("{} is missing: {}", file.what, path.display()),
@@ -57,7 +57,7 @@ fn private(path: &Path, file: &Private<'_>) -> Finding {
         );
     }
     let mode = metadata.mode() & 0o777;
-    if metadata.uid() == 0 && mode & !0o600 == 0 {
+    if metadata.uid() == owner && mode & !0o600 == 0 {
         Finding::ok(format!("{} is private ({mode:o})", file.what))
     } else {
         Finding::fail(
@@ -78,10 +78,10 @@ fn key(path: &Path, file: &Private<'_>) -> Finding {
     let held = match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() => protected::holds(path, Form::Token),
         // Missing, a link or a folder: said as of every private file.
-        _ => return private(path, file),
+        _ => return private(path, file, 0),
     };
     let lacks = match held {
-        Ok(Holds::Secret) => return private(path, file),
+        Ok(Holds::Secret) => return private(path, file, 0),
         Ok(Holds::Nothing) => "is empty",
         Ok(Holds::Other) => "holds something other than a key",
         Err(_) => "cannot be read",
@@ -200,6 +200,12 @@ pub(super) fn judged(
 
 /// A file the units load that may be empty, which means none.
 fn optional(config: &Config, name: &str) -> Finding {
+    optional_of(config, name, 0)
+}
+
+/// [`optional`], with the file owned by `owner`, which is root on a real
+/// host.
+pub(super) fn optional_of(config: &Config, name: &str, owner: u32) -> Finding {
     let path = config.credentials_directory.join(name);
     let made = format!("install -m 600 /dev/null {}", path.display());
     let reads = reader(config, name);
@@ -227,6 +233,7 @@ fn optional(config: &Config, name: &str) -> Finding {
                 path.display()
             ),
         },
+        owner,
     );
     if kept.level != Level::Ok {
         return kept;

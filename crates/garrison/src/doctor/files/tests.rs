@@ -397,3 +397,69 @@ fn a_file_its_reader_takes_for_none_fails_where_the_configuration_reads_it() {
     );
     assert_eq!(found.what, "kept");
 }
+
+/// The whole judgment of a file that may be empty, with the test's user in
+/// root's place as its owner: missing, empty or holding what its reader
+/// takes for none where a check reads it, open to others, and in order.
+#[test]
+fn a_file_that_may_be_empty_is_judged_whole() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    config
+        .collector
+        .providers
+        .push("type = \"prometheus\"".parse().unwrap());
+    let me = rustix::process::geteuid().as_raw();
+    let name = "metrics-credential";
+    let path = config.credentials_directory.join(name);
+    let judged = |config: &Config| optional_of(config, name, me);
+    let missing = judged(&config);
+    assert_eq!(missing.level, Level::Fail, "{}", missing.line());
+    assert!(
+        missing.what.starts_with("metrics-credential is missing"),
+        "{}",
+        missing.what
+    );
+    fs::create_dir_all(&config.credentials_directory).unwrap();
+    for (written, said) in [
+        (
+            &b""[..],
+            "metrics-credential is empty, but the prometheus check reads Stalwart's exporter with it",
+        ),
+        (
+            &b"garrison:a-password\n"[..],
+            "metrics-credential holds no credential, but the prometheus check reads Stalwart's exporter \
+             with it",
+        ),
+    ] {
+        garrison_testing::write_private(&path, written);
+        let found = judged(&config);
+        assert_eq!((found.level, found.what.as_str()), (Level::Fail, said));
+    }
+    let credential = br#"{"username": "garrison", "secret": "a-password"}"#;
+    garrison_testing::write_private(&path, credential);
+    assert_eq!(
+        judged(&config).level,
+        Level::Ok,
+        "{}",
+        judged(&config).line()
+    );
+    fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+    let open = judged(&config);
+    assert_eq!(open.level, Level::Fail, "{}", open.line());
+    assert!(
+        open.what
+            .contains("is not root-owned with mode 600 or less"),
+        "{}",
+        open.what
+    );
+    // Where nothing reads it, empty is in order.
+    config.collector.providers.clear();
+    garrison_testing::write_private(&path, b"");
+    assert_eq!(
+        judged(&config).level,
+        Level::Ok,
+        "{}",
+        judged(&config).line()
+    );
+}

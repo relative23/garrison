@@ -78,20 +78,16 @@ pub(super) fn policy_names_a_dropped_action() -> Broken {
 }
 
 /// A file that may be empty, holding what `written` says, where a check
-/// reads it: what doctor says of `name`, judged as `optional` judges it once
-/// owner and mode are in order.
+/// reads it: what doctor says of `name`, with the test's user in root's
+/// place as the file's owner.
 fn filled(config: &garrison_core::config::Config, name: &str, written: &[u8]) -> Vec<Finding> {
     let path = config.credentials_directory.join(name);
     fs::create_dir_all(&config.credentials_directory).unwrap();
     garrison_testing::write_private(&path, written);
-    let held = files::held(config, name, &path);
-    let kept = Finding::ok(format!("{name} is private (600)"));
-    vec![files::judged(
+    vec![files::optional_of(
+        config,
         name,
-        &held,
-        0o600,
-        files::reader(config, name),
-        kept,
+        rustix::process::geteuid().as_raw(),
     )]
 }
 
