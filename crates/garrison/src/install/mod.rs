@@ -30,6 +30,7 @@ mod settle;
 #[cfg(test)]
 mod stand_in;
 mod state;
+mod states;
 mod system;
 mod toml_text;
 mod uninstall;
@@ -133,7 +134,7 @@ pub(crate) fn start_installed() -> Step {
     protect_policy()?;
     install_system_files(&current)?;
     start(&current)?;
-    announce(&format!("Garrison {} is running.", name(&current)));
+    announce(&states::running(&name(&current), None).to_string());
     Ok(())
 }
 

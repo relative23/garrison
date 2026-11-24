@@ -19,6 +19,7 @@ mod notify_test;
 mod ops;
 mod selection;
 mod setup;
+mod state;
 mod unfollowed;
 mod units;
 mod upgrade;

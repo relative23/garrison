@@ -62,7 +62,7 @@ scenario_killed_late() {
     # settle, the next run finds the release running and makes no copy.
     for when in "as the backup begins:true" "during the backup:sleep 0.5" "while the services settle:$settling"; do
         installer '/root/previous/bin/garrison install'
-        killed_once '/root/release/bin/garrison install' 'Backing up the running state' "${when#*:}" ' is running. Roll back with'
+        killed_once '/root/release/bin/garrison install' 'Backing up the running state' "${when#*:}" '[install-running]'
         if ! installer '/root/release/bin/garrison install > /root/next.log 2>&1'; then
             inside 'cat /root/next.log' || true
             echo "FAIL  the installer after a kill ${when%%:*} succeeds"
@@ -213,7 +213,7 @@ scenario_upgrade_resumed() {
     copy_in "$release" "/root/$archive"
     copy_in "$release.minisig" "/root/$archive.minisig"
     last=$(inside 'readlink -f /var/backups/garrison/last-pre-upgrade')
-    killed_at "garrison upgrade /root/$archive" "$(current_is "$new")" 2 ' is running. Roll back with'
+    killed_at "garrison upgrade /root/$archive" "$(current_is "$new")" 2 '[install-running]'
     check "the killed upgrade had switched current" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$new'"
     # It starts the release where its start had not come so far, and says
@@ -282,7 +282,7 @@ scenario_upgrade_came_up() {
         mv /var/lib/garrison/collector/status.sqlite /root/status.away'
     again=$(another_release)
     killed_at '/root/again/bin/garrison install' \
-        "$(current_is "$again") && systemctl is-active --quiet garrison-web.service" 0 ' is running. Roll back with'
+        "$(current_is "$again") && systemctl is-active --quiet garrison-web.service" 0 '[install-running]'
     check "the release of the killed upgrade runs and collects" \
         'systemctl is-active --quiet garrison-collect.timer && systemctl start garrison-collect.service &&
             systemctl start garrison-collect.service'

@@ -14,7 +14,7 @@ use super::system::{install_system_files, protect_policy, unit_file};
 use super::unpack::{clear_staging, install_release, installed_now, unpacked_as};
 use super::{
     BACKUPS, BASE, CONFIG, LAST, LOCK, cli, command, configured, fallback, here, housekeeping,
-    leftover, name, rollback, verify,
+    leftover, name, rollback, states, verify,
 };
 use crate::{say, units};
 
@@ -205,7 +205,7 @@ pub(super) fn install() -> Step {
     preflight()?;
     base_shown()?;
     let here = here()?;
-    let version = verify::verify(&here)?;
+    let version = verify::verify(&here).map_err(|state| state.to_string())?;
     let _held = lock(Path::new(LOCK))?;
     let left = leftover()?;
     let base = Path::new(BASE);
@@ -309,24 +309,19 @@ pub(super) fn install() -> Step {
 /// `--rollback` refuses.
 fn last_line(version: &str, release: &Path, restore: bool, altered: bool) {
     let previous = fs::canonicalize(Path::new(BASE).join("previous")).ok();
-    let back = previous
-        .filter(|previous| previous != release)
-        .map(|_| {
-            format!(
-                " Roll back with: {} install --rollback{}",
-                command::name(),
-                if restore { " --restore-state" } else { "" }
-            )
-        })
-        .unwrap_or_default();
+    let back = previous.filter(|previous| previous != release).map(|_| {
+        format!(
+            "{} install --rollback{}",
+            command::name(),
+            if restore { " --restore-state" } else { "" }
+        )
+    });
     if !altered {
-        announce(&format!(
-            "Garrison {version} is running as installed; nothing was changed.{back}"
-        ));
+        announce(&states::as_installed(version, back.as_deref()).to_string());
         return;
     }
-    announce(&format!("Garrison {version} is running.{back}"));
-    if restore && !back.is_empty() {
+    announce(&states::running(version, back.as_deref()).to_string());
+    if restore && back.is_some() {
         announce(
             "This upgrade changes a database schema: a rollback returns to the data \
              from before it, and what was recorded since is lost.",
