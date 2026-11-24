@@ -4,7 +4,9 @@
 //! Stalwart's public hosts, which must not serve its metrics. And the issuer
 //! Stalwart names itself, asked of its own listener.
 
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::sync::Arc;
+use std::time::Duration;
 
 use garrison_collector::providers::signin;
 use garrison_collector::providers::tls::probe;
@@ -41,10 +43,15 @@ fn authority(origin: &str) -> (&str, u16) {
 /// the port `public_origin` names.
 pub(super) fn certificate(origin: &str, roots: &Arc<RootCertStore>) -> Finding {
     let (name, port) = authority(origin);
-    let shown = if port == 443 {
-        name.to_owned()
+    let host = if name.contains(':') {
+        format!("[{name}]")
     } else {
-        format!("{name}:{port}")
+        name.to_owned()
+    };
+    let shown = if port == 443 {
+        host
+    } else {
+        format!("{host}:{port}")
     };
     match probe(name, port, name, false, roots, time::now()) {
         Ok(probed) if probed.days < 0 => Finding::fail(
@@ -94,18 +101,30 @@ pub(super) fn interface(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Find
             findings
         }
         // What nginx answers where it does not reach the web service.
-        Ok(answer) if matches!(answer.status, 502..=504) => vec![Finding::fail(
-            format!(
-                "{url} answers {}: nginx does not reach Garrison's web service on \
-                 127.0.0.1:{}",
-                answer.status, config.web.port
-            ),
-            format!(
-                "`systemctl status {}` says whether it runs; the lines above name an include or \
-                 an SELinux module for another port.",
-                crate::units::WEB
-            ),
-        )],
+        Ok(answer) if matches!(answer.status, 502..=504) => {
+            let port = config.web.port;
+            let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+            let fix = if TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok() {
+                format!(
+                    "Something listens on 127.0.0.1:{port}: the lines above name an include or an \
+                     SELinux module for another port."
+                )
+            } else {
+                format!(
+                    "Nothing listens on 127.0.0.1:{port}: `systemctl restart {0}` starts the web \
+                     service on web.port, and `systemctl status {0}` says why it does not run.",
+                    crate::units::WEB
+                )
+            };
+            vec![Finding::fail(
+                format!(
+                    "{url} answers {}: nginx does not reach Garrison's web service on \
+                     127.0.0.1:{port}",
+                    answer.status
+                ),
+                fix,
+            )]
+        }
         Ok(answer) => vec![Finding::fail(
             format!(
                 "{url} answers {} instead of Garrison's answer to a visitor",
@@ -120,7 +139,32 @@ pub(super) fn interface(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Find
     }
 }
 
+/// Whether `body` is the text of a Prometheus exporter: a `# TYPE` line or
+/// a sample, a series' name and a number, and no markup, which a web page
+/// has.
+fn exported(body: &str) -> bool {
+    let sample = |line: &str| {
+        let name: String = line
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':'))
+            .collect();
+        !name.is_empty()
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && line.len() > name.len()
+            && line
+                .split_whitespace()
+                .last()
+                .is_some_and(|value| value.parse::<f64>().is_ok())
+    };
+    !body.contains('<')
+        && body
+            .lines()
+            .any(|line| line.starts_with("# TYPE ") || sample(line))
+}
+
 /// The exporter that `stalwart setup` enables must not answer from outside.
+/// Only its own answer counts: its text, or 401 for a scrape without its
+/// credential; a page that answers every path serves no metrics.
 pub(super) fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Finding> {
     let mut origins = vec![origin(&config.deployment.issuer)];
     let admin = origin(&config.deployment.admin_url);
@@ -132,7 +176,10 @@ pub(super) fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Findin
         .map(|origin| {
             let url = format!("{origin}/metrics/prometheus");
             match get(&url, roots) {
-                Ok(answer) if matches!(answer.status, 403 | 404 | 410) => {
+                Ok(answer)
+                    if matches!(answer.status, 403 | 404 | 410)
+                        || (answer.status == 200 && !exported(&answer.body)) =>
+                {
                     Finding::ok(format!("{origin} does not serve Stalwart's metrics"))
                 }
                 Ok(answer) if matches!(answer.status, 200 | 401) => Finding::fail(
@@ -279,7 +326,7 @@ pub(super) fn issuer(config: &Config) -> Finding {
     let fix = if kept_as_written(&stated) {
         format!(
             "Set issuer = \"{stated}\" under [deployment] and restart garrison-web, or make \
-             {host} Stalwart's Default Hostname."
+             {host} Stalwart's Default Hostname and reload its settings."
         )
     } else {
         format!("Make {host} Stalwart's Default Hostname and reload its settings.")

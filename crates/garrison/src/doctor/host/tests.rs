@@ -239,30 +239,37 @@ fn the_newest_snapshot_is_read_from_the_status_database() {
     );
 }
 
+/// The module's text as the installer writes it for `port`.
+fn cil(port: u16) -> String {
+    format!(
+        ";; Lets nginx (httpd_t) connect to Garrison's web service on port {port}.\n\
+         (type garrison_port_t)\n(roletype object_r garrison_port_t)\n\
+         (typeattributeset port_type (garrison_port_t))\n\
+         (portcon tcp {port} (system_u object_r garrison_port_t ((s0) (s0))))\n\
+         (allow httpd_t garrison_port_t (tcp_socket (name_connect)))\n"
+    )
+}
+
 /// A host's SELinux, made of files: whether it enforces, the boolean that
 /// lets nginx connect anywhere, and the module's text as the installer
-/// writes it for `port`.
-fn selinux_host(enforce: &str, everywhere: &str, port: Option<u16>) -> tempfile::TempDir {
+/// last wrote it, for `written`.
+fn selinux_host(enforce: &str, everywhere: &str, written: Option<u16>) -> tempfile::TempDir {
     let directory = tempfile::tempdir().unwrap();
     fs::write(directory.path().join("enforce"), enforce).unwrap();
     fs::write(directory.path().join("boolean"), everywhere).unwrap();
-    if let Some(port) = port {
-        fs::write(
-            directory.path().join("garrison.cil"),
-            format!(
-                ";; Lets nginx (httpd_t) connect to Garrison's web service on port {port}.\n\
-                 (type garrison_port_t)\n(roletype object_r garrison_port_t)\n\
-                 (typeattributeset port_type (garrison_port_t))\n\
-                 (portcon tcp {port} (system_u object_r garrison_port_t ((s0) (s0))))\n\
-                 (allow httpd_t garrison_port_t (tcp_socket (name_connect)))\n"
-            ),
-        )
-        .unwrap();
+    if let Some(port) = written {
+        fs::write(directory.path().join("garrison.cil"), cil(port)).unwrap();
     }
     directory
 }
 
-fn on(host: &tempfile::TempDir, listed: bool, port: u16) -> Option<Finding> {
+/// What doctor says on `host` for `port` where SELinux has `loaded` this
+/// module, `None` where it has not loaded it.
+fn on(
+    host: &tempfile::TempDir,
+    loaded: Option<Result<String, String>>,
+    port: u16,
+) -> Option<Finding> {
     let path = |name: &str| host.path().join(name).display().to_string();
     let (enforce, everywhere, module) = (path("enforce"), path("boolean"), path("garrison.cil"));
     selinux_at(
@@ -271,19 +278,21 @@ fn on(host: &tempfile::TempDir, listed: bool, port: u16) -> Option<Finding> {
             everywhere: &everywhere,
             module: &module,
         },
-        listed,
+        loaded,
         port,
     )
 }
 
-/// nginx reaches the web service under SELinux only where the module the
-/// installer loaded gives its port the type nginx may connect to, or where
-/// nginx may connect anywhere; a module for another port fails with the
-/// installer, which loads it for web.port.
+/// nginx reaches the web service under SELinux only where the module
+/// SELinux has loaded gives its port the type nginx may connect to, or
+/// where nginx may connect anywhere; a module for another port fails with
+/// the installer, which loads it for web.port, or, where the installer's
+/// file names web.port already, as after a load that failed, with the load
+/// by hand that the installer does not repeat.
 #[test]
 fn the_selinux_module_is_judged_by_the_port_it_lets_nginx_reach() {
     let enforcing = selinux_host("1", "0 0", Some(8091));
-    let kept = on(&enforcing, true, 8091).unwrap();
+    let kept = on(&enforcing, Some(Ok(cil(8091))), 8091).unwrap();
     assert_eq!(
         (kept.level, kept.what.as_str()),
         (
@@ -292,7 +301,7 @@ fn the_selinux_module_is_judged_by_the_port_it_lets_nginx_reach() {
              8091"
         )
     );
-    let moved = on(&enforcing, true, 9443).unwrap();
+    let moved = on(&enforcing, Some(Ok(cil(8091))), 9443).unwrap();
     assert_eq!(moved.level, Level::Fail, "{}", moved.line());
     assert_eq!(
         moved.what,
@@ -303,29 +312,63 @@ fn the_selinux_module_is_judged_by_the_port_it_lets_nginx_reach() {
         moved.fix.as_deref(),
         Some("Run the installer again; it loads the module for web.port.")
     );
+    // The installer wrote the file for web.port, and loading it failed.
+    let written = selinux_host("1", "0 0", Some(9443));
+    let failed = on(&written, Some(Ok(cil(8091))), 9443).unwrap();
+    assert_eq!(failed.level, Level::Fail, "{}", failed.line());
+    assert!(
+        failed
+            .what
+            .starts_with("the SELinux module garrison lets nginx reach port 8091, not 9443"),
+        "{}",
+        failed.what
+    );
+    let load = format!(
+        "Load the module the installer wrote for web.port: semodule -i {}",
+        written.path().join("garrison.cil").display()
+    );
+    assert_eq!(failed.fix.as_deref(), Some(load.as_str()));
     let permissive = selinux_host("0", "0 0", Some(8091));
-    assert_eq!(on(&permissive, true, 9443).unwrap().level, Level::Warn);
-    let unlisted = on(&enforcing, false, 8091).unwrap();
+    assert_eq!(
+        on(&permissive, Some(Ok(cil(8091))), 9443).unwrap().level,
+        Level::Warn
+    );
+    let unlisted = on(&enforcing, None, 8091).unwrap();
     assert_eq!(unlisted.level, Level::Fail, "{}", unlisted.line());
     let anywhere = selinux_host("1", "1 1", Some(8091));
-    assert_eq!(on(&anywhere, true, 9443).unwrap().level, Level::Ok);
-    let unwritten = selinux_host("1", "0 0", None);
-    let unknown = on(&unwritten, true, 8091).unwrap();
+    assert_eq!(
+        on(&anywhere, Some(Ok(cil(8091))), 9443).unwrap().level,
+        Level::Ok
+    );
+    let unknown = on(&enforcing, Some(Err("no module".to_owned())), 8091).unwrap();
     assert_eq!(unknown.level, Level::Unknown, "{}", unknown.line());
     // No SELinux, no line.
     let none = tempfile::tempdir().unwrap();
-    assert!(on(&none, true, 8091).is_none());
+    assert!(on(&none, Some(Ok(cil(8091))), 8091).is_none());
 }
 
-/// Where the disk of a folder cannot be asked, the line says why.
+/// A folder not made yet, as /var/backups before the first backup on a
+/// distribution that has none, is judged by the disk of the nearest folder
+/// of it that exists, as the installer's room check judges it; where the
+/// disk cannot be asked, the line says why.
 #[test]
-fn free_space_that_cannot_be_asked_is_unknown_with_why() {
-    let found = room("/garrison-test-folder-that-is-not-there");
+fn free_space_is_judged_where_a_folder_will_be_made() {
+    let missing = room("/var/garrison-test-folder-that-is-not-there/backups");
+    assert_ne!(missing.level, Level::Unknown, "{}", missing.line());
+    assert!(
+        missing.what.starts_with(
+            "/var/garrison-test-folder-that-is-not-there/backups does not exist yet; /var, \
+             where it will be made, has "
+        ),
+        "{}",
+        missing.what
+    );
+    let found = room("/proc/self/status/garrison");
     assert_eq!(found.level, Level::Unknown, "{}", found.line());
     assert!(
         found
             .what
-            .starts_with("free space of /garrison-test-folder-that-is-not-there: "),
+            .starts_with("free space of /proc/self/status/garrison: "),
         "{}",
         found.what
     );

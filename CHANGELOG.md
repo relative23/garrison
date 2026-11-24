@@ -1897,6 +1897,30 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` says that nginx does not reach the web service where it
   answers 502 for Garrison**, and names the service, the include's port and the
   SELinux module instead of the include itself.
+- **`garrison stalwart setup` no longer ends in success while Stalwart asks a
+  milter on this host where nothing answers, and `garrison doctor` names every
+  such entry**, also without setup's note of the macro filter's. Remove one
+  that setup cannot tell for the filter's in the Stalwart WebUI.
+- **`garrison doctor` judges the access policy exactly as the broker's own
+  reading takes it**: one the broker owns is a warning, no longer a failure,
+  one it does not take is named with why, and a closed `/etc/garrison` with
+  the `chmod` that opens it.
+- **`garrison doctor` tries the broker's and the collector's API keys with
+  Stalwart**, as their services use them, and fails one Stalwart no longer
+  knows, with which nobody can sign in, with the setup that makes a new one.
+- **The warning of nginx's include for another port restarts `garrison-web`
+  in its way without the installer**, which left nginx answering 502, and
+  `garrison doctor`'s line of a 502 says whether anything listens on
+  `web.port`.
+- **`garrison doctor` reads the port of the SELinux module SELinux has
+  loaded**, no longer that of the file the installer writes before it loads
+  it, and names the `semodule -i` that repeats a load that failed.
+- **`garrison doctor` judges the free space where `/var/backups` will be
+  made** on a host that has none yet, as the installer does, where it was
+  unknown until the first upgrade.
+- **`garrison doctor` no longer calls a web page at `/metrics/prometheus`
+  Stalwart's public exporter**, as a webmail answers one for any path: only
+  the exporter's own text, or its 401 without a credential, counts.
 
 ## [0.1.2] - 2026-11-13
 

@@ -7,7 +7,7 @@ use garrison_core::time;
 use garrison_testing::http::{json, serve};
 use garrison_testing::tls::serve_until;
 
-use super::super::public;
+use super::super::{keys, public};
 use super::Broken;
 
 /// The day `days` from now, as a test certificate's end takes it.
@@ -105,6 +105,12 @@ pub(super) fn nginx_answers_502() -> Broken {
     let directory = tempfile::tempdir().unwrap();
     let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
     config.deployment.public_origin.clone_from(&server.url);
+    // Where nothing listens, as before garrison-web was restarted.
+    config.web.port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let found = public::interface(&config, &roots);
     server.finish();
     Broken {
@@ -180,5 +186,30 @@ pub(super) fn sign_in_page_answers_404() -> Broken {
         found,
         said: "answers 404".into(),
         fix: Some("proxy rules".into()),
+    }
+}
+
+/// Stalwart no longer knows the broker's API key, as after the key was
+/// deleted in the Stalwart WebUI or Stalwart's data put back from before
+/// the last rotation: nobody can sign in.
+pub(super) fn stalwart_does_not_know_the_brokers_key() -> Broken {
+    let stalwart = serve(vec![
+        garrison_testing::http::answer(401, ""),
+        garrison_testing::http::answer(401, ""),
+    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), &stalwart.url);
+    let credentials = garrison_testing::credentials(&config);
+    garrison_testing::write_private(
+        &credentials.path(&config.collector.native_key),
+        b"collector-key-0123456789",
+    );
+    let found = keys::checks(&config, &credentials);
+    stalwart.requests();
+    Broken {
+        host: "a broker's API key Stalwart no longer knows",
+        found,
+        said: "does not know the broker's API key".into(),
+        fix: Some("garrison stalwart setup".into()),
     }
 }

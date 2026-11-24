@@ -78,20 +78,16 @@ pub(super) fn policy_names_a_dropped_action() -> Broken {
 }
 
 /// A file that may be empty, holding what `written` says, where a check
-/// reads it: what doctor says of `name`, judged as `optional` judges it once
-/// owner and mode are in order.
+/// reads it: what doctor says of `name`, with the test's user in root's
+/// place as the file's owner.
 fn filled(config: &garrison_core::config::Config, name: &str, written: &[u8]) -> Vec<Finding> {
     let path = config.credentials_directory.join(name);
     fs::create_dir_all(&config.credentials_directory).unwrap();
     garrison_testing::write_private(&path, written);
-    let held = files::held(config, name, &path);
-    let kept = Finding::ok(format!("{name} is private (600)"));
-    vec![files::judged(
+    vec![files::optional_of(
+        config,
         name,
-        &held,
-        0o600,
-        files::reader(config, name),
-        kept,
+        rustix::process::geteuid().as_raw(),
     )]
 }
 
@@ -152,9 +148,12 @@ pub(super) fn selinux_module_for_another_port() -> Broken {
         everywhere: &everywhere,
         module: &module,
     };
+    let loaded = fs::read_to_string(&module).map_err(|error| error.to_string());
     Broken {
         host: "an SELinux module that labels another port than web.port",
-        found: host::selinux_at(&places, true, 9443).into_iter().collect(),
+        found: host::selinux_at(&places, Some(loaded), 9443)
+            .into_iter()
+            .collect(),
         said: "lets nginx reach port 8091".into(),
         fix: Some("Run the installer again".into()),
     }
@@ -289,7 +288,8 @@ pub(super) fn clock_unsynchronized() -> Broken {
 pub(super) fn space_unknown() -> Broken {
     Broken {
         host: "free space that cannot be asked",
-        found: vec![host::room("/garrison-test-folder-that-is-not-there")],
+        // A path through a file, whose disk statvfs cannot be asked.
+        found: vec![host::room("/proc/self/status/garrison")],
         said: "free space of".into(),
         fix: None,
     }

@@ -4,16 +4,17 @@
 //! Where the configuration has a `[milter]` section, setup enters Garrison's
 //! own; where the section is gone, setup takes that entry out again, since
 //! an entry for a filter that no longer runs would make Stalwart defer all
-//! mail. A milter has no name or description to tell Garrison's from
-//! another, so setup keeps the entry's ID in a file beside the credentials.
-//! Where that note is gone or names nothing, an entry that asks the filter
-//! where it listens, 127.0.0.1 at the configured port, is Garrison's: the
-//! filter answers there before setup tells Stalwart anything. Setup leaves
-//! one entry for the filter, which asks it once about every message.
+//! mail. Which entries are Garrison's, setup tells by the rules doctor
+//! judges by (`doctor::milter::entries`), and it leaves one entry for the
+//! filter, which asks it once about every message. An entry Stalwart asks
+//! in vain that setup cannot tell for Garrison's, it leaves as it is and
+//! names, and it changes no entry while there is one.
 //!
 //! The order keeps mail flowing: the filter runs and answers before
-//! Stalwart is told of it, and it stops only after Stalwart has forgotten
-//! it.
+//! Stalwart is told of it, it moves to another port only once setup knows
+//! which entries ask it where it runs, and it stops only after Stalwart has
+//! forgotten it. The note says from before the first change until Stalwart
+//! has read its settings again that a run changed Stalwart's entries.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -22,12 +23,13 @@ use std::time::Duration;
 
 use garrison_core::config::Config;
 use garrison_core::systemd::SYSTEMCTL;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde::Serialize;
 
 use super::objects::{Created, NEW, Set};
 use super::{Admin, write_secret};
+use crate::doctor::milter::{WITHIN, entries};
 use crate::units;
+use entries::{Entry, Note};
 
 /// The entry as setup writes it: switched on, and asked once a message's
 /// data has arrived. Stalwart fills in the rest: protocol 6, its own
@@ -75,49 +77,6 @@ fn entry(port: u16, defer: bool) -> Milter {
     }
 }
 
-/// A milter as Stalwart holds it, as far as setup tells Garrison's from
-/// another's.
-#[derive(Debug, Deserialize)]
-struct Stored {
-    id: String,
-    #[serde(default)]
-    host: Option<Value>,
-    #[serde(default)]
-    port: Option<Value>,
-}
-
-impl Stored {
-    /// The port it asks, where it names one.
-    fn port(&self) -> Option<u16> {
-        match &self.port {
-            Some(Value::Number(number)) => {
-                number.as_u64().and_then(|port| u16::try_from(port).ok())
-            }
-            Some(Value::String(text)) => text.parse().ok(),
-            _ => None,
-        }
-    }
-
-    /// Whether it asks the filter where setup enters it: 127.0.0.1 at
-    /// `port`.
-    fn asks(&self, port: u16) -> bool {
-        self.host.as_ref().and_then(Value::as_str) == Some("127.0.0.1") && self.port() == Some(port)
-    }
-}
-
-/// Garrison's entries among those Stalwart holds: the one setup's note
-/// names first, then every other that asks the filter where it listens,
-/// 127.0.0.1 at `port`, the configured one, or, where the configuration no
-/// longer has the filter, at the noted entry's port.
-fn ours<'a>(stored: &'a [Stored], noted: Option<&str>, port: Option<u16>) -> Vec<&'a Stored> {
-    let first = noted.and_then(|id| stored.iter().find(|entry| entry.id == id));
-    let port = port.or_else(|| first.and_then(Stored::port));
-    let others = stored.iter().filter(|entry| {
-        first.is_none_or(|first| first.id != entry.id) && port.is_some_and(|port| entry.asks(port))
-    });
-    first.into_iter().chain(others).collect()
-}
-
 fn systemctl(arguments: &[&str]) -> bool {
     std::process::Command::new(SYSTEMCTL)
         .args(arguments)
@@ -136,38 +95,78 @@ fn managed() -> bool {
             .exists()
 }
 
-/// Before anything changes: where the configuration switches the filter on,
-/// it must answer. Root starts it anew first, so that it runs with the
-/// configuration as it is now.
-pub(super) fn prepare(config: &Config) -> Result<(), String> {
-    let Some(milter) = &config.milter else {
-        return Ok(());
-    };
+/// The ports the filter listens on where setup manages it and it runs; an
+/// error where it runs and they cannot be seen, since setup would not know
+/// which entries ask it.
+fn listening() -> Result<Vec<u16>, String> {
+    if !managed() || !systemctl(&["is-active", "--quiet"]) {
+        return Ok(Vec::new());
+    }
+    let ports = entries::listening();
+    if ports.is_empty() {
+        return Err(format!(
+            "{} runs, but setup cannot see where it listens, so it cannot tell which of \
+             Stalwart's entries ask it. Nothing was changed",
+            units::MILTER
+        ));
+    }
+    Ok(ports)
+}
+
+/// Whether the running filter listens elsewhere than on `port`.
+fn moving(listening: &[u16], port: u16) -> bool {
+    !listening.is_empty() && !listening.contains(&port)
+}
+
+/// Root starts the filter anew, so that it runs with the configuration as it
+/// is now; then it must answer on `port`.
+fn started(port: u16) -> Result<(), String> {
     if managed() {
         systemctl(&["enable", "--quiet"]);
         systemctl(&["restart"]);
     }
     let mut problem = String::new();
     for _ in 0..10 {
-        match garrison_milter::answers(milter.port, Duration::from_secs(2)) {
+        match garrison_milter::answers(port, Duration::from_secs(2)) {
             Ok(()) => return Ok(()),
             Err(error) => problem = error,
         }
         std::thread::sleep(Duration::from_millis(500));
     }
     Err(format!(
-        "The macro milter does not answer on 127.0.0.1:{} ({problem}). Nothing was changed: \
+        "The macro milter does not answer on 127.0.0.1:{port} ({problem}). Nothing was changed: \
          Stalwart would defer mail while it asks a filter that is not there. \
          `journalctl -u {} -n 20` shows why it does not run.",
-        milter.port,
         units::MILTER
     ))
 }
 
-/// After Stalwart has read its settings again: where the configuration no
-/// longer has the filter, root stops it; what was done, if anything.
+/// Before anything changes: where the configuration switches the filter on,
+/// it must answer. A filter that runs on another port moves later, once
+/// setup knows which entries ask it where it runs (`ensure`).
+pub(super) fn prepare(config: &Config) -> Result<(), String> {
+    let Some(milter) = &config.milter else {
+        return Ok(());
+    };
+    if moving(&listening()?, milter.port) {
+        return Ok(());
+    }
+    started(milter.port)
+}
+
+/// After Stalwart has read its settings again: the note names what it asks
+/// now, and where the configuration no longer has the filter, the note goes
+/// and root stops the filter; what was done, if anything.
 pub(super) fn retire(config: &Config) -> Option<String> {
-    if config.milter.is_some() || !managed() {
+    let kept = config.credentials_directory.join(units::MILTER_ENTRY);
+    if config.milter.is_some() {
+        if let Note::Pending(Some(id)) = Note::read(&kept) {
+            return write_secret(&kept, &id).err();
+        }
+        return None;
+    }
+    let _ = fs::remove_file(&kept);
+    if !managed() {
         return None;
     }
     if !systemctl(&["is-active", "--quiet"]) && !systemctl(&["is-enabled", "--quiet"]) {
@@ -183,6 +182,27 @@ pub(super) fn retire(config: &Config) -> Option<String> {
     })
 }
 
+/// Why setup leaves Stalwart's milters as they are: it asks `stranded` in
+/// vain, and setup cannot tell them for the filter's.
+fn refused(stranded: &[&Entry]) -> String {
+    let asked: Vec<String> = stranded
+        .iter()
+        .map(|entry| {
+            format!(
+                "{} (entry {}), where nothing answers, so it {}",
+                entry.address(),
+                entry.id,
+                entry.meanwhile("all incoming mail")
+            )
+        })
+        .collect();
+    format!(
+        "Stalwart asks a milter at {}. {} Setup changed no milter entry",
+        asked.join(", and at "),
+        entries::REMOVE
+    )
+}
+
 /// Enter, update or take out the entry, as the configuration says, and
 /// leave one; what was done, if anything.
 pub(super) fn ensure(
@@ -191,46 +211,55 @@ pub(super) fn ensure(
     directory: &Path,
 ) -> Result<Option<String>, String> {
     let kept = directory.join(units::MILTER_ENTRY);
-    // An empty note names no entry, as a missing one does.
-    let noted = fs::read_to_string(&kept)
-        .ok()
-        .map(|id| id.trim().to_owned())
-        .filter(|id| !id.is_empty());
-    let stored = admin.list::<Stored>("MtaMilter")?;
+    let note = Note::read(&kept);
+    let stored = admin.list::<Entry>("MtaMilter")?;
     let port = config.milter.as_ref().map(|milter| milter.port);
-    let ours = ours(&stored, noted.as_deref(), port);
+    let listening = listening()?;
+    let ours = entries::ours(&stored, note.id(), port, &listening);
+    let answers = |port| garrison_milter::answers(port, WITHIN).is_ok();
+    let theirs = stored
+        .iter()
+        .filter(|entry| !ours.iter().any(|our| our.id == entry.id));
+    let stranded = entries::vain(theirs, &answers);
+    if !stranded.is_empty() {
+        return Err(refused(&stranded));
+    }
+    let first = ours.first().map(|entry| entry.id.as_str());
     let Some(milter) = &config.milter else {
+        if ours.is_empty() {
+            return Ok(None);
+        }
+        // Stalwart asks them until it has read that they are gone.
+        write_secret(&kept, &entries::pending(first))?;
         for entry in &ours {
             admin.set("x:MtaMilter/set", &Set::<()>::Destroy([entry.id.as_str()]))?;
         }
-        // An ID of an entry that is gone says nothing any more.
-        let _ = fs::remove_file(&kept);
-        return Ok(match ours.len() {
-            0 => None,
-            1 => Some("took the macro milter's entry out of Stalwart".to_owned()),
-            many => Some(format!(
-                "took the macro milter's {many} entries out of Stalwart"
-            )),
-        });
+        return Ok(Some(match ours.len() {
+            1 => "took the macro milter's entry out of Stalwart".to_owned(),
+            many => format!("took the macro milter's {many} entries out of Stalwart"),
+        }));
     };
+    write_secret(&kept, &entries::pending(first))?;
+    if moving(&listening, milter.port) {
+        started(milter.port)?;
+    }
     let wanted = entry(milter.port, milter.defer_when_unreachable);
     let Some((first, others)) = ours.split_first() else {
-        let created: Created<Stored> = admin.call("x:MtaMilter/set", &Set::create(wanted))?;
+        let created: Created<Entry> = admin.call("x:MtaMilter/set", &Set::create(wanted))?;
         let new = created
             .created
             .get(NEW)
             .ok_or("Stalwart did not name the new milter entry")?;
-        write_secret(&kept, &new.id)?;
+        write_secret(&kept, &entries::pending(Some(&new.id)))?;
         return Ok(Some(format!(
             "entered the macro milter (127.0.0.1:{}); Stalwart asks it about every message it is sent",
             milter.port
         )));
     };
     admin.set("x:MtaMilter/set", &Set::update(&first.id, wanted))?;
-    let found = if noted.as_deref() == Some(first.id.as_str()) {
+    let found = if note.id() == Some(first.id.as_str()) {
         ""
     } else {
-        write_secret(&kept, &first.id)?;
         ", found by its address, as setup's note named none"
     };
     // More than one would have Stalwart ask the filter more than once.
@@ -262,31 +291,5 @@ mod tests {
                 "enable": {"match": {}, "else": "true"},
                 "stages": {"data": true}, "tempFailOnError": true})
         );
-    }
-
-    /// Garrison's entry is the one setup's note names, or, where the note
-    /// names none, one that asks the filter where it listens; every other
-    /// that asks it there is one more, and another milter's is none of
-    /// them.
-    #[test]
-    fn garrisons_entry_is_the_noted_one_or_one_that_asks_where_the_filter_listens() {
-        let stored: Vec<Stored> = serde_json::from_value(json!([
-            {"id": "a", "host": "127.0.0.1", "port": 8096},
-            {"id": "b", "host": "127.0.0.1", "port": 8097},
-            {"id": "c", "host": "127.0.0.1", "port": "8097"},
-            {"id": "d", "host": "10.0.0.5", "port": 8097},
-            {"id": "e", "host": "127.0.0.1", "port": 11332},
-            {"id": "f", "host": null, "port": null},
-        ]))
-        .unwrap();
-        let ids = |found: Vec<&Stored>| -> Vec<String> {
-            found.iter().map(|entry| entry.id.clone()).collect()
-        };
-        assert_eq!(ids(ours(&stored, Some("a"), Some(8097))), ["a", "b", "c"]);
-        assert_eq!(ids(ours(&stored, None, Some(8097))), ["b", "c"]);
-        assert_eq!(ids(ours(&stored, Some("gone"), Some(8096))), ["a"]);
-        // The section gone: the noted entry, and the others at its address.
-        assert_eq!(ids(ours(&stored, Some("b"), None)), ["b", "c"]);
-        assert_eq!(ids(ours(&stored, None, None)), Vec::<String>::new());
     }
 }

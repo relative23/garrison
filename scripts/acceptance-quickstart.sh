@@ -252,7 +252,7 @@ check "garrison-milter.service is active and enabled" \
 inside "$garrison doctor > /root/doctor-milter.log 2>&1 || true"
 check "doctor: the filter answers and Stalwart knows of it" \
     'grep -q "^ok    the macro milter answers on 127.0.0.1:8096" /root/doctor-milter.log &&
-        grep -q "^ok    setup told Stalwart of the macro milter" /root/doctor-milter.log'
+        grep -q "^ok    Stalwart asks the macro milter on 127.0.0.1:8096 about every message" /root/doctor-milter.log'
 check "a document with a macro project is refused in the filter's words" \
     'python3 /root/document-mail.py macro | tee /root/macro-on.log | grep -q "^550 .*contains macros"'
 check "a document without one is taken" \

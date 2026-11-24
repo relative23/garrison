@@ -144,7 +144,8 @@ fn the_issuer_stalwart_names_itself_is_the_one_garrison_takes() {
         other.fix.as_deref(),
         Some(
             "Set issuer = \"https://other.example.test\" under [deployment] and restart \
-             garrison-web, or make mail.example.test Stalwart's Default Hostname."
+             garrison-web, or make mail.example.test Stalwart's Default Hostname and reload its \
+             settings."
         )
     );
     // A name garrison.toml would not keep as written: only Stalwart's side mends it.
@@ -197,4 +198,95 @@ fn an_issuer_is_kept_as_written_only_in_the_form_garrison_toml_keeps() {
     ] {
         assert_eq!(kept_as_written(text), kept, "{text}");
     }
+}
+
+/// nginx answers 502: where nothing listens on web.port, as before the web
+/// service was restarted after a change of the port, doctor names the
+/// restart; where something does, the lines that name nginx's include or
+/// the SELinux module.
+#[test]
+fn a_502_names_the_restart_where_nothing_listens_on_web_port() {
+    let gateway = "<html>Bad gateway</html>";
+    let answer = format!(
+        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\
+         Connection: close\r\n\r\n{gateway}",
+        gateway.len()
+    );
+    let silent = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let listening = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    for (port, fix) in [
+        (silent, "systemctl restart garrison-web.service"),
+        (
+            listening.local_addr().unwrap().port(),
+            "the lines above name an include or an SELinux module",
+        ),
+    ] {
+        let server = garrison_testing::tls::serve_until(vec![answer.clone()], 2036, 1, 1);
+        let roots = Arc::new(server.roots.clone());
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        config.deployment.public_origin.clone_from(&server.url);
+        config.web.port = port;
+        let found = interface(&config, &roots);
+        server.finish();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0]
+                .fix
+                .as_deref()
+                .is_some_and(|text| text.contains(fix)),
+            "{}",
+            found[0].line()
+        );
+    }
+}
+
+/// Only Stalwart's exporter's own answer is taken for it: Prometheus text,
+/// or its refusal of a scrape without its credential. A web page that a
+/// webmail's server block answers for any path serves no metrics.
+#[test]
+fn only_the_exporters_own_answer_is_taken_for_it() {
+    let page = "<html><body>Welcome to our webmail</body></html>";
+    let exported = "# HELP stalwart_up Up.\n# TYPE stalwart_up gauge\nstalwart_up 1\n";
+    for (status, kind, body, public) in [
+        (200, "text/html", page, false),
+        (200, "text/plain; version=0.0.4", exported, true),
+        (401, "text/plain", "", true),
+    ] {
+        let server = garrison_testing::tls::serve_until(
+            vec![format!(
+                "HTTP/1.1 {status} X\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n\
+                 Connection: close\r\n\r\n{body}",
+                body.len()
+            )],
+            2036,
+            1,
+            1,
+        );
+        let roots = Arc::new(server.roots.clone());
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        config.deployment.issuer.clone_from(&server.url);
+        config.deployment.admin_url = format!("{}/admin/", server.url);
+        let found = metrics(&config, &roots);
+        server.finish();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(
+            found[0].level == Level::Fail,
+            public,
+            "{status} {kind}: {}",
+            found[0].line()
+        );
+    }
+}
+
+/// An IPv6 origin is named as a URL names it, in brackets, before its port.
+#[test]
+fn an_ipv6_origin_is_named_in_brackets() {
+    let found = certificate("https://[::1]:1", &roots());
+    assert!(found.what.starts_with("TLS to [::1]:1: "), "{}", found.what);
 }
