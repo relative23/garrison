@@ -6,6 +6,7 @@ use std::path::Path;
 use garrison_core::config::Database;
 use garrison_testing::http::{json, serve};
 
+use super::super::Level;
 use super::super::{Finding, files, host, milter, notify, policy};
 use super::Broken;
 
@@ -18,8 +19,7 @@ pub(super) fn events_database_is_a_folder() -> Broken {
     Broken {
         host: "an events database that is a folder",
         found: vec![host::events(&config)],
-        said: "the events database".into(),
-        fix: None,
+        said: (Level::Unknown, "doctor-events-unreadable"),
     }
 }
 
@@ -39,8 +39,7 @@ pub(super) fn policy_root_alone() -> Broken {
     Broken {
         host: "an access policy root:root 0600",
         found: vec![policy::readable(path, file, &[], broker.as_ref(), &names)],
-        said: "may not read the access policy".into(),
-        fix: Some("chown root:garrison-broker /etc/garrison/access-policy.json".into()),
+        said: (Level::Fail, "doctor-policy-unreadable"),
     }
 }
 
@@ -55,8 +54,7 @@ pub(super) fn policy_binds_nobody() -> Broken {
     Broken {
         host: "an access policy that binds nobody",
         found: vec![policy::content(&config)],
-        said: "binds no role and no account".into(),
-        fix: Some("garrison access bind-role <role-id> --profile administrator".into()),
+        said: (Level::Fail, "doctor-policy-unbound"),
     }
 }
 
@@ -72,8 +70,7 @@ pub(super) fn policy_names_a_dropped_action() -> Broken {
     Broken {
         host: "an access policy that names an action garrison.toml does not have",
         found: vec![policy::content(&config)],
-        said: "(run_reports)".into(),
-        fix: Some("garrison access update".into()),
+        said: (Level::Fail, "doctor-policy-actions-dropped"),
     }
 }
 
@@ -103,8 +100,7 @@ pub(super) fn metrics_credential_as_user_and_password() -> Broken {
     Broken {
         host: "a scrape credential written as user:password",
         found: filled(&config, "metrics-credential", b"garrison:a-password\n"),
-        said: "metrics-credential holds no credential".into(),
-        fix: Some("garrison stalwart setup".into()),
+        said: (Level::Fail, "doctor-credential-unusable"),
     }
 }
 
@@ -125,8 +121,7 @@ pub(super) fn dqs_key_of_two_words() -> Broken {
     Broken {
         host: "a key of Spamhaus' Data Query Service of two words",
         found: filled(&config, "spamhaus-dqs-key", b"two words\n"),
-        said: "spamhaus-dqs-key holds no key".into(),
-        fix: Some("install -m 600 /dev/null".into()),
+        said: (Level::Fail, "doctor-credential-unusable"),
     }
 }
 
@@ -154,8 +149,7 @@ pub(super) fn selinux_module_for_another_port() -> Broken {
         found: host::selinux_at(&places, Some(loaded), 9443)
             .into_iter()
             .collect(),
-        said: "lets nginx reach port 8091".into(),
-        fix: Some("Run the installer again".into()),
+        said: (Level::Fail, "doctor-selinux-other-port"),
     }
 }
 
@@ -200,8 +194,7 @@ pub(super) fn milter_on_another_port() -> Broken {
     Broken {
         host: "the macro milter on another port than Stalwart's entry",
         found,
-        said: format!("at 127.0.0.1:{old}"),
-        fix: Some("Stalwart WebUI".into()),
+        said: (Level::Fail, "doctor-milter-stranded"),
     }
 }
 
@@ -211,8 +204,7 @@ pub(super) fn no_release() -> Broken {
     Broken {
         host: "no release installed",
         found: vec![host::release_in(directory.path())],
-        said: "no installed release".into(),
-        fix: Some("Run the installer".into()),
+        said: (Level::Fail, "doctor-release-missing"),
     }
 }
 
@@ -221,8 +213,7 @@ pub(super) fn unit_failed() -> Broken {
     Broken {
         host: "a unit of Garrison's that failed",
         found: vec![host::service("garrison-web.service", Some("failed"))],
-        said: "garrison-web.service is failed".into(),
-        fix: Some("journalctl -u garrison-web.service".into()),
+        said: (Level::Fail, "doctor-service-inactive"),
     }
 }
 
@@ -232,8 +223,7 @@ pub(super) fn collector_stopped() -> Broken {
     Broken {
         host: "a collector that stopped an hour ago",
         found: vec![host::finished(Ok(Some(now.as_second() - 3600)), now)],
-        said: "no collection run has finished since".into(),
-        fix: Some("systemctl status garrison-collect.service".into()),
+        said: (Level::Fail, "doctor-collection-stopped"),
     }
 }
 
@@ -247,8 +237,7 @@ pub(super) fn key_not_roots() -> Broken {
     Broken {
         host: "a key file that is not root's alone",
         found: files::files(&config),
-        said: format!("{} is not root-owned", key.display()),
-        fix: Some("chmod 600".into()),
+        said: (Level::Fail, "doctor-credential-open"),
     }
 }
 
@@ -263,8 +252,7 @@ pub(super) fn metrics_credential_empty_where_read() -> Broken {
     Broken {
         host: "an empty scrape credential that the prometheus check reads",
         found: filled(&config, "metrics-credential", b""),
-        said: "metrics-credential is empty, but".into(),
-        fix: Some("garrison stalwart setup".into()),
+        said: (Level::Fail, "doctor-credential-unusable"),
     }
 }
 
@@ -273,8 +261,7 @@ pub(super) fn clock_unsynchronized() -> Broken {
     Broken {
         host: "a clock that is not synchronized",
         found: vec![host::synchronized(Some("no"))],
-        said: "the clock is not synchronized".into(),
-        fix: Some("timedatectl set-ntp true".into()),
+        said: (Level::Warn, "doctor-clock-unsynchronized"),
     }
 }
 
@@ -284,8 +271,7 @@ pub(super) fn space_unknown() -> Broken {
         host: "free space that cannot be asked",
         // A path through a file, whose disk statvfs cannot be asked.
         found: vec![host::room("/proc/self/status/garrison")],
-        said: "free space of".into(),
-        fix: None,
+        said: (Level::Unknown, "doctor-space-unknown"),
     }
 }
 
@@ -294,8 +280,7 @@ pub(super) fn milter_silent() -> Broken {
     Broken {
         host: "a macro milter that does not answer",
         found: vec![milter::answering(8096, Err("Connection refused".into()))],
-        said: "does not answer on 127.0.0.1:8096".into(),
-        fix: Some("journalctl -u garrison-milter.service".into()),
+        said: (Level::Fail, "doctor-milter-silent"),
     }
 }
 
@@ -315,7 +300,6 @@ pub(super) fn channel_without_its_address() -> Broken {
     Broken {
         host: "an ntfy channel whose address file is empty",
         found: notify::checks(&config, &credentials),
-        said: "notifications: ntfy".into(),
-        fix: Some("garrison notify-test".into()),
+        said: (Level::Fail, "doctor-notify-unusable"),
     }
 }

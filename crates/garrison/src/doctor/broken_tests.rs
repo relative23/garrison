@@ -16,11 +16,10 @@ struct Broken {
     host: &'static str,
     /// What the check that looks at it found there.
     found: Vec<Finding>,
-    /// Words of the line that must say it.
-    said: String,
-    /// Words its fix must hold; `None` for a line that says why the check
-    /// could not look, which is unknown and names no fix.
-    fix: Option<String>,
+    /// The state that must say it, and its level: a failure or a warning,
+    /// whose state names the fix that mends it, or unknown, where the check
+    /// could not look.
+    said: (Level, &'static str),
 }
 
 /// Every "ok" doctor can say, in the file that says it, with what it
@@ -156,43 +155,21 @@ const CHECKS: [(&str, &str); 8] = [
 
 /// What is wrong with what doctor said on `broken`, if anything.
 fn fault(broken: &Broken) -> Option<String> {
-    let lines: Vec<String> = broken.found.iter().map(Finding::line).collect();
-    let Some(finding) = broken
+    let (level, name) = broken.said;
+    assert_ne!(level, Level::Ok, "{}: what is broken is no ok", broken.host);
+    if broken
         .found
         .iter()
-        .find(|finding| finding.state.text.contains(&broken.said))
-    else {
-        return Some(format!(
-            "{}: no line says {:?}:\n{}",
-            broken.host,
-            broken.said,
-            lines.join("\n")
-        ));
-    };
-    if finding.level == Level::Ok {
-        return Some(format!("{}: {}", broken.host, finding.line()));
+        .any(|finding| (finding.level, finding.state.name) == broken.said)
+    {
+        return None;
     }
-    match &broken.fix {
-        Some(fix)
-            if !finding
-                .state
-                .fix
-                .as_deref()
-                .is_some_and(|text| text.contains(fix.as_str())) =>
-        {
-            Some(format!(
-                "{}: the fix does not name {fix:?}:\n{}",
-                broken.host,
-                finding.line()
-            ))
-        }
-        None if finding.level != Level::Unknown => Some(format!(
-            "{}: a check that could not look is unknown:\n{}",
-            broken.host,
-            finding.line()
-        )),
-        _ => None,
-    }
+    let lines: Vec<String> = broken.found.iter().map(Finding::line).collect();
+    Some(format!(
+        "{}: no line is {name} at {level:?}:\n{}",
+        broken.host,
+        lines.join("\n")
+    ))
 }
 
 #[test]
