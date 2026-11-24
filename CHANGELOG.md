@@ -1320,6 +1320,8 @@ Notable changes for operators and users. The format follows
   and names what mends each.
 - **A receipt that another user swaps for a named pipe no longer holds up
   the collection run.**
+- **A receipt whose `ok_rows` finds no row to judge is no longer in
+  order.** An empty list of rows is Unknown now, as a missing one is.
 - **A receipt's time is the same instant for every viewer.** A field or
   column of a receipt with `format = "datetime"` went out as the job wrote
   it, and a time written without its offset, such as `2026-11-17T03:00:00`,

@@ -188,10 +188,11 @@ impl Receipt {
         )
     }
 
-    /// What a receipt with rows says where they cannot all be read, and the
-    /// state it may have at most: Unknown where `rows` names no list, as
-    /// where a job that failed early wrote none, and Partial where rows are
-    /// no objects, which are not read.
+    /// What a receipt with rows says where they cannot all be read or
+    /// judged, and the state it may have at most: Unknown where `rows` names
+    /// no list, as where a job that failed early wrote none, or where
+    /// `ok_rows` found no row to judge, as in an empty list, and Partial
+    /// where rows are no objects, which are not read.
     fn unread_rows(&self, document: &Value) -> Option<(State, String)> {
         let Some(list) = self.place(document)?.as_array() else {
             let why = if self.rows.as_ref().is_some_and(Vec::is_empty) {
@@ -205,14 +206,21 @@ impl Receipt {
             list.iter().filter(|item| !item.is_object()).count(),
             list.len(),
         );
+        let judged_none = self.ok_rows.is_some() && others == total;
         let finding = match others {
+            0 if judged_none => "The receipt lists no rows, so `ok_rows` judged none.".to_owned(),
             0 => return None,
             1 => format!("1 of the receipt's {total} rows is no object and was not read."),
             _ => {
                 format!("{others} of the receipt's {total} rows are no objects and were not read.")
             }
         };
-        Some((State::Partial, finding))
+        let at_most = if judged_none {
+            State::Unknown
+        } else {
+            State::Partial
+        };
+        Some((at_most, finding))
     }
 
     fn reported(&self, document: &Value, items: Option<&[Value]>) -> Option<Written> {
@@ -438,6 +446,9 @@ impl Provider for Receipt {
         Ok(report)
     }
 }
+
+#[cfg(test)]
+mod rows_tests;
 
 #[cfg(test)]
 mod tests;

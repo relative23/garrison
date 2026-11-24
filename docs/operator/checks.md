@@ -560,7 +560,8 @@ receipt's; `fields`, `ok_when` and `date` read an object. Every
 row is judged, however many; the table shows the last 200, where a job that
 appends a row for each run puts the newest, and the card says how many rows
 the receipt lists where there are more. Where `rows` names no list, as where a
-job that failed early wrote none, the card is Unknown and says so; a row that
+job that failed early wrote none, or `ok_rows` finds no row to judge, as in an
+empty list, the card is Unknown and says so; a row that
 is no JSON object is not read, and the card says how many and is Partial
 where it would be in order.
 

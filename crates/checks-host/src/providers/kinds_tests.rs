@@ -173,6 +173,10 @@ fn receipts(at: &dyn Fn(&str) -> PathBuf) -> Vec<Seen> {
         r#"{"date": "2026-10-29T11:00:00Z", "results": null}"#,
     );
     file(
+        &at("empty.json"),
+        r#"{"date": "2026-10-29T11:00:00Z", "results": []}"#,
+    );
+    file(
         &at("odd.json"),
         r#"[{"ok": true, "at": "2026-10-29T11:00:00Z"}, "failed"]"#,
     );
@@ -185,6 +189,11 @@ fn receipts(at: &dyn Fn(&str) -> PathBuf) -> Vec<Seen> {
         (
             "rows where the receipt holds no list",
             "unlisted.json",
+            judged,
+        ),
+        (
+            "rows where the receipt's list is empty",
+            "empty.json",
             judged,
         ),
         ("a row that is no object", "odd.json", listed),
