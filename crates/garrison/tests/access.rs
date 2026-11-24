@@ -104,7 +104,8 @@ fn init_binds_only_roles_with_every_administrator_right() {
     // An existing policy stays unless --force replaces it.
     let again = run(directory.path(), &["access", "init"]);
     assert_eq!(again.status.code(), Some(1));
-    assert!(text(&again.stdout).contains("exists; use --force to replace it"));
+    assert_eq!(text(&again.stdout), "");
+    assert!(text(&again.stderr).contains("exists; use --force to replace it"));
 }
 
 /// Where no role qualifies, as where the administrators' role lacks a right
@@ -318,8 +319,11 @@ fn a_role_is_bound_to_a_known_profile_once_stalwart_knows_it() {
     );
     assert_eq!(unknown.status.code(), Some(1));
     assert_eq!(
-        text(&unknown.stdout),
-        "Unknown profile auditor; known: administrator, viewer\n"
+        (text(&unknown.stdout), text(&unknown.stderr)),
+        (
+            String::new(),
+            "Unknown profile auditor; known: administrator, viewer\n".to_owned()
+        )
     );
 }
 
@@ -368,8 +372,18 @@ fn access_changes_keep_a_backup_and_write_the_policy() {
     assert_eq!(text(&listed.stdout), written);
     let invalid = run(directory.path(), &["access", "deny", "a b"]);
     assert_eq!(
-        (invalid.status.code(), text(&invalid.stdout)),
-        (Some(1), "Invalid subject\n".to_owned())
+        (
+            invalid.status.code(),
+            text(&invalid.stdout),
+            text(&invalid.stderr)
+        ),
+        (
+            Some(1),
+            String::new(),
+            "\"a b\" is no subject: a subject is 1 to 128 letters, digits and _ . : @ -, and \
+             that of a local Stalwart account its numeric account ID.\n"
+                .to_owned()
+        )
     );
     let profile = run(
         directory.path(),

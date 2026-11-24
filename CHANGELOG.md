@@ -677,6 +677,9 @@ Notable changes for operators and users. The format follows
 - **`garrison modules --set` without `--yes` ends with 2 where no terminal is
   to answer its question.** A script adds `--yes`, as the installation guide
   shows.
+- **The refusals of `garrison access` and a failed check or restore of
+  `garrison backup-check` are said on standard error**, as the installation
+  guide says of every command.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year

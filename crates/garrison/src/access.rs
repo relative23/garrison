@@ -295,7 +295,7 @@ fn native(config: &Config) -> Result<JmapClient, String> {
 fn init(config: &Config, force: bool) -> Result<u8, String> {
     let path = &config.broker.policy;
     let exists = || {
-        say(&format!(
+        complain(&format!(
             "{} exists; use --force to replace it (a backup is kept).",
             path.display()
         ));
@@ -411,7 +411,7 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
             let mut policy = load(config)?;
             if !policy.profiles.contains_key(profile) {
                 let known: Vec<&str> = policy.profiles.keys().map(String::as_str).collect();
-                say(&format!(
+                complain(&format!(
                     "Unknown profile {profile}; known: {}",
                     known.join(", ")
                 ));
@@ -440,7 +440,10 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
         }),
         Command::Deny { subject, undo } => {
             if !is_subject(subject) {
-                say("Invalid subject");
+                complain(&format!(
+                    "{subject:?} is no subject: a subject is 1 to 128 letters, digits and _ . : \
+                     @ -, and that of a local Stalwart account its numeric account ID."
+                ));
                 return Ok(1);
             }
             locked(config, false, |folder| {

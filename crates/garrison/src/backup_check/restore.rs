@@ -175,7 +175,8 @@ pub(super) fn tested(repository: &Repository, path: &str, newest: Option<&str>) 
         }
     }
     let (run, left) = repository.restore(path, newest);
-    say(&format!(
+    let said = if run.ok { say } else { complain };
+    said(&format!(
         "Restore test: {} ({})",
         if run.ok { "passed" } else { "FAILED" },
         run.detail

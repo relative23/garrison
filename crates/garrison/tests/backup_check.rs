@@ -137,6 +137,12 @@ fn what_restic_fails_at_ends_the_command_with_its_last_word() {
         read(&report)["verify"]["detail"],
         "Fatal: the repository is locked by another process"
     );
+    // The failure's reason is on standard error, as for every command.
+    assert_eq!(
+        text(&damaged.stderr),
+        "Integrity check: FAILED (Fatal: the repository is locked by another process)\n"
+    );
+    assert!(!text(&damaged.stdout).contains("FAILED"));
     assert_eq!(read(&report)["verify"]["ok"], false);
     assert_eq!(read(&report)["restore"]["ok"], true);
     assert_eq!(tools.calls().len(), 4);
@@ -185,6 +191,12 @@ fn what_restic_fails_at_ends_the_command_with_its_last_word() {
     );
     assert_eq!(missing.status.code(), Some(1));
     assert_eq!(read(&report)["restore"]["ok"], false);
+    assert!(
+        text(&missing.stderr).starts_with("Restore test: FAILED ("),
+        "{}",
+        text(&missing.stderr)
+    );
+    assert!(!text(&missing.stdout).contains("FAILED"));
 }
 
 #[test]

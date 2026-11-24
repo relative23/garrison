@@ -302,7 +302,9 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
     }
     if asked.verify && report.problem.is_none() {
         let run = repository.verify();
-        say(&format!(
+        // A failure's reason goes to standard error, as for every command.
+        let said = if run.ok { say } else { complain };
+        said(&format!(
             "Integrity check: {} ({})",
             if run.ok { "passed" } else { "FAILED" },
             run.detail
