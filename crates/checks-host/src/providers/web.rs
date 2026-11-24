@@ -2,10 +2,10 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fs, io};
 
-use garrison_core::files::read_bounded;
+use garrison_core::files::{answered_by, read_bounded};
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_core::{hex, json};
@@ -13,6 +13,7 @@ use garrison_stalwart::http::status_of;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use super::ran::{SECONDS, patience, silent};
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
@@ -149,11 +150,11 @@ impl Bulwark {
         Ok(Bulwark { base, plugins })
     }
 
-    /// The plugins the registry lists, or why it cannot be read.
-    fn registry(&self) -> Result<Vec<Value>, String> {
+    /// The plugins the registry lists, or why it cannot be read by `until`.
+    fn registry(&self, until: Instant) -> Result<Vec<Value>, String> {
         let path = self.base.join(REGISTRY);
-        let data = read_bounded(&path, MAX_REGISTRY)
-            .map_err(|error| unread(REGISTRY, &path, &error, MAX_REGISTRY))?;
+        let data = read(&path, MAX_REGISTRY, until)
+            .map_err(|error| unread(REGISTRY, &path, &error, MAX_REGISTRY, until))?;
         let registry =
             json::parse(&data, MAX_REGISTRY).map_err(|_| format!("{REGISTRY} is no valid JSON"))?;
         registry
@@ -163,8 +164,9 @@ impl Bulwark {
             .ok_or_else(|| format!("{REGISTRY} holds no list of plugins"))
     }
 
-    /// The bundle of `name` against the hash that its row records.
-    fn integrity(&self, name: &str, row: &Value) -> Integrity {
+    /// The bundle of `name`, read by `until`, against the hash that its row
+    /// records.
+    fn integrity(&self, name: &str, row: &Value, until: Instant) -> Integrity {
         let Some(expected) = row
             .get("bundleHash")
             .and_then(Value::as_str)
@@ -179,12 +181,19 @@ impl Bulwark {
         };
         let shown = format!("plugins/{name}.js");
         let path = self.base.join(&shown);
-        match read_bounded(&path, MAX_BUNDLE) {
+        match read(&path, MAX_BUNDLE, until) {
             Ok(code) if hex::encode(&Sha256::digest(&code)) == expected => Integrity::Verified,
             Ok(_) => Integrity::Mismatch,
-            Err(error) => Integrity::Unknown(unread(&shown, &path, &error, MAX_BUNDLE)),
+            Err(error) => Integrity::Unknown(unread(&shown, &path, &error, MAX_BUNDLE, until)),
         }
     }
+}
+
+/// The file at `path`, of at most `limit` bytes, as its file system answers
+/// by `until`.
+fn read(path: &Path, limit: usize, until: Instant) -> io::Result<Vec<u8>> {
+    let path = path.to_path_buf();
+    answered_by(until, move || read_bounded(&path, limit)).and_then(|read| read)
 }
 
 /// What the check of one plugin's bundle found.
@@ -207,11 +216,17 @@ impl Integrity {
     }
 }
 
-/// Why a file below the administration folder could not be read: it is
-/// missing, a link, larger than it may be, kept from the collector, or the
-/// error says.
-fn unread(shown: &str, path: &Path, error: &io::Error, limit: usize) -> String {
-    match fs::symlink_metadata(path) {
+/// Why a file below the administration folder could not be read: its file
+/// system gave no answer by `until`, or it is missing, a link, larger than
+/// it may be, kept from the collector, or the error says.
+fn unread(shown: &str, path: &Path, error: &io::Error, limit: usize, until: Instant) -> String {
+    let silence = || format!("the file system of {shown} did not answer within {SECONDS} seconds");
+    if silent(error) {
+        return silence();
+    }
+    let looked = path.to_path_buf();
+    match answered_by(until, move || fs::symlink_metadata(&looked)).and_then(|looked| looked) {
+        Err(looked) if silent(&looked) => silence(),
         Err(_) if error.kind() == io::ErrorKind::NotFound => format!("{shown} is missing"),
         Ok(metadata) if metadata.is_symlink() => {
             format!("{shown} is a link, which is not followed")
@@ -244,8 +259,15 @@ impl Provider for Bulwark {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
+        self.card(context, patience())
+    }
+}
+
+impl Bulwark {
+    /// The card, with what it reads below the folder read by `until`.
+    pub(super) fn card(&self, context: &Context<'_>, until: Instant) -> Collected {
         let registry_path = self.base.join(REGISTRY);
-        let registry = self.registry();
+        let registry = self.registry(until);
         let mut fields = Vec::new();
         let (mut mismatched, mut unknown, mut verified) = (Vec::new(), Vec::new(), 0_usize);
         for name in &self.plugins {
@@ -256,7 +278,7 @@ impl Provider for Bulwark {
                         .filter(|row| row.get("id").and_then(Value::as_str) == Some(name))
                         .collect();
                     match matches[..] {
-                        [row] => (row, self.integrity(name, row)),
+                        [row] => (row, self.integrity(name, row, until)),
                         [] => (
                             &Value::Null,
                             Integrity::Unknown(format!("{REGISTRY} does not list it")),
@@ -422,6 +444,22 @@ mod tests {
             let (_directory, observation) = plugins(b"x", recorded);
             assert_eq!(integrity(&observation), json!("unknown"), "{recorded}");
         }
+    }
+
+    /// A bundle whose file system gives no answer by the card's time is not
+    /// known, and says so.
+    #[test]
+    fn a_bundle_whose_file_system_does_not_answer_is_not_known() {
+        let directory = tempfile::tempdir().unwrap();
+        let raw = format!("admin_directory = \"{}\"", directory.path().display());
+        let provider = Bulwark::new(&table(&raw)).unwrap();
+        let row = json!({"id": "spam", "bundleHash": hex::encode(&Sha256::digest(b"x"))});
+        assert_eq!(
+            provider.integrity("spam", &row, Instant::now()),
+            Integrity::Unknown(
+                "the file system of plugins/spam.js did not answer within 8 seconds".to_owned()
+            )
+        );
     }
 
     #[test]

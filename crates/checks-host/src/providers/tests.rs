@@ -417,3 +417,42 @@ fn a_version_command_without_a_version_says_why() {
         );
     }
 }
+
+/// The webmail card and a version command whose file system gives no
+/// answer by the check's time, as a folder or a program on a hard NFS mount
+/// whose server is gone, say so: here the time is past before they begin.
+#[test]
+fn a_file_system_that_does_not_answer_is_named_by_the_card_that_reads_it() {
+    let code = b"bundle".as_slice();
+    let folder = webmail(&json!([recorded("spam", code)]), &[("spam.js", code)]);
+    let raw = format!(
+        "admin_directory = \"{}\"\nplugins = [\"spam\"]",
+        folder.path().display()
+    );
+    let (config, runner) = (config(folder.path()), Canned(String::new()));
+    let card = Bulwark::new(&table(&raw))
+        .unwrap()
+        .card(&context(&config, &runner), std::time::Instant::now())
+        .unwrap()
+        .observations
+        .remove(0);
+    assert_eq!(
+        (card.state, card.findings),
+        (
+            State::Unknown,
+            vec![
+                "No bundle's integrity is known: the file system of plugins/registry.json did \
+                 not answer within 8 seconds."
+                    .to_owned()
+            ]
+        )
+    );
+    let version = VersionCommand::new(&table(
+        "component = \"C\"\ncommand = [\"/usr/bin/c\", \"--version\"]",
+    ))
+    .unwrap();
+    assert_eq!(
+        version.version(&context(&config, &runner), std::time::Instant::now()),
+        Err("/usr/bin/c was not run: its file system did not answer within 8 seconds.".to_owned())
+    );
+}

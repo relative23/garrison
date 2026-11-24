@@ -2,11 +2,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::time::Instant;
 use std::{fs, io};
 
+use garrison_core::files::answered_by;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 
+use super::ran::{SECONDS, patience, silent};
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options};
 
@@ -79,23 +82,31 @@ impl Host {
         })
     }
 
-    fn read(&self) -> Reading {
+    /// What the sources give, the file system at `disk_path` by `until`.
+    fn read(&self, until: Instant) -> Reading {
         let text = |name: &str| {
             fs::read_to_string(self.proc.join(name))
                 .map_err(|error| format!("{name} could not be read: {error}."))
         };
         let parsed = |name: &str| format!("{name} holds no value this check reads.");
         let at = self.disk_path.display();
-        let disk = rustix::fs::statvfs(&self.disk_path)
-            .map_err(|error| {
-                let error = io::Error::from(error);
+        let path = self.disk_path.clone();
+        let disk = answered_by(until, move || {
+            rustix::fs::statvfs(&path).map_err(io::Error::from)
+        })
+        .and_then(|measured| measured)
+        .map_err(|error| {
+            if silent(&error) {
+                format!("The file system at {at} did not answer within {SECONDS} seconds.")
+            } else {
                 format!("The file system at {at} could not be measured: {error}.")
-            })
-            // A file system of the kernel's, such as /proc, keeps no size.
-            .and_then(|stats| match stats.f_blocks {
-                0 => Err(format!("The file system at {at} gives no size.")),
-                _ => Ok(stats),
-            });
+            }
+        })
+        // A file system of the kernel's, such as /proc, keeps no size.
+        .and_then(|stats| match stats.f_blocks {
+            0 => Err(format!("The file system at {at} gives no size.")),
+            _ => Ok(stats),
+        });
         Reading {
             memory: text("meminfo").map(|text| meminfo(&text)),
             load: text("loadavg").and_then(|text| loadavg(&text).ok_or_else(|| parsed("loadavg"))),
@@ -215,9 +226,16 @@ impl Provider for Host {
         ]
     }
 
-    #[allow(clippy::cast_precision_loss)]
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let reading = self.read();
+        self.card(context, patience())
+    }
+}
+
+impl Host {
+    /// The card, with the file system at `disk_path` read by `until`.
+    #[allow(clippy::cast_precision_loss)]
+    fn card(&self, context: &Context<'_>, until: Instant) -> Collected {
+        let reading = self.read(until);
         let (state, findings) = judged(&reading);
         let (total, available) = reading.memory.as_ref().map_or((None, None), memory);
         let disk = reading.disk.as_ref().ok();

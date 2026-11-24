@@ -190,11 +190,42 @@ fn a_receipt_in_a_place_the_sandbox_hides_says_so() {
              it: let the job write it where the collector sees it, as under /var/lib \
              (docs/operator/checks.md, \"Paths the collector cannot see\")."
         );
-        assert_eq!(receipt.unread(Some(Path::new(place))), hides);
+        assert_eq!(receipt.unread(Some(Path::new(place)), patience()), hides);
         let kept_out = std::fs::symlink_metadata(path)
             .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied);
-        let seen = receipt.unread(None);
+        let seen = receipt.unread(None, patience());
         assert_eq!(seen == hides, kept_out, "{path}: {seen}");
         assert!(!seen.contains("chmod"), "{path}: {seen}");
     }
+}
+
+/// A receipt whose file system gives no answer by the check's time, as one
+/// on a hard NFS mount whose server is gone, is Unknown and says so, and
+/// the looks at why it could not be read say the same: here the time is
+/// past before the card begins.
+#[test]
+fn a_receipt_whose_file_system_does_not_answer_says_so() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("last.json");
+    write(&path, r#"{"date": "2026-10-29T11:00:00Z"}"#);
+    let receipt = Receipt::new(&table(&format!(
+        "type = \"receipt\"\nid = \"r\"\ntitle = \"R\"\npath = \"{}\"\nmodules = [\"backups\"]",
+        path.display()
+    )))
+    .unwrap();
+    let (config, runner) = (config(directory.path()), Canned(String::new()));
+    let silent = format!(
+        "The receipt at {} could not be read: its file system did not answer within 8 seconds.",
+        path.display()
+    );
+    let card = receipt
+        .card(&context(&config, &runner), Instant::now())
+        .unwrap()
+        .observations
+        .remove(0);
+    assert_eq!(
+        (card.state, card.findings),
+        (State::Unknown, vec![silent.clone()])
+    );
+    assert_eq!(receipt.unread(None, Instant::now()), silent);
 }

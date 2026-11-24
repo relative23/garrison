@@ -1364,6 +1364,10 @@ Notable changes for operators and users. The format follows
   and names what mends each.
 - **A receipt that another user swaps for a named pipe no longer holds up
   the collection run.**
+- **A file system that does not answer no longer holds up the collection
+  run.** A `disk_path`, receipt, webmail folder or version command on a
+  mount that hangs, such as a hard NFS mount whose server is gone, costs its
+  card 8 seconds, and the card says so.
 - **A receipt whose `ok_rows` finds no row to judge is no longer in
   order.** An empty list of rows is Unknown now, as a missing one is.
 - **A receipt in a place the collector's unit hides, such as `/root` or

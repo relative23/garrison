@@ -56,7 +56,7 @@ fn no_check_waits_for_a_file_that_another_user_may_replace() {
             "below `root`, the kernel's osrelease and root's /run/reboot-required.pkgs",
         ),
         (
-            "providers/receipt.rs",
+            "providers/receipt/unread.rs",
             "read_json_with_metadata(",
             "the receipt, through core",
         ),

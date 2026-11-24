@@ -4,7 +4,10 @@ What Garrison shows on its pages comes from checks. The configuration calls
 them providers: each `[[providers]]` entry in `/etc/garrison/garrison.toml`
 is one check, and `type` names it. The collector runs them every minute. A
 source that is missing or unreadable shows as Unknown; it never stops the
-other checks. The checks that read Stalwart's domains, listeners or
+other checks. A file system that does not answer, as a hard NFS mount whose
+server is gone, costs `host`, `host-care`, `receipt`, `bulwark` and
+`version-command` eight seconds each, and their cards say so. The checks
+that read Stalwart's domains, listeners or
 accounts with the collector's API key (`dns`, `tls`, `reputation`,
 `mail-flow`) say why where they could not: Stalwart could not be reached or
 failed on its side, which the card names, such as "Stalwart answered HTTP

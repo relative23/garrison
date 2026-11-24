@@ -323,3 +323,52 @@ fn only_root_or_this_user_may_be_able_to_change_trusted_json() {
     assert!(read_json_with_metadata(&link, 1024).is_none());
     assert!(read_json_with_metadata(&path, 4).is_none());
 }
+
+/// A call that answers in time gives its answer. One on a file system that
+/// does not answer, here the open of a named pipe that has no writer, is
+/// given up by its time: the caller goes on, and the call is left to end by
+/// itself, as it does once the pipe has a writer.
+#[test]
+fn a_call_on_a_file_system_is_waited_for_until_its_time() {
+    let soon = Instant::now() + Duration::from_secs(5);
+    assert_eq!(answered_by(soon, || 42).unwrap(), 42);
+    let directory = tempfile::tempdir().unwrap();
+    let fifo = directory.path().join("fifo");
+    rustix::fs::mkfifoat(rustix::fs::CWD, &fifo, Mode::from_raw_mode(0o600)).unwrap();
+    let (opened, ended) = mpsc::channel();
+    let waiting = fifo.clone();
+    let started = Instant::now();
+    let error = answered_by(started + Duration::from_millis(200), move || {
+        let open = File::open(&waiting).map(drop);
+        let _ = opened.send(());
+        open
+    })
+    .unwrap_err();
+    let took = started.elapsed();
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    assert!(took < Duration::from_secs(2), "{took:?}");
+    let until = Instant::now() + Duration::from_secs(5);
+    let _writer = loop {
+        match rustix::fs::open(&fifo, OFlags::WRONLY | OFlags::NONBLOCK, Mode::empty()) {
+            Ok(writer) => break writer,
+            Err(error) => assert!(Instant::now() < until, "{error}"),
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    ended.recv_timeout(Duration::from_secs(5)).unwrap();
+}
+
+/// Nothing is asked once the time is past.
+#[test]
+fn nothing_is_asked_once_its_time_is_past() {
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = std::sync::Arc::clone(&asked);
+    let past = Instant::now();
+    let error = answered_by(past, move || {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    thread::sleep(Duration::from_millis(50));
+    assert!(!asked.load(std::sync::atomic::Ordering::SeqCst));
+}
