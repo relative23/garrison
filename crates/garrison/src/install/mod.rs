@@ -41,10 +41,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use garrison_core::time;
-
 use crate::{say, units};
-use files::{Step, announce, copy_tree, exchange, io, lock, place, run, switch};
+use files::{Step, announce, copy_tree, exchange, fresh_folder, io, lock, place, run, switch};
 use requirements::{preflight, room, size, state_size};
 pub(crate) use restore::run_restore;
 use services::{check_config, start, stop_services};
@@ -164,19 +162,20 @@ fn install_release(here: &Path, version: &str) -> Step<PathBuf> {
 /// reinstall of the running release would otherwise replace it with data the
 /// previous release cannot read.
 fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
-    let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
     let kind = if upgrade {
         "pre-upgrade"
     } else {
         "pre-reinstall"
     };
-    let target = Path::new(BACKUPS).join(format!("{kind}-{stamp}"));
+    let target = fresh_folder(Path::new(BACKUPS), kind)
+        .map_err(|error| format!("backup failed: {error}"))?;
     announce(&format!(
         "Backing up the running state to {}",
         target.display()
     ));
     let output = cli(current, &["backup", "--to", &target.display().to_string()])?;
     if !output.status.success() {
+        let _ = fs::remove_dir_all(&target);
         return Err(format!(
             "backup failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()

@@ -57,10 +57,19 @@ scenario_killed_late() {
     step "Installers killed as they back up, while the services settle and as they switch back"
     upgraded
     before=$(events)
-    # A reinstall backs up and settles as an upgrade does.
+    # A reinstall backs up and settles as an upgrade does. The backup a
+    # killed installer started runs on, into the folder it named.
     for when in "as the backup begins:true" "during the backup:sleep 0.5" "while the services settle:$settling"; do
         killed_once '/root/release/bin/garrison install' 'Backing up the running state' "${when#*:}" ' is running. Roll back with'
-        installer '/root/release/bin/garrison install'
+        if ! installer '/root/release/bin/garrison install > /root/next.log 2>&1'; then
+            inside 'cat /root/next.log' || true
+            echo "FAIL  the installer after a kill ${when%%:*} succeeds"
+            exit 1
+        fi
+        check "after a kill ${when%%:*}, the next run backs up into a folder of its own" \
+            'folder() { sed -n "s|^==> Backing up the running state to ||p" "$1"; }
+            test -n "$(folder /root/late.log)" && test "$(folder /root/late.log)" != "$(folder /root/next.log)" ||
+                { echo "killed: $(folder /root/late.log), next: $(folder /root/next.log)"; false; }'
         running "after a kill ${when%%:*}" "$new"
     done
     # A release whose web service does not start, as in failed_start: the

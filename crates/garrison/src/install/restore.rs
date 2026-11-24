@@ -26,9 +26,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use garrison_core::config;
-use garrison_core::time;
 
-use super::files::{Step, announce, io, lock};
+use super::files::{Step, announce, fresh_folder, io, lock};
 use super::requirements::{preflight, state_size};
 use super::unfinished::{self, Seen, Unfinished};
 use super::{BACKUPS, BASE, CONFIG, LOCK, cli, precheck, start, state, stop_services};
@@ -187,14 +186,16 @@ impl Restored<'_> {
 /// What is there now, copied by `current`'s own backup, so that this restore
 /// can be taken back.
 fn keep(current: &Path) -> Step<PathBuf> {
-    let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
-    let kept = Path::new(BACKUPS).join(format!("pre-restore-{stamp}"));
+    let kept = fresh_folder(Path::new(BACKUPS), "pre-restore").map_err(|error| {
+        format!("The state as it is could not be backed up ({error}); nothing was changed.")
+    })?;
     announce(&format!(
         "Backing up the state as it is to {}",
         kept.display()
     ));
     let backup = cli(current, &["backup", "--to", &kept.display().to_string()])?;
     if !backup.status.success() {
+        let _ = fs::remove_dir_all(&kept);
         return Err(format!(
             "The state as it is could not be backed up ({}); nothing was changed.",
             String::from_utf8_lossy(&backup.stderr).trim()
