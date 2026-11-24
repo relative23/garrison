@@ -5,9 +5,13 @@
 //! found from what they report, not from a list. Without the key each such
 //! card says why in the same words, which name what makes a key, after a
 //! frame of its own, as it gives its other reasons. A reading such a check
-//! keeps from a run without the key is made again once a run has one.
+//! keeps from a run without the key is made again once a run has one, and
+//! one from a run in which Stalwart refused the key once Stalwart answers
+//! otherwise.
 
 use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
 
 use garrison_core::config::Config;
 use garrison_core::observations::State;
@@ -175,4 +179,59 @@ fn a_reading_kept_with_the_key_stands_until_its_check_reads_stalwart_again() {
     }
     let standing: Vec<String> = standing.into_iter().collect();
     assert_eq!(standing, ["flow.spam-domains"]);
+}
+
+/// A Stalwart that refuses the collector's key at every call, as where the
+/// key lacks the rights a check needs, for as long as the test runs.
+fn refusing() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut reader = BufReader::new(stream);
+            let mut length = 0;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = value.trim().parse().unwrap_or(0);
+                }
+            }
+            let mut body = vec![0; length];
+            let _ = reader.read_exact(&mut body);
+            let _ = reader
+                .into_inner()
+                .write_all(b"HTTP/1.1 403 X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        }
+    });
+    url
+}
+
+/// A reading a check keeps from a run in which Stalwart refused the key,
+/// as before setup gave the key its rights, follows Stalwart's next answer:
+/// a minute later, where Stalwart does not answer at all, each card says
+/// what it says in a run that kept nothing.
+#[test]
+fn a_reading_kept_while_stalwart_refused_the_key_follows_its_next_answer() {
+    let refusing = refusing();
+    let work = tempfile::tempdir().unwrap();
+    let mut kept: BTreeMap<String, Option<Card>> = BTreeMap::new();
+    for case in cases(work.path()) {
+        let (provider, _directory, config) = reading_stalwart(case);
+        let provider = provider.as_ref();
+        let fresh = cards_at(provider, &config, Some(NATIVE_KEY), &Forgetful, 60);
+        let mut refused = config.clone();
+        refused.deployment.stalwart_url.clone_from(&refusing);
+        let memory = Remembered::default();
+        cards_at(provider, &refused, Some(NATIVE_KEY), &memory, 0);
+        let after = cards_at(provider, &config, Some(NATIVE_KEY), &memory, 60);
+        for id in fresh.keys().chain(after.keys()) {
+            if after.get(id) != fresh.get(id) {
+                kept.insert(id.clone(), after.get(id).cloned());
+            }
+        }
+    }
+    assert_eq!(kept, BTreeMap::new());
 }

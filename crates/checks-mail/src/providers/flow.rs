@@ -32,7 +32,7 @@ use read::{DAY, DAYS, Limits, Week};
 use super::history;
 
 use crate::context::{Collected, Context, NO_KEY, Provider, ProviderError, Report};
-use crate::kept::{Kept, cached};
+use crate::kept::{Kept, cached, recalled};
 use crate::options::{Checked, Options, fail};
 
 const CHECKS: [&str; 4] = ["spam", "milter", "authentication", "tls"];
@@ -56,6 +56,13 @@ struct Read {
     /// the reading is made again in the first run that has one.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     no_native_key: bool,
+}
+
+impl Read {
+    /// Whether Stalwart did not give the accounts to the collector's key.
+    fn of_stalwart(&self) -> bool {
+        self.domains_unread.is_some() && !self.no_native_key
+    }
 }
 
 #[derive(Debug)]
@@ -149,12 +156,21 @@ impl Flow {
     }
 
     /// The last reading, or a new one where that is due: every ten minutes,
-    /// and at once for one made without the collector's key where this run
-    /// has it.
+    /// at once for one made without the collector's key where this run has
+    /// it, and for one Stalwart did not give the accounts for where it
+    /// answers otherwise now. Setup may change only the key's rights, so
+    /// nothing but asking shows the change: while it lasts, each run asks
+    /// Stalwart alone.
     fn known(context: &Context<'_>) -> Kept<Read> {
         let keyed = context.native_key.is_some();
+        let asked = recalled::<Read>(context, MEMORY)
+            .filter(|(_, read)| keyed && read.of_stalwart())
+            .map(|_| Self::accounts(context).err());
         let wait = |_, read: &Read| {
-            if read.no_native_key && keyed {
+            let answered = asked
+                .as_ref()
+                .is_some_and(|why| read.of_stalwart() && *why != read.domains_unread);
+            if (read.no_native_key && keyed) || answered {
                 0
             } else {
                 EVERY
