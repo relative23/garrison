@@ -80,7 +80,7 @@ fn state_fits(target: &Path, source: &Path, comes_back: bool) -> Step<(Uid, Gid)
 
 /// Put the pre-upgrade copies of the databases and the policy back, the
 /// policy owned by `owner`; what went back is in `restored`.
-fn restore_state(source: &Path, owner: (Uid, Gid), restored: &mut Vec<&'static str>) -> Step {
+fn restore_state(source: &Path, owner: (Uid, Gid), restored: &mut state::Returned) -> Step {
     // The configured state directories, which need not be the defaults.
     let settings = Path::new(CONFIG).join("garrison.toml");
     let config = config::load(&settings)
@@ -94,7 +94,7 @@ fn roll_back_to(
     target: &Path,
     after: Option<&Path>,
     source: Option<(&Path, (Uid, Gid))>,
-    restored: &mut Vec<&'static str>,
+    restored: &mut state::Returned,
 ) -> Step {
     if let Some((source, owner)) = source {
         restore_state(source, owner, restored)?;
@@ -253,7 +253,7 @@ pub(super) fn rollback(with_state: bool) -> Step {
     let restoring = source
         .as_ref()
         .map(|(source, owner)| (source.as_path(), *owner));
-    let mut restored = Vec::new();
+    let mut restored = state::Returned::default();
     if let Err(error) = roll_back_to(&target, after.as_deref(), restoring, &mut restored) {
         // Garrison is stopped now: back to the release that ran, and running.
         announce("Rollback failed; starting the release that ran before.");
@@ -273,9 +273,7 @@ pub(super) fn rollback(with_state: bool) -> Step {
             "the release that ran before did not start either".to_owned()
         };
         // What went back stays: the release that ran runs on it now.
-        let back = restoring.map_or_else(String::new, |(source, _)| {
-            state::went_back(&restored, source)
-        });
+        let back = restoring.map_or_else(String::new, |(source, _)| restored.said(source));
         return Err(format!(
             "The rollback failed ({error}); {outcome}.{back} See the journal."
         ));

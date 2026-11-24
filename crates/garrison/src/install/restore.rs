@@ -122,7 +122,7 @@ fn restore(from: &Path) -> Step {
         kept: kept.clone(),
     })?;
     stop_services();
-    let mut restored = Vec::new();
+    let mut restored = state::Returned::default();
     let result = state::restore_all(&source, &config, owner, &mut restored);
     // Garrison is stopped now: whatever was put back, it starts again.
     let started = start(&current);
@@ -130,7 +130,7 @@ fn restore(from: &Path) -> Step {
         place: &place,
         release: &name,
         kept: &kept,
-        went_back: state::went_back(&restored, &source),
+        went_back: restored.said(&source),
     };
     put_back.said(result, started)
 }

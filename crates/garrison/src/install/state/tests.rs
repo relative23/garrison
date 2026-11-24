@@ -138,22 +138,23 @@ fn the_whole_state_goes_back_and_what_did_not_exist_is_removed() {
     let (config, backup) = failed_upgrade(directory.path());
     fs::write(backup.join(crate::ops::POLICY_COPY), "{}").unwrap();
     fs::create_dir_all(config.broker.policy.parent().unwrap()).unwrap();
-    let mut restored = Vec::new();
+    let mut restored = Returned::default();
     restore_all(&backup, &config, own(), &mut restored).unwrap();
-    // The jobs database went back to not being there.
+    // The jobs database had no copy: it was removed, and is named so.
     assert_eq!(
-        restored,
-        ["web", "ingest", "collector", "broker", "the access policy"]
+        restored.back,
+        ["web", "ingest", "collector", "the access policy"]
     );
+    assert_eq!(restored.removed, ["broker"]);
     assert_eq!(
-        went_back(&restored, &backup),
+        restored.said(&backup),
         format!(
-            " These went back to their copies in {}: web, ingest, collector, broker, the \
-             access policy.",
+            " These went back to their copies in {}: web, ingest, collector, the access policy. \
+             Removed, as they did not exist then: broker.",
             backup.display()
         )
     );
-    assert_eq!(went_back(&[], &backup), "");
+    assert_eq!(Returned::default().said(&backup), "");
     for kept in [Database::Web, Database::Events, Database::Status] {
         assert_eq!(note(&config.database(kept)), "before the upgrade");
     }
@@ -162,7 +163,7 @@ fn the_whole_state_goes_back_and_what_did_not_exist_is_removed() {
     // A backup that does not say what was absent removes nothing.
     database(&config.database(Database::Jobs), 3, "kept");
     fs::remove_file(backup.join("backup.json")).unwrap();
-    restore_all(&backup, &config, own(), &mut Vec::new()).unwrap();
+    restore_all(&backup, &config, own(), &mut Returned::default()).unwrap();
     assert_eq!(note(&config.database(Database::Jobs)), "kept");
 }
 
@@ -180,11 +181,12 @@ fn the_policy_never_goes_back_through_a_link() {
     fs::set_permissions(&victim, fs::Permissions::from_mode(0o644)).unwrap();
     fs::create_dir_all(config.broker.policy.parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(&victim, &config.broker.policy).unwrap();
-    let mut restored = Vec::new();
+    let mut restored = Returned::default();
     let refused = restore_all(&backup, &config, own(), &mut restored).unwrap_err();
     assert!(refused.contains("not a file of its own"), "{refused}");
     // What went back before the policy is named as such.
-    assert_eq!(restored, ["web", "ingest", "collector", "broker"]);
+    assert_eq!(restored.back, ["web", "ingest", "collector"]);
+    assert_eq!(restored.removed, ["broker"]);
     assert_eq!(
         fs::read_to_string(&victim).unwrap(),
         "root:x:0:0::/root:/bin/sh\n"
@@ -200,7 +202,7 @@ fn the_policy_never_goes_back_through_a_link() {
     fs::remove_file(&config.broker.policy).unwrap();
     fs::create_dir(&config.broker.policy).unwrap();
     fs::write(config.broker.policy.join("mail"), "kept").unwrap();
-    assert!(restore_all(&backup, &config, own(), &mut Vec::new()).is_err());
+    assert!(restore_all(&backup, &config, own(), &mut Returned::default()).is_err());
     let kept = fs::read_to_string(config.broker.policy.join("mail")).unwrap();
     assert_eq!(kept, "kept");
 }
@@ -222,7 +224,7 @@ fn the_policy_goes_back_as_a_new_file_of_its_owner() {
             fs::write(policy, "{}").unwrap();
             fs::set_permissions(policy, fs::Permissions::from_mode(mode)).unwrap();
         }
-        restore_all(&backup, &config, own(), &mut Vec::new()).unwrap();
+        restore_all(&backup, &config, own(), &mut Returned::default()).unwrap();
         let written = fs::symlink_metadata(policy).unwrap();
         assert!(written.file_type().is_file());
         assert_eq!(mode(policy), 0o640);

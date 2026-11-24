@@ -117,12 +117,13 @@ pub(super) fn policy_owner() -> Step<(Uid, Gid)> {
 
 /// Put back every database and the policy as `source` holds them, the
 /// policy owned by `owner`, and remove the databases it says did not exist.
-/// What went back is in `restored`, also where a later one failed.
+/// What went back and what was removed is in `restored`, also where a later
+/// one failed.
 pub(super) fn restore_all(
     source: &Path,
     config: &Config,
     owner: (Uid, Gid),
-    restored: &mut Vec<&'static str>,
+    restored: &mut Returned,
 ) -> Step {
     announce(&format!(
         "Restoring Garrison state from {}",
@@ -133,32 +134,18 @@ pub(super) fn restore_all(
         let copy = copy_of(source, database);
         if copy.exists() {
             put_back(config, database, &copy)?;
+            restored.back.push(database.writer());
         } else if absent_before(&manifest, database) {
             take_away(config, database)?;
-        } else {
-            continue;
+            restored.removed.push(database.writer());
         }
-        restored.push(database.writer());
     }
     let policy = source.join(crate::ops::POLICY_COPY);
     if policy.exists() {
         put_policy_back(&policy, &config.broker.policy, owner)?;
-        restored.push("the access policy");
+        restored.back.push("the access policy");
     }
     Ok(())
-}
-
-/// What went back to the copies in `source`, as a sentence to append to a
-/// message: nothing where nothing went back.
-pub(super) fn went_back(restored: &[&str], source: &Path) -> String {
-    if restored.is_empty() {
-        return String::new();
-    }
-    format!(
-        " These went back to their copies in {}: {}.",
-        source.display(),
-        restored.join(", ")
-    )
 }
 
 /// The access policy as the broker reads it: a file of its own, made new
