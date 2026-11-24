@@ -208,8 +208,9 @@ step "garrison doctor"
 inside "$garrison doctor > /root/doctor.log 2>&1 || true"
 inside 'sed "s/^/      | /" /root/doctor.log'
 # Doctor reports the reserved test names (.test) as placeholders; nothing else may fail.
+# Its lines are looked for by the names of their states, which stay as they are.
 check "doctor finds no problem but the reserved test names" \
-    '! grep "^FAIL" /root/doctor.log | grep -v "is still the placeholder https://\(admin\|mail\)\.example\.test" | grep -q .'
+    '! grep "^FAIL" /root/doctor.log | grep -vF "[doctor-origin-placeholder]" | grep -q .'
 
 step "The macro milter, switched on and off again"
 # A document as Word writes one with macros, and one without, handed to
@@ -251,8 +252,8 @@ check "garrison-milter.service is active and enabled" \
     'systemctl is-active --quiet garrison-milter.service && systemctl is-enabled --quiet garrison-milter.service'
 inside "$garrison doctor > /root/doctor-milter.log 2>&1 || true"
 check "doctor: the filter answers and Stalwart knows of it" \
-    'grep -q "^ok    the macro milter answers on 127.0.0.1:8096" /root/doctor-milter.log &&
-        grep -q "^ok    Stalwart asks the macro milter on 127.0.0.1:8096 about every message" /root/doctor-milter.log'
+    'grep -qF "[doctor-milter-answers]" /root/doctor-milter.log &&
+        grep -qF "[doctor-milter-entry-asked]" /root/doctor-milter.log'
 check "a document with a macro project is refused in the filter's words" \
     'python3 /root/document-mail.py macro | tee /root/macro-on.log | grep -q "^550 .*contains macros"'
 check "a document without one is taken" \
