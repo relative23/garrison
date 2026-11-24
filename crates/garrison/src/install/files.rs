@@ -52,6 +52,22 @@ pub(super) fn place(source: &Path, target: &Path, mode: u32) -> Step {
     )
 }
 
+/// Write `contents` to `target` with `mode`, as `place` copies, where it does
+/// not hold them with that mode already; whether it wrote.
+pub(super) fn put(target: &Path, contents: &[u8], mode: u32) -> Step<bool> {
+    let held = fs::read(target).is_ok_and(|now| now == contents)
+        && fs::metadata(target).is_ok_and(|now| now.permissions().mode() & 0o7777 == mode);
+    if held {
+        return Ok(false);
+    }
+    io(fs::write(target, contents), target)?;
+    io(
+        fs::set_permissions(target, fs::Permissions::from_mode(mode)),
+        target,
+    )?;
+    Ok(true)
+}
+
 fn at<T>(result: rustix::io::Result<T>, what: &Path) -> Step<T> {
     result.map_err(|error| format!("{}: {error}", what.display()))
 }
@@ -357,6 +373,24 @@ mod tests {
         let file = directory.path().join("file");
         fs::write(&file, "").unwrap();
         assert!(fresh_folder(&file, "pre-upgrade").is_err());
+    }
+
+    /// A file that holds what is to be written, with its mode, is left as it
+    /// is; another content or mode is written.
+    #[test]
+    fn a_file_is_written_only_where_it_differs() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("garrison-web.service");
+        assert_eq!(put(&file, b"[Unit]\n", 0o644), Ok(true));
+        assert_eq!(put(&file, b"[Unit]\n", 0o644), Ok(false));
+        assert_eq!(put(&file, b"[Unit]\n", 0o600), Ok(true));
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(put(&file, b"[Service]\n", 0o600), Ok(true));
+        assert_eq!(fs::read(&file).unwrap(), b"[Service]\n");
+        assert!(put(&directory.path().join("absent/file"), b"", 0o644).is_err());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install the older of two signed test archives, then check that `garrison
-# upgrade` refuses every archive it must not install, changing nothing, and
-# installs the newer one.
+# upgrade` refuses every archive it must not install, changing nothing,
+# changes nothing with the running release's own, and installs the newer one.
 #
 #   [DISTRO=debian-13] scripts/acceptance-upgrade.sh OUT-DIR
 #
@@ -69,6 +69,24 @@ refused() {
     echo "ok    $1"
 }
 
+# `garrison upgrade` with the running release's own archive must succeed,
+# say that nothing was changed, stop nothing and leave no unpacked tree.
+unchanged() {
+    pid=$(inside 'systemctl show -p MainPID --value garrison-web.service')
+    if ! inside "$2" > "$cases/output" 2>&1 ||
+        ! grep -q -- "is running as installed; nothing was changed." "$cases/output"; then
+        echo "FAIL  $1: it did not say that nothing was changed"
+        cat "$cases/output"
+        exit 1
+    fi
+    if [ "$(inside 'systemctl show -p MainPID --value garrison-web.service')" != "$pid" ] ||
+        inside 'ls /opt/garrison | grep -q "^upgrade\."'; then
+        echo "FAIL  $1: something changed"
+        exit 1
+    fi
+    echo "ok    $1"
+}
+
 step "Refusals change nothing"
 upgrade=/opt/garrison/current/bin/garrison
 refused "an archive changed after signing is refused" \
@@ -81,8 +99,8 @@ refused "an archive without a signature is refused" \
     "$upgrade upgrade /root/cases/unsigned/$file" "$file.minisig"
 refused "an archive for another architecture is refused" \
     "$upgrade upgrade /root/cases/arch/garrison-$newer-$other.tar.gz" "is built for $other"
-refused "the running version is not installed again" \
-    "$upgrade upgrade /root/cases/older/garrison-$older-$arch.tar.gz" "is not newer than the running $older"
+unchanged "the running release's own archive changes nothing" \
+    "$upgrade upgrade /root/cases/older/garrison-$older-$arch.tar.gz"
 refused "only root upgrades" \
     "setpriv --reuid=65534 --regid=65534 --clear-groups $upgrade upgrade /root/$file" "Run as root."
 refused "only an installed release upgrades" \
@@ -93,7 +111,10 @@ installer "$upgrade upgrade /root/$file"
 check "current points at the signed release" "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$newer'"
 check "the unpacked tree is gone" '! ls /opt/garrison | grep -q "^upgrade\."'
 services upgraded
-refused "the same release is not installed twice" \
-    "/opt/garrison/current/bin/garrison upgrade /root/$file" "is not newer than the running $newer"
+unchanged "the same release again changes nothing" \
+    "/opt/garrison/current/bin/garrison upgrade /root/$file"
+refused "an older release is not installed" \
+    "/opt/garrison/current/bin/garrison upgrade /root/cases/older/garrison-$older-$arch.tar.gz" \
+    "is older than the running $newer"
 
 step "Accepted: garrison upgrade installs only what a trusted key signed for it"

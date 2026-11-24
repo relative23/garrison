@@ -5,7 +5,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use super::files::{Step, announce, io, must, place, relabel, run};
+use super::files::{Step, announce, io, must, put, relabel, run};
 use super::{CONFIG, SYSTEMCTL, UNITS, cli, command};
 
 fn nginx_files() -> Vec<(String, Vec<u8>)> {
@@ -46,27 +46,24 @@ fn reload_nginx() -> Step {
     Ok(())
 }
 
-/// Write what a command of `release` prints, where it succeeds; where it
-/// fails, why, in the command's own words.
+/// Write what a command of `release` prints where it succeeds, and say
+/// whether that changed the file; where it fails, why, in the command's own
+/// words.
 fn write_output(
     release: &Path,
     command: &[&str],
     target: &Path,
     installed: &mut Vec<PathBuf>,
-) -> Step<Result<(), String>> {
+) -> Step<Result<bool, String>> {
     let output = cli(release, command)?;
     if !output.status.success() {
         return Ok(Err(String::from_utf8_lossy(&output.stderr)
             .trim()
             .to_owned()));
     }
-    io(fs::write(target, &output.stdout), target)?;
-    io(
-        fs::set_permissions(target, fs::Permissions::from_mode(0o644)),
-        target,
-    )?;
+    let wrote = put(target, &output.stdout, 0o644)?;
     installed.push(target.to_owned());
-    Ok(Ok(()))
+    Ok(Ok(wrote))
 }
 
 /// Write what a command of `release` prints, or say why not. Before a
@@ -77,13 +74,21 @@ fn write_or_say(
     command: &[&str],
     target: &Path,
     installed: &mut Vec<PathBuf>,
-) -> Step {
-    if let Err(reason) = write_output(release, command, target, installed)?
-        && Path::new(CONFIG).join("garrison.toml").exists()
-    {
-        announce(&unwritten(target, command, &reason));
+) -> Step<bool> {
+    match write_output(release, command, target, installed)? {
+        Ok(wrote) => Ok(wrote),
+        Err(reason) => {
+            if Path::new(CONFIG).join("garrison.toml").exists() {
+                announce(&unwritten(target, command, &reason));
+            }
+            Ok(false)
+        }
     }
-    Ok(())
+}
+
+/// A file of the release as a system file, where it differs.
+fn copy_to(source: &Path, target: &Path) -> Step<bool> {
+    put(target, &io(fs::read(source), source)?, 0o644)
 }
 
 fn unwritten(target: &Path, command: &[&str], reason: &str) -> String {
@@ -99,14 +104,16 @@ pub(super) fn unit_file(unit: &str) -> PathBuf {
     Path::new("/etc/systemd/system").join(unit)
 }
 
-pub(super) fn install_system_files(release: &Path) -> Step {
+/// Install the system files of `release` where they differ from what it
+/// writes, and say whether any did.
+pub(super) fn install_system_files(release: &Path) -> Step<bool> {
     let share = release.join("share/deploy");
     let sysusers = PathBuf::from("/etc/sysusers.d/garrison.conf");
     io(
         fs::create_dir_all("/etc/sysusers.d"),
         Path::new("/etc/sysusers.d"),
     )?;
-    place(&share.join("sysusers/garrison.conf"), &sysusers, 0o644)?;
+    let mut changed = copy_to(&share.join("sysusers/garrison.conf"), &sysusers)?;
     must(
         "/usr/bin/systemd-sysusers",
         &[&sysusers.display().to_string()],
@@ -115,17 +122,19 @@ pub(super) fn install_system_files(release: &Path) -> Step {
     for unit in UNITS {
         let (source, target) = (share.join("systemd").join(unit), unit_file(unit));
         if source.exists() {
-            place(&source, &target, 0o644)?;
+            changed |= copy_to(&source, &target)?;
             installed.push(target);
         } else if target.exists() {
             // A rollback to a release from before this unit: it must not go
             // on starting a command that release does not have.
             let _ = run(SYSTEMCTL, &["disable", "--now", unit]);
             io(fs::remove_file(&target), &target)?;
+            changed = true;
         }
     }
-    if let Err(reason) = command::link(Path::new(command::LINK)) {
-        announce(&reason);
+    match command::link(Path::new(command::LINK)) {
+        Ok(made) => changed |= made,
+        Err(reason) => announce(&reason),
     }
     if Path::new("/etc/nginx").is_dir() {
         io(
@@ -137,16 +146,12 @@ pub(super) fn install_system_files(release: &Path) -> Step {
         // for a release that cannot write it, the include as shipped.
         let target = PathBuf::from(crate::nginx::SNIPPET);
         if write_output(release, &["nginx", "--snippet"], &target, &mut installed)?.is_err() {
-            place(&share.join("nginx/garrison.conf"), &target, 0o644)?;
+            copy_to(&share.join("nginx/garrison.conf"), &target)?;
             installed.push(target);
         }
         // Keeps the exporter that `stalwart setup` enables off Stalwart's public hosts.
         let private = PathBuf::from("/etc/nginx/snippets/garrison-stalwart-server.conf");
-        place(
-            &share.join("nginx/garrison-stalwart-server.conf"),
-            &private,
-            0o644,
-        )?;
+        copy_to(&share.join("nginx/garrison-stalwart-server.conf"), &private)?;
         installed.push(private);
         // The optional "Switch to Garrison WebUI" row in the Stalwart WebUI; the
         // operator includes this file where the Stalwart WebUI is served.
@@ -154,18 +159,21 @@ pub(super) fn install_system_files(release: &Path) -> Step {
         write_or_say(release, &["stalwart-switch"], &switch, &mut installed)?;
         if nginx_files() != before {
             reload_nginx()?;
+            changed = true;
         }
     }
     let rule = PathBuf::from("/etc/polkit-1/rules.d/50-garrison.rules");
-    write_or_say(release, &["polkit-rule"], &rule, &mut installed)?;
+    changed |= write_or_say(release, &["polkit-rule"], &rule, &mut installed)?;
     relabel(&installed);
-    super::selinux::install()?;
-    protect_policy()?;
-    must(SYSTEMCTL, &["daemon-reload"])
+    changed |= super::selinux::install()?;
+    changed |= protect_policy()?;
+    must(SYSTEMCTL, &["daemon-reload"])?;
+    Ok(changed)
 }
 
-/// The access policy belongs to root and only the broker's group may read it.
-pub(super) fn protect_policy() -> Step {
+/// The access policy belongs to root and only the broker's group may read
+/// it; whether its owner or mode had to change.
+pub(super) fn protect_policy() -> Step<bool> {
     protect(&super::policy())
 }
 
@@ -176,17 +184,17 @@ pub(super) fn protect_policy() -> Step {
 /// root's own file is made the broker's: one of another user, who may write
 /// a folder outside /etc/garrison, would become the policy the broker grants
 /// by, and is refused as the broker refuses it.
-fn protect(policy: &Path) -> Step {
+fn protect(policy: &Path) -> Step<bool> {
     use std::os::unix::fs::MetadataExt;
 
     use rustix::fs::{Mode, OFlags};
     let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
     let Ok(file) = rustix::fs::open(policy, flags, Mode::empty()).map(fs::File::from) else {
-        return Ok(());
+        return Ok(false);
     };
     let metadata = io(file.metadata(), policy)?;
     if !metadata.is_file() {
-        return Ok(());
+        return Ok(false);
     }
     if metadata.uid() != 0 {
         return Err(format!(
@@ -198,13 +206,21 @@ fn protect(policy: &Path) -> Step {
             policy.display()
         ));
     }
-    let group = crate::access::group_id("garrison-broker").map(rustix::fs::Gid::from_raw);
-    rustix::fs::fchown(&file, Some(rustix::fs::Uid::ROOT), group)
-        .map_err(|error| format!("{}: {error}", policy.display()))?;
+    let group = crate::access::group_id("garrison-broker");
+    if group.is_none_or(|group| metadata.gid() == group) && metadata.mode() & 0o7777 == 0o640 {
+        return Ok(false);
+    }
+    rustix::fs::fchown(
+        &file,
+        Some(rustix::fs::Uid::ROOT),
+        group.map(rustix::fs::Gid::from_raw),
+    )
+    .map_err(|error| format!("{}: {error}", policy.display()))?;
     io(
         file.set_permissions(fs::Permissions::from_mode(0o640)),
         policy,
-    )
+    )?;
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -222,7 +238,7 @@ mod tests {
         let printing = release("echo 'polkit.addRule(rule);'");
         assert_eq!(
             write_output(printing.path(), &["polkit-rule"], &target, &mut installed),
-            Ok(Ok(()))
+            Ok(Ok(true))
         );
         assert_eq!(
             fs::read_to_string(&target).unwrap(),
@@ -233,6 +249,11 @@ mod tests {
             0o644
         );
         assert_eq!(installed, std::slice::from_ref(&target));
+        // The same output again changes nothing.
+        assert_eq!(
+            write_output(printing.path(), &["polkit-rule"], &target, &mut Vec::new()),
+            Ok(Ok(false))
+        );
         let failing = release(
             "echo 'Cannot load /etc/garrison/garrison.toml: unknown key nonsense' >&2; exit 2",
         );
@@ -274,7 +295,7 @@ mod tests {
         fs::create_dir(&folder).unwrap();
         fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
         for named in [&link, &folder, &directory.path().join("missing.json")] {
-            assert_eq!(protect(named), Ok(()), "{}", named.display());
+            assert_eq!(protect(named), Ok(false), "{}", named.display());
         }
         let mode = |path: &Path| fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!((mode(&elsewhere), mode(&folder)), (0o644, 0o755));

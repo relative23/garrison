@@ -3,9 +3,6 @@
 //!
 //! Every check comes before the services stop. Once they have stopped, any
 //! failure returns to the release that ran and starts it again.
-//!
-//! Run again after it was interrupted, a rollback goes on to where it was
-//! going; while an upgrade is unfinished, it undoes that (`unfinished.rs`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,7 +12,6 @@ use rustix::fs::{Gid, Uid};
 
 use super::files::{Step, announce, io, lock, switch};
 use super::system::install_system_files;
-use super::unfinished::{self, Seen, Unfinished};
 use super::{
     BACKUPS, BASE, CONFIG, LAST, LOCK, cli, precheck, preflight, start, state, stop_services,
 };
@@ -88,11 +84,12 @@ fn restore_state(source: &Path, owner: (Uid, Gid), restored: &mut state::Returne
     state::restore_all(source, &config, owner, restored)
 }
 
-/// Make `target` current and `after` previous, or none where that is
-/// `target` itself, then start `target`.
+/// Put the state back where asked, make `target` current and start it, and
+/// only then make `left` previous: until `target` runs, `previous` names it,
+/// so that the same rollback run again goes there.
 fn roll_back_to(
     target: &Path,
-    after: Option<&Path>,
+    left: &Path,
     source: Option<(&Path, (Uid, Gid))>,
     restored: &mut state::Returned,
 ) -> Step {
@@ -101,81 +98,52 @@ fn roll_back_to(
     }
     let base = Path::new(BASE);
     switch(&base.join("current"), target)?;
-    roll_back_previous(after.filter(|after| *after != target))?;
     install_system_files(target)?;
-    start(target)
+    start(target)?;
+    switch(&base.join("previous"), left)
 }
 
-/// Where a rollback goes: to `target`, leaving `left`, and what `previous`
-/// names once it is done. `state` where an earlier run of this rollback put
-/// the state from before the upgrade back, `started` where it had started
-/// its target, and its state went back before that.
+/// Where a rollback goes: to `target`, the release `previous` names, from
+/// `current`, leaving `left`. That is `current`, or, where `current` names
+/// the target already, as a rollback cut short once it switched `current`
+/// leaves it, the installed release of `installer`, the binary that runs
+/// this, which that rollback's first line named.
 struct Plan {
     target: PathBuf,
+    current: PathBuf,
     left: PathBuf,
-    after: Option<PathBuf>,
-    state: bool,
-    started: bool,
 }
 
-/// What the rollback returns to: an unfinished upgrade is undone, an
-/// unfinished rollback goes on; otherwise the release `previous` names.
-fn plan(base: &Path) -> Step<Plan> {
+fn plan(base: &Path, installer: Option<PathBuf>) -> Step<Plan> {
     let current = io(
         fs::canonicalize(base.join("current")),
         &base.join("current"),
     )?;
-    match unfinished::read()? {
-        Seen::Holds(Unfinished::Upgrade { from, previous, .. })
-        | Seen::Failed(Unfinished::Upgrade { from, previous, .. }) => Ok(Plan {
-            target: from,
-            left: current,
-            after: previous,
-            state: false,
-            started: false,
+    let Ok(target) = fs::canonicalize(base.join("previous")) else {
+        return Err("There is no previous release to return to.".into());
+    };
+    if target != current {
+        return Ok(Plan {
+            target,
+            left: current.clone(),
+            current,
+        });
+    }
+    let releases = fs::canonicalize(base.join("releases")).ok();
+    let installer = installer
+        .and_then(|binary| Some(binary.parent()?.parent()?.to_owned()))
+        .filter(|release| release.parent() == releases.as_deref() && *release != target);
+    match installer {
+        Some(left) => Ok(Plan {
+            target,
+            current,
+            left,
         }),
-        Seen::Holds(Unfinished::Rollback {
-            from,
-            to,
-            previous,
-            state,
-        }) => Ok(Plan {
-            target: to,
-            left: from,
-            after: previous,
-            state: state.is_some(),
-            started: false,
-        }),
-        Seen::Holds(record @ Unfinished::Restore { .. }) | Seen::Failed(record) => {
-            Err(record.finish_first())
-        }
-        Seen::Stale(Unfinished::Rollback {
-            from, to, previous, ..
-        }) if to == current => Ok(Plan {
-            target: to,
-            left: from,
-            after: previous,
-            state: false,
-            started: true,
-        }),
-        Seen::Stale(_) | Seen::Nothing => {
-            let Ok(target) = fs::canonicalize(base.join("previous")) else {
-                return Err("There is no previous release to return to.".into());
-            };
-            if target == current {
-                return Err(format!(
-                    "There is no other release to return to: {BASE}/previous names the \
-                     running release."
-                ));
-            }
-            Ok(Plan {
-                target,
-                after: Some(current.clone()),
-                left: current,
-                state: false,
-                started: false,
-            })
-        }
+        None => Err(format!(
+            "There is no other release to return to: {BASE}/previous names the release \
+             {BASE}/current names. A rollback cut short is finished by the installer its first \
+             line named."
+        )),
     }
 }
 
@@ -183,27 +151,14 @@ pub(super) fn rollback(with_state: bool) -> Step {
     preflight()?;
     super::requirements::base_shown()?;
     let _held = lock(Path::new(LOCK))?;
+    super::leftover()?;
     let base = Path::new(BASE);
     let Plan {
         target,
-        left: current,
-        after,
-        state,
-        started,
-    } = plan(base)?;
-    let name = target.file_name().unwrap_or_default().to_string_lossy();
-    // The target ran on the state that went back: what it recorded since
-    // stays, and the rollback finishes with links, system files and a start.
-    if started && with_state {
-        announce(&format!(
-            "The state from before the upgrade went back before {name} was started; it does \
-             not go back again over what was recorded since."
-        ));
-    }
-    if state && !with_state {
-        announce("The rollback began with --restore-state and goes on with it.");
-    }
-    let with_state = (with_state || state) && !started;
+        current,
+        left,
+    } = plan(base, std::env::current_exe().ok())?;
+    let name = super::name(&target);
     let source = if with_state {
         Some(restore_source(&name)?)
     } else {
@@ -237,74 +192,98 @@ pub(super) fn rollback(with_state: bool) -> Step {
         Some(source) => Some((source.clone(), state_fits(&target, &source, comes_back)?)),
         None => None,
     };
-    // A release from before this one, which `current` then names, knows no
-    // record: this binary finishes the rollback.
-    let binary = std::env::current_exe().map_or_else(
-        |_| super::command::name(),
-        |binary| binary.display().to_string(),
-    );
     announce(&format!(
-        "Rolling back to {name}; if this is interrupted, finish it with: {binary} install \
-         --rollback{}",
+        "Rolling back to {name}; if this is interrupted, run it again: {} install --rollback{}",
+        left.join("bin/garrison").display(),
         if with_state { " --restore-state" } else { "" }
     ));
     // The system files of the target protect the policy as it is.
     super::system::protect_policy().map_err(|error| format!("{error}. Nothing was changed."))?;
-    unfinished::write(&Unfinished::Rollback {
-        from: current.clone(),
-        to: target.clone(),
-        previous: after.clone(),
-        state: source.as_ref().map(|(source, _)| source.clone()),
-    })?;
     stop_services();
     let restoring = source
         .as_ref()
         .map(|(source, owner)| (source.as_path(), *owner));
     let mut restored = state::Returned::default();
-    if let Err(error) = roll_back_to(&target, after.as_deref(), restoring, &mut restored) {
+    if let Err(error) = roll_back_to(&target, &left, restoring, &mut restored) {
+        // What went back stays: a release that starts now runs on it.
+        let back = restoring.map_or_else(String::new, |(source, _)| restored.said(source));
+        if current == target {
+            stop_services();
+            return Err(format!(
+                "The rollback failed ({error}); {name} is stopped.{back} See the journal."
+            ));
+        }
         // Garrison is stopped now: back to the release that ran, and running.
         announce("Rollback failed; starting the release that ran before.");
         switch(&base.join("current"), &current)?;
-        if target == current {
-            roll_back_previous(after.as_deref())?;
-        } else {
-            switch(&base.join("previous"), &target)?;
-        }
+        switch(&base.join("previous"), &target)?;
         install_system_files(&current)?;
         let outcome = if start(&current).is_ok() {
-            match unfinished::done() {
-                Ok(()) => "the release that ran before is running again".to_owned(),
-                Err(error) => format!("the release that ran before is running again, but {error}"),
-            }
+            "the release that ran before is running again"
         } else {
-            "the release that ran before did not start either".to_owned()
+            "the release that ran before did not start either"
         };
-        // What went back stays: the release that ran runs on it now.
-        let back = restoring.map_or_else(String::new, |(source, _)| restored.said(source));
         return Err(format!(
             "The rollback failed ({error}); {outcome}.{back} See the journal."
         ));
     }
-    unfinished::done()?;
     announce(&format!("Rolled back to {name}."));
-    Ok(())
-}
-
-/// `previous` as `after` says, or none.
-fn roll_back_previous(after: Option<&Path>) -> Step {
-    let previous = Path::new(BASE).join("previous");
-    if let Some(after) = after {
-        return switch(&previous, after);
-    }
-    let _ = fs::remove_file(&previous);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::symlink;
+
     use rusqlite::Connection;
 
     use super::*;
+
+    /// A rollback goes to `previous` and leaves `current`; where `current`
+    /// names the target already, it leaves the installed release whose
+    /// installer runs it, and without one it changes nothing.
+    #[test]
+    fn a_rollback_cut_short_is_finished_by_the_installer_it_named() {
+        let directory = tempfile::tempdir().unwrap();
+        let base = fs::canonicalize(directory.path()).unwrap();
+        for release in ["0.1", "0.2"] {
+            fs::create_dir_all(base.join("releases").join(release).join("bin")).unwrap();
+        }
+        let release = |name: &str| base.join("releases").join(name);
+        let installer = |name: &str| Some(release(name).join("bin/garrison"));
+        let link = |name: &str, to: &str| {
+            let _ = fs::remove_file(base.join(name));
+            symlink(release(to), base.join(name)).unwrap();
+        };
+        let left = |found: Step<Plan>| found.map(|plan| (plan.target, plan.left));
+        assert!(plan(&base, installer("0.2")).is_err(), "no current release");
+        link("current", "0.2");
+        let refused = plan(&base, installer("0.2")).err().unwrap();
+        assert_eq!(refused, "There is no previous release to return to.");
+        // Begun: whichever installer runs it.
+        link("previous", "0.1");
+        for name in ["0.1", "0.2"] {
+            let found = left(plan(&base, installer(name)));
+            assert_eq!(found, Ok((release("0.1"), release("0.2"))), "{name}");
+        }
+        // Cut short once it switched `current`: the installer it named.
+        link("current", "0.1");
+        let found = left(plan(&base, installer("0.2")));
+        assert_eq!(found, Ok((release("0.1"), release("0.2"))));
+        // Run by the target's own installer, or by a binary outside the
+        // releases: nothing tells the release it left.
+        for binary in [
+            installer("0.1"),
+            Some(base.join("unpacked/bin/garrison")),
+            None,
+        ] {
+            let refused = plan(&base, binary.clone()).err().unwrap();
+            assert!(
+                refused.contains("is finished by the installer"),
+                "{binary:?}"
+            );
+        }
+    }
 
     /// A backup that holds `database` at schema `version`.
     fn copy(backup: &Path, database: Database, version: usize) {

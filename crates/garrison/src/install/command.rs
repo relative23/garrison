@@ -28,11 +28,11 @@ pub(super) fn ours(link: &Path) -> bool {
     fs::read_link(link).is_ok_and(|found| found == Path::new(&target()))
 }
 
-/// Make the link at `link`. `Err` says why there is none, for the operator
-/// to read; it never ends an installation.
-pub(super) fn link(link: &Path) -> Result<(), String> {
+/// Make the link at `link`, and say whether it was made now. `Err` says why
+/// there is none, for the operator to read; it never ends an installation.
+pub(super) fn link(link: &Path) -> Result<bool, String> {
     if ours(link) {
-        return Ok(());
+        return Ok(false);
     }
     let full = target();
     match fs::symlink_metadata(link) {
@@ -41,7 +41,7 @@ pub(super) fn link(link: &Path) -> Result<(), String> {
             link.display()
         )),
         Err(error) if error.kind() == ErrorKind::NotFound => {
-            symlink(&full, link).map_err(|error| {
+            symlink(&full, link).map(|()| true).map_err(|error| {
                 format!(
                     "{} could not be made ({error}); Garrison's command is {full}.",
                     link.display()
@@ -74,14 +74,14 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("garrison");
         assert!(!ours(&path));
-        assert_eq!(link(&path), Ok(()));
+        assert_eq!(link(&path), Ok(true));
         assert_eq!(
             fs::read_link(&path).unwrap(),
             Path::new("/opt/garrison/current/bin/garrison")
         );
         assert!(ours(&path));
         // A second installation finds it and changes nothing.
-        assert_eq!(link(&path), Ok(()));
+        assert_eq!(link(&path), Ok(false));
     }
 
     #[test]

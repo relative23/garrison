@@ -29,7 +29,7 @@ pub(super) fn settle(milter: bool) -> Step {
 }
 
 /// Why `systemctl show -p ActiveState -p NRestarts` describes a unit that did not stay up.
-fn unsettled(properties: &str) -> Option<String> {
+pub(super) fn unsettled(properties: &str) -> Option<String> {
     let value = |key: &str| {
         properties
             .lines()

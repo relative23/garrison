@@ -59,7 +59,7 @@ fn still_asked(
 }
 
 /// Stalwart's milters, as the collector's API key reads them.
-fn stalwart_entries(config: &Config) -> Result<Vec<Entry>, String> {
+pub(super) fn stalwart_entries(config: &Config) -> Result<Vec<Entry>, String> {
     let key = Credentials::new(&config.credentials_directory)
         .read_secret(&config.collector.native_key)
         .map_err(|error| format!("the collector's API key: {error}"))?;
