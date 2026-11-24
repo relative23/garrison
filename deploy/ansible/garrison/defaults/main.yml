@@ -21,8 +21,7 @@ garrison_modules: []
 garrison_extra_config: ""
 
 # The Stalwart administrator for `garrison stalwart setup`, passed on
-# standard input: {username: ..., secret: ...} or {apiKey: ...}. Used where
-# setup has not finished with the configuration as it is, as on the first
-# run and after a change, or where a key file it writes holds no key. Keep it
-# in Ansible Vault.
+# standard input: {username: ..., secret: ...} or {apiKey: ...}. Used in
+# every play; setup changes nothing where Stalwart is as asked. Keep it in
+# Ansible Vault.
 garrison_stalwart_admin: {}

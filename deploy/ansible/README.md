@@ -23,17 +23,14 @@ reaches a host.
 
 Put `garrison-<version>-<arch>.tar.gz` and its `.minisig` in `archives/` next
 to the playbook. Changing `garrison_version` upgrades; the installer backs up
-and switches back on failure as always. Every play runs the installer, which
-changes nothing where the release runs as installed with this configuration:
-a second play changes nothing, and a play that stopped on the way is finished
-by the next one. With this role, a release before this one restarts Garrison
-in every play, as its installer always did. `garrison stalwart setup` runs,
-where `garrison_stalwart_admin` is set, until it has finished with this
-configuration, which the role notes in `/opt/garrison/ansible-setup`. So setup
-also runs after a change of the configuration, and Stalwart must answer then.
-The first play of this role runs setup also on a host that the role of an
-earlier release set up, so the administrator in `garrison_stalwart_admin` must
-still work then.
+and switches back on failure as always. Every play runs `garrison stalwart
+setup` where `garrison_stalwart_admin` is set, and then the installer; setup
+changes nothing where Stalwart is as asked, and the installer nothing where
+the release runs as installed with this configuration. So a second play
+changes nothing, and a play that stopped on the way is finished by the next
+one; every play needs Stalwart to answer and that administrator to work.
+With this role, a release before this one restarts Garrison and sets up
+Stalwart again in every play, as its installer and setup always did.
 Where the access policy binds no role and no account, the play stops and
 says how to bind one. On a host the role has set up, a dry run (`--check`)
 checks the signature and says whether `garrison.toml` would change; it runs

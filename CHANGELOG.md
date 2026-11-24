@@ -55,10 +55,10 @@ Notable changes for operators and users. The format follows
   `sysAccountQuery`, and the DNS records, Blocklists, Reverse names, TLS
   certificates, Mailbox storage and Spam and ham by domain cards stay
   Unknown without a notification.
-- **The first play of the Ansible role runs `garrison stalwart setup`, where
-  `garrison_stalwart_admin` is set, also on a host that an earlier release's
-  role set up.** Stalwart must answer then, and that administrator must still
-  work.
+- **Every play of the Ansible role runs `garrison stalwart setup` where
+  `garrison_stalwart_admin` is set, and setup changes nothing where Stalwart
+  is as asked.** Stalwart must answer in every play, and that administrator
+  must still work.
 
 ### Added
 
@@ -1616,8 +1616,7 @@ Notable changes for operators and users. The format follows
   needed after setup had made the key; the first run with a key reads them
   again, as it does a reading made without the key of Spamhaus' Data Query
   Service. The Ansible role ran setup only where the broker's key file was
-  missing; it now runs it where any of the three key files is missing or
-  empty, and a run with every key in place still changes nothing.
+  missing; it now runs it in every play.
 - **Setup says that Stalwart refused the administrator.** A wrong
   password, an unknown user or an API key that Stalwart does not know made
   `garrison stalwart setup` end with "x:ApiKey/get: HTTP 401", which named
@@ -2075,10 +2074,9 @@ Notable changes for operators and users. The format follows
 - **The Ansible role runs the installer in every play, which changes nothing
   where the release runs as installed**, so that the next play starts Garrison
   where one stopped after the first install or its installer did not finish.
-- **The Ansible role runs `garrison stalwart setup` again where setup did
-  not finish or `garrison.toml` changed since, and finds the access policy
-  where `[broker] policy` keeps it**; where the policy binds no role and no
-  account, the play stops and says how to bind one.
+- **The Ansible role runs `garrison stalwart setup` in every play, and finds
+  the access policy where `[broker] policy` keeps it**; where the policy
+  binds no role and no account, the play stops and says how to bind one.
 - **A dry run of the Ansible role (`ansible-playbook --check`) checks the
   signature and runs to its end on a host the role set up**, where it stopped
   saying that the signature belonged to another release.

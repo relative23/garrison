@@ -447,10 +447,12 @@ services "installed by the role"
 
 step "A second run changes nothing"
 unchanged "a second run changes nothing" "$older"
+said "Stalwart is set up as asked; nothing was changed."
 unchanged "a dry run changes nothing" "$older" --check
 
 step "A new version upgrades"
 play "$newer"
+said "Stalwart is set up as asked; nothing was changed."
 check "the role upgraded to $newer" "test \"\$(cat /opt/garrison/current/VERSION)\" = '$newer'"
 services "upgraded by the role"
 

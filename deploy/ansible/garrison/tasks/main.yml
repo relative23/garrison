@@ -1,10 +1,8 @@
 ---
 # Install, configure and upgrade Garrison; the play needs `become: true`.
 # Every task can run again: a second run changes only what changed, and a run
-# that stopped anywhere is finished by the next. The installer runs in every
-# play and says itself whether it changed anything. What setup last finished
-# with is kept in /opt/garrison, which goes with an uninstallation, and is
-# taken away before setup runs again.
+# that stopped anywhere is finished by the next. The installer and setup run
+# in every play, and each says itself whether it changed anything.
 
 - name: The release and the addresses are named
   ansible.builtin.assert:
@@ -102,39 +100,6 @@
     owner: root
     group: root
     mode: "0644"
-  register: garrison_config
-
-# An empty key file, or one of a line end alone, gives its service no key,
-# as a missing one does: setup runs where any of the three holds none.
-- name: What the key files setup writes hold
-  ansible.builtin.command:
-    argv: [grep, -qs, "[^[:space:]]", "/etc/garrison/credentials/{{ item }}"]
-  loop: [webhook-signature-key, collector-native-key, broker-native-key]
-  register: garrison_keys
-  changed_when: false
-  failed_when: false
-  when: garrison_stalwart_admin | length > 0
-
-- name: The configuration setup last finished with
-  ansible.builtin.slurp:
-    src: /opt/garrison/ansible-setup
-  register: garrison_set_up
-  failed_when: false
-
-# Also where garrison.toml changed since: the sign-in client, the webhook and
-# the macro filter's entry in Stalwart follow it only through setup.
-- name: Whether setup is due
-  ansible.builtin.set_fact:
-    garrison_setup_due: >-
-      {{ garrison_stalwart_admin | length > 0
-      and (garrison_keys.results | rejectattr('rc', 'equalto', 0) | list | length > 0
-      or (garrison_set_up.content | default('') | b64decode | trim) != garrison_config.checksum) }}
-
-- name: The record of a finished setup goes first
-  ansible.builtin.file:
-    path: /opt/garrison/ansible-setup
-    state: absent
-  when: garrison_setup_due | bool
 
 # The release being installed, not the one in /opt/garrison/current: on an
 # upgrade that is still the release being replaced, whose setup may not
@@ -150,26 +115,18 @@
       - "-"
     stdin: "{{ garrison_stalwart_admin | to_json }}"
   register: garrison_setup
+  changed_when: "'Stalwart is set up as asked; nothing was changed.' not in garrison_setup.stdout"
   # Hides the administrator on standard input; what setup says holds no
   # secret and is shown next.
   no_log: true
   failed_when: false
-  when: garrison_setup_due | bool
+  when: garrison_stalwart_admin | length > 0
 
 - name: What setup said
   ansible.builtin.debug:
     msg: "{{ garrison_setup.stdout_lines + garrison_setup.stderr_lines or [garrison_setup.msg] }}"
   failed_when: garrison_setup.rc != 0
   when: garrison_setup is not skipped
-
-- name: Setup finished with this configuration
-  ansible.builtin.copy:
-    content: "{{ garrison_config.checksum }}\n"
-    dest: /opt/garrison/ansible-setup
-    owner: root
-    group: root
-    mode: "0644"
-  when: garrison_setup is not skipped and garrison_setup.rc == 0
 
 # Where garrison.toml keeps the policy, read by the release being installed
 # as its broker will read it; init writes one only where none is there.
