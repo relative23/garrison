@@ -145,9 +145,9 @@ fn a_few_triplets_in_a_quoted_printable_wrapper_do_not_hide_the_base64() {
 fn a_triplet_among_the_headers_has_nothing_read_again() {
     let message = b"DKIM-Signature: v=1; s=20230601; bh=AbCd;\r\n t=1763373600\r\n\
         Subject: x\r\n\r\nA line of text.\r\n";
-    assert_eq!(unquoted(message).1, 0);
+    assert_eq!(unquoted(message, false).1, 0);
     let body = b"Subject: x\r\n\r\nwidth=3D600\r\n";
-    assert_eq!(unquoted(body).1, 1);
+    assert_eq!(unquoted(body, false).1, 1);
     // What ends the header block for some reader ends it here.
     for early in [
         &b"Subject: x\r\n \r\ns=20\r\n"[..],
@@ -157,7 +157,12 @@ fn a_triplet_among_the_headers_has_nothing_read_again() {
         b" s=20: x\r\n",
         b"Sub ject: s=20\r\n",
     ] {
-        assert_eq!(unquoted(early).1, 1, "{}", String::from_utf8_lossy(early));
+        assert_eq!(
+            unquoted(early, false).1,
+            1,
+            "{}",
+            String::from_utf8_lossy(early)
+        );
     }
 }
 
@@ -427,5 +432,42 @@ fn macros_in_the_base64_of_an_office_xml_file_are_found() {
             macros(&part("base64", STANDARD.encode(&file).as_bytes())),
             Outcome::Clean
         );
+    }
+}
+
+/// `data` as quoted-printable, every byte `=XX`, with `soft` after every
+/// seventh triplet.
+fn quoted_with(data: &[u8], soft: &[u8]) -> Vec<u8> {
+    let mut out = b"Subject: x\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n".to_vec();
+    for (index, byte) in data.iter().enumerate() {
+        out.extend_from_slice(format!("={byte:02X}").as_bytes());
+        if index % 7 == 6 {
+            out.extend_from_slice(soft);
+        }
+    }
+    out
+}
+
+// Thunderbird and PHP end a soft line break at a CR that no LF follows as
+// well; PHP lets space and tab stand before it.
+#[test]
+fn quoted_printable_soft_breaks_at_a_lone_cr_are_read_as_some_programs_read_them() {
+    for soft in [&b"=\r"[..], b"= \t\r"] {
+        for (name, body, found) in macro_documents() {
+            assert_eq!(
+                macros(&quoted_with(&body, soft)),
+                Outcome::Macros(found),
+                "{name}, {soft:?}"
+            );
+        }
+        // A program that keeps such bytes hands over a file they break: no
+        // document with macros, though the scan may not read it whole.
+        for (name, body) in clean_documents() {
+            let outcome = macros(&quoted_with(&body, soft));
+            assert!(
+                matches!(outcome, Outcome::Clean | Outcome::Incomplete(_)),
+                "{name}, {soft:?}: {outcome:?}"
+            );
+        }
     }
 }

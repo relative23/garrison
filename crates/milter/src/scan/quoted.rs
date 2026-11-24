@@ -38,9 +38,11 @@ fn headers_end(message: &[u8]) -> usize {
 /// hexadecimal case, and `=` at a line's end joins the lines. A transport
 /// may pad an encoded line with space and tab before the break; RFC 2045
 /// section 6.7 rule 3 has the decoder strip it, so `=` then white space then
-/// the line's end is a soft break as well. With it, how many `=XX` were
-/// undone past the header block: each stands where a body may be.
-pub(super) fn unquoted(message: &[u8]) -> (Vec<u8>, usize) {
+/// the line's end is a soft break as well. Where `lone_cr` is set, a CR that
+/// no LF follows ends a line too, as Thunderbird and PHP take it. With it,
+/// how many `=XX` were undone past the header block: each stands where a
+/// body may be.
+pub(super) fn unquoted(message: &[u8], lone_cr: bool) -> (Vec<u8>, usize) {
     let hex = |byte: u8| char::from(byte).to_digit(16);
     let body = headers_end(message);
     let mut plain = Vec::with_capacity(message.len());
@@ -63,6 +65,10 @@ pub(super) fn unquoted(message: &[u8]) -> (Vec<u8>, usize) {
                     at = end + 1;
                     continue;
                 }
+                (Some(b'\r'), _) if lone_cr => {
+                    at = end + 1;
+                    continue;
+                }
                 _ => {}
             }
             // `=XX`: the high hexadecimal digit then the low, either case.
@@ -79,4 +85,18 @@ pub(super) fn unquoted(message: &[u8]) -> (Vec<u8>, usize) {
         at += 1;
     }
     (plain, triplets)
+}
+
+/// Whether `data` holds `=`, then any space or tab, then a CR that no LF
+/// follows.
+pub(super) fn lone_cr_break(data: &[u8]) -> bool {
+    memchr::memchr_iter(b'=', data).any(|at| {
+        let end = at
+            + 1
+            + data[at + 1..]
+                .iter()
+                .take_while(|byte| matches!(byte, b' ' | b'\t'))
+                .count();
+        data.get(end) == Some(&b'\r') && data.get(end + 1) != Some(&b'\n')
+    })
 }

@@ -42,7 +42,7 @@ mod unpack;
 mod uu;
 
 use marks::contains;
-use quoted::unquoted;
+use quoted::{lone_cr_break, unquoted};
 use unpack::Work;
 
 /// Archives inside archives are opened this deep.
@@ -207,7 +207,7 @@ impl Work {
             whole,
             least: whole,
         };
-        let found = self.encoded(data, &mut readings, QUOTED);
+        let found = self.encoded(data, &mut readings, QUOTED, None);
         self.allow(readings.least);
         found
     }
@@ -228,8 +228,16 @@ impl Work {
     }
 
     /// `data`'s base64 and uuencode, then the same of `data` with its
-    /// quoted-printable undone, `rounds` times over at the most.
-    fn encoded(&mut self, data: &[u8], readings: &mut Readings, rounds: usize) -> Option<Found> {
+    /// quoted-printable undone, `rounds` times over at the most, with a lone
+    /// CR taken for a line's end as `lone_cr` says where a round above
+    /// decided it.
+    fn encoded(
+        &mut self,
+        data: &[u8],
+        readings: &mut Readings,
+        rounds: usize,
+        lone_cr: Option<bool>,
+    ) -> Option<Found> {
         let symbols = base64_stream::count(data);
         let tokens = symbols + base64_stream::padding(data);
         let dropped = |phase| base64_stream::decode_phase(data, phase, symbols);
@@ -251,18 +259,50 @@ impl Work {
         if self.stopped() || !contains(data, b"=") {
             return None;
         }
-        let (undone, triplets) = unquoted(data);
-        if undone.len() == data.len() || !self.may_decode(undone.len()) {
+        // Thunderbird and PHP take `=` before a CR that no LF follows for a
+        // soft break as well. Where `data` holds one, it is undone both ways,
+        // and each way keeps to itself in the rounds below.
+        let ways: &[(bool, Option<bool>)] = match lone_cr {
+            Some(false) => &[(false, Some(false))],
+            Some(true) => &[(true, Some(true))],
+            None if lone_cr_break(data) => &[(false, Some(false)), (true, Some(true))],
+            None => &[(false, None)],
+        };
+        for (way, below) in ways {
+            if self.stopped() {
+                return None;
+            }
+            let (undone, triplets) = unquoted(data, *way);
+            if let Some(found) =
+                self.quoted(&undone, triplets, data.len(), readings, (rounds, *below))
+            {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// The reading of a text whose quoted-printable was undone: as it stands,
+    /// and as the text was read where triplets were undone.
+    fn quoted(
+        &mut self,
+        undone: &[u8],
+        triplets: usize,
+        length: usize,
+        readings: &mut Readings,
+        (rounds, lone_cr): (usize, Option<bool>),
+    ) -> Option<Found> {
+        if undone.len() == length || !self.may_decode(undone.len()) {
             return None;
         }
-        if let Some(found) = self.reading(readings, |work| work.scanned(&undone, DEPTH)) {
+        if let Some(found) = self.reading(readings, |work| work.scanned(undone, DEPTH)) {
             return Some(found);
         }
         // Where only soft line breaks went, the base64 reads as before: `=`
         // and a line's end are no symbols. A uuencode block's lines are
         // whole only now.
         if triplets == 0 {
-            return self.reading(readings, |work| work.scanned_uuencoded(&undone));
+            return self.reading(readings, |work| work.scanned_uuencoded(undone));
         }
         // An `=XX` is two symbols to the base64 readers and one byte, or
         // none, to a mail program that undoes it first: one of them inside a
@@ -273,7 +313,7 @@ impl Work {
             self.gap.get_or_insert(Gap::Encoding);
             return None;
         }
-        self.encoded(&undone, readings, rounds - 1)
+        self.encoded(undone, readings, rounds - 1, lone_cr)
     }
 
     /// One way to read the base64, on each of its grids.
