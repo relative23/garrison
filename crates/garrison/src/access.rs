@@ -26,6 +26,7 @@ mod folder;
 
 use defaults::{Candidate, administrator_roles, default_profiles};
 use folder::{Current, Folder, MAX_POLICY};
+pub(crate) use folder::{too_large, way_out};
 
 const POLICY_GROUP: &str = "garrison-broker";
 
@@ -239,26 +240,6 @@ fn action_ids(config: &Config) -> BTreeSet<&str> {
         .iter()
         .map(|action| action.id.as_str())
         .collect()
-}
-
-/// What mends a policy larger than the broker reads, which is no policy:
-/// a way out that is always there, and one where a backup is.
-pub(crate) fn way_out(path: &Path) -> String {
-    format!(
-        "move it away and run `garrison access init`, or copy back the newest backup beside it \
-         ({}.<time>.bak) with sudo cp where there is one",
-        path.display()
-    )
-}
-
-/// What every command says of a policy larger than the broker reads.
-pub(crate) fn too_large(path: &Path) -> String {
-    format!(
-        "The access policy {} is larger than the broker reads ({} KiB), so it is no policy: {}.",
-        path.display(),
-        MAX_POLICY / 1024,
-        way_out(path)
-    )
 }
 
 /// The policy as it is written, actions that garrison.toml no longer has

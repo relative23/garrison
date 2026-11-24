@@ -22,6 +22,26 @@ use rustix::io::Errno;
 /// As much of the policy as the broker reads: a larger file is no policy.
 pub(super) const MAX_POLICY: usize = 65536;
 
+/// What mends a policy larger than the broker reads, which is no policy:
+/// a way out that is always there, and one where a backup is.
+pub(crate) fn way_out(path: &Path) -> String {
+    format!(
+        "move it away and run `garrison access init`, or copy back the newest backup beside it \
+         ({}.<time>.bak) with sudo cp where there is one",
+        path.display()
+    )
+}
+
+/// What every command says of a policy larger than the broker reads.
+pub(crate) fn too_large(path: &Path) -> String {
+    format!(
+        "The access policy {} is larger than the broker reads ({} KiB), so it is no policy: {}.",
+        path.display(),
+        MAX_POLICY / 1024,
+        way_out(path)
+    )
+}
+
 /// What is at the policy's name.
 pub(super) enum Current {
     Missing,
@@ -210,7 +230,7 @@ impl Folder {
             .read_to_end(&mut data)
             .map_err(|error| failed(&path, error))?;
         if data.len() > MAX_POLICY {
-            return Err(super::too_large(&path));
+            return Err(too_large(&path));
         }
         Ok(data)
     }
