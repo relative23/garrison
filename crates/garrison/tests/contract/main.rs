@@ -25,6 +25,8 @@ use serde_json::json;
 
 // The parts of this test, in files beside this one.
 mod clients;
+mod entries;
+mod entry_stops;
 mod keys;
 mod milter;
 mod refused;

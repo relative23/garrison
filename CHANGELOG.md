@@ -1854,6 +1854,10 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` says that nginx does not reach the web service where it
   answers 502 for Garrison**, and names the service, the include's port and the
   SELinux module instead of the include itself.
+- **`garrison stalwart setup` no longer ends in success while Stalwart asks a
+  milter on this host where nothing answers, and `garrison doctor` names every
+  such entry**, also without setup's note of the macro filter's. Remove one
+  that setup cannot tell for the filter's in the Stalwart WebUI.
 
 ## [0.1.2] - 2026-11-13
 

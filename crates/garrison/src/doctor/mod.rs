@@ -5,7 +5,7 @@
 
 mod files;
 mod host;
-mod milter;
+pub(crate) mod milter;
 mod notify;
 mod policy;
 mod public;
