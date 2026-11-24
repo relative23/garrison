@@ -26,10 +26,11 @@ mod uses;
 use uses::{host_uses, other_uses, receipt_uses, systemd_uses};
 
 /// The sources of this crate's checks that take options, below providers/.
-const SOURCES: [(&str, &str); 8] = [
+const SOURCES: [(&str, &str); 9] = [
     ("backupcheck.rs", include_str!("backupcheck.rs")),
     ("host.rs", include_str!("host.rs")),
     ("hostcare.rs", include_str!("hostcare.rs")),
+    ("http.rs", include_str!("http.rs")),
     ("receipt.rs", include_str!("receipt.rs")),
     ("receipt/keys.rs", include_str!("receipt/keys.rs")),
     ("systemd.rs", include_str!("systemd.rs")),
@@ -355,7 +356,8 @@ fn every_option_is_named_in_the_reference_of_the_checks() {
         ("receipt/keys.rs", &["receipt"][..]),
         ("systemd.rs", &["systemd"][..]),
         ("version.rs", &["version-command"][..]),
-        ("web.rs", &["http", "bulwark"][..]),
+        ("http.rs", &["http"][..]),
+        ("web.rs", &["bulwark"][..]),
     ]);
     let unnamed: Vec<String> = SOURCES
         .iter()

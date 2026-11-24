@@ -271,7 +271,7 @@ pub(super) fn other_uses(at: &dyn Fn(&str) -> String, url: &str) -> Vec<Use> {
         ],
     ));
     all.extend(uses(
-        "web.rs",
+        "http.rs",
         "http",
         &endpoint,
         &[
