@@ -158,11 +158,9 @@ fn rows() -> Vec<(State, &'static str)> {
 mod tests {
     use super::*;
 
-    /// Every state of doctor's, once, with its whole line: the one place in
-    /// doctor's tests where a sentence stands.
-    #[test]
-    fn every_state_of_doctor_says_its_line() {
-        let rows = [
+    /// Every state of doctor's, with its whole line as an example.
+    fn every() -> Vec<(State, &'static str)> {
+        [
             rows(),
             host::rows(),
             files::rows(),
@@ -173,7 +171,14 @@ mod tests {
             public::rows(),
             selinux::rows(),
         ]
-        .concat();
+        .concat()
+    }
+
+    /// Every state of doctor's, once, with its whole line: the one place in
+    /// doctor's tests where a sentence stands.
+    #[test]
+    fn every_state_of_doctor_says_its_line() {
+        let rows = every();
         crate::state::table(
             &[
                 include_str!("mod.rs"),
@@ -188,5 +193,30 @@ mod tests {
             ],
             &rows,
         );
+    }
+
+    /// Each state an acceptance script looks for in doctor's output, by its
+    /// name in brackets, is one doctor has: a script cannot tell a name
+    /// doctor no longer says from a fault.
+    #[test]
+    fn every_name_the_scripts_look_for_is_a_state_of_doctors() {
+        let rows = every();
+        let known: Vec<&str> = rows.iter().map(|(state, _)| state.name).collect();
+        let mut looked_for = 0;
+        for script in [
+            include_str!("../../../../../scripts/acceptance-quickstart.sh"),
+            include_str!("../../../../../scripts/acceptance-host.sh"),
+            include_str!("../../../../../scripts/soak.sh"),
+        ] {
+            for rest in script.split("[doctor-").skip(1) {
+                let name = format!("doctor-{}", rest.split(']').next().unwrap_or_default());
+                assert!(
+                    known.contains(&name.as_str()),
+                    "{name} is no state of doctor's"
+                );
+                looked_for += 1;
+            }
+        }
+        assert!(looked_for >= 17, "{looked_for}");
     }
 }
