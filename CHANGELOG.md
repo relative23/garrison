@@ -682,6 +682,9 @@ Notable changes for operators and users. The format follows
   guide says of every command.
 - **`garrison notify-test` without root says to run it as root and ends with
   2**, as `garrison doctor` does.
+- **`garrison install`, `uninstall`, `setup`, `upgrade`, `restore`,
+  `backup-check` and `detect` refuse `--config`, which none of them
+  follows**, with exit 2 before they do anything.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year

@@ -1,9 +1,9 @@
 //! `garrison <command>`: the entry point for services and operators.
 //!
-//! Service commands (started by systemd): web, ingest, collect, broker.
-//! Operator commands: install, detect, check-config, modules, access,
-//! stalwart, polkit-rule, stalwart-switch, backup, self-check. Every command
-//! but `install` and `detect` reads the configuration first.
+//! The services systemd starts and the operator's commands are one binary;
+//! `garrison --help` lists them. A command that works with the configuration
+//! loads the file `--config` names first; one that uses the units' own file,
+//! or reads none, refuses the option.
 
 mod access;
 mod backup_check;
@@ -42,9 +42,11 @@ use garrison_core::logging;
     arg_required_else_help = true
 )]
 struct Arguments {
-    /// The configuration file.
-    #[arg(long, global = true, default_value = config::DEFAULT_PATH)]
-    config: PathBuf,
+    /// The configuration file, /etc/garrison/garrison.toml where none is named;
+    /// install, uninstall, setup, upgrade, restore, backup-check and detect
+    /// take none.
+    #[arg(long, global = true, value_name = "FILE")]
+    config: Option<PathBuf>,
     /// Also log debug messages, including those of libraries.
     #[arg(long, global = true)]
     verbose: bool,
@@ -317,9 +319,37 @@ fn load(path: &Path) -> Result<Config, String> {
     config::load(path).map_err(|error| format!("Cannot load {}: {error}", path.display()))
 }
 
+/// Why a command follows no `--config`: it uses the file the units read, as
+/// the installer and setup do, or it reads no configuration.
+fn unfollowed(command: &Command) -> Option<(&'static str, &'static str)> {
+    let units = "uses /etc/garrison/garrison.toml, the units' configuration";
+    let none = "reads no configuration";
+    Some(match command {
+        Command::Install { .. } => ("install", units),
+        Command::Uninstall { .. } => ("uninstall", units),
+        Command::Setup => ("setup", units),
+        Command::Upgrade { .. } => ("upgrade", units),
+        Command::Restore { .. } => ("restore", units),
+        Command::BackupCheck { .. } => ("backup-check", none),
+        Command::Detect { .. } => ("detect", none),
+        Command::Watch | Command::Configured(_) => return None,
+    })
+}
+
 fn main() -> ExitCode {
     let arguments = Arguments::parse();
     logging::init(arguments.verbose);
+    if let (Some(named), Some((command, why))) = (&arguments.config, unfollowed(&arguments.command))
+    {
+        complain(&format!(
+            "garrison {command} {why}, so it takes no --config ({}).",
+            named.display()
+        ));
+        return ExitCode::from(2);
+    }
+    let path = arguments
+        .config
+        .unwrap_or_else(|| PathBuf::from(config::DEFAULT_PATH));
     let code = match arguments.command {
         // The installer runs before a configuration exists.
         Command::Install {
@@ -327,11 +357,11 @@ fn main() -> ExitCode {
             restore_state,
         } => install::run_installer(rollback, restore_state),
         Command::Upgrade { archive, signature } => upgrade::run(&archive, signature.as_deref()),
-        Command::Setup => wizard::run(&arguments.config),
+        Command::Setup => wizard::run(&path),
         Command::Uninstall { purge, dry_run } => install::run_uninstall(purge, dry_run),
         Command::Restore { from } => install::run_restore(&from),
         // The watch also looks where the configuration no longer loads.
-        Command::Watch => watch::run(&arguments.config),
+        Command::Watch => watch::run(&path),
         Command::BackupCheck {
             tool,
             repo,
@@ -347,8 +377,8 @@ fn main() -> ExitCode {
         }),
         // Detection also runs before a configuration exists.
         Command::Detect { format } => detect::run(format),
-        Command::Configured(task) => match load(&arguments.config) {
-            Ok(config) => dispatch(task, &config, &arguments.config),
+        Command::Configured(task) => match load(&path) {
+            Ok(config) => dispatch(task, &config, &path),
             Err(message) => {
                 complain(&message);
                 2

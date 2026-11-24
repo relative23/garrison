@@ -8,7 +8,9 @@
 
 mod support;
 
-use support::{prepared, run, text};
+use std::process::Command;
+
+use support::{finished, prepared, run, text};
 
 /// `garrison modules --set` without `--yes` would ask before it writes,
 /// and nobody can answer where no terminal is: it refuses, names `--yes`
@@ -46,4 +48,40 @@ fn notify_test_without_root_says_to_run_as_root() {
             "Run as root: the channels' secrets are files only root may read.\n".to_owned()
         )
     );
+}
+
+/// The commands that use the units' own configuration, or read none,
+/// refuse `--config` before they do anything, where they ignored it.
+#[test]
+fn a_command_that_follows_no_config_refuses_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let named = directory.path().join("garrison.toml");
+    let units = "uses /etc/garrison/garrison.toml, the units' configuration";
+    let none = "reads no configuration";
+    for (command, why) in [
+        (&["install"][..], units),
+        (&["uninstall", "--dry-run"], units),
+        (&["setup"], units),
+        (&["upgrade", "garrison-0.2.0-x86_64.tar.gz"], units),
+        (&["restore", "--from", "/var/backups/garrison"], units),
+        (&["backup-check", "restic"], none),
+        (&["detect"], none),
+    ] {
+        let ran = finished(
+            Command::new(env!("CARGO_BIN_EXE_garrison"))
+                .arg("--config")
+                .arg(&named)
+                .args(command),
+        );
+        let refused = format!(
+            "garrison {} {why}, so it takes no --config ({}).\n",
+            command[0],
+            named.display()
+        );
+        assert_eq!(
+            (ran.status.code(), text(&ran.stdout), text(&ran.stderr)),
+            (Some(2), String::new(), refused),
+            "{command:?}"
+        );
+    }
 }
