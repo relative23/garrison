@@ -8,6 +8,11 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+# The models of mail programs' decoders (src/decoders.rs), for the fuzz
+# targets. No dependency of its own.
+testing = []
+
 [dependencies]
 base64.workspace = true
 flate2.workspace = true

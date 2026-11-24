@@ -247,10 +247,10 @@ fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
     None
 }
 
-/// What the readings of one text may unpack. Two readings often hold the
-/// same archive (a base64 body reads the same with `=` dropped and with `=`
-/// as a group's end, and again once quoted-printable is undone around it),
-/// and it is then unpacked for each. So each reading unpacks within the
+/// What the readings of one text may unpack. Readings often hold the same
+/// archive (a base64 body without `=` in it reads the same in each of them,
+/// and again once quoted-printable is undone around it), and it is then
+/// unpacked for each. So each reading unpacks within the
 /// bounds the text came with, and the scan goes on with what the reading
 /// that unpacked most has left.
 struct Readings {
@@ -298,15 +298,17 @@ impl Work {
         let symbols = base64_stream::count(data);
         let tokens = symbols + base64_stream::padding(data);
         let dropped = |phase| base64_stream::decode_phase(data, phase, symbols);
-        let grouped = |phase| base64_stream::decode_tokens(data, phase, tokens);
         if let Some(found) = self.reading(readings, |work| work.base64(dropped)) {
             return Some(found);
         }
-        // Without `=` both ways to read base64 read the same.
-        if tokens > symbols
-            && let Some(found) = self.reading(readings, |work| work.base64(grouped))
-        {
-            return Some(found);
+        // Without `=` every way to read base64 reads the same.
+        if tokens > symbols {
+            for group in base64_stream::Group::ALL {
+                let grouped = |phase| base64_stream::decode_tokens(data, phase, tokens, group);
+                if let Some(found) = self.reading(readings, |work| work.base64(grouped)) {
+                    return Some(found);
+                }
+            }
         }
         if let Some(found) = self.reading(readings, |work| work.scanned_uuencoded(data)) {
             return Some(found);
@@ -372,11 +374,20 @@ impl Work {
     /// is not read again. Below the depth the scan follows, such a message is
     /// incomplete, never clean.
     pub(super) fn nested(&mut self, data: &[u8]) -> Option<Found> {
-        if !declares_encoding(data) {
-            return None;
-        }
+        let declared = first_declaration(data)?;
         if self.encodings == 0 {
             self.gap.get_or_insert(Gap::Encoding);
+            return None;
+        }
+        // A mail program decodes nothing of the message before its first
+        // declaration, nor before a block it cannot decode: two readings of
+        // a body that agree from there on are one message, read once.
+        let from = parts::unread_opening(data).map_or(declared, |opening| opening.min(declared));
+        let line = data[..from]
+            .iter()
+            .rposition(|byte| matches!(byte, b'\n' | b'\r'))
+            .map_or(0, |end| end + 1);
+        if !self.unread_message(&data[line..]) {
             return None;
         }
         self.encodings -= 1;
@@ -389,22 +400,31 @@ impl Work {
     }
 }
 
-/// Whether `data` says of itself that it holds an encoding: a message that
+/// Where `data` first says of itself that it holds an encoding: a message that
 /// names a transfer encoding (the header name in the clear, the only way a
 /// client would read it, any case), a uuencode block's `begin` line, or an
 /// element that Office's XML formats fill with base64.
-fn declares_encoding(data: &[u8]) -> bool {
+fn first_declaration(data: &[u8]) -> Option<usize> {
     const NAME: &[u8] = b"content-transfer-encoding";
     // Found by its first `-`, which decoded noise holds far less often than
     // a letter.
     const DASH: usize = 7;
-    memchr::memchr_iter(b'-', data).any(|dash| {
-        dash >= DASH
-            && data
-                .get(dash - DASH..dash - DASH + NAME.len())
-                .is_some_and(|name| name.eq_ignore_ascii_case(NAME))
-    }) || uu::next_begin(data, 0, false).is_some()
-        || marks::office_xml(data)
+    let named = memchr::memchr_iter(b'-', data)
+        .find(|dash| {
+            *dash >= DASH
+                && data
+                    .get(dash - DASH..dash - DASH + NAME.len())
+                    .is_some_and(|name| name.eq_ignore_ascii_case(NAME))
+        })
+        .map(|dash| dash - DASH);
+    [
+        named,
+        uu::next_begin(data, 0, false),
+        marks::office_xml(data),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
 }
 
 #[cfg(test)]
@@ -414,6 +434,8 @@ mod client_tests;
 #[cfg(test)]
 mod encoding_tests;
 #[cfg(test)]
+mod equals_tests;
+#[cfg(test)]
 mod incomplete_tests;
 #[cfg(test)]
 mod nested_tests;
@@ -421,5 +443,7 @@ mod nested_tests;
 mod parts_tests;
 #[cfg(test)]
 mod structure_tests;
+#[cfg(test)]
+mod sweep_tests;
 #[cfg(test)]
 pub(crate) mod tests;

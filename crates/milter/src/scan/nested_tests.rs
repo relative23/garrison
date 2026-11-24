@@ -142,3 +142,36 @@ fn junk_in_the_inner_base64_does_not_hide_the_document() {
     }
     assert_eq!(macros(&base64_part(&inner)), Outcome::Macros(Found::Zipped));
 }
+
+/// A message as a mail program writes it, with `attachment` as a base64 part.
+fn forwarded(attachment: &[u8], name: &str) -> Vec<u8> {
+    let mut message = format!(
+        "From: a@example.net\r\nSubject: Fwd: report\r\nMIME-Version: 1.0\r\n\
+         DKIM-Signature: v=1; a=rsa-sha256; d=example.net; s=20230601; bh=AbCd0123=\r\n\
+         Content-Type: multipart/mixed; boundary=\"b0\"\r\n\r\n--b0\r\n\
+         Content-Type: text/plain; charset=utf-8\r\n\r\nSee the attachment.\r\n--b0\r\n\
+         Content-Type: application/octet-stream; name=\"{name}\"\r\n\
+         Content-Transfer-Encoding: base64\r\n\r\n"
+    )
+    .into_bytes();
+    for chunk in STANDARD.encode(attachment).as_bytes().chunks(76) {
+        message.extend_from_slice(chunk);
+        message.extend_from_slice(b"\r\n");
+    }
+    message.extend_from_slice(b"--b0--\r\n");
+    message
+}
+
+#[test]
+fn a_message_every_reading_gives_alike_is_read_once() {
+    // Each way to read base64 gives the inner message, and so does the
+    // message with its quoted-printable undone: read once, it fits the
+    // budget, and the forwarded letter is clean.
+    let inner = forwarded(&plain_document(), "letter.docx");
+    assert_eq!(macros(&forwarded(&inner, "fwd.eml")), Outcome::Clean);
+    let with_macros = forwarded(&document(), "invoice.docm");
+    assert_eq!(
+        macros(&forwarded(&with_macros, "fwd.eml")),
+        Outcome::Macros(Found::Zipped)
+    );
+}

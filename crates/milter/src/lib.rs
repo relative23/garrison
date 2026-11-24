@@ -3,7 +3,8 @@
 //! macros.
 //!
 //! `scan` reads a message, `protocol` and `server` speak with the mail
-//! server, and `sample` makes the harmless document the mail test sends.
+//! server, and `sample` makes the harmless document the mail test sends;
+//! `decoders`, for tests only, models mail programs' base64 decoders.
 //!
 //! What the scan does not see: an archive with a password, or one that is
 //! no zip archive; macro sheets of Excel 4.0 in an old `.xls` file, which
@@ -17,6 +18,8 @@
 //! scan unpacks or are packed otherwise than by deflate, and one whose scan
 //! ran out of time get what `on_incomplete` says.
 
+#[cfg(any(test, feature = "testing"))]
+pub mod decoders;
 pub mod protocol;
 pub mod sample;
 pub mod scan;
