@@ -38,11 +38,6 @@ pub(super) fn rollback() -> Rows {
              installer makes it. Nothing was changed. [install-no-broker-group]",
         ),
         (
-            unchanged(unloadable(settings, "unknown field `nonsense`")),
-            "Cannot load /etc/garrison/garrison.toml: unknown field `nonsense`. Nothing was \
-             changed. [install-unloadable]",
-        ),
-        (
             rollback_unloadable("0.1.2", "Configuration not usable: unknown field `modules`"),
             "0.1.2 cannot load /etc/garrison/garrison.toml:\nConfiguration not usable: unknown \
              field `modules`\nRemove the settings 0.1.2 does not know, or put back the file from \

@@ -55,13 +55,6 @@ pub(crate) fn no_broker_group() -> State {
     )
 }
 
-pub(crate) fn unloadable(settings: &Path, error: impl Display) -> State {
-    State::new(
-        "install-unloadable",
-        format!("Cannot load {}: {error}", settings.display()),
-    )
-}
-
 /// `said`: what the check-config of `name`, the release a rollback returns
 /// to, said.
 pub(crate) fn rollback_unloadable(name: &str, said: &str) -> State {
