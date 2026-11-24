@@ -63,6 +63,9 @@ jobs:
           mkdir "$first"
           mv dist/garrison-*.tar.gz "$first/"
           rm -rf dist
+          # Without this, cargo finds the first build's binaries fresh and the
+          # comparison holds one compile against itself.
+          cargo clean
           cargo xtask release
           for archive in "$first"/*.tar.gz; do cmp "$archive" "dist/${archive##*/}"; done
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
