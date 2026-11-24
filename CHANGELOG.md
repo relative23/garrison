@@ -1377,6 +1377,9 @@ Notable changes for operators and users. The format follows
   names what a mount shows the collector by its place on the host.** Where
   the collector's user may not search a folder, let the job write the
   receipt where it may, and set `path` to it.
+- **A receipt reached through a link names the link and where it leads.**
+  Where it leads into a place the collector's unit hides, the card says
+  so, and names `path`, which is to follow the receipt to its new place.
 - **A list receipt read by an entry for an object is Unknown and says how
   to read it, instead of Failed.** A list is read with `rows = []` and
   `row_date`.

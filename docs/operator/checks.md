@@ -586,7 +586,7 @@ under umask 027 or 077 writes it with mode 0640 or 0600 (mode `0644` mends
 it); it is a link, which is not followed, or no plain file; or it is larger
 than 1024 KiB or no JSON object or list. A folder or a file that a mount
 shows the collector at another place, as below, is named by its place on
-the host.
+the host, and a link on the way with where it leads.
 
 A receipt can list results, one row each: `rows = []` where the file itself
 is the list, or `rows = ["results"]` for a list under that key. `columns`

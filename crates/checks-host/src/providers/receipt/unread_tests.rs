@@ -189,8 +189,8 @@ fn a_receipt_in_a_place_the_sandbox_hides_says_so() {
         .unwrap();
         let hides = format!(
             "The receipt at {path} lies under {place}, which the collector's unit hides from \
-             it: let the job write it where the collector sees it, as under /var/lib \
-             (docs/operator/checks.md, \"Paths the collector cannot see\")."
+             it: let the job write it where the collector sees it, as under /var/lib, and set \
+             `path` to it (docs/operator/checks.md, \"Paths the collector cannot see\")."
         );
         let hidden = Seen::Hidden(PathBuf::from(place));
         assert_eq!(receipt.unread(&hidden, patience()), hides);
@@ -281,6 +281,67 @@ fn what_a_mount_shows_is_named_by_its_place_on_the_host() {
                  where that user may search, and set `path` to it.",
                 path.display(),
                 shown.display()
+            )
+        );
+    }
+}
+
+/// A link on the way to the receipt is followed and named. Where it leads
+/// into a home, which the collector's unit hides, the card says so; where it
+/// leads to a folder that the collector's user may not search, the card
+/// names the link, where it leads and that folder. Neither opens a folder to
+/// every user. Shown without root, by `/root` and by mode 000.
+#[test]
+fn a_link_on_the_way_is_named_with_where_it_leads() {
+    let directory = tempfile::tempdir().unwrap();
+    let card = |path: &Path| {
+        let receipt = Receipt::new(&table(&format!(
+            "type = \"receipt\"\nid = \"r\"\ntitle = \"R\"\npath = \"{}\"\nmodules = [\"backups\"]",
+            path.display()
+        )))
+        .unwrap();
+        receipt.unread(&Seen::Host, patience())
+    };
+    let home = directory.path().join("home");
+    std::os::unix::fs::symlink("/root", &home).unwrap();
+    let path = home.join("last.json");
+    let kept_out = |path: &Path| {
+        std::fs::symlink_metadata(path)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied)
+    };
+    if kept_out(Path::new("/root/garrison-test-link")) {
+        assert_eq!(
+            card(&path),
+            format!(
+                "The receipt at {} lies, through the link {}, under /root, which the \
+                 collector's unit hides from it: let the job write it where the collector sees \
+                 it, as under /var/lib, and set `path` to it (docs/operator/checks.md, \"Paths \
+                 the collector cannot see\").",
+                path.display(),
+                home.display()
+            )
+        );
+    }
+    // A link that names no root leads from the folder that holds it.
+    let closed = directory.path().join("closed");
+    std::fs::create_dir(&closed).unwrap();
+    let link = directory.path().join("link");
+    std::os::unix::fs::symlink("closed", &link).unwrap();
+    let path = link.join("last.json");
+    std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let (denied, said) = (kept_out(&path), card(&path));
+    std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if denied {
+        assert_eq!(
+            said,
+            format!(
+                "The receipt at {} cannot be looked for: the link {} leads to {}, and the \
+                 collector's user may not search the folder {}; let the job write it where that \
+                 user may search, and set `path` to it.",
+                path.display(),
+                link.display(),
+                closed.display(),
+                closed.display()
             )
         );
     }
