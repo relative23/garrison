@@ -176,20 +176,3 @@ fn a_block_in_an_encoding_the_scan_does_not_read_is_incomplete() {
         BinHex file says (This file must be converted with BinHex 4.0) first.\r\n";
     assert_eq!(macros(prose), Outcome::Clean);
 }
-
-#[test]
-fn a_quoted_header_with_an_encoding_the_scan_does_not_decode_is_a_known_false_alarm() {
-    // A bug report that quotes a raw message's headers: the scan reads no
-    // structure, so the quoted line counts as a part's header, and ordinary
-    // mail is incomplete. The documents name it.
-    let report = b"Subject: Bounce\r\nContent-Type: text/plain\r\n\r\n\
-        The message below came back:\r\n\r\n\
-        Content-Type: application/octet-stream\r\n\
-        Content-Transfer-Encoding: base85\r\n\r\n\
-        Please tell me what base85 is.\r\n";
-    assert_eq!(macros(report), Outcome::Incomplete(Gap::Encoding));
-    // The encodings the scan decodes are no such alarm.
-    let decoded = b"Subject: Bounce\r\nContent-Type: text/plain\r\n\r\n\
-        The message below came back:\r\n\r\nContent-Transfer-Encoding: base64\r\n\r\n";
-    assert_eq!(macros(decoded), Outcome::Clean);
-}

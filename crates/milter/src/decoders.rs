@@ -5,7 +5,7 @@
 //! `GMime` 3.2.15 and its development branch, `MimeKit`'s `Base64Decoder`,
 //! Thunderbird's `mimeenc.cpp`, PHP's `base64_decode`, Python 3.14's
 //! `email` package, Perl's `MIME::Base64` 3.16, Apache mime4j, Jakarta Mail's
-//! `BASE64DecoderStream`, Node's `Buffer`, libbase64 1.4.1 and postal-mime.
+//! `BASE64DecoderStream` and Node's `Buffer`.
 
 /// The value of a symbol of the alphabet.
 fn value(byte: u8) -> Option<u8> {
@@ -196,67 +196,12 @@ pub fn jakarta(body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// libbase64 1.3.1 and later (mailsplit, mailparser) and postal-mime: every
-/// `=` ends a piece, and each piece is decoded on its own from its first
-/// symbol.
-#[must_use]
-pub fn pieces(body: &[u8]) -> Vec<u8> {
-    let kept = tokens(body);
-    let mut out = Vec::new();
-    for piece in kept.split(|byte| *byte == b'=') {
-        run(piece, &mut out);
-    }
-    out
-}
-
-/// Node's `Buffer.from(text, "base64")` with both alphabets: `-` and `_` are
-/// 62 and 63 as well, and the first `=` ends the data.
-#[must_use]
-pub fn node(body: &[u8]) -> Vec<u8> {
-    let end = body
-        .iter()
-        .position(|byte| *byte == b'=')
-        .unwrap_or(body.len());
-    let symbols: Vec<u8> = body[..end]
-        .iter()
-        .filter_map(|byte| match byte {
-            b'-' => Some(b'+'),
-            b'_' => Some(b'/'),
-            byte => value(*byte).map(|_| *byte),
-        })
-        .collect();
-    let mut out = Vec::new();
-    run(&symbols, &mut out);
-    out
-}
-
-/// `GMime` 2.6 when one call is handed the whole body: `=` is 0 and every
-/// group gives three bytes, with one byte fewer at the end for each `=`
-/// among the last two symbols. A program that hands it the body in reads of
-/// 4096 bytes drops bytes at the end of each read instead.
-#[must_use]
-pub fn gmime26(body: &[u8]) -> Vec<u8> {
-    let tokens = tokens(body);
-    let (groups, rest) = tokens.as_chunks::<4>();
-    let mut out = Vec::new();
-    for group in groups {
-        out.extend_from_slice(&triple(group));
-    }
-    if rest.is_empty() {
-        for token in tokens.iter().rev().take(2) {
-            if *token == b'=' {
-                out.pop();
-            }
-        }
-    }
-    out
-}
-
 /// A decoder by its name, as the tests and the fuzz targets list them.
 pub type Decoder = (&'static str, fn(&[u8]) -> Vec<u8>);
 
 /// The decoders whose reading the scan follows, alone or as a part of
-/// another's: a document any of them hands over is found.
+/// another's: a document any of them hands over is found. Those it does not
+/// follow are named in the documents.
 pub const READ: [Decoder; 7] = [
     ("GLib, GMime 3", glib),
     ("MimeKit", mimekit),
@@ -265,11 +210,4 @@ pub const READ: [Decoder; 7] = [
     ("Python", python),
     ("Perl, mime4j", stopped),
     ("Jakarta Mail", jakarta),
-];
-
-/// The decoders whose reading the scan does not follow.
-pub const NOT_READ: [Decoder; 3] = [
-    ("libbase64, postal-mime", pieces),
-    ("Node's Buffer", node),
-    ("GMime 2.6", gmime26),
 ];

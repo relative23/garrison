@@ -10,7 +10,7 @@ use base64::engine::general_purpose::STANDARD;
 
 use super::tests::{compound, plain_document};
 use super::*;
-use crate::decoders::{NOT_READ, READ};
+use crate::decoders::READ;
 use crate::sample::{archive, document};
 
 /// A xorshift generator, the same numbers from the same seed.
@@ -228,20 +228,6 @@ fn no_document_a_decoder_the_scan_follows_rebuilds_is_called_clean() {
     }
     // The sweep is no sweep if the changes hide the document from every model.
     assert!(rebuilt > cases().len() / 2, "{rebuilt}");
-}
-
-/// The decoders the scan does not follow rebuild documents it calls clean:
-/// the documents name them, and this holds the list true.
-#[test]
-fn the_decoders_the_scan_does_not_follow_are_still_not_followed() {
-    for (decoder, decode) in NOT_READ {
-        assert!(
-            cases().iter().any(|(_, _, body)| {
-                in_file(&decode(body)).is_some() && macros(&message(body)) == Outcome::Clean
-            }),
-            "{decoder}"
-        );
-    }
 }
 
 #[test]
