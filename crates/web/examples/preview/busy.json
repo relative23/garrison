@@ -1140,7 +1140,7 @@
     "checkedAt": "2026-10-29T12:00:00+00:00",
     "source": "event history",
     "kind": "details",
-    "scope": "What the scanner behind the milter said of the mail it was shown on each of the last seven days (UTC).",
+    "scope": "What the scanner behind the milter said of the mail it was shown on each of the last seven days (UTC). A reply of the milter's own may refuse a message or defer it; Stalwart's event does not say which.",
     "fields": [],
     "table": {
       "columns": [
@@ -1165,18 +1165,22 @@
           "format": "number"
         },
         {
+          "label": "Own reply",
+          "format": "number"
+        },
+        {
           "label": "Not reached",
           "format": "number"
         }
       ],
       "rows": [
-        ["2026-10-29", 21480, 61, 0, 0, 0],
-        ["2026-10-28", 46912, 138, 0, 0, 0],
-        ["2026-10-27", 45107, 127, 0, 0, 0],
-        ["2026-10-26", 44236, 119, 0, 2, 0],
-        ["2026-10-25", 17844, 44, 0, 0, 0],
-        ["2026-10-24", 15932, 37, 0, 0, 0],
-        ["2026-10-23", 43518, 142, 0, 0, 0]
+        ["2026-10-29", 21480, 61, 0, 0, 3, 0],
+        ["2026-10-28", 46912, 138, 0, 0, 7, 0],
+        ["2026-10-27", 45107, 127, 0, 0, 6, 0],
+        ["2026-10-26", 44236, 119, 0, 2, 5, 0],
+        ["2026-10-25", 17844, 44, 0, 0, 2, 0],
+        ["2026-10-24", 15932, 37, 0, 0, 1, 0],
+        ["2026-10-23", 43518, 142, 0, 0, 6, 0]
       ]
     },
     "findings": [],
