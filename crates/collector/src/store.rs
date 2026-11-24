@@ -197,6 +197,10 @@ impl StatusStore {
             )
             .optional()?
             .flatten();
+        // SQLite gives a new row one more than the greatest id, but after the
+        // greatest integer, which no run gives, any id at random: a snapshot
+        // that holds it goes, so that each run's own is the newest.
+        transaction.execute("DELETE FROM snapshots WHERE id = ?", [i64::MAX])?;
         transaction.execute(
             "INSERT INTO snapshots(collected_at, document) VALUES(?,?)",
             params![collected_at, document],

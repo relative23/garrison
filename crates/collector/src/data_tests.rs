@@ -187,25 +187,18 @@ fn places(path: &Path) -> Vec<Place> {
         .unwrap();
     let mut places = Vec::new();
     for (table, sql) in tables {
+        // A key that is an INTEGER alone, as a snapshot's id, is SQLite's
+        // rowid: it takes integers only, and SQLite gives the next row one
+        // more than the greatest, so it is changed too.
         let columns: Vec<(String, i64)> = db
             .prepare(&format!(
-                "SELECT name, pk, type = 'INTEGER' AND pk = 1 \
-                        AND (SELECT count(*) FROM pragma_table_info('{table}') WHERE pk > 0) = 1 \
-                 FROM pragma_table_info('{table}')"
+                "SELECT name, pk FROM pragma_table_info('{table}')"
             ))
             .unwrap()
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
             .unwrap()
-            .filter_map(|column| {
-                let (name, pk, alone): (String, i64, bool) = column.unwrap();
-                // A key that is an INTEGER alone is SQLite's rowid, as a
-                // snapshot's id: it takes only integers and is the order of
-                // the rows, not a value the collector reads. An id of the
-                // greatest integer has SQLite choose every later one at
-                // random, so no order is left to hold the store to.
-                (!alone || sql.contains("WITHOUT ROWID")).then_some((name, pk))
-            })
-            .collect();
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
         // One row: the last that SQLite gave, or in a table without rowid
         // the last by its key.
         let one = if sql.contains("WITHOUT ROWID") {

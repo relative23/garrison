@@ -123,6 +123,49 @@ fn only_ten_snapshots_are_kept_and_bad_values_are_skipped() {
     ));
 }
 
+/// A snapshot whose id is the greatest integer, which no run gives, as in a
+/// damaged or hand-edited database, has SQLite choose every later id at
+/// random. It costs that snapshot alone: each run's own is kept and is the
+/// newest that the status page and the watch read, also once far more than
+/// ten runs went by.
+#[test]
+fn a_snapshot_id_of_the_greatest_integer_costs_that_snapshot_alone() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("status.sqlite");
+    let mut store = StatusStore::open(&path, 90).unwrap();
+    let none = BTreeMap::new();
+    let start = 1_800_000_000;
+    store.write(start, &snapshot("0"), &none, &none).unwrap();
+    store
+        .db
+        .execute("UPDATE snapshots SET id = ?1", [i64::MAX])
+        .unwrap();
+    let mut found = Vec::new();
+    for run in 1..=40 {
+        let at = start + run * 60;
+        let name = run.to_string();
+        store.write(at, &snapshot(&name), &none, &none).unwrap();
+        let db = reading(&path, Duration::from_secs(2)).unwrap().unwrap();
+        let kept: i64 = db
+            .query_row(
+                "SELECT count(*) FROM snapshots WHERE collected_at = ?1",
+                [at],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let shown = latest_snapshot(&db)
+            .unwrap()
+            .map(|shown| shown.collected_at);
+        let last = crate::watch::last_run(&path).unwrap();
+        if (kept, shown.as_deref(), last) != (1, Some(name.as_str()), Some(at)) {
+            found.push(format!(
+                "run {run}: kept {kept}, shown {shown:?}, last run {last:?}"
+            ));
+        }
+    }
+    assert_eq!(found, Vec::<String>::new());
+}
+
 #[test]
 fn a_second_run_within_a_minute_adds_to_that_minutes_increase() {
     let directory = tempfile::tempdir().unwrap();
