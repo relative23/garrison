@@ -72,6 +72,19 @@ fn the_journal_says_once_for_each_reason_why_the_collector_has_no_key() {
     assert_eq!(run(), Vec::<String>::new());
     private(&key, "short\n");
     assert_eq!(run(), no_key("Protected secret has an invalid format"));
+    // Open to other users: what makes it private, as a run by hand meets
+    // it; systemd hands the service a private copy.
+    private(&key, "collector-key-0123456789\n");
+    fs::set_permissions(&key, fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(
+        run(),
+        [format!(
+            "WARN The collector has no API key for Stalwart: {0} may be read by other users; \
+             make it root's with mode 600: chown root {0} && chmod 600 {0}. Each card that needs \
+             it says so when its check next reads Stalwart.",
+            key.display()
+        )]
+    );
 }
 
 /// The scrape credential: a file that holds none is said once for each

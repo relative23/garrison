@@ -300,3 +300,96 @@ fn stalwart_takes_a_notification_of_an_origin_with_a_port() {
         std::thread::sleep(Duration::from_secs(1));
     }
 }
+
+/// Who sent the delivered message whose Message-ID is `id`, as Stalwart
+/// read its From line: each mailbox's name and address.
+fn sender(lab: &Lab, id: &str) -> Option<serde_json::Value> {
+    let admin = std::env::var("GARRISON_LAB_ADMIN").expect("GARRISON_LAB_ADMIN");
+    let session = lab.http("/jmap/session", &admin, None);
+    let account = session["primaryAccounts"]["urn:ietf:params:jmap:mail"]
+        .as_str()
+        .expect("the administrator has a mailbox")
+        .to_owned();
+    let answer = lab.http(
+        "/jmap/",
+        &admin,
+        Some(&serde_json::json!({
+            "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+            "methodCalls": [
+                ["Email/query", {
+                    "accountId": account,
+                    "sort": [{"property": "receivedAt", "isAscending": false}],
+                    "limit": 20,
+                }, "0"],
+                ["Email/get", {
+                    "accountId": account,
+                    "#ids": {"resultOf": "0", "name": "Email/query", "path": "/ids"},
+                    "properties": ["messageId", "from"],
+                }, "1"],
+            ],
+        })),
+    );
+    answer["methodResponses"][1][1]["list"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{answer}"))
+        .iter()
+        .find(|message| message["messageId"][0].as_str() == Some(id))
+        .map(|message| message["from"].clone())
+}
+
+/// An installation whose public origin is an address greets Stalwart with
+/// an address literal, `[192.0.2.1]` or `[IPv6:2001:db8::1]`, and its From
+/// line, whose name holds the port or the IPv6 address, is one mailbox:
+/// Stalwart takes the message and reads the name and the address.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn stalwart_takes_a_notification_of_an_origin_that_is_an_address() {
+    use garrison_collector::notify::Secret;
+    use garrison_collector::notify::mail::{Mail, message, submit_over};
+
+    let _guard = one_at_a_time();
+    let lab = Lab::from_environment();
+    let smtp = std::env::var("GARRISON_LAB_SMTP").expect("GARRISON_LAB_SMTP");
+    let admin = std::env::var("GARRISON_LAB_ADMIN").expect("GARRISON_LAB_ADMIN");
+    let (user, password) = admin.split_once(':').expect("user:password");
+    let mail = Mail {
+        host: smtp.clone(),
+        port: 465,
+        user: user.to_owned(),
+        password: Secret::Text(password.to_owned()),
+        from: user.to_owned(),
+        to: user.to_owned(),
+    };
+    for name in ["192.0.2.1:8443", "[2001:db8::1]"] {
+        // A text of this run's own, so that the Message-ID is too.
+        let text = message(
+            &mail,
+            name,
+            &format!("Garrison on {name}: test"),
+            &format!("A test, {}.\n", random_hex(8)),
+            time::now(),
+        );
+        let id = text
+            .lines()
+            .find_map(|line| line.strip_prefix("Message-ID: <")?.strip_suffix('>'))
+            .expect("the message has an ID")
+            .to_owned();
+        submit_over(session(&smtp), &mail, name, &text).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let from = loop {
+            if let Some(from) = sender(&lab, &id) {
+                break from;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the notification of {name} was not delivered"
+            );
+            std::thread::sleep(Duration::from_secs(1));
+        };
+        assert_eq!(
+            from,
+            serde_json::json!([{"name": format!("Garrison on {name}"), "email": user}]),
+            "{name}"
+        );
+    }
+}

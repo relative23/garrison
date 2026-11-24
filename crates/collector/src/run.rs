@@ -43,11 +43,11 @@ pub struct Time {
     /// The notifications are sent or given up by then; the snapshot is
     /// written after.
     pub run: Duration,
-    /// What an earlier release kept of a key of Spamhaus' Data Query Service
-    /// is cleared from the status database by then, after the snapshot is
-    /// stored, and systemd is asked for more time while that runs: on a disk
-    /// that writes 1 MB a second, some 400 MB of history. The watch counts
-    /// from the snapshot and sees no stop before ten minutes.
+    /// What an earlier release or setting left in the status database of a
+    /// secret that is kept in a file now is cleared by then, after the
+    /// snapshot is stored, and systemd is asked for more time while that
+    /// runs: on a disk that writes 1 MB a second, some 400 MB of history. The
+    /// watch counts from the snapshot and sees no stop before ten minutes.
     pub rebuild: Duration,
 }
 
@@ -298,7 +298,9 @@ pub fn collect_within(
         garrison_core::observations::RENAMED,
     );
     // For the watch over the collector, should this configuration stop loading.
-    crate::watch::remember(&store, &channels);
+    if crate::watch::remember(&store, &channels) {
+        store.note_moved_address();
+    }
     let snapshot = Snapshot {
         schema_version: SCHEMA,
         collected_at: context.checked_at(),

@@ -2,16 +2,18 @@
 //! notification, and whether its address and secret can be used as their
 //! files stand now.
 //!
-//! What the last notification did is kept for each channel by its name as
-//! the page shows it ("webhook at hooks.example.org"), with the
+//! What the last notification did is kept for each kind of channel with the
+//! name the page showed it by then ("webhook at hooks.example.org") and the
 //! notification's time, and judged against the channels configured now: a
 //! channel taken out of the configuration, or named otherwise now, is no
 //! longer judged by it, and one named since has carried no message yet, so
-//! whether one would arrive is not known. The next notification replaces
-//! it. `garrison notify-test`, which runs as root, does not: only the
-//! collector writes the status database.
+//! whether one would arrive is not known. A channel whose address could not
+//! be read then, or cannot now, as while its file is written anew, is the
+//! one of its kind. The next notification replaces it. `garrison
+//! notify-test`, which runs as root, does not: only the collector writes the
+//! status database.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
@@ -19,6 +21,7 @@ use garrison_core::time;
 use serde::{Deserialize, Serialize};
 
 use super::Channels;
+use super::channels::unread;
 use crate::context::Memory;
 
 /// Where it is kept.
@@ -33,14 +36,23 @@ pub(super) const SENT: &str = "notify.sent";
 /// them.
 type Named = [(&'static str, String)];
 
-/// What the last notification did on each channel, by its name: `None`
-/// where the channel took it, else why not, as `webhook: it answered 500`.
+/// What the last notification did on one channel.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+struct Took {
+    /// The channel's name as the page showed it then.
+    name: String,
+    /// `None` where the channel took it, else why not, as `webhook: it
+    /// answered 500`.
+    failed: Option<String>,
+}
+
+/// What the last notification did on each channel, by its kind.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub(super) struct Last {
     /// When it was sent, a Unix second; none where a release before this
     /// one kept what it did, which it kept without a time.
     at: Option<i64>,
-    channels: BTreeMap<String, Option<String>>,
+    channels: BTreeMap<String, Took>,
 }
 
 impl Last {
@@ -55,8 +67,9 @@ impl Last {
             .iter()
             .filter_map(|(kind, name)| {
                 let (_, outcome) = outcomes.iter().find(|(sent, _)| sent == kind)?;
-                let failed = outcome.as_ref().err();
-                Some((name.clone(), failed.map(|why| format!("{kind}: {why}"))))
+                let failed = outcome.as_ref().err().map(|why| format!("{kind}: {why}"));
+                let name = name.clone();
+                Some(((*kind).to_owned(), Took { name, failed }))
             })
             .collect();
         Last {
@@ -77,7 +90,9 @@ impl Last {
         Some(last.of(named))
     }
 
-    /// What a release before this one kept.
+    /// What a release before this one kept: which channels did not take the
+    /// last notification, but not its words for why, which may name all of
+    /// a channel's address.
     fn earlier(memory: &dyn Memory, named: &Named) -> Option<Self> {
         let problem = memory.recall(PROBLEM).unwrap_or_default();
         let taken = memory.recall(SENT).is_some();
@@ -87,9 +102,14 @@ impl Last {
         let failed = by_kind(&problem);
         let channels = named
             .iter()
-            .filter_map(|(kind, name)| match failed.get(kind) {
-                Some(why) => Some((name.clone(), Some(why.clone()))),
-                None => taken.then(|| (name.clone(), None)),
+            .filter_map(|(kind, name)| {
+                let failed = if failed.contains(kind) {
+                    Some(Some(format!("{kind}: it did not take it")))
+                } else {
+                    taken.then_some(None)
+                };
+                let name = name.clone();
+                failed.map(|failed| ((*kind).to_owned(), Took { name, failed }))
             })
             .collect();
         Some(Last { at: None, channels })
@@ -97,9 +117,17 @@ impl Last {
 
     /// The same, of the channels configured now alone.
     pub(super) fn of(mut self, named: &Named) -> Self {
-        self.channels
-            .retain(|name, _| named.iter().any(|(_, now)| now == name));
+        self.channels.retain(|kind, took| {
+            named
+                .iter()
+                .any(|(now, name)| now == kind && same(kind, &took.name, name))
+        });
         self
+    }
+
+    /// Whether the notification went out on the channel of `kind`.
+    fn carried(&self, kind: &str) -> bool {
+        self.channels.contains_key(kind)
     }
 
     /// Why the channels that did not take it did not, in the order they are
@@ -107,9 +135,22 @@ impl Last {
     fn failures(&self, named: &Named) -> String {
         let failed: Vec<&str> = named
             .iter()
-            .filter_map(|(_, name)| self.channels.get(name)?.as_deref())
+            .filter_map(|(kind, _)| self.channels.get(*kind)?.failed.as_deref())
             .collect();
         failed.join("; ")
+    }
+
+    /// The names of the channels that did not take it, in their order.
+    fn failed(&self, named: &Named) -> Vec<String> {
+        named
+            .iter()
+            .filter(|(kind, _)| {
+                self.channels
+                    .get(*kind)
+                    .is_some_and(|took| took.failed.is_some())
+            })
+            .map(|(_, name)| name.clone())
+            .collect()
     }
 
     /// Keep it, and its failures for a release before this one, where they
@@ -126,6 +167,14 @@ impl Last {
     }
 }
 
+/// Whether the channel of `kind` that was named `then` is the one named
+/// `now`: the same name, or one of them is of an address that could not be
+/// read, so that where it pointed is not known.
+fn same(kind: &str, then: &str, now: &str) -> bool {
+    let unread = unread(kind);
+    then == now || then == unread || now == unread
+}
+
 /// With no channel configured, what the last notification did is forgotten,
 /// so that a channel named again is not judged by what one of its name did
 /// before; nothing is kept where nothing was.
@@ -139,28 +188,16 @@ pub(super) fn forget(memory: &dyn Memory) {
     }
 }
 
-/// The failures of a line that a release before this one kept, by the kind
-/// of channel each names: `ntfy: …; webhook: …`. A kind begins the line or
-/// follows `; `.
-fn by_kind(line: &str) -> BTreeMap<&'static str, String> {
-    let mut starts: Vec<(usize, &'static str)> = Vec::new();
-    for kind in ["ntfy", "webhook", "mail"] {
-        let prefix = format!("{kind}: ");
-        if line.starts_with(&prefix) {
-            starts.push((0, kind));
-        }
-        let inner = format!("; {prefix}");
-        starts.extend(line.match_indices(&inner).map(|(at, _)| (at + 2, kind)));
-    }
-    starts.sort_unstable();
-    let mut failed = BTreeMap::new();
-    for (index, (start, kind)) in starts.iter().enumerate() {
-        let end = starts
-            .get(index + 1)
-            .map_or(line.len(), |(next, _)| next - 2);
-        failed.insert(*kind, line[*start..end].to_owned());
-    }
-    failed
+/// The kinds of channel whose failure a line that a release before this one
+/// kept names: `ntfy: …; webhook: …`. A kind begins the line or follows `; `.
+fn by_kind(line: &str) -> BTreeSet<&'static str> {
+    ["ntfy", "webhook", "mail"]
+        .into_iter()
+        .filter(|kind| {
+            let prefix = format!("{kind}: ");
+            line.starts_with(&prefix) || line.contains(&format!("; {prefix}"))
+        })
+        .collect()
 }
 
 /// Channels that are named have not yet carried a message: only one that
@@ -192,20 +229,23 @@ pub(super) fn card(
         .map(|line| format!("{line}."))
         .collect();
     let failures = last.map(|last| last.failures(named)).unwrap_or_default();
-    if !failures.is_empty() {
-        let at = last.and_then(|last| last.at);
-        let at = at.and_then(|at| time::Timestamp::from_second(at).ok());
+    if let Some(last) = last.filter(|_| !failures.is_empty()) {
+        let at = last.at.and_then(|at| time::Timestamp::from_second(at).ok());
         findings.push(match at {
             Some(at) => format!(
                 "The notification of {} did not go out: {failures}.",
                 time::isoformat(at)
             ),
-            None => format!("The last notification did not go out: {failures}."),
+            None => format!(
+                "The last notification did not go out on {}. `garrison notify-test` shows \
+                 whether one goes out now.",
+                last.failed(named).join(", ")
+            ),
         });
     }
     let unsent: Vec<&str> = named
         .iter()
-        .filter(|(_, name)| last.is_none_or(|last| !last.channels.contains_key(name)))
+        .filter(|(kind, _)| last.is_none_or(|last| !last.carried(kind)))
         .map(|(_, name)| name.as_str())
         .collect();
     let state = if !findings.is_empty() {

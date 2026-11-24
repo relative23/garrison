@@ -23,7 +23,7 @@ use rusqlite::{Connection, OptionalExtension};
 use rustls::RootCertStore;
 
 use crate::context::{Deadline, Memory};
-use crate::notify::{Channels, Level, Note, Secrets, taken};
+use crate::notify::{Address, Channels, Level, Note, Secrets, taken};
 
 /// Where a run leaves the channel, in the collector's memory.
 const CHANNEL: &str = "notify.channel";
@@ -33,17 +33,28 @@ pub const LIMIT: i64 = 600;
 const BUDGET: Duration = Duration::from_secs(5);
 
 /// Leave the channels for the watch, without their secrets; nothing where
-/// none is configured.
-pub fn remember(memory: &dyn Memory, channels: &Channels) {
+/// none is configured. Says whether the channels left before held an address
+/// as written that is kept in a file now, of which the status database may
+/// hold a copy.
+pub fn remember(memory: &dyn Memory, channels: &Channels) -> bool {
     let text = if channels.is_empty() {
         String::new()
     } else {
         serde_json::to_string(channels).unwrap_or_default()
     };
     // Written only when it changes: the collector runs every minute.
-    if memory.recall(CHANNEL).unwrap_or_default() != text {
-        memory.keep(CHANNEL, &text);
+    let before = memory.recall(CHANNEL).unwrap_or_default();
+    if before == text {
+        return false;
     }
+    memory.keep(CHANNEL, &text);
+    let before: Channels = serde_json::from_str(&before).unwrap_or_default();
+    let moved = |was: Option<&Address>, now: Option<&Address>| {
+        was.is_some_and(|was| was.file.is_none() && !was.url.is_empty())
+            && now.is_some_and(|now| now.file.is_some())
+    };
+    moved(before.ntfy.as_ref(), channels.ntfy.as_ref())
+        || moved(before.webhook.as_ref(), channels.webhook.as_ref())
 }
 
 /// What one look at the collector found and did.

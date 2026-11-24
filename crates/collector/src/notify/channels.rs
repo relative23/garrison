@@ -61,6 +61,12 @@ impl Note {
     }
 }
 
+/// The name of a channel of `kind` whose address cannot be read now, as
+/// while its file is written anew: where it points is not known.
+pub(super) fn unread(kind: &str) -> String {
+    format!("{kind}, whose address cannot be read")
+}
+
 /// The server of an address, `host` or `host:port`, never more of it: what
 /// an earlier release kept for the watch may hold a query right after it.
 pub(crate) fn host_of(url: &str) -> &str {
@@ -213,7 +219,7 @@ impl Channels {
             if let Some(address) = address {
                 let name = match address.usable() {
                     Ok(url) => format!("{channel} at {}", host_of(url)),
-                    Err(_) => format!("{channel}, whose address cannot be read"),
+                    Err(_) => unread(channel),
                 };
                 named.push((channel, name));
             }

@@ -94,6 +94,22 @@ fn header(value: &str) -> String {
     }
 }
 
+/// A display name as one word: a quoted string, since a phrase of atoms
+/// takes no colon or bracket, which a port and an IPv6 address bring (RFC
+/// 5322, 3.2.3), or an encoded word for text beyond ASCII, which may not
+/// stand within one (RFC 2047, 5).
+fn display_name(value: &str) -> String {
+    let line: String = value
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect();
+    if line.is_ascii() {
+        format!("\"{}\"", line.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        header(&line)
+    }
+}
+
 /// This installation's host from `name`, as `public_origin` names it,
 /// without its port: a greeting and a Message-ID name a host, never a port
 /// (RFC 5321, 4.1.1.1; RFC 5322, 3.6.4).
@@ -102,6 +118,20 @@ fn host_name(name: &str) -> &str {
         // An IPv6 address keeps the colons inside its brackets.
         Some(rest) => rest.find(']').map_or(name, |end| &name[..end + 2]),
         None => name.rsplit_once(':').map_or(name, |(host, _)| host),
+    }
+}
+
+/// What this installation greets with: its host, or an address as an
+/// address literal, `[192.0.2.1]` or `[IPv6:2001:db8::1]` (RFC 5321, 4.1.3).
+fn greeting(name: &str) -> String {
+    let host = host_name(name);
+    match host
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
+        Some(address) => format!("[IPv6:{address}]"),
+        None if host.parse::<std::net::Ipv4Addr>().is_ok() => format!("[{host}]"),
+        None => host.to_owned(),
     }
 }
 
@@ -120,7 +150,7 @@ pub fn message(mail: &Mail, name: &str, subject: &str, text: &str, now: time::Ti
          MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\
          Content-Transfer-Encoding: base64\r\n\r\n{body}\r\n",
         host = host_name(name),
-        sender = header(&format!("Garrison on {name}")),
+        sender = display_name(&format!("Garrison on {name}")),
         from = mail.from,
         to = mail.to,
         subject = header(subject),
@@ -174,7 +204,7 @@ pub fn submit_over(
     let login = STANDARD.encode(format!("\0{}\0{}", mail.user, mail.password.text()?));
     let steps = [
         (None, 220, "greet"),
-        (Some(format!("EHLO {}\r\n", host_name(name))), 250, "greet"),
+        (Some(format!("EHLO {}\r\n", greeting(name))), 250, "greet"),
         (Some(format!("AUTH PLAIN {login}\r\n")), 235, "sign in"),
         (
             Some(format!("MAIL FROM:<{}>\r\n", mail.from)),

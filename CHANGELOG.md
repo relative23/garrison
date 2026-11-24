@@ -428,6 +428,14 @@ Notable changes for operators and users. The format follows
   with its key right after the server**, which put the key on the Alerts
   page and in the journal, even when kept in a file. Such an address is
   now refused, without the key.
+- **The Alerts page no longer shows an earlier release's record of a failed
+  notification, which could hold a webhook's whole address and key.** The
+  first collection run clears it from the status database; renew a key
+  that showed there.
+- **A notification mail's sender is one mailbox, also where
+  `public_origin` is an IPv6 address or names a port.** Its name was not
+  quoted, so a mail program could read the From line as a group or find no
+  address in it.
 - **A state that a page does not know no longer stops it or reads as OK.**
   A page opened before an upgrade that brings a new state of a check failed
   on such a state and showed its error instead of its checks, and the
@@ -1289,7 +1297,7 @@ Notable changes for operators and users. The format follows
   channel named since the last notification is Unknown, not in order, until
   one has gone out on it. `garrison notify-test` shows whether a message
   goes out now and does not change the check. What a release before this one
-  kept is read as before, without a time.
+  kept names the channels that did not take it, without a time or its words.
 - **A release list that stops answering is said.** While GitHub gave no
   answer, the release checks kept the last release it had named without a
   word. They now say since when no answer came, and after three days "the

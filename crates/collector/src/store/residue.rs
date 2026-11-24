@@ -1,22 +1,29 @@
-//! What earlier releases kept of a key of Spamhaus' Data Query Service. A
-//! zone of the service holds the subscriber's key in its name, and releases
-//! before this one kept it there: in the reputation check's reading, in the
-//! notifications' memory of a listing and in the snapshots. SQLite does not
-//! overwrite what it frees, so a key that no row holds any more may stay in
-//! a free page or in a page's free space until that is reused, and the
-//! group garrison may read the status database.
+//! What the status database may hold of a secret that is kept in a file
+//! now. A zone of Spamhaus' Data Query Service holds the subscriber's key in
+//! its name, and releases before this one kept it there: in the reputation
+//! check's reading, in the notifications' memory of a listing and in the
+//! snapshots. They also kept a channel's address as `garrison.toml` wrote
+//! it, where it may hold a key, for the watch, and named all of it in a
+//! failure their snapshots showed; this release keeps an address written
+//! there for the watch until it is kept in a file. SQLite does not overwrite
+//! what it frees, so a secret that no row holds any more may stay in a free
+//! page or in a page's free space until that is reused, and the group
+//! garrison may read the status database.
 //!
-//! So the store rebuilds the file without it: once, in the first run of this
-//! release, where the file names the service at all, and in any run that
-//! finds a key in a row, as after a return to an earlier release and back.
-//! The rows are masked in place under `secure_delete`, a short write; then
-//! VACUUM INTO writes a copy beside the database, which leaves no free space
-//! and holds only a reader's lock on it, so the web service reads on, and
-//! the copy takes the database's place (replace.rs). A VACUUM in place held
-//! every reader off for as long as it wrote: some 20 seconds for 90 days of
-//! history on a disk that writes 2 MB a second, where a reader gives up
-//! after two. The status database uses the rollback journal, which SQLite
-//! deletes at the end of each commit: no write-ahead log holds a copy.
+//! So the store rebuilds the file without them: once, in the first run of
+//! this release, where the file names the service or a channel at all; in
+//! any run that finds a key in a row, as after a return to an earlier
+//! release and back; and once a channel's address that the watch's record
+//! held as written is kept in a file. The rows are masked in place under
+//! `secure_delete`, a short write, and the snapshots but the newest, which
+//! nobody reads and an earlier release's of which name a channel's address,
+//! go; then VACUUM INTO writes a copy beside the database, which leaves no
+//! free space and holds only a reader's lock on it, so the web service reads
+//! on, and the copy takes the database's place (replace.rs). A VACUUM in
+//! place held every reader off for as long as it wrote: some 20 seconds for
+//! 90 days of history on a disk that writes 2 MB a second, where a reader
+//! gives up after two. The status database uses the rollback journal, which
+//! SQLite deletes at the end of each commit: no write-ahead log holds a copy.
 //!
 //! A rebuild is a run's last step, once its snapshot is stored, and may take
 //! until eight minutes after the run began (run.rs), asking systemd for more
@@ -36,13 +43,19 @@ use rusqlite::{Connection, OptionalExtension, params};
 use super::replace;
 
 /// Where the store notes that this release looked at the file.
-const LOOKED: &str = "store.dqs-keys-looked";
+const LOOKED: &str = "store.secrets-looked";
 /// When a rebuild began that has not finished, a Unix second.
-const BEGAN: &str = "store.dqs-keys-rebuild-began";
+const BEGAN: &str = "store.secrets-rebuild-began";
+/// Where a run notes that a channel's address is kept in a file now that
+/// the watch's record held as written.
+const MOVED: &str = "store.secrets-moved";
 /// How long after such a rebuild the next one waits.
 const AGAIN_AFTER: i64 = 86_400;
 /// How every name of the service ends.
 const SERVICE: &str = ".dq.spamhaus.net";
+/// The key of the watch's record of the channels, which every release
+/// writes once a channel is configured.
+const CHANNELS: &str = "notify.channel";
 
 /// Why a rebuild did not finish: the time it had was up, or it failed.
 #[derive(Debug, thiserror::Error)]
@@ -104,10 +117,11 @@ fn without_key(before: &str) -> String {
     format!("{}…{}", &before[..key], &before[dot..])
 }
 
-/// Whether the file at `path` names the service anywhere: in a row, a free
-/// page or a page's free space.
+/// Whether the file at `path` names the service or the watch's record of
+/// the channels anywhere: in a row, a free page or a page's free space.
 fn named_in_file(path: &Path) -> std::io::Result<bool> {
-    let wanted = SERVICE.as_bytes();
+    let wanted = [SERVICE.as_bytes(), CHANNELS.as_bytes()];
+    let longest = SERVICE.len().max(CHANNELS.len());
     let mut file = File::open(path)?;
     let mut chunk = vec![0; 1 << 20];
     // The end of the chunk before, where a name may begin.
@@ -118,13 +132,14 @@ fn named_in_file(path: &Path) -> std::io::Result<bool> {
             return Ok(false);
         }
         held.extend_from_slice(&chunk[..read]);
-        if held
-            .windows(wanted.len())
-            .any(|window| window[0] == b'.' && window == wanted)
-        {
+        let named = |wanted: &[u8]| {
+            held.windows(wanted.len())
+                .any(|window| window[0] == wanted[0] && window == wanted)
+        };
+        if wanted.into_iter().any(named) {
             return Ok(true);
         }
-        let start = held.len().saturating_sub(wanted.len() - 1);
+        let start = held.len().saturating_sub(longest - 1);
         held.drain(..start);
     }
 }
@@ -152,9 +167,9 @@ fn keyed(db: &Connection, table: &str, text: &str) -> rusqlite::Result<Vec<(i64,
     Ok(found)
 }
 
-/// Whether the database `db` holds open, at `path`, may hold a key of the
-/// service, and is to be rebuilt now: not within a day of a rebuild that did
-/// not finish. `now` is the run's time.
+/// Whether the database `db` holds open, at `path`, may hold a secret, and
+/// is to be rebuilt now: not within a day of a rebuild that did not finish.
+/// `now` is the run's time.
 pub(super) fn due(db: &Connection, path: &Path, now: i64) -> Result<bool, SqliteError> {
     // A value of another type is no value, but one is there.
     let recalled = |key: &str| {
@@ -171,7 +186,8 @@ pub(super) fn due(db: &Connection, path: &Path, now: i64) -> Result<bool, Sqlite
         .and_then(|began| began.parse::<i64>().ok())
         .is_some_and(|began| (0..AGAIN_AFTER).contains(&now.saturating_sub(began)));
     let keyed = !keyed(db, "memory", "value")?.is_empty()
-        || !keyed(db, "snapshots", "document")?.is_empty();
+        || !keyed(db, "snapshots", "document")?.is_empty()
+        || recalled(MOVED)?.is_some();
     if !keyed && (looked || !named_in_file(path)?) {
         if !looked {
             note(db, LOOKED, "1")?;
@@ -230,7 +246,7 @@ fn rebuilt(
     // Only the copy says that the rebuild is done: until it is in place, the
     // database is one to rebuild.
     let copied = Connection::open(copy)?;
-    copied.execute("DELETE FROM memory WHERE key = ?1", [BEGAN])?;
+    copied.execute("DELETE FROM memory WHERE key IN (?1, ?2)", [BEGAN, MOVED])?;
     note(&copied, LOOKED, "1")?;
     drop(copied);
     replace::put_in_place(copy, path)?;
@@ -238,16 +254,21 @@ fn rebuilt(
 }
 
 /// Mask the key in every row of the database `db` holds open that holds one,
-/// as the copy is to have them; how many did. VACUUM INTO writes the copy
-/// without zeroing what it moves, so the rows it copies must hold no key:
-/// masked afterwards, the copy's own pages would keep it. The masking holds
-/// readers off only while it writes these rows.
+/// and take out every snapshot but the newest, as the copy is to have them;
+/// how many rows held a key. VACUUM INTO writes the copy without zeroing
+/// what it moves, so the rows it copies must hold no secret: masked
+/// afterwards, the copy's own pages would keep it. The masking holds readers
+/// off only while it writes these rows.
 fn masked_rows(db: &mut Connection) -> Result<usize, Unfinished> {
     let memory = keyed(db, "memory", "value")?;
     let snapshots = keyed(db, "snapshots", "document")?;
     // What the masking frees is overwritten with zeros.
     db.pragma_update(None, "secure_delete", true)?;
     let transaction = db.transaction()?;
+    transaction.execute(
+        "DELETE FROM snapshots WHERE id < (SELECT max(id) FROM snapshots)",
+        [],
+    )?;
     for (row, value) in &memory {
         transaction.execute(
             "UPDATE memory SET value = ?1 WHERE rowid = ?2",
@@ -263,6 +284,12 @@ fn masked_rows(db: &mut Connection) -> Result<usize, Unfinished> {
     transaction.commit()?;
     db.pragma_update(None, "secure_delete", false)?;
     Ok(memory.len() + snapshots.len())
+}
+
+/// Note that a channel's address is kept in a file now that the watch's
+/// record held as written: the next rebuild leaves no copy of it.
+pub(super) fn moved(db: &Connection) -> rusqlite::Result<()> {
+    note(db, MOVED, "1")
 }
 
 /// Note `value` under `key` in the store's memory: that this release looked,

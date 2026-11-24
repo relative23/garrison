@@ -64,11 +64,17 @@ pub(super) fn native_key(
                 "The collector has an API key for Stalwart again, from {}",
                 credentials.path(source).display()
             ),
-            Err(error) => log::warn!(
-                "The collector has no API key for Stalwart: {error}{}. Each card that needs it \
-                 says so when its check next reads Stalwart.",
-                made_by_setup(error)
-            ),
+            Err(error) => {
+                let file = configured(config, source);
+                let why = match unread(error, &file) {
+                    (what, Some(mend)) => format!("{} {what}; {mend}", file.display()),
+                    (_, None) => format!("{error}{}", made_by_setup(error)),
+                };
+                log::warn!(
+                    "The collector has no API key for Stalwart: {why}. Each card that needs it \
+                     says so when its check next reads Stalwart."
+                );
+            }
         }
     }
     read.ok()

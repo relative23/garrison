@@ -114,15 +114,28 @@ impl StatusStore {
         })
     }
 
-    /// Rebuild the database without what earlier releases kept of a key of
-    /// Spamhaus' Data Query Service, where it may hold some (residue.rs), by
-    /// `until`; `now` is the run's time. A run's last step, so that it costs
-    /// no run: a rebuild that did not finish is said in the journal.
+    /// Note that a channel's address is kept in a file now that the channels
+    /// the database keeps for the watch held as written: the run's last step
+    /// rebuilds the database without any copy of it (residue.rs).
+    pub fn note_moved_address(&self) {
+        if let Err(error) = residue::moved(&self.db) {
+            log::warn!(
+                "The status database did not note a channel's address kept in a file now: {error}"
+            );
+        }
+    }
+
+    /// Rebuild the database without what an earlier release or setting left
+    /// in it of a secret that is kept in a file now, a key of Spamhaus' Data
+    /// Query Service or a channel's address, where it may hold some
+    /// (residue.rs), by `until`; `now` is the run's time. A run's last step,
+    /// so that it costs no run: a rebuild that did not finish is said in the
+    /// journal.
     pub fn clear_residue(&mut self, now: i64, until: Instant) {
         let unread = |error: &dyn std::fmt::Display| {
             log::warn!(
-                "The status database could not be cleared of a key of Spamhaus' Data Query \
-                 Service that an earlier release kept: {error}; the next run tries again"
+                "The status database could not be cleared of a secret that an earlier release \
+                 or setting left in it: {error}; the next run tries again"
             );
         };
         match residue::due(&self.db, &self.path, now) {
@@ -132,9 +145,8 @@ impl StatusStore {
         }
         if until.saturating_duration_since(Instant::now()) < REBUILD_FOR {
             log::info!(
-                "The status database may hold a key of Spamhaus' Data Query Service that an \
-                 earlier release kept; this run left too little time to rebuild it, a later \
-                 one does"
+                "The status database may hold a secret that an earlier release or setting left \
+                 in it; this run left too little time to rebuild it, a later one does"
             );
             return;
         }
@@ -143,9 +155,9 @@ impl StatusStore {
         match with_more_time(until, || residue::clear(db, path, now, until)) {
             Ok(rows) => {
                 log::info!(
-                    "The status database held a key of Spamhaus' Data Query Service that an \
-                     earlier release kept: {rows} rows named it, now without it, and the file was \
-                     rebuilt beside it in {} ms and put in its place",
+                    "The status database was rebuilt beside it without what an earlier release or \
+                     setting left in it of a secret, in {} ms, and put in its place; {rows} rows \
+                     named a key of Spamhaus' Data Query Service",
                     began.elapsed().as_millis()
                 );
                 // The connection holds the file that the copy replaced.
@@ -155,9 +167,9 @@ impl StatusStore {
                 }
             }
             Err(residue::Unfinished::Late) => log::warn!(
-                "The status database could not be cleared of a key of Spamhaus' Data Query \
-                 Service that an earlier release kept within the time this run left: the copy \
-                 was removed, and a run tries again in a day"
+                "The status database could not be cleared of a secret that an earlier release \
+                 or setting left in it within the time this run left: the copy was removed, and \
+                 a run tries again in a day"
             ),
             Err(residue::Unfinished::Failed(error)) => unread(&error),
         }
@@ -185,6 +197,10 @@ impl StatusStore {
             )
             .optional()?
             .flatten();
+        // SQLite gives a new row one more than the greatest id, but after the
+        // greatest integer, which no run gives, any id at random: a snapshot
+        // that holds it goes, so that each run's own is the newest.
+        transaction.execute("DELETE FROM snapshots WHERE id = ?", [i64::MAX])?;
         transaction.execute(
             "INSERT INTO snapshots(collected_at, document) VALUES(?,?)",
             params![collected_at, document],
