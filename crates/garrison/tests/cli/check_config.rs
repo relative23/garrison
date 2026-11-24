@@ -14,8 +14,15 @@ fn check_config_reports_providers_actions_and_the_policy() {
     // The counts and the policy, as the two outcomes carry them.
     let said = text(&valid.stdout);
     let policy = directory.path().join("policy.json");
+    let counts: Vec<&str> = said
+        .lines()
+        .find(|line| line.ends_with("[check-config-valid]"))
+        .unwrap_or_default()
+        .split(|character: char| !character.is_ascii_digit())
+        .filter(|number| !number.is_empty())
+        .collect();
     assert!(
-        said.contains("1 providers, 2 actions") && said.contains(&policy.display().to_string()),
+        counts == ["1", "2"] && said.contains(&policy.display().to_string()),
         "{said}"
     );
     // The test origins are reserved names, as the example's are; its

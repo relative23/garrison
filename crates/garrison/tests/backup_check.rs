@@ -294,9 +294,14 @@ fn another_tool_or_a_place_that_cannot_be_written_ends_the_command() {
     );
     assert_eq!(nowhere.status.code(), Some(1));
     assert_eq!(states(&nowhere.stderr), ["backup-check-io"]);
-    // The folder, in the system's words for why it is not there.
+    // The folder, not the report in it, in the system's words for why it is
+    // not there.
+    let said = text(&nowhere.stderr);
     assert!(
-        text(&nowhere.stderr).contains("/proc/garrison cannot be made: No such file or directory")
+        said.contains("/proc/garrison ")
+            && !said.contains("/proc/garrison/restic.json")
+            && said.contains("No such file or directory"),
+        "{said}"
     );
     assert_eq!(tools.calls(), Vec::<String>::new());
     // A folder at the report's name takes no report.

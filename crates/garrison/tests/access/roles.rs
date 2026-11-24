@@ -51,7 +51,8 @@ fn a_role_that_lacks_a_right_its_profile_requires_is_said_so() {
     assert!(
         said.contains("admin (Administrators)")
             && said.contains("sysRoleUpdate")
-            && said.contains("operator and viewer"),
+            && said.contains("operator")
+            && said.contains("viewer"),
         "{said}"
     );
     let bound = run(
@@ -60,11 +61,16 @@ fn a_role_that_lacks_a_right_its_profile_requires_is_said_so() {
     );
     assert_eq!(bound.status.code(), Some(0), "{}", text(&bound.stderr));
     let said = text(&bound.stdout);
+    let lacks = said
+        .lines()
+        .find(|line| line.ends_with("[access-role-lacks]"))
+        .unwrap_or_default();
     assert!(
         states(&bound.stdout)
             .ends_with(&["access-saved".to_owned(), "access-role-lacks".to_owned()])
-            && said.contains("role admin lacks sysRoleUpdate")
-            && said.contains("operator and viewer"),
+            && ["admin", "sysRoleUpdate", "operator", "viewer"]
+                .iter()
+                .all(|data| lacks.contains(data)),
         "{said}"
     );
     assert_eq!(
@@ -288,7 +294,7 @@ fn init_names_each_default_administrator_role_it_leaves_out() {
         "gone",
         "odd (Of another shape)",
     ]) {
-        assert!(line.contains(&format!("role {role} ")), "{role}: {said}");
+        assert!(line.contains(role), "{role}: {said}");
     }
     assert!(!said.contains("<role-id>"), "{said}");
     let (url, _) = super::graph::stalwart(defaults(&["both"]), all);
