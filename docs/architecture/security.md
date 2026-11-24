@@ -103,11 +103,12 @@ brokers never repeat a job; pending jobs become "uncertain".
   only soft line breaks wrap as the programs do that count `=`;
   quoted-printable that is not well formed it undoes as its standard has it,
   which some programs do not. How Outlook and Apple Mail decode is not known.
-  It does not decode yEnc or BinHex, which a mail program may take from a
-  body: a message that holds a block of either, a part that declares a
-  transfer encoding the filter does not decode, and nesting deeper than three
-  are incomplete, below, not a clean message. Anyone who can reach its
-  loopback port can ask it about a message, as with any milter.
+  It reads one message at a time, so a document split over the fragments of a
+  message/partial is not seen. It does not decode yEnc or BinHex, which a mail
+  program may take from a body: a message that holds a block of either, a part
+  that declares a transfer encoding the filter does not decode, and nesting
+  deeper than three are incomplete, below, not a clean message. Anyone who can
+  reach its loopback port can ask it about a message, as with any milter.
 - A message the macro filter could not scan completely is taken all the same
   unless the operator chose otherwise: one larger than `max_message_mib`, one
   whose archives unpack to more than 16 MiB a file or 64 MiB together or are

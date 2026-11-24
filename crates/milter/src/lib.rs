@@ -10,8 +10,9 @@
 //! no zip archive; macro sheets of Excel 4.0 in an old `.xls` file, which
 //! are no VBA project; the macros of an old `.ppt` file, which keeps them
 //! compressed inside one of its streams; macros of other office suites'
-//! own formats; a document behind a link; and what lies deeper in archives
-//! than [`scan::DEPTH`].
+//! own formats; a document behind a link or split over the parts of a
+//! message/partial, since each message is scanned alone; and what lies
+//! deeper in archives than [`scan::DEPTH`].
 //!
 //! What the scan could not look at completely is no clean message: one
 //! larger than the configured size, one whose archives hold more than the
