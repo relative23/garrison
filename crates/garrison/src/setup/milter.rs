@@ -301,15 +301,28 @@ mod tests {
 
     /// The filter moves only to a port it can have: one another program
     /// holds refuses the run before anything changes, and one that is free
-    /// is taken. No socket can hold that port for the second look, since the
-    /// filter's listener does not share it: between the two lines the system
-    /// may give it to another socket of this host, which is rare.
+    /// is taken.
     #[test]
     fn the_filter_moves_only_to_a_port_it_can_have() {
-        let (held, port) = crate::doctor::silent_port();
-        assert_eq!(free(port), Err(states::milter_port_taken(port, in_use())));
-        drop(held);
-        assert_eq!(free(port), Ok(()));
+        let (_held, taken) = crate::doctor::silent_port();
+        assert_eq!(free(taken), Err(states::milter_port_taken(taken, in_use())));
+        assert_eq!(free(unassigned_port()), Ok(()));
+    }
+
+    /// A port that is free and stays so between two looks: one outside the
+    /// range from which the system gives a port to a socket that asks for
+    /// any, as the listeners of the tests beside this one do. A port such a
+    /// socket has just given back is the next the system hands out.
+    fn unassigned_port() -> u16 {
+        let range = fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range").unwrap();
+        let mut bounds = range
+            .split_whitespace()
+            .map(|bound| bound.parse::<u16>().unwrap());
+        let (low, high) = (bounds.next().unwrap(), bounds.next().unwrap());
+        (1024..low)
+            .chain((high..=u16::MAX).skip(1))
+            .find(|port| TcpListener::bind((Ipv4Addr::LOCALHOST, *port)).is_ok())
+            .expect("a free port outside the range the system gives ports from")
     }
 
     /// What the system says of a port another socket holds.
