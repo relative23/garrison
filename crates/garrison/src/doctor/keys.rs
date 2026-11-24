@@ -183,31 +183,38 @@ mod tests {
             asked[2]
         );
         assert_eq!(
-            (found[0].level, found[0].state.text.as_str()),
-            (
-                Level::Ok,
-                "Stalwart takes the broker's API key (broker-native-key) from this host"
-            )
-        );
-        assert_eq!(found[1].level, Level::Fail, "{}", found[1].line());
-        assert_eq!(
-            found[1].state.fix.as_deref(),
-            Some("Run `garrison stalwart setup`, which makes a new one.")
-        );
-        let refused = tried("broker-native-key", Service::Broker, Ok(403));
-        assert_eq!(refused.level, Level::Fail);
-        assert!(
-            refused.state.text.contains("(HTTP 403)"),
-            "{}",
-            refused.state.text
+            found,
+            [
+                Finding::ok(states::taken(Service::Broker, "broker-native-key")),
+                Finding::fail(states::not_known(
+                    Service::Collector,
+                    "collector-native-key"
+                )),
+            ]
         );
         // An address Stalwart blocked gets no answer at all (measured on
-        // 1.1.0), so a 403 names no block.
-        assert!(!refused.line().contains("block"), "{}", refused.line());
-        for answer in [Ok(500), Err("Stalwart did not answer".to_owned())] {
-            let unknown = tried("broker-native-key", Service::Broker, answer);
-            assert_eq!(unknown.level, Level::Unknown, "{}", unknown.line());
+        // 1.1.0), so a 403 is the key's address, which its state names.
+        assert_eq!(
+            tried("broker-native-key", Service::Broker, Ok(403)),
+            Finding::fail(states::other_address(Service::Broker, "broker-native-key"))
+        );
+        for (answer, why) in [
+            (Ok(500), states::answered(500)),
+            (
+                Err("Stalwart did not answer".to_owned()),
+                "Stalwart did not answer".to_owned(),
+            ),
+        ] {
+            assert_eq!(
+                tried("broker-native-key", Service::Broker, answer),
+                Finding::unknown(states::untried(Service::Broker, "broker-native-key", &why))
+            );
         }
+    }
+
+    /// The level and the name of a finding.
+    fn named(finding: &Finding) -> (Level, &str) {
+        (finding.level, finding.state.name)
     }
 
     /// A broker's key that opens its session but lacks a permission the
@@ -234,14 +241,9 @@ mod tests {
             b"collector-key-0123456789",
         );
         let found = checks(&config, &credentials);
-        assert_eq!(found[0].level, Level::Fail, "{}", found[0].line());
-        assert!(
-            found[0]
-                .state
-                .fix
-                .as_deref()
-                .unwrap_or_default()
-                .contains("garrison stalwart setup"),
+        assert_eq!(
+            named(&found[0]),
+            (Level::Fail, "doctor-key-narrowed"),
             "{}",
             found[0].line()
         );
@@ -275,10 +277,11 @@ mod tests {
             b"collector-key-0123456789",
         );
         let found = checks(&config, &credentials);
-        assert_eq!(found[1].level, Level::Fail, "{}", found[1].line());
         assert_eq!(
-            found[1].state.fix.as_deref(),
-            Some("Run `garrison stalwart setup`, which gives the key the permissions it needs.")
+            named(&found[1]),
+            (Level::Fail, "doctor-key-narrowed"),
+            "{}",
+            found[1].line()
         );
         let asked = stalwart.requests();
         assert!(
