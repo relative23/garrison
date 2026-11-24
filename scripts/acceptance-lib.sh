@@ -392,7 +392,7 @@ services() {
     check "$1: ingest answers" 'curl -sf http://127.0.0.1:8094/health'
     check "$1: a signed batch is stored" '
         key=$(cat /etc/garrison/credentials/webhook-signature-key)
-        body="{\"events\": [{\"id\": \"$(date +%s%N)\", \"createdAt\": \"2026-10-29T10:00:00Z\", \"type\": \"auth.failed\", \"data\": {}}]}"
+        body="{\"events\": [{\"id\": \"$(date +%s%N)\", \"createdAt\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"type\": \"auth.failed\", \"data\": {}}]}"
         signature=$(printf %s "$body" | openssl dgst -sha256 -hmac "$key" -binary | base64)
         curl -s -H "Content-Type: application/json" -H "X-Signature: $signature" \
             --data-binary "$body" http://127.0.0.1:8094/webhook | grep -q "\"stored\":1"'
