@@ -412,6 +412,10 @@ Notable changes for operators and users. The format follows
   with its key right after the server**, which put the key on the Alerts
   page and in the journal, even when kept in a file. Such an address is
   now refused, without the key.
+- **The Alerts page no longer shows an earlier release's record of a failed
+  notification, which could hold a webhook's whole address and key.** The
+  first collection run clears it from the status database; renew a key
+  that showed there.
 - **A state that a page does not know no longer stops it or reads as OK.**
   A page opened before an upgrade that brings a new state of a check failed
   on such a state and showed its error instead of its checks, and the

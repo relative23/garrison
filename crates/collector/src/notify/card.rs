@@ -11,7 +11,7 @@
 //! it. `garrison notify-test`, which runs as root, does not: only the
 //! collector writes the status database.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
@@ -77,7 +77,9 @@ impl Last {
         Some(last.of(named))
     }
 
-    /// What a release before this one kept.
+    /// What a release before this one kept: which channels did not take the
+    /// last notification, but not its words for why, which may name all of
+    /// a channel's address.
     fn earlier(memory: &dyn Memory, named: &Named) -> Option<Self> {
         let problem = memory.recall(PROBLEM).unwrap_or_default();
         let taken = memory.recall(SENT).is_some();
@@ -87,9 +89,12 @@ impl Last {
         let failed = by_kind(&problem);
         let channels = named
             .iter()
-            .filter_map(|(kind, name)| match failed.get(kind) {
-                Some(why) => Some((name.clone(), Some(why.clone()))),
-                None => taken.then(|| (name.clone(), None)),
+            .filter_map(|(kind, name)| {
+                if failed.contains(kind) {
+                    Some((name.clone(), Some(format!("{kind}: it did not take it"))))
+                } else {
+                    taken.then(|| (name.clone(), None))
+                }
             })
             .collect();
         Some(Last { at: None, channels })
@@ -110,6 +115,15 @@ impl Last {
             .filter_map(|(_, name)| self.channels.get(name)?.as_deref())
             .collect();
         failed.join("; ")
+    }
+
+    /// The names of the channels that did not take it, in their order.
+    fn failed(&self, named: &Named) -> Vec<String> {
+        named
+            .iter()
+            .filter(|(_, name)| matches!(self.channels.get(name), Some(Some(_))))
+            .map(|(_, name)| name.clone())
+            .collect()
     }
 
     /// Keep it, and its failures for a release before this one, where they
@@ -139,28 +153,16 @@ pub(super) fn forget(memory: &dyn Memory) {
     }
 }
 
-/// The failures of a line that a release before this one kept, by the kind
-/// of channel each names: `ntfy: …; webhook: …`. A kind begins the line or
-/// follows `; `.
-fn by_kind(line: &str) -> BTreeMap<&'static str, String> {
-    let mut starts: Vec<(usize, &'static str)> = Vec::new();
-    for kind in ["ntfy", "webhook", "mail"] {
-        let prefix = format!("{kind}: ");
-        if line.starts_with(&prefix) {
-            starts.push((0, kind));
-        }
-        let inner = format!("; {prefix}");
-        starts.extend(line.match_indices(&inner).map(|(at, _)| (at + 2, kind)));
-    }
-    starts.sort_unstable();
-    let mut failed = BTreeMap::new();
-    for (index, (start, kind)) in starts.iter().enumerate() {
-        let end = starts
-            .get(index + 1)
-            .map_or(line.len(), |(next, _)| next - 2);
-        failed.insert(*kind, line[*start..end].to_owned());
-    }
-    failed
+/// The kinds of channel whose failure a line that a release before this one
+/// kept names: `ntfy: …; webhook: …`. A kind begins the line or follows `; `.
+fn by_kind(line: &str) -> BTreeSet<&'static str> {
+    ["ntfy", "webhook", "mail"]
+        .into_iter()
+        .filter(|kind| {
+            let prefix = format!("{kind}: ");
+            line.starts_with(&prefix) || line.contains(&format!("; {prefix}"))
+        })
+        .collect()
 }
 
 /// Channels that are named have not yet carried a message: only one that
@@ -192,15 +194,18 @@ pub(super) fn card(
         .map(|line| format!("{line}."))
         .collect();
     let failures = last.map(|last| last.failures(named)).unwrap_or_default();
-    if !failures.is_empty() {
-        let at = last.and_then(|last| last.at);
-        let at = at.and_then(|at| time::Timestamp::from_second(at).ok());
+    if let Some(last) = last.filter(|_| !failures.is_empty()) {
+        let at = last.at.and_then(|at| time::Timestamp::from_second(at).ok());
         findings.push(match at {
             Some(at) => format!(
                 "The notification of {} did not go out: {failures}.",
                 time::isoformat(at)
             ),
-            None => format!("The last notification did not go out: {failures}."),
+            None => format!(
+                "The last notification did not go out on {}. `garrison notify-test` shows \
+                 whether one goes out now.",
+                last.failed(named).join(", ")
+            ),
         });
     }
     let unsent: Vec<&str> = named

@@ -219,7 +219,9 @@ that holds no such address is that channel's error. Such an address never
 shows: the Alerts page, the journal and `garrison notify-test` name its
 server only, and the status database, where the watch finds the channels
 when the configuration does not load, holds the name of its file, which the
-watch reads again. `garrison doctor` warns of a topic or a webhook that
+watch reads again. What the status database held of it before, as earlier
+releases kept it, goes with the next collection run, free pages included.
+`garrison doctor` warns of a topic or a webhook that
 takes no token while its address is written in `garrison.toml`.
 
 ### Mail

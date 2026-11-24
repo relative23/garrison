@@ -107,7 +107,8 @@ fn the_first_run_of_this_release_leaves_no_copy_of_a_dqs_key_in_the_status_datab
                         })
                         .ok()
                     });
-                if read != Some(10) {
+                // Ten snapshots, or the newest alone once the rows are masked.
+                if !matches!(read, Some(10 | 1)) {
                     failed.store(true, Ordering::SeqCst);
                 }
                 reads += 1;
@@ -185,9 +186,11 @@ fn a_rebuild_out_of_time_leaves_the_database_as_it_was_and_waits_a_day() {
     let mut store = StatusStore::open(&path, 90).unwrap();
     let now = time::now().as_second();
     assert!(residue::due(&store.db, &path, now).unwrap());
+    let file = fs::metadata(&path).unwrap().ino();
     let late = residue::clear(&mut store.db, &path, now, Instant::now());
     assert!(matches!(late, Err(residue::Unfinished::Late)), "{late:?}");
-    assert_eq!(holding(directory.path()), ["status.sqlite"]);
+    // The database is the file it was: no copy took its place.
+    assert_eq!(fs::metadata(&path).unwrap().ino(), file);
     assert!(!replace::copy_of(&path).exists());
     for later in [0, 3600, 86_399] {
         assert!(

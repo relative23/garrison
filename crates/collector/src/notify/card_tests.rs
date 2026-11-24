@@ -128,7 +128,8 @@ fn a_channel_named_since_the_last_notification_is_not_known_to_work() {
 }
 
 /// A release before this one kept the failures on one line and no time:
-/// each counts for the channel of its kind, as long as one is configured.
+/// each counts for the channel of its kind, as long as one is configured,
+/// but not with its words, which may name all of the channel's address.
 #[test]
 fn what_an_earlier_release_kept_counts_for_the_channels_of_its_kinds() {
     let memory = Remembered::default();
@@ -144,14 +145,14 @@ fn what_an_earlier_release_kept_counts_for_the_channels_of_its_kinds() {
     assert_eq!(
         card.findings,
         [
-            "The last notification did not go out: webhook: the certificate is not valid for this \
-          name; it is for localhost."
+            "The last notification did not go out on webhook at 127.0.0.1:9. `garrison \
+             notify-test` shows whether one goes out now."
         ]
     );
     // Its line for a release before this one names what still counts.
     assert_eq!(
         memory.recall("notify.problem").as_deref(),
-        Some("webhook: the certificate is not valid for this name; it is for localhost")
+        Some("webhook: it did not take it")
     );
     // Without the webhook, the topic took it.
     let topic = Channels {

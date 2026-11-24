@@ -133,7 +133,8 @@ fn filled(directory: &Path) -> PathBuf {
     run(&config, &credentials, t0 - 60).unwrap();
     keep(&[
         ("store.ahead-for", "0".to_owned()),
-        ("store.dqs-keys-rebuild-began", (t0 - 60).to_string()),
+        ("store.secrets-rebuild-began", (t0 - 60).to_string()),
+        ("store.secrets-moved", "1".to_owned()),
     ]);
     path
 }
