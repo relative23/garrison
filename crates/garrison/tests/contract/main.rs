@@ -238,7 +238,9 @@ const UNCHANGED: &str = "Stalwart is set up as asked; nothing was changed.";
 
 /// The run after a first setup, with the same arguments, through a relay
 /// that keeps every request: it finds everything as asked, so it writes no
-/// object in Stalwart, asks for no reload, restarts no service and says so.
+/// object in Stalwart, restarts no service and says so. It asks Stalwart to
+/// reload its settings, as every run does, since no read shows whether
+/// Stalwart uses what it holds.
 fn unchanged(lab: &Lab, directory: &std::path::Path, credential: &str, gateway: &str) {
     let relay = stopper::Stopper::new(&lab.url, usize::MAX, stopper::Stop::Lost);
     let settings = directory.join("garrison.toml");
@@ -261,7 +263,7 @@ fn unchanged(lab: &Lab, directory: &std::path::Path, credential: &str, gateway: 
     assert_eq!(again.status.code(), Some(0), "{said}");
     let written: Vec<&String> = asked
         .iter()
-        .filter(|asked| asked.contains("/set"))
+        .filter(|asked| asked.contains("/set") && *asked != "x:Action/set create")
         .collect();
     assert_eq!(written, Vec::<&String>::new(), "{said}");
     assert!(

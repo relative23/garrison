@@ -196,11 +196,12 @@ fn configure(
     for step in &steps {
         say(&format!("- {step}"));
     }
-    let reloaded = !steps.is_empty();
-    if reloaded {
-        let reload = admin.set("x:Action/set", &Set::create(Action::ReloadSettings));
-        reload.map_err(|error| until(error, signing.new, new_scrape))?;
-    }
+    // Stalwart uses what it holds of these from its next reload of its
+    // settings on, and shows no read of what it uses: after a run stopped
+    // between a change and the reload, only a reload makes it take what it
+    // holds, so every run asks for one.
+    let reload = admin.set("x:Action/set", &Set::create(Action::ReloadSettings));
+    reload.map_err(|error| until(error, signing.new, new_scrape))?;
     // Stalwart signs with the receiver's new key from now on, so the
     // receiver starts again to read it.
     let mut stale = restart::stale(directory);
@@ -212,17 +213,16 @@ fn configure(
         Err(asked) => Some(asked),
     };
     let retired = milter::retire(config)?;
-    match (reloaded, restarted) {
-        (true, None) => say("Settings reloaded."),
-        (true, Some(line)) => say(&format!("Settings reloaded. {line}")),
-        (false, Some(line)) => say(&line),
-        (false, None) => {}
+    if !keys_changed && steps.is_empty() && stale.is_empty() && retired.is_empty() {
+        say(UNCHANGED);
+        return Ok(());
+    }
+    match restarted {
+        None => say("Settings reloaded."),
+        Some(line) => say(&format!("Settings reloaded. {line}")),
     }
     for step in &retired {
         say(&format!("- {step}"));
-    }
-    if !keys_changed && !reloaded && stale.is_empty() && retired.is_empty() {
-        say(UNCHANGED);
     }
     Ok(())
 }
