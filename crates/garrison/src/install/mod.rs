@@ -148,12 +148,14 @@ pub(super) fn name(release: &Path) -> String {
 
 /// Installers built before 0.2.0 from the development branch left
 /// `unfinished.json` for the next run. Nothing reads it any more: each run
-/// that holds the lock names one it finds and removes it.
-pub(super) fn leftover() -> Step {
-    if let Some(line) = leftover_in(Path::new(BASE))? {
-        announce(&line);
+/// that holds the lock names one it finds and removes it, and says whether
+/// there was one.
+pub(super) fn leftover() -> Step<bool> {
+    let found = leftover_in(Path::new(BASE))?;
+    if let Some(line) = &found {
+        announce(line);
     }
-    Ok(())
+    Ok(found.is_some())
 }
 
 fn leftover_in(base: &Path) -> Step<Option<String>> {
