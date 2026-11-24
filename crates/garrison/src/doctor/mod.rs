@@ -185,32 +185,33 @@ fn silent_port() -> (std::os::fd::OwnedFd, u16) {
 mod tests {
     use super::*;
 
-    /// What the units do not follow is a warning with what to do, as in
-    /// check-config: the test configuration's own folders are not the units'.
+    /// The names and levels of `findings`.
+    fn named(findings: &[Finding]) -> Vec<(Level, &str)> {
+        findings
+            .iter()
+            .map(|finding| (finding.level, finding.state.name))
+            .collect()
+    }
+
+    /// What the units do not follow is a warning with what to do, in
+    /// check-config's words: the test configuration's own four state
+    /// directories, credentials and socket are not the units'.
     #[test]
     fn a_setting_the_units_do_not_follow_is_a_warning() {
         let directory = tempfile::tempdir().unwrap();
         let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
-        let found = unfollowed(&config);
-        assert!(found.iter().all(|finding| finding.level == Level::Warn));
-        let said: Vec<&str> = found
-            .iter()
-            .map(|finding| finding.state.text.as_str())
+        let include = crate::unfollowed::installed_include();
+        let settings = crate::unfollowed::settings(&config, include.as_deref());
+        assert!(settings.len() >= 6, "{settings:?}");
+        let said: Vec<Finding> = settings
+            .into_iter()
+            .map(|setting| Finding::warn(states::unfollowed(setting)))
             .collect();
-        for start in [
-            "web.state_directory is ",
-            "collector.state_directory is ",
-            "credentials_directory is ",
-            "broker.socket is ",
-        ] {
-            assert!(said.iter().any(|what| what.starts_with(start)), "{said:?}");
-        }
+        assert_eq!(unfollowed(&config), said);
         assert!(
-            found[0]
-                .line()
-                .contains("Remove the setting. To keep Garrison's data on another disk"),
-            "{}",
-            found[0].line()
+            named(&said)
+                .iter()
+                .all(|named| *named == (Level::Warn, "doctor-setting-unfollowed"))
         );
     }
 
@@ -223,15 +224,11 @@ mod tests {
             garrison_core::credentials::SecretSource::Credential("key".into());
         let (found, channels) = secrets(&config);
         assert!(channels);
-        assert_eq!(found.len(), 1);
-        assert_eq!(
-            found[0].line(),
-            "FAIL  broker.native_key is credential:key, but garrison-broker.service loads this \
-             secret only as credential:broker-native-key [doctor-secret-unloaded]\n      Write \
-             broker.native_key = \
-             \"credential:broker-native-key\" and keep the secret in \
-             /etc/garrison/credentials/broker-native-key."
-        );
+        let mut unloaded = crate::loaded::unloaded(&config);
+        assert_eq!(unloaded.len(), 1);
+        assert_eq!(unloaded[0].setting, "broker.native_key");
+        assert_eq!(found, [Finding::fail(states::unloaded(unloaded.remove(0)))]);
+        assert_eq!(named(&found), [(Level::Fail, "doctor-secret-unloaded")]);
         config.notifications.token =
             garrison_core::credentials::SecretSource::Credential("token".into());
         assert!(matches!(secrets(&config), (found, false) if found.len() == 2));
@@ -239,7 +236,7 @@ mod tests {
 
     /// A list of Spamhaus' Data Query Service: one written without its key
     /// fails while nothing could ask it; one that holds its key is a warning
-    /// that never repeats the key.
+    /// that never repeats the key. Both in check-config's words.
     #[test]
     fn the_lists_of_spamhaus_dqs_are_judged_as_check_config_judges_them() {
         let directory = tempfile::tempdir().unwrap();
@@ -253,29 +250,23 @@ mod tests {
         .unwrap();
         config.collector.providers.push(reputation);
         let found = lists(&config);
-        let lines: Vec<(Level, String)> = found
-            .iter()
-            .map(|finding| (finding.level, finding.state.text.clone()))
-            .collect();
+        let (mut refused, mut warned) = (crate::dqs::refused(&config), crate::dqs::warned(&config));
+        assert_eq!((refused.len(), warned.len()), (1, 1));
         assert_eq!(
-            lines,
+            found,
             [
-                (
-                    Level::Fail,
-                    "providers[1].lists names zen.dq.spamhaus.net, a list of Spamhaus' Data \
-                     Query Service written without its key, but collector.dqs_key is not set, so \
-                     it could not be asked"
-                        .to_owned()
-                ),
-                (
-                    Level::Warn,
-                    "providers[1].lists names ….sbl.dq.spamhaus.net with the key of Spamhaus' \
-                     Data Query Service in it, in garrison.toml, which every user of this host \
-                     may read"
-                        .to_owned()
-                ),
+                Finding::fail(states::dqs_unasked(refused.remove(0))),
+                Finding::warn(states::dqs_key_written(warned.remove(0)))
             ]
         );
+        assert_eq!(
+            named(&found),
+            [
+                (Level::Fail, "doctor-dqs-list-unasked"),
+                (Level::Warn, "doctor-dqs-key-in-config")
+            ]
+        );
+        // The key itself, which garrison.toml holds here, is in no line.
         assert!(found.iter().all(|finding| !finding.line().contains(key)));
         config.collector.dqs_key = Some(garrison_core::credentials::SecretSource::Credential(
             "spamhaus-dqs-key".into(),
