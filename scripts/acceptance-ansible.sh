@@ -283,11 +283,12 @@ scenario_first_unfinished() {
     unchanged "a further run changes nothing" "$older" -e acceptance_policy=false
 }
 
-# The installer refuses the play that changed the configuration for lack of
-# room, before it changes anything; once there is room, the next play brings
-# that configuration into force.
+# The installer needs room only where it copies the state, before another
+# release starts on it: a changed configuration of the running release is in
+# force after one play without that room, an upgrade without it is refused
+# before anything changes, and the next play, once there is room, finishes it.
 scenario_no_room() {
-    step "A configuration the installer had no room for is installed by the next play"
+    step "An upgrade the installer had no room for is finished by the next play"
     inside 'cp /etc/systemd/system/acceptance-check.service /etc/systemd/system/acceptance-other.service &&
         free=$(df --output=avail -B 1 /opt | tail -n 1) && fallocate -l $((free - 31457280)) /root/filled'
     cat > "$work/other.yml" <<'VARS'
@@ -302,14 +303,18 @@ acceptance_config: |
   cooldown_seconds = 0
   timeout_seconds = 30
 VARS
+    play "$newer" -e "@$work/other.yml"
+    check "a changed configuration of the running release is in force without room for a copy" \
+        'grep -q acceptance-other.service /etc/polkit-1/rules.d/50-garrison.rules'
+    inside '/opt/garrison/current/bin/garrison install --rollback >/dev/null'
+    names "a rollback by hand returned to $older" current "$older"
     stops "$newer" "MiB free and the installation needs" -e "@$work/other.yml"
-    # Setup follows the configuration before the installer refuses it.
-    said "Stalwart accepts both API keys from this host"
+    names "the upgrade without room left $older current" current "$older"
+    check "the upgrade without room left $older running" 'systemctl is-active --quiet garrison-web.service'
     inside 'rm /root/filled'
     play "$newer" -e "@$work/other.yml"
-    check "the configuration of the play that had no room is in force" \
-        'grep -q acceptance-other.service /etc/polkit-1/rules.d/50-garrison.rules'
-    services "after a play that had no room"
+    names "the next play finished the upgrade to $newer" current "$newer"
+    services "after an upgrade that had no room"
     unchanged "a further run changes nothing" "$newer" -e "@$work/other.yml"
 }
 
