@@ -6,8 +6,8 @@ use std::process::{Command, Output};
 
 use serde_json::{Map, Value, json};
 
+use super::stand_in::{Tools, read};
 use super::support::{finished, text};
-use super::{Tools, read};
 
 pub(super) const OLD: &str = "0a0b0c0d0e0f00112233445566778899aabbccddeeff00112233445566778899";
 pub(super) const NEW: &str = "f0e1d2c3b4a5968778695a4b3c2d1e0ffedcba98765432100123456789abcdef";

@@ -9,7 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 use serde_json::{Map, Value, json};
 
 use super::case::{Case, HERE, NEW, OLD, Way, id, way};
-use super::read;
+use super::stand_in::read;
 use super::support::text;
 
 /// The repository asked again, under the name it had or under another.
