@@ -186,7 +186,8 @@ describe("first paint", () => {
     serve({ "GET session": { body: { session: null } } });
     openApp("/admin/");
     expect(await screen.findByRole("link", { name: "Sign in with Stalwart" })).toBeTruthy();
-    expect(document.documentElement.className).toBe("light");
+    // The page takes the system's theme in an effect, after the link is drawn.
+    await waitFor(() => expect(document.documentElement.className).toBe("light"));
   });
 });
 
