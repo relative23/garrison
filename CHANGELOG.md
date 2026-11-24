@@ -668,6 +668,9 @@ Notable changes for operators and users. The format follows
 - **`garrison nginx` prints a block that listens on the port
   `public_origin` names**, and its redirect from plain HTTP keeps that port;
   it listened on 443 whatever the origin said.
+- **`garrison setup` says the configuration holds its addresses only where it
+  does.** A `[deployment]` table it cannot edit, as with dotted keys, ends the
+  setup with the lines to write there by hand.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year
