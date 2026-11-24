@@ -255,11 +255,12 @@ batches that Stalwart sends while the signature key changes are refused once
 and delivered again. Rotate after anyone who should not have them may have
 seen the files in `/etc/garrison/credentials`, and from time to time.
 
-Run it as root, so that it can restart the services itself. If it stops
-with an error, or is interrupted, the services keep secrets that Stalwart
-takes, and the message says what may go without a new one until it runs
-again: once the cause is mended, run `sudo garrison stalwart setup --rotate`
-again, which finishes the rotation.
+Run it as root, so that it can restart the services itself. A run that
+stops with an error, or is interrupted, leaves the broker and the collector
+keys that Stalwart takes, and the next run finishes the rotation: once the
+cause is mended, run `sudo garrison stalwart setup --rotate` again, as its
+message says. Until then the receiver may refuse Stalwart's batches, which
+Stalwart sends again for an hour.
 
 ## Uninstall
 
