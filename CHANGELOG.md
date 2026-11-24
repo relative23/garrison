@@ -1330,6 +1330,8 @@ Notable changes for operators and users. The format follows
   `row_date`.
 - **The disk forecast begins anew where `disk_path` changes, instead of
   mixing the readings of two file systems.**
+- **The firewall card is Unknown where systemctl gives no state for its
+  units, instead of warning that no firewall runs.**
 - **A receipt's time is the same instant for every viewer.** A field or
   column of a receipt with `format = "datetime"` went out as the job wrote
   it, and a time written without its offset, such as `2026-11-17T03:00:00`,

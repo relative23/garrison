@@ -90,6 +90,7 @@ fn field<'a>(observation: &'a Observation, label: &str) -> &'a serde_json::Value
 }
 
 mod disk;
+mod firewall;
 mod updates;
 
 #[test]

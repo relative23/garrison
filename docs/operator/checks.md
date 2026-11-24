@@ -101,7 +101,8 @@ changes nothing; one that cannot be made is Unknown.
   warning. The forecast needs a day of readings first, and again after
   `disk_path` changes.
 - `firewall`: whether one of the services firewalld, nftables and ufw is
-  active; none is a warning. Where a unit of the host's own loads the rules,
+  active; none is a warning, and a systemctl that gives no state for each,
+  as while it cannot reach systemd, is Unknown. Where a unit of the host's own loads the rules,
   for example one that runs `nft -f`, name it:
   `firewall_units = ["host-firewall.service"]`. The check then asks for
   those units instead; `garrison detect` names the ones it finds. The rules

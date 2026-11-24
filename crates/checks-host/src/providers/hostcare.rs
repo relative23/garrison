@@ -356,23 +356,28 @@ impl HostCare {
         let short = |unit: &&str| unit.trim_end_matches(".service").to_owned();
         let mut arguments = vec!["systemctl", "is-active"];
         arguments.extend(&units);
-        // The exit code only says whether all are active; the lines say which.
-        let active: Option<Vec<String>> = context.runner.run(&arguments).ok().map(|output| {
-            let states: Vec<String> = output
-                .stdout
-                .lines()
-                .map(|line| line.trim().to_owned())
-                .collect();
-            units
-                .iter()
-                .zip(&states)
-                .filter(|(_, state)| *state == "active")
-                .map(|(unit, _)| short(unit))
-                .collect()
-        });
-        let (state, finding) = match &active {
-            None => (State::Unknown, Some("systemctl did not answer.".to_owned())),
-            Some(active) if active.is_empty() && self.firewall_units.is_none() => (
+        // The exit code only says whether all are active; the lines say
+        // which, one for each unit, or there is no answer.
+        let answer = match context.runner.run(&arguments) {
+            Err(_) => Err("systemctl did not answer."),
+            Ok(output) => {
+                let states: Vec<&str> = output.stdout.lines().map(str::trim).collect();
+                if states.len() == units.len() {
+                    Ok(units
+                        .iter()
+                        .zip(&states)
+                        .filter(|(_, state)| **state == "active")
+                        .map(|(unit, _)| short(unit))
+                        .collect::<Vec<String>>())
+                } else {
+                    Err("systemctl gave no state for every firewall unit.")
+                }
+            }
+        };
+        let active = answer.as_ref().ok().cloned();
+        let (state, finding) = match &answer {
+            Err(why) => (State::Unknown, Some((*why).to_owned())),
+            Ok(active) if active.is_empty() && self.firewall_units.is_none() => (
                 State::Warning,
                 Some(
                     "No firewall service is active (firewalld, nftables, ufw). Where a unit of the \
@@ -380,14 +385,14 @@ impl HostCare {
                         .to_owned(),
                 ),
             ),
-            Some(active) if active.is_empty() => (
+            Ok(active) if active.is_empty() => (
                 State::Warning,
                 Some(format!(
                     "None of the firewall units is active ({}).",
                     units.iter().map(short).collect::<Vec<_>>().join(", ")
                 )),
             ),
-            Some(_) => (State::Ok, None),
+            Ok(_) => (State::Ok, None),
         };
         Ok(self
             .observation(
