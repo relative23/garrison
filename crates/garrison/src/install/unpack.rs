@@ -95,6 +95,13 @@ fn same_file(from: &Path, to: &Path, mode: u32) -> bool {
         && fs::read(from).is_ok_and(|wanted| fs::read(to).is_ok_and(|held| held == wanted))
 }
 
+/// Count `release` as installed now, as an unpack does: housekeeping keeps
+/// the releases installed last, by their folder's time.
+pub(super) fn installed_now(release: &Path) -> Step {
+    let folder = io(fs::File::open(release), release)?;
+    io(folder.set_modified(std::time::SystemTime::now()), release)
+}
+
 /// Unpack next to the target, then rename it into place: the release's name
 /// only ever holds a complete tree, also the running one's on a reinstall.
 pub(super) fn install_release(here: &Path, version: &str) -> Step<PathBuf> {
@@ -125,7 +132,32 @@ pub(super) fn install_release(here: &Path, version: &str) -> Step<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
     use super::*;
+
+    /// A release made current again counts as installed now, as one just
+    /// unpacked does, for housekeeping's order.
+    #[test]
+    fn a_release_made_current_counts_as_installed_now() {
+        let directory = tempfile::tempdir().unwrap();
+        let release = directory.path().join("0.2.0");
+        fs::create_dir(&release).unwrap();
+        let long_ago = SystemTime::now() - Duration::from_hours(720);
+        fs::File::open(&release)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+        installed_now(&release).unwrap();
+        let age = fs::metadata(&release)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .elapsed()
+            .unwrap();
+        assert!(age < Duration::from_secs(60), "{age:?}");
+        assert!(installed_now(&directory.path().join("absent")).is_err());
+    }
 
     /// A release is unpacked as its archive where every file it installs is
     /// there with the same contents and the installer's modes, and nothing

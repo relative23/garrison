@@ -11,7 +11,7 @@ use super::files::{Step, announce, fresh_folder, io, lock, place, switch};
 use super::requirements::{base_shown, preflight, room, size, state_size};
 use super::services::{self, check_config, start, stop_services};
 use super::system::{install_system_files, protect_policy, unit_file};
-use super::unpack::{clear_staging, install_release, unpacked_as};
+use super::unpack::{clear_staging, install_release, installed_now, unpacked_as};
 use super::{
     BACKUPS, BASE, CONFIG, LAST, LOCK, cli, command, configured, fallback, here, housekeeping,
     leftover, name, rollback, verify,
@@ -287,6 +287,11 @@ pub(super) fn install() -> Step {
                 backup.as_deref(),
             ));
         }
+    }
+    // A release unpacked before and made current now counts as installed now;
+    // where that fails, only housekeeping's order is the older one.
+    if changed.is_some() && !unpack {
+        let _ = installed_now(&release);
     }
     let backups = Path::new(BACKUPS);
     for line in housekeeping::prune(base, backups, &backups.join(LAST)) {
