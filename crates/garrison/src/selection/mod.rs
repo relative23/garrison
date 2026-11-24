@@ -313,7 +313,12 @@ fn offer(found: &str) -> bool {
 }
 
 /// A yes or no; Enter, or an answer that is neither, takes the default.
-fn ask(question: &str, default: bool, input: &mut impl BufRead, output: &mut impl Write) -> bool {
+pub(crate) fn ask(
+    question: &str,
+    default: bool,
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> bool {
     let _ = write!(output, "{question} ");
     let _ = output.flush();
     let mut answer = String::new();
