@@ -38,7 +38,7 @@ pub enum Error {
 
 /// The UID of a system user from `/etc/passwd`, where systemd-sysusers puts
 /// the service users.
-pub fn user_id(passwd: &str, name: &str) -> Option<u32> {
+pub(crate) fn user_id(passwd: &str, name: &str) -> Option<u32> {
     passwd.lines().find_map(|line| {
         let mut fields = line.split(':');
         (fields.next()? == name).then_some(())?;

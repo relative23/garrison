@@ -370,7 +370,7 @@ fn a_milter_that_deferred_everything_since_yesterday_is_a_warning_and_own_replie
 fn every_message_one_of_two_milters_deferred_is_a_warning() {
     // Garrison's macro filter passes each message and clamav-milter, its
     // clamd down, defers it: Stalwart records both answers in the message's
-    // session (measured with Stalwart 1.1.0), and every message was deferred.
+    // session (measured with Stalwart 1.2.0), and every message was deferred.
     let mut events: Vec<Event> = Vec::new();
     for (ago, span) in [(60, "1"), (61, "2"), (62, "3")] {
         events.push(("milter.action-accept", ago, Some(span), json!({})));

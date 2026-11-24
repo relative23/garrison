@@ -9,7 +9,7 @@ use garrison_core::config::ConfigError;
 use crate::context::Provider;
 use crate::options::{Checked, fail};
 
-pub use garrison_checks_host::providers::{
+pub(crate) use garrison_checks_host::providers::{
     BackupCheck, Bulwark, Host, HostCare, Http, Receipt, Systemd, VersionCommand,
 };
 pub use garrison_checks_mail::providers::{Clamav, Flow, MailTest, Senders, directives};

@@ -454,12 +454,3 @@ fn a_detail_shows_its_first_256_events() {
     assert_eq!((detail.truncated, detail.events.len()), (true, 256));
     assert_eq!(detail.summary.event_count, 257);
 }
-
-#[test]
-fn only_an_interrupted_query_counts_as_interrupted() {
-    let interrupt = rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_INTERRUPT);
-    assert!(QueryError::Sqlite(rusqlite::Error::SqliteFailure(interrupt, None)).is_interrupted());
-    let busy = rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY);
-    assert!(!QueryError::Sqlite(rusqlite::Error::SqliteFailure(busy, None)).is_interrupted());
-    assert!(!QueryError::Invalid.is_interrupted());
-}

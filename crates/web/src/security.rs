@@ -41,11 +41,11 @@ use flights::Flights;
 /// `__Host-` cookies belong to Garrison's own host name alone: no other
 /// host of the domain, Stalwart's included, can set or replace them.
 pub const SESSION_COOKIE: &str = "__Host-garrison_session";
-pub const STATE_COOKIE: &str = "__Host-garrison_login";
+pub(crate) const STATE_COOKIE: &str = "__Host-garrison_login";
 const MAX_CACHED: usize = 1024;
 /// What every route answers where the user's rights cannot be checked just
 /// then: the broker gives no answer, or says so itself.
-pub const UNCHECKED: &str = "Authorization is temporarily unavailable";
+pub(crate) const UNCHECKED: &str = "Authorization is temporarily unavailable";
 
 /// What the broker answers; tests use their own.
 pub trait Broker: Send + Sync {
@@ -60,23 +60,23 @@ impl Broker for BrokerClient {
 
 /// The parts of a request the gate looks at.
 #[derive(Clone, Debug, Default)]
-pub struct Visitor {
-    pub cookies: HashMap<String, String>,
-    pub peer: Option<IpAddr>,
-    pub headers: HeaderMap,
+pub(crate) struct Visitor {
+    pub(crate) cookies: HashMap<String, String>,
+    pub(crate) peer: Option<IpAddr>,
+    pub(crate) headers: HeaderMap,
 }
 
 impl Visitor {
-    pub fn cookie(&self, name: &str) -> &str {
+    pub(crate) fn cookie(&self, name: &str) -> &str {
         self.cookies.get(name).map_or("", String::as_str)
     }
 
-    pub fn header(&self, name: &str) -> Option<&str> {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         self.headers.get(name).and_then(|value| value.to_str().ok())
     }
 
     /// nginx passes the client address; only a loopback peer may assert it.
-    pub fn client_ip(&self) -> Option<String> {
+    pub(crate) fn client_ip(&self) -> Option<String> {
         let value = self
             .header("x-garrison-client-ip")
             .filter(|value| !value.is_empty())?;
@@ -127,9 +127,9 @@ impl<S: Send + Sync> FromRequestParts<S> for Visitor {
 
 /// A signed-in user and the rights the broker confirmed.
 #[derive(Clone, Debug)]
-pub struct Caller {
-    pub session: Session,
-    pub grant: Grant,
+pub(crate) struct Caller {
+    pub(crate) session: Session,
+    pub(crate) grant: Grant,
 }
 
 pub struct Gate {
@@ -204,7 +204,7 @@ impl Gate {
     /// cause; so is a request it could not read (400), where the web
     /// service made the request alone: only a submission carries what the
     /// user typed.
-    pub fn ask(&self, request: &Request) -> ApiResult<Value> {
+    pub(crate) fn ask(&self, request: &Request) -> ApiResult<Value> {
         let ours = !matches!(request, Request::Submit { .. });
         match self.broker.call(request) {
             Ok(answer) => Ok(answer),
@@ -223,7 +223,7 @@ impl Gate {
     }
 
     /// Ask the broker for the grant of `token`'s user.
-    pub fn grant_for(&self, token: &str) -> ApiResult<Grant> {
+    pub(crate) fn grant_for(&self, token: &str) -> ApiResult<Grant> {
         let ids: BTreeSet<&str> = self.action_ids.iter().map(String::as_str).collect();
         let request = Request::Authorize {
             token: token.to_owned(),
@@ -251,7 +251,7 @@ impl Gate {
     /// that such a session is one whose token Stalwart no longer takes. A
     /// token Stalwart did not answer the revocation of keeps its row, ended,
     /// so that it is asked again (`App::end_ended_sessions`).
-    pub fn end(&self, session: &Session, revoke: bool) -> ApiResult<()> {
+    pub(crate) fn end(&self, session: &Session, revoke: bool) -> ApiResult<()> {
         self.cached().remove(&session.id_hash);
         let revoked = match (revoke, &self.revoke) {
             (true, Some(revoker)) => revoker(&session.token),
@@ -268,7 +268,7 @@ impl Gate {
         })
     }
 
-    pub fn session(&self, visitor: &Visitor) -> ApiResult<Option<Session>> {
+    pub(crate) fn session(&self, visitor: &Visitor) -> ApiResult<Option<Session>> {
         self.store
             .get(visitor.cookie(SESSION_COOKIE))
             .map_err(ApiError::from)
@@ -277,7 +277,7 @@ impl Gate {
     /// The visitor's session where it may use it: with `web.bind_client_ip`
     /// only from the address it was signed in from, and from another as if
     /// signed out.
-    pub fn bound_session(&self, visitor: &Visitor) -> ApiResult<Option<Session>> {
+    pub(crate) fn bound_session(&self, visitor: &Visitor) -> ApiResult<Option<Session>> {
         let session = self.session(visitor)?;
         Ok(session
             .filter(|session| !self.bind_client_ip || session.client_ip == visitor.client_ip()))
@@ -289,7 +289,7 @@ impl Gate {
         (at.elapsed() < self.cache_time).then_some(grant)
     }
 
-    pub fn caller(&self, visitor: &Visitor) -> ApiResult<Caller> {
+    pub(crate) fn caller(&self, visitor: &Visitor) -> ApiResult<Caller> {
         let unknown = || ApiError::new(401, "Sign-in required");
         let session = self.bound_session(visitor)?.ok_or_else(unknown)?;
         if let Some(grant) = self.fresh(&session) {
@@ -342,7 +342,7 @@ impl Gate {
     }
 
     /// A session with at least one of the named modules.
-    pub fn require(&self, visitor: &Visitor, modules: &[ModuleId]) -> ApiResult<Caller> {
+    pub(crate) fn require(&self, visitor: &Visitor, modules: &[ModuleId]) -> ApiResult<Caller> {
         let caller = self.caller(visitor)?;
         if !modules
             .iter()
@@ -354,13 +354,13 @@ impl Gate {
     }
 
     /// For state-changing requests: Origin and CSRF are mandatory.
-    pub fn writer(&self, visitor: &Visitor) -> ApiResult<Caller> {
+    pub(crate) fn writer(&self, visitor: &Visitor) -> ApiResult<Caller> {
         let caller = self.caller(visitor)?;
         self.check_write(visitor, &caller.session)?;
         Ok(caller)
     }
 
-    pub fn check_write(&self, visitor: &Visitor, session: &Session) -> ApiResult<()> {
+    pub(crate) fn check_write(&self, visitor: &Visitor, session: &Session) -> ApiResult<()> {
         let provided = visitor.header("x-csrf-token").unwrap_or_default();
         let origin = visitor.header("origin") == Some(self.origin.as_str());
         if !origin || !constant_time::eq(provided, &session.csrf) {

@@ -57,10 +57,10 @@ impl Authorize for Authority {
 
 /// Runs an accepted job; the broker passes a thread spawner, tests their own.
 /// An error says that the job could not be started: nothing of it ran.
-pub type Worker = Box<dyn Fn(Box<dyn FnOnce() + Send>) -> io::Result<()> + Send + Sync>;
+pub(crate) type Worker = Box<dyn Fn(Box<dyn FnOnce() + Send>) -> io::Result<()> + Send + Sync>;
 
 /// Each accepted job runs on its own thread.
-pub fn threads() -> Worker {
+pub(crate) fn threads() -> Worker {
     Box::new(|work| {
         thread::Builder::new()
             .name("maintenance-action".into())
@@ -170,7 +170,7 @@ impl Broker {
         self.actions.iter().find(|action| action.id == id)
     }
 
-    pub fn catalog(&self, token: &str) -> Result<Catalog, BrokerError> {
+    pub(crate) fn catalog(&self, token: &str) -> Result<Catalog, BrokerError> {
         let grant = self.authorize(token)?;
         let actions = self
             .actions
@@ -190,7 +190,7 @@ impl Broker {
         Ok(Catalog { actions, jobs })
     }
 
-    pub fn job(&self, token: &str, identifier: &str) -> Result<JobView, BrokerError> {
+    pub(crate) fn job(&self, token: &str, identifier: &str) -> Result<JobView, BrokerError> {
         let grant = self.authorize(token)?;
         if !is_job_id(identifier) {
             return Err(refuse(400, "Invalid job ID"));
@@ -202,7 +202,7 @@ impl Broker {
         }
     }
 
-    pub fn submit(
+    pub(crate) fn submit(
         self: &Arc<Self>,
         token: &str,
         action_id: &str,

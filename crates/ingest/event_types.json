@@ -1,510 +1,383 @@
 {
  "auth.failed": {
-  "label": "Authentication failed",
-  "explanation": "A login attempt was rejected due to incorrect credentials; repeated failures from the same IP may trigger an authentication ban."
+  "label": "Authentication failed"
  },
  "auth.mfa-required": {
-  "label": "Missing MFA token for authentication",
-  "explanation": "MFA token is required for authentication but was not provided"
+  "label": "Missing MFA token for authentication"
  },
  "auth.too-many-attempts": {
-  "label": "Too many authentication attempts",
-  "explanation": "The client has exceeded the configured limit for failed login attempts in a rolling window; further attempts may be blocked."
+  "label": "Too many authentication attempts"
  },
  "delivery.attempt-end": {
-  "label": "Delivery attempt ended",
-  "explanation": "The outbound delivery attempt has finished, either successfully or with a temporary/permanent failure recorded."
+  "label": "Delivery attempt ended"
  },
  "delivery.attempt-start": {
-  "label": "Delivery attempt started",
-  "explanation": "A new outbound SMTP delivery attempt is beginning; the server will look up MX records and try to connect to the recipient's mail server."
+  "label": "Delivery attempt started"
  },
  "delivery.auth": {
-  "label": "SMTP authentication",
-  "explanation": "Authenticating with the remote server using the configured relay credentials."
+  "label": "SMTP authentication"
  },
  "delivery.auth-failed": {
-  "label": "SMTP authentication failed",
-  "explanation": "The configured relay credentials were rejected by the remote server; delivery via this relay will fail."
+  "label": "SMTP authentication failed"
  },
  "delivery.completed": {
-  "label": "Delivery completed",
-  "explanation": "All recipients for this message have been either delivered or permanently failed; the message is removed from the queue."
+  "label": "Delivery completed"
  },
  "delivery.concurrency-limit-exceeded": {
-  "label": "Concurrency limit exceeded",
-  "explanation": "The configured maximum number of simultaneous outbound connections to this remote host has been reached; delivery is deferred."
+  "label": "Concurrency limit exceeded"
  },
  "delivery.connect": {
-  "label": "Connecting to remote server",
-  "explanation": "A TCP connection is being established to the remote mail server for outbound delivery."
+  "label": "Connecting to remote server"
  },
  "delivery.connect-error": {
-  "label": "Connection error",
-  "explanation": "The TCP connection to the remote mail server failed; another MX host will be tried if available."
+  "label": "Connection error"
  },
  "delivery.delivered": {
-  "label": "Message delivered",
-  "explanation": "The remote server accepted the message for the recipient with a 250 response; delivery is complete."
+  "label": "Message delivered"
  },
  "delivery.domain-delivery-start": {
-  "label": "New delivery attempt for domain",
-  "explanation": "An outbound delivery attempt is starting for a specific recipient domain; MX lookup and connection will follow."
+  "label": "New delivery attempt for domain"
  },
  "delivery.double-bounce": {
-  "label": "Discarding message after double bounce",
-  "explanation": "A bounce notification itself bounced; the message is permanently discarded to prevent a delivery loop."
+  "label": "Discarding message after double bounce"
  },
  "delivery.dsn-perm-fail": {
-  "label": "DSN permanent failure notification",
-  "explanation": "A permanent failure delivery status notification was generated; the sender is informed that the message cannot be delivered."
+  "label": "DSN permanent failure notification"
  },
  "delivery.dsn-success": {
-  "label": "DSN success notification",
-  "explanation": "A delivery success notification (DSN) was generated and queued for the original sender."
+  "label": "DSN success notification"
  },
  "delivery.dsn-temp-fail": {
-  "label": "DSN temporary failure notification",
-  "explanation": "A temporary failure delivery status notification was generated; the sender is informed that delivery is being retried."
+  "label": "DSN temporary failure notification"
  },
  "delivery.ehlo": {
-  "label": "SMTP EHLO command",
-  "explanation": "The EHLO command was sent to the remote server to advertise capabilities and begin the SMTP session."
+  "label": "SMTP EHLO command"
  },
  "delivery.ehlo-rejected": {
-  "label": "SMTP EHLO rejected",
-  "explanation": "The remote server rejected the EHLO command; delivery to this host cannot proceed."
+  "label": "SMTP EHLO rejected"
  },
  "delivery.failed": {
-  "label": "Delivery failed",
-  "explanation": "The delivery attempt failed with a temporary error; the message will be rescheduled for a later retry."
+  "label": "Delivery failed"
  },
  "delivery.greeting-failed": {
-  "label": "SMTP greeting failed",
-  "explanation": "The remote server did not send a valid SMTP 220 greeting after connection; the session cannot continue."
+  "label": "SMTP greeting failed"
  },
  "delivery.implicit-tls-error": {
-  "label": "Implicit TLS error",
-  "explanation": "The TLS handshake on the implicit TLS port (e.g. port 465) failed; the connection cannot be used."
+  "label": "Implicit TLS error"
  },
  "delivery.ip-lookup": {
-  "label": "IP address lookup",
-  "explanation": "Resolving the IP address of an MX host before attempting a connection."
+  "label": "IP address lookup"
  },
  "delivery.ip-lookup-failed": {
-  "label": "IP address lookup failed",
-  "explanation": "DNS resolution of an MX hostname failed; this host will be skipped and the next MX record tried."
+  "label": "IP address lookup failed"
  },
  "delivery.mail-from": {
-  "label": "SMTP MAIL FROM command",
-  "explanation": "The MAIL FROM command was sent to declare the envelope sender address to the remote server."
+  "label": "SMTP MAIL FROM command"
  },
  "delivery.mail-from-rejected": {
-  "label": "SMTP MAIL FROM rejected",
-  "explanation": "The remote server rejected the MAIL FROM command; the sender address or domain may be blocked."
+  "label": "SMTP MAIL FROM rejected"
  },
  "delivery.message-rejected": {
-  "label": "Message rejected by remote server",
-  "explanation": "The remote server rejected the message data after accepting the envelope; a DSN will be generated."
+  "label": "Message rejected by remote server"
  },
  "delivery.missing-outbound-hostname": {
-  "label": "Missing outbound hostname in configuration",
-  "explanation": "No outbound EHLO hostname is configured; a hostname is required to present in the EHLO command to remote servers."
+  "label": "Missing outbound hostname in configuration"
  },
  "delivery.mx-lookup": {
-  "label": "MX record lookup",
-  "explanation": "Performing a DNS MX record lookup to determine which mail servers accept mail for the recipient domain."
+  "label": "MX record lookup"
  },
  "delivery.mx-lookup-failed": {
-  "label": "MX record lookup failed",
-  "explanation": "DNS returned no MX records or an error for the recipient domain; delivery to this domain cannot proceed."
+  "label": "MX record lookup failed"
  },
  "delivery.null-mx": {
-  "label": "Null MX record found",
-  "explanation": "The recipient domain published a null MX record (RFC 7505), explicitly indicating it does not accept email; delivery is permanently impossible."
+  "label": "Null MX record found"
  },
  "delivery.rate-limit-exceeded": {
-  "label": "Rate limit exceeded",
-  "explanation": "The configured outbound message rate limit for this remote host has been reached; delivery is deferred until the window resets."
+  "label": "Rate limit exceeded"
  },
  "delivery.rcpt-to": {
-  "label": "SMTP RCPT TO command",
-  "explanation": "The RCPT TO command was sent to specify the envelope recipient address to the remote server."
+  "label": "SMTP RCPT TO command"
  },
  "delivery.rcpt-to-failed": {
-  "label": "SMTP RCPT TO failed",
-  "explanation": "The RCPT TO command could not be sent due to a connection error; delivery will be retried."
+  "label": "SMTP RCPT TO failed"
  },
  "delivery.rcpt-to-rejected": {
-  "label": "SMTP RCPT TO rejected",
-  "explanation": "The remote server rejected the recipient address; a DSN will be generated for permanent failures."
+  "label": "SMTP RCPT TO rejected"
  },
  "delivery.start-tls": {
-  "label": "SMTP STARTTLS command",
-  "explanation": "Requesting a TLS upgrade on the existing SMTP connection to the remote server."
+  "label": "SMTP STARTTLS command"
  },
  "delivery.start-tls-disabled": {
-  "label": "STARTTLS disabled",
-  "explanation": "STARTTLS has been disabled in the configuration for this remote host; the connection will be plaintext."
+  "label": "STARTTLS disabled"
  },
  "delivery.start-tls-error": {
-  "label": "STARTTLS error",
-  "explanation": "The TLS handshake after STARTTLS failed; the connection may fall back to plaintext or be abandoned depending on policy."
+  "label": "STARTTLS error"
  },
  "delivery.start-tls-unavailable": {
-  "label": "STARTTLS unavailable",
-  "explanation": "The remote server does not advertise STARTTLS; the connection will proceed unencrypted if policy allows."
+  "label": "STARTTLS unavailable"
  },
  "message-ingest.duplicate": {
-  "label": "Skipping duplicate message",
-  "explanation": "An incoming message was detected as a duplicate of one already delivered; it has been discarded to prevent duplicates in the mailbox."
+  "label": "Skipping duplicate message"
  },
  "message-ingest.error": {
-  "label": "Message ingestion error",
-  "explanation": "An error occurred while storing an inbound message; the message may not have been delivered to the recipient."
+  "label": "Message ingestion error"
  },
  "message-ingest.ham": {
-  "label": "Message ingested",
-  "explanation": "An inbound message passed spam checks and was successfully delivered to the recipient's mailbox."
+  "label": "Message ingested"
  },
  "message-ingest.imap-append": {
-  "label": "Message appended via IMAP",
-  "explanation": "A message was directly appended to a mailbox by an IMAP client using the APPEND command."
+  "label": "Message appended via IMAP"
  },
  "message-ingest.jmap-append": {
-  "label": "Message appended via JMAP",
-  "explanation": "A message was directly appended to a mailbox via the JMAP Email/import method."
+  "label": "Message appended via JMAP"
  },
  "message-ingest.spam": {
-  "label": "Possible spam message ingested",
-  "explanation": "An inbound message was classified as likely spam and delivered to the Junk folder rather than the inbox."
+  "label": "Possible spam message ingested"
  },
  "milter.action-accept": {
-  "label": "Milter action: Accept",
-  "explanation": "The Milter requested to accept the message"
+  "label": "Milter action: Accept"
  },
  "milter.action-connection-failure": {
-  "label": "Milter action: Connection failure",
-  "explanation": "The Milter requested a connection failure"
+  "label": "Milter action: Connection failure"
  },
  "milter.action-discard": {
-  "label": "Milter action: Discard",
-  "explanation": "The Milter requested to discard the message"
+  "label": "Milter action: Discard"
  },
  "milter.action-reject": {
-  "label": "Milter action: Reject",
-  "explanation": "The Milter requested to reject the message"
+  "label": "Milter action: Reject"
  },
  "milter.action-reply-code": {
-  "label": "Milter action: Reply code",
-  "explanation": "The Milter requested a reply code"
+  "label": "Milter action: Reply code"
  },
  "milter.action-shutdown": {
-  "label": "Milter action: Shutdown",
-  "explanation": "The Milter requested a shutdown"
+  "label": "Milter action: Shutdown"
  },
  "milter.action-temp-fail": {
-  "label": "Milter action: Temporary failure",
-  "explanation": "The Milter requested to temporarily fail the message"
+  "label": "Milter action: Temporary failure"
  },
  "milter.disconnected": {
-  "label": "Milter disconnected",
-  "explanation": "The Milter disconnected"
+  "label": "Milter disconnected"
  },
  "milter.io-error": {
-  "label": "Milter I/O error",
-  "explanation": "An I/O error occurred with the Milter"
+  "label": "Milter I/O error"
  },
  "milter.timeout": {
-  "label": "Milter timeout",
-  "explanation": "A timeout occurred with the Milter"
+  "label": "Milter timeout"
  },
  "milter.tls-invalid-name": {
-  "label": "Invalid TLS name for Milter",
-  "explanation": "The Milter TLS name is invalid"
+  "label": "Invalid TLS name for Milter"
  },
  "mta-hook.action-accept": {
-  "label": "MTA hook action: Accept",
-  "explanation": "The MTA hook requested to accept the message"
+  "label": "MTA hook action: Accept"
  },
  "mta-hook.action-discard": {
-  "label": "MTA hook action: Discard",
-  "explanation": "The MTA hook requested to discard the message"
+  "label": "MTA hook action: Discard"
  },
  "mta-hook.action-quarantine": {
-  "label": "MTA hook action: Quarantine",
-  "explanation": "The MTA hook requested to quarantine the message"
+  "label": "MTA hook action: Quarantine"
  },
  "mta-hook.action-reject": {
-  "label": "MTA hook action: Reject",
-  "explanation": "The MTA hook requested to reject the message"
+  "label": "MTA hook action: Reject"
  },
  "mta-hook.error": {
-  "label": "MTA hook error",
-  "explanation": "An error occurred with the MTA hook"
+  "label": "MTA hook error"
  },
  "queue.authenticated-message-queued": {
-  "label": "Queued message submission for delivery",
-  "explanation": "A message submitted by an authenticated SMTP client was accepted and placed into the outbound delivery queue."
+  "label": "Queued message submission for delivery"
  },
  "queue.autogenerated-queued": {
-  "label": "Queued autogenerated message for delivery",
-  "explanation": "A system-generated message (e.g. calendar notification or auto-reply) was placed into the delivery queue."
+  "label": "Queued autogenerated message for delivery"
  },
  "queue.back-pressure": {
-  "label": "Queue backpressure detected",
-  "explanation": "Queue congested, processing can't keep up with incoming message rate"
+  "label": "Queue backpressure detected"
  },
  "queue.blob-not-found": {
-  "label": "Message blob not found",
-  "explanation": "The message body blob referenced by a queue entry could not be found in the blob store; the message cannot be delivered."
+  "label": "Message blob not found"
  },
  "queue.concurrency-limit-exceeded": {
-  "label": "Concurrency limit exceeded",
-  "explanation": "The maximum number of simultaneous outbound delivery connections has been reached; new deliveries are deferred."
+  "label": "Concurrency limit exceeded"
  },
  "queue.dsn-queued": {
-  "label": "Queued DSN for delivery",
-  "explanation": "A delivery status notification (bounce or success) was placed into the queue for delivery back to the original sender."
+  "label": "Queued DSN for delivery"
  },
  "queue.locked": {
-  "label": "Queue event is locked by another process",
-  "explanation": "Another cluster node is already processing this queue event; this node will skip it to avoid duplicate delivery attempts."
+  "label": "Queue event is locked by another process"
  },
  "queue.message-queued": {
-  "label": "Queued message for delivery",
-  "explanation": "An inbound message was accepted and placed into the outbound delivery queue for processing."
+  "label": "Queued message for delivery"
  },
  "queue.quota-exceeded": {
-  "label": "Quota exceeded",
-  "explanation": "The outbound queue size limit has been reached; new messages cannot be queued until existing ones are delivered or expired."
+  "label": "Quota exceeded"
  },
  "queue.rate-limit-exceeded": {
-  "label": "Rate limit exceeded",
-  "explanation": "The outbound rate limit for the destination domain or relay has been reached; delivery is deferred until the window resets."
+  "label": "Rate limit exceeded"
  },
  "queue.report-queued": {
-  "label": "Queued report for delivery",
-  "explanation": "A DMARC, TLS-RPT, or ARF report was placed into the delivery queue for sending to the recipient domain."
+  "label": "Queued report for delivery"
  },
  "queue.rescheduled": {
-  "label": "Message rescheduled for delivery",
-  "explanation": "A delivery attempt failed with a temporary error; the message has been rescheduled for a later retry."
+  "label": "Message rescheduled for delivery"
  },
  "queue.started": {
-  "label": "MTA queue started",
-  "explanation": "The outbound MTA message queue has started and is ready to process and deliver queued messages."
+  "label": "MTA queue started"
  },
  "security.abuse-ban": {
-  "label": "Banned due to abuse",
-  "explanation": "IP address was banned due to abuse, such as RCPT TO attacks"
+  "label": "Banned due to abuse"
  },
  "security.authentication-ban": {
-  "label": "Banned due to authentication errors",
-  "explanation": "IP address was banned due to multiple authentication errors"
+  "label": "Banned due to authentication errors"
  },
  "security.ip-blocked": {
-  "label": "Blocked IP address",
-  "explanation": "Rejected connection from blocked IP address"
+  "label": "Blocked IP address"
  },
  "security.ip-unauthorized": {
-  "label": "Unauthorized IP address",
-  "explanation": "IP address is not authorized to authenticate using this credential"
+  "label": "Unauthorized IP address"
  },
  "security.loiter-ban": {
-  "label": "Banned due to loitering",
-  "explanation": "IP address was banned due to multiple loitering events"
+  "label": "Banned due to loitering"
  },
  "security.scan-ban": {
-  "label": "Banned due to scan",
-  "explanation": "IP address was banned due to exploit scanning"
+  "label": "Banned due to scan"
  },
  "server.shutdown": {
-  "label": "Shutting down Stalwart Server",
-  "explanation": "A graceful shutdown has been initiated; active connections will be drained before the process exits."
+  "label": "Shutting down Stalwart Server"
  },
  "server.startup": {
-  "label": "Starting Stalwart Server",
-  "explanation": "The server has finished initializing all subsystems and is now accepting connections."
+  "label": "Starting Stalwart Server"
  },
  "smtp.arc-fail": {
-  "label": "ARC verification failed",
-  "explanation": "Failed to verify ARC signature"
+  "label": "ARC verification failed"
  },
  "smtp.arc-pass": {
-  "label": "ARC verification passed",
-  "explanation": "Successful ARC verification"
+  "label": "ARC verification passed"
  },
  "smtp.auth-not-allowed": {
-  "label": "Authentication not allowed",
-  "explanation": "Authentication is not allowed on this listener"
+  "label": "Authentication not allowed"
  },
  "smtp.concurrency-limit-exceeded": {
-  "label": "Concurrency limit exceeded",
-  "explanation": "The concurrency limit was exceeded"
+  "label": "Concurrency limit exceeded"
  },
  "smtp.connection-end": {
-  "label": "SMTP connection ended",
-  "explanation": "The SMTP connection was ended"
+  "label": "SMTP connection ended"
  },
  "smtp.connection-start": {
-  "label": "SMTP connection started",
-  "explanation": "A new SMTP connection was started"
+  "label": "SMTP connection started"
  },
  "smtp.did-not-say-ehlo": {
-  "label": "Client did not say EHLO",
-  "explanation": "The remote server did not send EHLO command"
+  "label": "Client did not say EHLO"
  },
  "smtp.dkim-fail": {
-  "label": "DKIM verification failed",
-  "explanation": "Failed to verify DKIM signature"
+  "label": "DKIM verification failed"
  },
  "smtp.dkim-pass": {
-  "label": "DKIM verification passed",
-  "explanation": "Successful DKIM verification"
+  "label": "DKIM verification passed"
  },
  "smtp.dmarc-fail": {
-  "label": "DMARC check failed",
-  "explanation": "Failed to verify DMARC policy"
+  "label": "DMARC check failed"
  },
  "smtp.dmarc-pass": {
-  "label": "DMARC check passed",
-  "explanation": "Successful DMARC verification"
+  "label": "DMARC check passed"
  },
  "smtp.dsn-disabled": {
-  "label": "DSN extension disabled",
-  "explanation": "The DSN extension is disabled"
+  "label": "DSN extension disabled"
  },
  "smtp.ehlo": {
-  "label": "SMTP EHLO command",
-  "explanation": "The remote server sent an EHLO command"
+  "label": "SMTP EHLO command"
  },
  "smtp.invalid-command": {
-  "label": "Invalid command",
-  "explanation": "The remote client sent an invalid command"
+  "label": "Invalid command"
  },
  "smtp.invalid-ehlo": {
-  "label": "Invalid EHLO command",
-  "explanation": "The remote server sent an invalid EHLO command"
+  "label": "Invalid EHLO command"
  },
  "smtp.invalid-sender-address": {
-  "label": "Invalid sender address",
-  "explanation": "The specified sender address is invalid"
+  "label": "Invalid sender address"
  },
  "smtp.iprev-fail": {
-  "label": "IPREV check failed",
-  "explanation": "Reverse IP check failed"
+  "label": "IPREV check failed"
  },
  "smtp.iprev-pass": {
-  "label": "IPREV check passed",
-  "explanation": "Reverse IP check passed"
+  "label": "IPREV check passed"
  },
  "smtp.loop-detected": {
-  "label": "Mail loop detected",
-  "explanation": "A mail loop was detected, the message contains too many Received headers"
+  "label": "Mail loop detected"
  },
  "smtp.mail-from": {
-  "label": "SMTP MAIL FROM command",
-  "explanation": "The remote client sent a MAIL FROM command"
+  "label": "SMTP MAIL FROM command"
  },
  "smtp.mail-from-missing": {
-  "label": "MAIL FROM address missing",
-  "explanation": "The remote client issued an RCPT TO command before MAIL FROM"
+  "label": "MAIL FROM address missing"
  },
  "smtp.mail-from-not-allowed": {
-  "label": "MAIL FROM not allowed",
-  "explanation": "The remote client is not allowed to send mail from this address"
+  "label": "MAIL FROM not allowed"
  },
  "smtp.mail-from-unauthenticated": {
-  "label": "MAIL FROM without authentication",
-  "explanation": "The remote client did not authenticate before sending MAIL FROM"
+  "label": "MAIL FROM without authentication"
  },
  "smtp.mail-from-unauthorized": {
-  "label": "MAIL FROM unauthorized",
-  "explanation": "The remote client is not authorized to send mail from the given address"
+  "label": "MAIL FROM unauthorized"
  },
  "smtp.mailbox-does-not-exist": {
-  "label": "Mailbox does not exist",
-  "explanation": "The mailbox does not exist on the server"
+  "label": "Mailbox does not exist"
  },
  "smtp.message-too-large": {
-  "label": "Message too large",
-  "explanation": "The message was rejected because it was too large"
+  "label": "Message too large"
  },
  "smtp.multiple-from-domains": {
-  "label": "Multiple From domains",
-  "explanation": "The message was rejected because its From header lists mailboxes from more than one domain, which would bypass DMARC"
+  "label": "Multiple From domains"
  },
  "smtp.multiple-mail-from": {
-  "label": "Multiple MAIL FROM commands",
-  "explanation": "The remote client already sent a MAIL FROM command"
+  "label": "Multiple MAIL FROM commands"
  },
  "smtp.rate-limit-exceeded": {
-  "label": "Rate limit exceeded",
-  "explanation": "The rate limit was exceeded"
+  "label": "Rate limit exceeded"
  },
  "smtp.rcpt-to": {
-  "label": "SMTP RCPT TO command",
-  "explanation": "The remote client sent an RCPT TO command"
+  "label": "SMTP RCPT TO command"
  },
  "smtp.rcpt-to-greylisted": {
-  "label": "RCPT TO greylisted",
-  "explanation": "The recipient was greylisted"
+  "label": "RCPT TO greylisted"
  },
  "smtp.relay-not-allowed": {
-  "label": "Relay not allowed",
-  "explanation": "The server does not allow relaying"
+  "label": "Relay not allowed"
  },
  "smtp.spf-ehlo-fail": {
-  "label": "SPF EHLO check failed",
-  "explanation": "EHLO identity failed SPF check"
+  "label": "SPF EHLO check failed"
  },
  "smtp.spf-ehlo-pass": {
-  "label": "SPF EHLO check passed",
-  "explanation": "EHLO identity passed SPF check"
+  "label": "SPF EHLO check passed"
  },
  "smtp.spf-from-fail": {
-  "label": "SPF From check failed",
-  "explanation": "MAIL FROM identity failed SPF check"
+  "label": "SPF From check failed"
  },
  "smtp.spf-from-pass": {
-  "label": "SPF From check passed",
-  "explanation": "MAIL FROM identity passed SPF check"
+  "label": "SPF From check passed"
  },
  "smtp.start-tls": {
-  "label": "SMTP STARTTLS command",
-  "explanation": "The remote client requested a TLS connection"
+  "label": "SMTP STARTTLS command"
  },
  "smtp.time-limit-exceeded": {
-  "label": "Time limit exceeded",
-  "explanation": "The remote host kept the SMTP session open too long"
+  "label": "Time limit exceeded"
  },
  "smtp.too-many-invalid-rcpt": {
-  "label": "Too many invalid recipients",
-  "explanation": "The remote client exceeded the number of invalid RCPT TO commands allowed"
+  "label": "Too many invalid recipients"
  },
  "smtp.too-many-messages": {
-  "label": "Too many messages",
-  "explanation": "The remote server exceeded the number of messages allowed per session"
+  "label": "Too many messages"
  },
  "smtp.too-many-recipients": {
-  "label": "Too many recipients",
-  "explanation": "The remote client exceeded the number of recipients allowed"
+  "label": "Too many recipients"
  },
  "smtp.unsupported-parameter": {
-  "label": "Unsupported parameter",
-  "explanation": "The command contained an unsupported parameter"
+  "label": "Unsupported parameter"
  },
  "spam.train-completed": {
-  "label": "Spam classifier training completed",
-  "explanation": "The FTRL-Proximal logistic regression spam classifier training run finished, was stopped, or had no samples to train on; when the run trained on new samples, the updated model is now active."
+  "label": "Spam classifier training completed"
  },
  "telemetry.events-dropped": {
-  "label": "Telemetry events dropped",
-  "explanation": "Events were discarded because producers or tracers could not keep up with the event rate; logs and traces for this period are incomplete. The total key holds the number of events dropped since the last report."
+  "label": "Telemetry events dropped"
  },
  "tls.handshake-error": {
-  "label": "TLS handshake error",
-  "explanation": "A TLS handshake failed; the client may not support the configured TLS version or cipher, or presented an invalid certificate."
+  "label": "TLS handshake error"
  }
 }

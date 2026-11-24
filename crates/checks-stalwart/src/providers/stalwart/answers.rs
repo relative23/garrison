@@ -46,10 +46,10 @@ impl Arguments {
 /// A plain number below 10^12, as Stalwart wrote it; a boolean, a larger
 /// value or anything else is no number.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Plain(pub Option<Number>);
+pub(crate) struct Plain(pub(crate) Option<Number>);
 
 impl Plain {
-    pub fn of(value: &Value) -> Plain {
+    pub(crate) fn of(value: &Value) -> Plain {
         Plain(match value {
             Value::Number(number) if number.as_f64().is_some_and(|size| size.abs() < 1e12) => {
                 Some(number.clone())
@@ -58,12 +58,12 @@ impl Plain {
         })
     }
 
-    pub fn float(&self) -> Option<f64> {
+    pub(crate) fn float(&self) -> Option<f64> {
         self.0.as_ref().and_then(Number::as_f64)
     }
 
     /// The number as it was written, for a field or a table cell.
-    pub fn value(&self) -> Option<Value> {
+    pub(crate) fn value(&self) -> Option<Value> {
         self.0.clone().map(Value::Number)
     }
 }
@@ -81,7 +81,7 @@ impl<'de> Deserialize<'de> for Plain {
 pub struct Fixed(pub Option<bool>);
 
 impl Fixed {
-    pub fn of(value: &Value) -> Fixed {
+    pub(crate) fn of(value: &Value) -> Fixed {
         Fixed(match value {
             Value::Bool(flag) => Some(*flag),
             Value::Object(map)
@@ -139,41 +139,41 @@ impl<'de, T: DeserializeOwned + Default> Deserialize<'de> for Tolerant<T> {
 /// `x:SpamSettings`, as far as it is shown.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct SpamSettings {
-    pub enable: Fixed,
-    pub score_spam: Plain,
-    pub score_reject: Plain,
-    pub score_discard: Plain,
+pub(crate) struct SpamSettings {
+    pub(crate) enable: Fixed,
+    pub(crate) score_spam: Plain,
+    pub(crate) score_reject: Plain,
+    pub(crate) score_discard: Plain,
 }
 
 /// `x:SpamClassifier`, as far as it is shown.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct SpamClassifier {
-    pub model: Tolerant<Model>,
+pub(crate) struct SpamClassifier {
+    pub(crate) model: Tolerant<Model>,
     /// In milliseconds.
-    pub train_interval: Plain,
-    pub min_ham_samples: Plain,
-    pub min_spam_samples: Plain,
+    pub(crate) train_interval: Plain,
+    pub(crate) min_ham_samples: Plain,
+    pub(crate) min_spam_samples: Plain,
 }
 
 /// The classifier's model: a variant object, of which the name is shown.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default)]
-pub struct Model {
+pub(crate) struct Model {
     #[serde(rename = "@type")]
-    pub kind: Written,
+    pub(crate) kind: Written,
 }
 
 /// A row of `x:MtaMilter`.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct Milter {
-    pub host: Written,
-    pub port: Written,
-    pub enable: Fixed,
-    pub stages: Tolerant<Stages>,
-    pub temp_fail_on_error: Fixed,
+pub(crate) struct Milter {
+    pub(crate) host: Written,
+    pub(crate) port: Written,
+    pub(crate) enable: Fixed,
+    pub(crate) stages: Tolerant<Stages>,
+    pub(crate) temp_fail_on_error: Fixed,
 }
 
 /// The SMTP stages a milter is asked at.
@@ -186,14 +186,14 @@ pub struct Stages {
 /// A row of `x:Account`: what the mailbox table shows of a user.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct MailboxAccount {
+pub(crate) struct MailboxAccount {
     #[serde(rename = "@type")]
-    pub kind: Written,
+    pub(crate) kind: Written,
     /// As written, `null` included; `None` only where the key is missing.
     #[serde(deserialize_with = "present")]
-    pub email_address: Option<Value>,
-    pub quotas: Tolerant<Quotas>,
-    pub used_disk_quota: Plain,
+    pub(crate) email_address: Option<Value>,
+    pub(crate) quotas: Tolerant<Quotas>,
+    pub(crate) used_disk_quota: Plain,
 }
 
 fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
@@ -202,8 +202,8 @@ fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, 
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct Quotas {
-    pub max_disk_quota: Plain,
+pub(crate) struct Quotas {
+    pub(crate) max_disk_quota: Plain,
 }
 
 /// The total of a `/query` answer.
@@ -221,7 +221,7 @@ struct Listed {
 
 /// The rows of a `/get` answer that are objects, each read as a `T`; `None`
 /// when the method did not answer or answered without a list.
-pub fn rows<T: DeserializeOwned + Default>(answer: Option<Object>) -> Option<Vec<T>> {
+pub(crate) fn rows<T: DeserializeOwned + Default>(answer: Option<Object>) -> Option<Vec<T>> {
     let listed: Listed = json::object(Value::Object(answer?)).ok()?;
     let objects = listed.list.into_iter().filter(Value::is_object);
     Some(
@@ -233,7 +233,7 @@ pub fn rows<T: DeserializeOwned + Default>(answer: Option<Object>) -> Option<Vec
 
 /// The one object of a `/get` answer for a singleton. An answer with another
 /// number of rows, or with an empty object, says nothing.
-pub fn only<T: DeserializeOwned>(answer: Option<Object>) -> Option<T> {
+pub(crate) fn only<T: DeserializeOwned>(answer: Option<Object>) -> Option<T> {
     let listed: Listed = json::object(Value::Object(answer?)).ok()?;
     let [row] = <[Value; 1]>::try_from(listed.list).ok()?;
     match &row {
@@ -243,7 +243,7 @@ pub fn only<T: DeserializeOwned>(answer: Option<Object>) -> Option<T> {
 }
 
 /// How many objects a `/query` counted.
-pub fn total(answer: Option<Object>) -> Option<u64> {
+pub(crate) fn total(answer: Option<Object>) -> Option<u64> {
     let counted: Counted = json::object(Value::Object(answer?)).ok()?;
     counted.total
 }

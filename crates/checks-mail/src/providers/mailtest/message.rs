@@ -41,16 +41,16 @@ fn harmless_document() -> Vec<u8> {
 
 /// Who a test message is from and for, and when it was written.
 pub(super) struct Envelope<'a> {
-    pub from: &'a str,
-    pub to: &'a str,
+    pub(crate) from: &'a str,
+    pub(crate) to: &'a str,
     /// The date as a mail header has it.
-    pub date: String,
+    pub(crate) date: String,
     /// The two halves of the message ID.
-    pub stamp: i64,
-    pub host: &'a str,
+    pub(crate) stamp: i64,
+    pub(crate) host: &'a str,
     /// Whether this is the copy sent again at once, which has an ID of its
     /// own: a server may take a second message of one ID for the first.
-    pub again: bool,
+    pub(crate) again: bool,
 }
 
 impl Test {

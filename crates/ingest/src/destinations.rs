@@ -13,12 +13,10 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::event_type::EventType;
-use crate::queries::Result;
+use crate::queries::{Result, newest_of};
 
-/// The newest events of one type that are read.
-pub const MAX_EVENTS: usize = 100_000;
 /// The rows of each list.
-pub const MAX_ROWS: usize = 50;
+pub(crate) const MAX_ROWS: usize = 50;
 const MAX_CAUSE: usize = 120;
 /// A message that neither completed nor failed for good counts as waiting
 /// for this long after it was queued; Stalwart gives up on older ones.
@@ -104,7 +102,7 @@ struct Fields {
 }
 
 /// The domain of an address, in lower case; `None` for text without one.
-pub fn domain(address: &str) -> Option<String> {
+pub(crate) fn domain(address: &str) -> Option<String> {
     let (_, domain) = address.trim_matches(['<', '>']).rsplit_once('@')?;
     let domain = domain.trim().trim_end_matches('.').to_lowercase();
     (!domain.is_empty()).then_some(domain)
@@ -167,27 +165,13 @@ impl Sums {
         stretch: (i64, i64),
         outcome: Outcome,
     ) -> Result<()> {
-        let mut statement = db.prepare_cached(
-            "SELECT created_at,fields FROM events WHERE type=?1 AND created_at>=?2 \
-             AND created_at<=?3 ORDER BY seq DESC LIMIT ?4",
-        )?;
-        let limit = i64::try_from(MAX_EVENTS + 1).unwrap_or(i64::MAX);
-        let mut rows = statement.query((kind.as_str(), stretch.0, stretch.1, limit))?;
-        let mut read = 0;
-        while let Some(row) = rows.next()? {
-            if read == MAX_EVENTS {
-                self.truncated = true;
-                break;
-            }
-            read += 1;
-            let at: i64 = row.get(0)?;
-            let text: String = row.get(1)?;
-            let Ok(fields) = serde_json::from_str::<Fields>(&text) else {
-                continue;
+        let more = newest_of(db, kind, stretch, |at, text| {
+            let Ok(fields) = serde_json::from_str::<Fields>(text) else {
+                return;
             };
             // Mail for this server's own mailboxes has no destination to judge.
             if fields.queue_name.as_deref() == Some("local") {
-                continue;
+                return;
             }
             let recipients = texts(fields.to.as_ref());
             let hosts = texts(fields.hostname.as_ref());
@@ -196,7 +180,8 @@ impl Sums {
                     self.count(&domain, at, outcome, fields.details.as_deref(), &hosts);
                 }
             }
-        }
+        })?;
+        self.truncated |= more;
         Ok(())
     }
 

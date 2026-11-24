@@ -176,7 +176,7 @@ pub struct Account {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Authentication {
-    pub id: String,
+    pub(crate) id: String,
     pub default_admin_role_ids: RoleIds,
     pub default_user_role_ids: RoleIds,
 }
@@ -187,8 +187,8 @@ pub struct Authentication {
 pub struct Role {
     pub id: String,
     pub role_ids: RoleIds,
-    pub enabled_permissions: PermissionNames,
-    pub disabled_permissions: PermissionNames,
+    pub(crate) enabled_permissions: PermissionNames,
+    pub(crate) disabled_permissions: PermissionNames,
     /// Set for a tenant's role, which no evaluation uses.
     #[serde(default)]
     pub member_tenant_id: Option<String>,
@@ -206,7 +206,7 @@ impl Account {
     }
 
     /// The Admin/User/Custom role IDs assigned to a non-tenant user.
-    pub fn role_ids<'a>(
+    pub(crate) fn role_ids<'a>(
         &'a self,
         authentication: &'a Authentication,
     ) -> Result<&'a BTreeSet<String>, Error> {
@@ -345,7 +345,7 @@ pub enum Native {
 
 /// Whether Garrison evaluates the rights of the account `object`, by its
 /// type and tenant alone, before the rest of it is read: a group's roles are
-/// of a kind of their own (`Default`, measured on Stalwart 1.1.0), and an
+/// of a kind of their own (`Default`, measured on Stalwart 1.1.0 only), and an
 /// account Garrison evaluates no rights for is refused whatever its roles.
 /// A type this release does not know is an answer it does not read.
 fn evaluated(object: &Value) -> Result<bool, Error> {

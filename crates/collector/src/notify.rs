@@ -305,7 +305,7 @@ pub fn test(channels: &Channels, now: time::Timestamp) -> Vec<(&'static str, Res
 
 /// Tell what this run changed and return the observation of the channels for
 /// the Alerts page; `None` where no channel is configured.
-pub fn after_run(
+pub(crate) fn after_run(
     channels: &Channels,
     observations: &[Observation],
     memory: &dyn Memory,

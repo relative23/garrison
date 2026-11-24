@@ -18,7 +18,10 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use garrison_core::config::Database;
-use garrison_core::{recording, sqlite, time};
+use garrison_core::recording::{
+    self, HEARTBEAT_AT, LAST_BATCH_AT, RECORDING_SINCE, RETENTION_DAYS,
+};
+use garrison_core::{sqlite, time};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
 
@@ -28,8 +31,8 @@ mod taking;
 use failing::Failing;
 use taking::{Arrival, Taken, insert};
 
-pub use failing::Health;
-pub use sqlite::SqliteError;
+pub(crate) use failing::Health;
+pub(crate) use sqlite::SqliteError;
 
 /// The schema version this release writes; `self-check` accepts up to it.
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
@@ -76,7 +79,7 @@ const MIGRATIONS: [sqlite::Migration; 1] = [&[
 ]];
 
 /// The reasons a window in `gaps` may lack events.
-pub use recording::{EVENT_LIMIT, OFFLINE, STORAGE_BUDGET};
+pub(crate) use recording::{EVENT_LIMIT, OFFLINE, STORAGE_BUDGET};
 
 const MAX_TIME_TEXT: usize = 40;
 const MAX_EVENT_ID: usize = 40;
@@ -85,10 +88,10 @@ const CLEANUP_AFTER: u64 = 1000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
-    pub retention_days: u32,
-    pub max_events: u32,
-    pub max_bytes: i64,
-    pub discard_after_seconds: i64,
+    pub(crate) retention_days: u32,
+    pub(crate) max_events: u32,
+    pub(crate) max_bytes: i64,
+    pub(crate) discard_after_seconds: i64,
 }
 
 impl Limits {
@@ -103,7 +106,7 @@ impl Limits {
 }
 
 /// `createdAt` of an event: ISO 8601 with an offset, as whole seconds.
-pub fn parse_time(value: &Value) -> Option<i64> {
+pub(crate) fn parse_time(value: &Value) -> Option<i64> {
     let text = value.as_str().filter(|text| text.len() <= MAX_TIME_TEXT)?;
     time::parse(text).map(time::Timestamp::as_second)
 }
@@ -129,11 +132,11 @@ struct State {
 pub struct Outcome {
     pub stored: u64,
     /// Everything that was not stored, for whatever reason.
-    pub skipped: u64,
+    pub(crate) skipped: u64,
     /// Of the skipped: stored already, by a batch that came before.
-    pub duplicate: u64,
+    pub(crate) duplicate: u64,
     /// Of the skipped: of a type that is recorded, but not readable.
-    pub unreadable: u64,
+    pub(crate) unreadable: u64,
 }
 
 impl EventStore {
@@ -168,7 +171,7 @@ impl EventStore {
         let transaction = state
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(last) = meta(&transaction, "heartbeatAt")?.and_then(|value| value.as_i64()) {
+        if let Some(last) = meta(&transaction, HEARTBEAT_AT)?.and_then(|value| value.as_i64()) {
             let lost_until = now - self.limits.discard_after_seconds;
             if lost_until > last {
                 transaction.execute(
@@ -177,13 +180,13 @@ impl EventStore {
                 )?;
             }
         }
-        if meta(&transaction, "recordingSince")?.is_none() {
-            set_meta(&transaction, "recordingSince", now)?;
+        if meta(&transaction, RECORDING_SINCE)?.is_none() {
+            recording::set(&transaction, RECORDING_SINCE, now)?;
         }
-        set_meta(&transaction, "heartbeatAt", now)?;
-        set_meta(
+        recording::set(&transaction, HEARTBEAT_AT, now)?;
+        recording::set(
             &transaction,
-            "retentionDays",
+            RETENTION_DAYS,
             i64::from(self.limits.retention_days),
         )?;
         // A run that ended while it stored nothing: that time is not over.
@@ -196,7 +199,7 @@ impl EventStore {
     /// A batch was refused at `now`: its signature did not match, or it
     /// could not be stored. The receiver remembers since when; the database
     /// is told if it takes it, which a full or read-only one does not.
-    pub fn refused(&self, now: i64) -> u64 {
+    pub(crate) fn refused(&self, now: i64) -> u64 {
         let mut state = self.state();
         state.health.refused += 1;
         let count = state.health.refused;
@@ -225,7 +228,7 @@ impl EventStore {
 
     pub fn heartbeat(&self, now: i64) -> Result<(), SqliteError> {
         let state = self.state();
-        set_meta(&state.db, "heartbeatAt", now)?;
+        recording::set(&state.db, HEARTBEAT_AT, now)?;
         Ok(())
     }
 
@@ -260,8 +263,8 @@ impl EventStore {
             }
         }
         outcome.skipped = events.len() as u64 - outcome.stored;
-        set_meta(&transaction, "lastBatchAt", received)?;
-        set_meta(&transaction, "heartbeatAt", received)?;
+        recording::set(&transaction, LAST_BATCH_AT, received)?;
+        recording::set(&transaction, HEARTBEAT_AT, received)?;
         // Events that could not be read are gone, since Stalwart is answered
         // "stored": from now on something is missing. A batch that reads
         // whole ends that, and what was lost until then becomes a gap.
@@ -305,7 +308,7 @@ impl EventStore {
     /// should not wait for its turn. The store does not clean up while it
     /// takes a batch: removing a tenth of a full history takes longer than
     /// Stalwart waits for its answer.
-    pub fn cleanup_due(&self) -> bool {
+    pub(crate) fn cleanup_due(&self) -> bool {
         self.state().inserted_since_cleanup >= CLEANUP_AFTER
     }
 
@@ -369,11 +372,6 @@ fn meta(db: &Connection, key: &str) -> Result<Option<Value>, SqliteError> {
         })
         .optional()?;
     Ok(text.and_then(|text| serde_json::from_str(&text).ok()))
-}
-
-fn set_meta(db: &Connection, key: &str, value: i64) -> Result<(), SqliteError> {
-    recording::set(db, key, value)?;
-    Ok(())
 }
 
 /// Remove the `count` oldest events to keep the size limit `limit`.

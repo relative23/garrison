@@ -30,7 +30,7 @@ const MAX_FILE: usize = 16 * 1024 * 1024;
 /// first: the content coding and the copy's suffix.
 const ENCODINGS: [(&str, &str); 2] = [("br", "br"), ("gzip", "gz")];
 
-pub fn routes() -> Router<Arc<App>> {
+pub(crate) fn routes() -> Router<Arc<App>> {
     Router::new()
         // The root leads to the interface, as Stalwart's leads to its WebUI.
         .route("/", get(root))

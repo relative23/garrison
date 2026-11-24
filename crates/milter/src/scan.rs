@@ -51,6 +51,7 @@ pub const DEPTH: usize = 3;
 const QUOTED: usize = 2;
 /// What a scan holds of unpacked files at the most: one at each depth, in
 /// a buffer that may hold twice what was unpacked into it.
+#[cfg(test)]
 pub(crate) const MOST_UNPACKED: usize = DEPTH * 2 * unpack::UNPACKED;
 
 /// What kind of document with macros was found.
@@ -130,7 +131,7 @@ pub fn macros(message: &[u8]) -> Outcome {
 /// What `message` carries, so far as that is known at `until`: a scan that
 /// is not done by then ends as [`Gap::Deadline`].
 #[must_use]
-pub fn macros_until(message: &[u8], until: Instant) -> Outcome {
+pub(crate) fn macros_until(message: &[u8], until: Instant) -> Outcome {
     scan(message, Some(until))
 }
 

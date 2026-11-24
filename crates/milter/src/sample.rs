@@ -13,7 +13,7 @@ use flate2::write::DeflateEncoder;
 pub const NAME: &str = "garrison-macro-test.docm";
 
 /// One file for [`archive`]: its name, its content and whether to deflate it.
-pub type Entry<'a> = (&'a str, &'a [u8], bool);
+pub(crate) type Entry<'a> = (&'a str, &'a [u8], bool);
 
 fn field(target: &mut Vec<u8>, value: usize, bytes: usize) {
     target.extend_from_slice(&value.to_le_bytes()[..bytes]);

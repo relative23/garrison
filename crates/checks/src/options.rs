@@ -18,7 +18,7 @@ pub fn fail<T>(message: impl Into<String>) -> Checked<T> {
 #[derive(Debug)]
 pub struct Options<'a> {
     pub kind: String,
-    pub raw: &'a Table,
+    pub(crate) raw: &'a Table,
 }
 
 impl<'a> Options<'a> {

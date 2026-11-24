@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::JobView;
 
-pub const MAX_REQUEST: usize = 16384;
-pub const MAX_ANSWER: usize = 1024 * 1024;
+pub(crate) const MAX_REQUEST: usize = 16384;
+pub(crate) const MAX_ANSWER: usize = 1024 * 1024;
 
 /// One request. The user's token is all the broker hears about who asks; it
 /// derives the identity and the rights itself.
@@ -109,7 +109,7 @@ pub struct BrokerError {
     pub message: String,
 }
 
-pub fn refuse(status: u16, message: &str) -> BrokerError {
+pub(crate) fn refuse(status: u16, message: &str) -> BrokerError {
     BrokerError {
         status,
         message: message.to_owned(),

@@ -244,14 +244,7 @@ fn binary(root: &Path, triple: &str, epoch: &str) -> Result<PathBuf, String> {
 
 /// Cargo's build directory, which `CARGO_TARGET_DIR` or a config may move.
 fn target_directory(root: &Path) -> Result<PathBuf, String> {
-    let metadata = output(
-        Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-            .args(["metadata", "--format-version", "1", "--no-deps", "--locked"])
-            .current_dir(root),
-    )?;
-    let value: serde_json::Value =
-        serde_json::from_str(&metadata).map_err(|error| error.to_string())?;
-    value["target_directory"]
+    crate::metadata(root, &["--no-deps"])?["target_directory"]
         .as_str()
         .map(PathBuf::from)
         .ok_or_else(|| "cargo metadata names no target directory".into())

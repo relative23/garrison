@@ -7,50 +7,50 @@ use utoipa::ToSchema;
 /// TLS handshake.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AttackSource {
-    pub address: String,
+pub(crate) struct AttackSource {
+    pub(crate) address: String,
     /// The /24 of an IPv4 address, the /64 of an IPv6 address.
-    pub network: String,
-    pub failed_sign_ins: i64,
+    pub(crate) network: String,
+    pub(crate) failed_sign_ins: i64,
     /// The existing accounts it tried.
-    pub accounts: i64,
-    pub tls_errors: i64,
-    pub bans: i64,
+    pub(crate) accounts: i64,
+    pub(crate) tls_errors: i64,
+    pub(crate) bans: i64,
     /// Its connections that Stalwart refused while it blocked the address or
     /// its network.
-    pub refused: i64,
-    pub first_seen: i64,
-    pub last_seen: i64,
-    pub listeners: Vec<String>,
+    pub(crate) refused: i64,
+    pub(crate) first_seen: i64,
+    pub(crate) last_seen: i64,
+    pub(crate) listeners: Vec<String>,
 }
 
 /// A network from which more than one address was seen.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AttackNetwork {
-    pub network: String,
-    pub sources: i64,
-    pub failed_sign_ins: i64,
-    pub tls_errors: i64,
-    pub bans: i64,
-    pub refused: i64,
-    pub last_seen: i64,
+pub(crate) struct AttackNetwork {
+    pub(crate) network: String,
+    pub(crate) sources: i64,
+    pub(crate) failed_sign_ins: i64,
+    pub(crate) tls_errors: i64,
+    pub(crate) bans: i64,
+    pub(crate) refused: i64,
+    pub(crate) last_seen: i64,
 }
 
 /// An existing account that someone failed to sign in to.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AttackedAccount {
-    pub name: String,
-    pub failed_sign_ins: i64,
-    pub sources: i64,
-    pub last_seen: i64,
+pub(crate) struct AttackedAccount {
+    pub(crate) name: String,
+    pub(crate) failed_sign_ins: i64,
+    pub(crate) sources: i64,
+    pub(crate) last_seen: i64,
 }
 
 /// Why Stalwart banned an address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
-pub enum BanReason {
+pub(crate) enum BanReason {
     Authentication,
     Abuse,
     Scan,
@@ -59,29 +59,29 @@ pub enum BanReason {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Ban {
-    pub at: i64,
-    pub address: String,
+pub(crate) struct Ban {
+    pub(crate) at: i64,
+    pub(crate) address: String,
     /// The /64 of an IPv6 address, which Stalwart blocks with it unless an
     /// account's count of failed sign-ins alone banned the address.
-    pub network: Option<String>,
-    pub reason: BanReason,
+    pub(crate) network: Option<String>,
+    pub(crate) reason: BanReason,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct AttackTotals {
-    pub failed_sign_ins: i64,
+pub(crate) struct AttackTotals {
+    pub(crate) failed_sign_ins: i64,
     /// Failed sign-ins that named no existing account.
-    pub unknown_accounts: i64,
-    pub tls_errors: i64,
-    pub bans: i64,
+    pub(crate) unknown_accounts: i64,
+    pub(crate) tls_errors: i64,
+    pub(crate) bans: i64,
     /// Connections Stalwart refused while it blocked their address; null
     /// where the history holds none at all, as before `garrison stalwart
     /// setup` asked Stalwart for them.
-    pub refused: Option<i64>,
+    pub(crate) refused: Option<i64>,
     /// Every address seen, also beyond the rows of the list.
-    pub sources: i64,
+    pub(crate) sources: i64,
 }
 
 /// Failed sign-ins, bans and TLS handshake errors of a stretch of the event
@@ -89,14 +89,14 @@ pub struct AttackTotals {
 /// the newest.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Attacks {
-    pub since: i64,
-    pub until: i64,
+pub(crate) struct Attacks {
+    pub(crate) since: i64,
+    pub(crate) until: i64,
     /// More events were recorded in the stretch than were read.
-    pub truncated: bool,
-    pub totals: AttackTotals,
-    pub sources: Vec<AttackSource>,
-    pub networks: Vec<AttackNetwork>,
-    pub accounts: Vec<AttackedAccount>,
-    pub bans: Vec<Ban>,
+    pub(crate) truncated: bool,
+    pub(crate) totals: AttackTotals,
+    pub(crate) sources: Vec<AttackSource>,
+    pub(crate) networks: Vec<AttackNetwork>,
+    pub(crate) accounts: Vec<AttackedAccount>,
+    pub(crate) bans: Vec<Ban>,
 }

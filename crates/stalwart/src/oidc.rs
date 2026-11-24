@@ -27,7 +27,7 @@ pub fn is_subject(text: &str) -> bool {
 }
 
 /// An access token: 16 to 4096 printable ASCII characters.
-pub fn is_token(text: &str) -> bool {
+pub(crate) fn is_token(text: &str) -> bool {
     (16..=4096).contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
@@ -45,7 +45,7 @@ pub fn redirect_uri(public_origin: &str) -> String {
 /// Whether the user's address goes to Stalwart in X-Forwarded-For, which it
 /// counts and bans by where its `clientIpSource` says so: an IP address,
 /// but none of loopback, which Stalwart refuses there with 400, also in
-/// IPv4's form within IPv6 (measured on Stalwart 1.1.0). A request without
+/// IPv4's form within IPv6 (measured on Stalwart 1.1.0 only). A request without
 /// the header counts under Garrison's own address.
 fn forwardable(address: &str) -> bool {
     match address.parse::<IpAddr>() {
@@ -132,8 +132,8 @@ impl Provider {
             .header("Content-Type", "application/x-www-form-urlencoded")
             .send()?;
         // The token endpoint refuses a code, a grant or a client with 400 or
-        // 401 (RFC 6749, 5.2; Stalwart 1.1.0 answers 400 to a code it does
-        // not know); another status is no answer this release reads.
+        // 401 (RFC 6749, 5.2; 400 to a code it does not know, measured on
+        // Stalwart 1.1.0 only); another status is no answer this release reads.
         match answer.status {
             200 => {}
             400 | 401 => return Err(Error::denied("The authorization code was not accepted")),
@@ -172,7 +172,7 @@ impl Provider {
             .header("Authorization", &authorization)
             .send()?;
         // Only 401 says that the token is not valid (RFC 6750, 3.1; what
-        // Stalwart 1.1.0 answers to a token it does not know or revoked),
+        // Stalwart 1.2.0 answers to a token it does not know or revoked),
         // which ends the user's session. Another status says nothing of
         // the token, and a sign-out of every user for it would be wrong.
         match answer.status {

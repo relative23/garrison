@@ -48,7 +48,7 @@ fn userinfo_forwards_the_public_host_and_reads_the_subject() {
 
 /// Stalwart, told to take the client's address from X-Forwarded-For,
 /// answers 400 to a request that names a loopback address there (measured
-/// on Stalwart 1.1.0), and an address that is none. A user nginx saw at
+/// on Stalwart 1.1.0 only), and an address that is none. A user nginx saw at
 /// loopback, through a tunnel, is not named: the request then counts under
 /// Garrison's own address, which Stalwart limits and bans not at all.
 #[test]
@@ -108,7 +108,7 @@ fn bad_tokens_and_subjects_are_told_apart() {
         ))
     );
     // Only 401 says that the token is not valid (RFC 6750, 3.1, and what
-    // Stalwart 1.1.0 answers); another status says nothing of it.
+    // Stalwart 1.2.0 answers); another status says nothing of it.
     for status in [403, 404] {
         assert_eq!(
             oidc.userinfo(TOKEN, None),
@@ -162,8 +162,8 @@ fn code_exchange_accepts_only_bearer_tokens_with_a_lifetime() {
             Err(Error::unreadable("The provider returned an unusable token"))
         );
     }
-    // The token endpoint refuses with 400 or 401 (RFC 6749, 5.2; Stalwart
-    // 1.1.0 answers 400 to a code it does not know); another status is no
+    // The token endpoint refuses with 400 or 401 (RFC 6749, 5.2; 400 to a code
+    // it does not know, measured on Stalwart 1.1.0 only); another status is no
     // answer this release reads.
     for _ in 0..2 {
         assert_eq!(

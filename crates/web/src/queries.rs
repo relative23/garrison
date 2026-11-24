@@ -27,7 +27,7 @@ pub const RUNNING: usize = 2;
 /// History queries that may wait for a turn beside those that run.
 pub const WAITING: usize = 8;
 /// How long a history query may run, and so how long the next one waits.
-pub const BUDGET: Duration = Duration::from_secs(2);
+pub(crate) const BUDGET: Duration = Duration::from_secs(2);
 
 #[derive(Debug)]
 pub struct Queries {
@@ -49,7 +49,7 @@ impl Default for Queries {
 impl Queries {
     /// `running` queries at once and `waiting` more that wait up to `wait`
     /// for a turn; each runs for at most `budget`.
-    pub fn new(running: usize, waiting: usize, wait: Duration, budget: Duration) -> Self {
+    pub(crate) fn new(running: usize, waiting: usize, wait: Duration, budget: Duration) -> Self {
         Queries {
             running: Arc::new(Semaphore::new(running)),
             admitted: Arc::new(Semaphore::new(running + waiting)),

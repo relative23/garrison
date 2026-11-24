@@ -7,7 +7,7 @@
 
 use serde_json::{Map, Number, Value};
 
-pub use crate::event_type::EventType;
+pub(crate) use crate::event_type::EventType;
 
 /// Never requested, even if an operator edits the native webhook by hand.
 pub const FORBIDDEN_EVENTS: [&str; 14] = [
@@ -126,7 +126,7 @@ fn integer(number: &Number) -> Option<i128> {
 }
 
 /// A positive integer identifier as text; 0 means "no span" natively.
-pub fn identifier(value: &Value) -> Option<String> {
+pub(crate) fn identifier(value: &Value) -> Option<String> {
     match value {
         Value::Number(number) => number
             .as_u64()
@@ -159,7 +159,7 @@ fn outcome(value: &Value) -> Option<String> {
 }
 
 /// The fields of one event that may be stored, in the order Stalwart sent them.
-pub fn select_fields(event_type: EventType, data: &Value) -> Map<String, Value> {
+pub(crate) fn select_fields(event_type: EventType, data: &Value) -> Map<String, Value> {
     let mut result = Map::new();
     let Value::Object(data) = data else {
         return result;

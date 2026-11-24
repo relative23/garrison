@@ -12,11 +12,11 @@ use serde_json::{Map, Value, json};
 
 use crate::event_type::EventType;
 
-pub const MAX_SUMMARY_EVENTS: usize = 256;
+pub(crate) const MAX_SUMMARY_EVENTS: usize = 256;
 const MAX_RECIPIENTS: usize = 100;
 
 /// One recorded event: its type and stored fields.
-pub type Event = (String, Map<String, Value>);
+pub(crate) type Event = (String, Map<String, Value>);
 
 /// What the recorded events of one queued message say.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -113,7 +113,7 @@ fn status(event_type: EventType, current: &str) -> &str {
     }
 }
 
-pub fn summarize_queue(events: &[Event], total: usize) -> Lifecycle {
+pub(crate) fn summarize_queue(events: &[Event], total: usize) -> Lifecycle {
     let mut sender = String::new();
     let mut recipients: Vec<String> = Vec::new();
     let mut expected: BTreeSet<String> = BTreeSet::new();
@@ -233,7 +233,7 @@ fn rejection(event_type: EventType) -> Option<&'static str> {
     })
 }
 
-pub fn summarize_session(events: &[Event], total: usize) -> Milestones {
+pub(crate) fn summarize_session(events: &[Event], total: usize) -> Milestones {
     let mut listener: Option<String> = None;
     let mut remote_ip: Option<String> = None;
     let mut ehlo = None;

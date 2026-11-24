@@ -36,24 +36,24 @@ const SLOW: Duration = Duration::from_secs(10);
 /// (`TimeoutStartSec`), and a run that is ended stores nothing, not even
 /// what the quick checks found. So the run keeps its own, shorter times.
 #[derive(Clone, Copy, Debug)]
-pub struct Time {
+pub(crate) struct Time {
     /// No check begins after this, and a check that asks many times stops
     /// asking.
-    pub checks: Duration,
+    pub(crate) checks: Duration,
     /// The notifications are sent or given up by then; the snapshot is
     /// written after.
-    pub run: Duration,
+    pub(crate) run: Duration,
     /// What an earlier release or setting left in the status database of a
     /// secret that is kept in a file now is cleared by then, after the
     /// snapshot is stored, and systemd is asked for more time while that
     /// runs: on a disk that writes 1 MB a second, some 400 MB of history. The
     /// watch counts from the snapshot and sees no stop before ten minutes.
-    pub rebuild: Duration,
+    pub(crate) rebuild: Duration,
 }
 
 impl Time {
     /// What the collector's unit leaves room for.
-    pub const OF_A_RUN: Time = Time {
+    pub(crate) const OF_A_RUN: Time = Time {
         checks: Duration::from_secs(70),
         run: Duration::from_secs(100),
         rebuild: Duration::from_secs(480),
@@ -208,7 +208,7 @@ pub fn collect_from(
 }
 
 /// The same, within `time`.
-pub fn collect_within(
+pub(crate) fn collect_within(
     providers: &[Box<dyn Provider>],
     config: &Config,
     credentials: &Credentials,

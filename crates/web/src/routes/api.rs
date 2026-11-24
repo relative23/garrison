@@ -38,7 +38,7 @@ use crate::security::{SESSION_COOKIE, Visitor};
 const READ_BUDGET: Duration = Duration::from_secs(2);
 const MAX_BODY: usize = 65536;
 
-pub fn routes() -> Router<Arc<App>> {
+pub(crate) fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/session", get(session))
         .route("/api/logout", post(logout))
@@ -62,7 +62,7 @@ pub fn read(data: Result<Bytes, BytesRejection>) -> ApiResult<Bytes> {
 
 /// A JSON body for `T`: a JSON media type, strict JSON (no duplicate keys),
 /// no unknown fields.
-pub fn body<T: serde::de::DeserializeOwned>(visitor: &Visitor, data: &[u8]) -> ApiResult<T> {
+pub(crate) fn body<T: serde::de::DeserializeOwned>(visitor: &Visitor, data: &[u8]) -> ApiResult<T> {
     let media = visitor.header("content-type").unwrap_or_default();
     let media = media
         .split(';')
@@ -285,7 +285,7 @@ fn checked_at(observation: &observations::Observation) -> Option<time::Timestamp
 
 /// Whether an observation is older than its `maxAge`; one without a time
 /// that can be read is.
-pub fn stale(observation: &observations::Observation, now: f64) -> bool {
+pub(crate) fn stale(observation: &observations::Observation, now: f64) -> bool {
     checked_at(observation)
         .is_none_or(|checked| now - time::unix(checked) > f64::from(observation.max_age))
 }
@@ -294,7 +294,7 @@ pub fn stale(observation: &observations::Observation, now: f64) -> bool {
 /// whole; `None` for one without a time that can be read. A page adds the
 /// time that passes without a new answer and so sees by itself when the
 /// observation goes stale.
-pub fn age(observation: &observations::Observation, now: time::Timestamp) -> Option<i64> {
+pub(crate) fn age(observation: &observations::Observation, now: time::Timestamp) -> Option<i64> {
     let checked = checked_at(observation)?;
     let micros = now.as_microsecond() - checked.as_microsecond();
     Some((micros + 999_999).div_euclid(1_000_000))
@@ -378,7 +378,7 @@ fn day() -> String {
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
-pub struct MetricsQuery {
+pub(crate) struct MetricsQuery {
     #[serde(default = "day")]
     #[param(default = "24h", pattern = "^(24h|7d|30d|90d|custom)$")]
     period: String,

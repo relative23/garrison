@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 
 use crate::answers::{DeliverySummary, Detail, EventItem, Page, SessionSummary};
 use crate::deliveries::{Event, MAX_SUMMARY_EVENTS, summarize_queue, summarize_session};
+use crate::event_type::EventType;
 use crate::policy::identifier;
 
 mod select;
@@ -22,18 +23,46 @@ mod select;
 use select::{chosen, clause, conditions, foldable, searched};
 
 const MAX_RESPONSE_BYTES: usize = 768 * 1024;
+/// The newest events of one type that a summary of a stretch reads. Where a
+/// type has more in the stretch, the summary says that it is cut.
+pub(crate) const MAX_EVENTS: usize = 100_000;
 
-/// Stalwart's own label and explanation of an event type (generated data).
+/// Hand `each` the events of `kind` in `stretch`, the newest first, each
+/// with its time and its fields as stored, [`MAX_EVENTS`] of them at the
+/// most; whether there were more.
+pub(crate) fn newest_of(
+    db: &Connection,
+    kind: EventType,
+    stretch: (i64, i64),
+    mut each: impl FnMut(i64, &str),
+) -> Result<bool> {
+    let mut statement = db.prepare_cached(
+        "SELECT created_at,fields FROM events WHERE type=?1 AND created_at>=?2 \
+         AND created_at<=?3 ORDER BY seq DESC LIMIT ?4",
+    )?;
+    let limit = i64::try_from(MAX_EVENTS + 1).unwrap_or(i64::MAX);
+    let mut rows = statement.query((kind.as_str(), stretch.0, stretch.1, limit))?;
+    let mut read = 0;
+    while let Some(row) = rows.next()? {
+        if read == MAX_EVENTS {
+            return Ok(true);
+        }
+        read += 1;
+        each(row.get(0)?, &row.get::<_, String>(1)?);
+    }
+    Ok(false)
+}
+
+/// Stalwart's own label of an event type (generated data).
 #[derive(Debug, Deserialize)]
-pub struct Labels {
-    pub label: String,
-    pub explanation: String,
+pub(crate) struct Labels {
+    pub(crate) label: String,
 }
 
 static LABELS: LazyLock<BTreeMap<String, Labels>> =
     LazyLock::new(|| serde_json::from_str(include_str!("../event_types.json")).unwrap_or_default());
 
-pub fn labels(event_type: &str) -> Option<&'static Labels> {
+pub(crate) fn labels(event_type: &str) -> Option<&'static Labels> {
     LABELS.get(event_type)
 }
 
@@ -48,13 +77,6 @@ pub enum QueryError {
     Unreadable(String),
     #[error("{0}")]
     Sqlite(#[from] rusqlite::Error),
-}
-
-impl QueryError {
-    /// The reader's progress handler interrupted a query over its time budget.
-    pub fn is_interrupted(&self) -> bool {
-        matches!(self, QueryError::Sqlite(error) if garrison_core::sqlite::out_of_time(error))
-    }
 }
 
 pub(crate) type Result<T> = std::result::Result<T, QueryError>;

@@ -58,7 +58,7 @@ pub fn made_by_setup(error: &ProtectedFileError) -> &'static str {
 }
 
 /// A systemd credential name; dots alone would name a directory, not a file.
-pub fn is_credential_name(name: &str) -> bool {
+pub(crate) fn is_credential_name(name: &str) -> bool {
     (1..=64).contains(&name.len())
         && name
             .bytes()

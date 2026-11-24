@@ -14,13 +14,10 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::event_type::EventType;
-use crate::queries::Result;
+use crate::queries::{Result, newest_of};
 
-/// The newest events of one type that are read. Where a type has more in the
-/// stretch, the summary says that it is cut.
-pub const MAX_EVENTS: usize = 100_000;
 /// The rows of each list.
-pub const MAX_ROWS: usize = 50;
+pub(crate) const MAX_ROWS: usize = 50;
 
 /// The sign-ins Stalwart refused: a wrong password or name, the right
 /// password without its second factor, and a credential used from an
@@ -144,7 +141,7 @@ struct Fields {
 
 /// The network an address counts to: its /24, or its /64 for IPv6. Text that
 /// is no address is its own network.
-pub fn network(address: &str) -> String {
+pub(crate) fn network(address: &str) -> String {
     match address.parse::<IpAddr>().map(|ip| ip.to_canonical()) {
         Ok(IpAddr::V4(ip)) => {
             let [a, b, c, _] = ip.octets();
@@ -207,27 +204,13 @@ impl Sums {
         stretch: (i64, i64),
         mut count: impl FnMut(&mut Self, i64, &str, &Fields),
     ) -> Result<()> {
-        let mut statement = db.prepare_cached(
-            "SELECT created_at,fields FROM events WHERE type=?1 AND created_at>=?2 \
-             AND created_at<=?3 ORDER BY seq DESC LIMIT ?4",
-        )?;
-        let limit = i64::try_from(MAX_EVENTS + 1).unwrap_or(i64::MAX);
-        let mut rows = statement.query((kind.as_str(), stretch.0, stretch.1, limit))?;
-        let mut read = 0;
-        while let Some(row) = rows.next()? {
-            if read == MAX_EVENTS {
-                self.truncated = true;
-                break;
-            }
-            read += 1;
-            let at: i64 = row.get(0)?;
-            let text: String = row.get(1)?;
+        let more = newest_of(db, kind, stretch, |at, text| {
             // An event without an address says nothing about a source.
-            let Ok(fields) = serde_json::from_str::<Fields>(&text) else {
-                continue;
+            let Ok(fields) = serde_json::from_str::<Fields>(text) else {
+                return;
             };
             let Some(address) = fields.remote_ip.clone() else {
-                continue;
+                return;
             };
             let seen = self.sources.entry(address.clone()).or_default();
             let source = &mut seen.source;
@@ -238,7 +221,8 @@ impl Sums {
             source.last_seen = source.last_seen.max(at);
             seen.listeners.extend(fields.listener_id.clone());
             count(self, at, &address, &fields);
-        }
+        })?;
+        self.truncated |= more;
         Ok(())
     }
 

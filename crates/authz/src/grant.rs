@@ -34,7 +34,9 @@ impl Grant {
         self.modules.contains(&ModuleId::Actions) && self.actions.contains(action)
     }
 
-    pub fn to_value(&self) -> Value {
+    /// The grant as the broker sends it, as the tests read it.
+    #[cfg(test)]
+    pub(crate) fn to_value(&self) -> Value {
         serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }

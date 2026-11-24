@@ -11,7 +11,7 @@ use std::io::{self, Read, Write};
 
 /// The largest frame that is read. A mail server sends the body in pieces of
 /// 64 KiB; this leaves room for one that sends larger ones.
-pub const MAX_FRAME: usize = 2 * 1024 * 1024;
+pub(crate) const MAX_FRAME: usize = 2 * 1024 * 1024;
 
 // What the mail server need not send (`SMFIP_NO...`), and the answers it need
 // not wait for (`SMFIP_NR_...`).
@@ -21,9 +21,9 @@ const NO_MAIL: u32 = 0x0000_0004;
 const NO_RCPT: u32 = 0x0000_0008;
 const NO_UNKNOWN: u32 = 0x0000_0100;
 const NO_DATA: u32 = 0x0000_0200;
-pub const NO_REPLY_HEADER: u32 = 0x0000_0080;
-pub const NO_REPLY_END_OF_HEADERS: u32 = 0x0004_0000;
-pub const NO_REPLY_BODY: u32 = 0x0008_0000;
+pub(crate) const NO_REPLY_HEADER: u32 = 0x0000_0080;
+pub(crate) const NO_REPLY_END_OF_HEADERS: u32 = 0x0004_0000;
+pub(crate) const NO_REPLY_BODY: u32 = 0x0008_0000;
 /// The steps this filter does without, and the answers it does not give.
 const WANTED: u32 = NO_CONNECT
     | NO_HELO
@@ -35,7 +35,7 @@ const WANTED: u32 = NO_CONNECT
     | NO_REPLY_END_OF_HEADERS
     | NO_REPLY_BODY;
 /// The filter may add a header (`SMFIF_ADDHDRS`).
-pub const ADD_HEADERS: u32 = 0x0000_0001;
+pub(crate) const ADD_HEADERS: u32 = 0x0000_0001;
 const VERSION: u32 = 6;
 
 /// What the mail server sends.
@@ -132,7 +132,7 @@ pub fn read(stream: &mut impl Read) -> io::Result<Option<Command>> {
 
 /// What the filter takes of what the server offers.
 #[must_use]
-pub fn negotiated(actions: u32, protocol: u32, tagging: bool) -> Reply {
+pub(crate) fn negotiated(actions: u32, protocol: u32, tagging: bool) -> Reply {
     Reply::Negotiate {
         actions: if tagging { actions & ADD_HEADERS } else { 0 },
         protocol: protocol & WANTED,

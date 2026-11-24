@@ -36,7 +36,7 @@ const BUDGET: Duration = Duration::from_secs(5);
 /// none is configured. Says whether the channels left before held an address
 /// as written that is kept in a file now, of which the status database may
 /// hold a copy.
-pub fn remember(memory: &dyn Memory, channels: &Channels) -> bool {
+pub(crate) fn remember(memory: &dyn Memory, channels: &Channels) -> bool {
     let text = if channels.is_empty() {
         String::new()
     } else {

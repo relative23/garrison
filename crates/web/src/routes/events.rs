@@ -36,7 +36,7 @@ const LATEST_SECOND: i64 = 253_402_300_799;
 static CATEGORIES: LazyLock<BTreeSet<&'static str>> =
     LazyLock::new(|| event_types().into_iter().map(category).collect());
 
-pub fn routes() -> Router<Arc<App>> {
+pub(crate) fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/coverage", get(coverage))
         .route("/api/events", get(events))
@@ -57,7 +57,7 @@ fn twenty_five() -> i64 {
 /// The query of the event list, as the schema states it.
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
-pub struct EventsQuery {
+pub(crate) struct EventsQuery {
     #[serde(default)]
     #[param(default = "", max_length = 200)]
     search: String,
@@ -81,7 +81,7 @@ pub struct EventsQuery {
 /// The query of the delivery and session lists, which take no category or type.
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
-pub struct GroupQuery {
+pub(crate) struct GroupQuery {
     #[serde(default)]
     #[param(default = "", max_length = 200)]
     search: String,

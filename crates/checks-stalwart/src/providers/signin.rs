@@ -59,7 +59,7 @@ pub struct Examined {
     /// What to do about a failure.
     pub fix: Option<String>,
     /// How many files of its own host the page loads, once it was read.
-    pub files: Option<usize>,
+    pub(crate) files: Option<usize>,
 }
 
 impl Examined {
@@ -171,7 +171,7 @@ fn files_of(page: &str, html: &str, asking: Asking<'_>) -> (usize, Vec<String>, 
 /// held against the page Stalwart serves at `own`, and every file of its own
 /// host that it loads; each asked only while there is time before the
 /// deadline of `asking`, and what was not asked is said.
-pub fn examine(page: &str, own: &str, query: &str, asking: Asking<'_>) -> Examined {
+pub(crate) fn examine(page: &str, own: &str, query: &str, asking: Asking<'_>) -> Examined {
     if asking.deadline.expired() {
         return Examined::unknown(format!(
             "Stalwart's sign-in page {page} was not asked: {RUN_OVER}"
@@ -319,7 +319,7 @@ fn judged(
 }
 
 /// The page Garrison sends its users to, under the issuer.
-pub fn page(deployment: &Deployment) -> String {
+pub(crate) fn page(deployment: &Deployment) -> String {
     format!("{}{}", deployment.issuer, sign_in_page::PATH)
 }
 

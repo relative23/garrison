@@ -179,16 +179,8 @@ fn connect(host: &str, port: u16, until: Instant) -> Result<Timed, Failed> {
 }
 
 /// A TLS session with `host`, its certificate checked against `roots` for
-/// that name. The handshake happens with the first read or write.
-pub fn secure_stream(
-    host: &str,
-    port: u16,
-    roots: &Arc<RootCertStore>,
-) -> Result<StreamOwned<ClientConnection, Timed>, String> {
-    secure_stream_until(host, port, roots, Instant::now() + WITHIN)
-}
-
-/// The same, with everything said over it done by `until`.
+/// that name, with everything said over it done by `until`. The handshake
+/// happens with the first read or write.
 pub fn secure_stream_until(
     host: &str,
     port: u16,
@@ -231,7 +223,7 @@ pub fn tls_error(error: &std::io::Error) -> String {
 /// the common faults as what they are, with the time where the certificate
 /// gives one, and any other in the TLS library's words.
 #[must_use]
-pub fn certificate_fault(reason: &CertificateError) -> String {
+pub(crate) fn certificate_fault(reason: &CertificateError) -> String {
     let at = |at: &UnixTime| {
         i64::try_from(at.as_secs())
             .ok()

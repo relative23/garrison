@@ -2,7 +2,7 @@
 //! domain of every mailbox among the accounts the flow reads, in pages, and
 //! says how many it leaves. Stalwart gives a request for all of its
 //! accounts the first 500 alone and says nothing of the rest (measured on
-//! 1.1.0).
+//! 1.2.0).
 
 use garrison_stalwart::ids::encode_native_id;
 use garrison_testing::http::{json as answer_json, serve};

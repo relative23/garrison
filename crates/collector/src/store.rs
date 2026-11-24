@@ -117,7 +117,7 @@ impl StatusStore {
     /// Note that a channel's address is kept in a file now that the channels
     /// the database keeps for the watch held as written: the run's last step
     /// rebuilds the database without any copy of it (residue.rs).
-    pub fn note_moved_address(&self) {
+    pub(crate) fn note_moved_address(&self) {
         if let Err(error) = residue::moved(&self.db) {
             log::warn!(
                 "The status database did not note a channel's address kept in a file now: {error}"
@@ -131,7 +131,7 @@ impl StatusStore {
     /// (residue.rs), by `until`; `now` is the run's time. A run's last step,
     /// so that it costs no run: a rebuild that did not finish is said in the
     /// journal.
-    pub fn clear_residue(&mut self, now: i64, until: Instant) {
+    pub(crate) fn clear_residue(&mut self, now: i64, until: Instant) {
         let unread = |error: &dyn std::fmt::Display| {
             log::warn!(
                 "The status database could not be cleared of a secret that an earlier release \

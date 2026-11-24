@@ -6,7 +6,6 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -38,17 +37,7 @@ const FORBIDDEN: [&str; 10] = [
 ];
 
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
-    let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-        .args(["metadata", "--format-version", "1", "--locked"])
-        .current_dir(root)
-        .output()
-        .map_err(|error| format!("cannot run cargo metadata: {error}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
-    }
-    let metadata: Value =
-        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
-    Ok(problems(&metadata))
+    Ok(problems(&crate::metadata(root, &[])?))
 }
 
 /// The privileged packages in `cargo metadata` output that reach a forbidden crate.

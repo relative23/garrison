@@ -279,7 +279,7 @@ fn an_account_garrison_evaluates_no_rights_for_is_refused() {
             json!({"id": "b", "@type": "Group", "roles": {"@type": "User"},
                    "permissions": {"@type": "Inherit"}}),
         ),
-        // As Stalwart 1.1.0 answers for a group: its roles are of a kind
+        // As Stalwart 1.1.0 answers for a group (measured there only): its roles are of a kind
         // this module reads for no account it evaluates.
         (
             "a group as Stalwart answers it",
@@ -343,7 +343,7 @@ fn an_account_of_a_type_this_release_does_not_know_refuses_nobody() {
 /// names. Where the policy binds the subject to that account by hand,
 /// Garrison's own setup is broken. Otherwise two answers of Stalwart's do not
 /// fit together: an answer this release does not read. Neither refuses the
-/// user; Stalwart 1.1.0 answers the token of a removed account 403 at
+/// user; Stalwart 1.2.0 answers the token of a removed account 403 at
 /// UserInfo already (the web's contract test).
 #[test]
 fn an_account_stalwart_does_not_have_refuses_nobody() {

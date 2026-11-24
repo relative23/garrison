@@ -29,12 +29,12 @@ pub enum ModuleId {
 
 #[derive(Debug)]
 pub struct Module {
-    pub id: ModuleId,
+    pub(crate) id: ModuleId,
     pub label: &'static str,
     pub description: &'static str,
 }
 
-pub const MODULES: [Module; 12] = [
+pub(crate) const MODULES: [Module; 12] = [
     Module {
         id: ModuleId::Dashboard,
         label: "Dashboard",

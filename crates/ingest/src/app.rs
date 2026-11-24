@@ -32,7 +32,7 @@ mod turns;
 
 use turns::{Late, Turns};
 
-pub const MAX_BODY: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_EVENTS_PER_BATCH: usize = 50_000;
 /// The batches that are read and stored at a time. Stalwart sends one and
 /// waits for its answer; the second turn is for whoever else reaches the

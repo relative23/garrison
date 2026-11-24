@@ -25,7 +25,7 @@ impl Smtp {
     }
 
     /// The last line of a (possibly multi-line) reply.
-    pub fn reply(&mut self) -> String {
+    pub(crate) fn reply(&mut self) -> String {
         loop {
             let mut text = String::new();
             self.reader.read_line(&mut text).unwrap();

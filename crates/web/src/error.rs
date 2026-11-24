@@ -17,7 +17,7 @@ use crate::store::StoreError;
 /// held its database for longer than a reader waits, as the receiver does
 /// while it removes a tenth of a full history: the writer's moment, which
 /// passes. A narrower filter would not help.
-pub const WAITED: &str =
+pub(crate) const WAITED: &str =
     "The query waited too long for another service's write; try again in a moment";
 
 /// What a read of another service's database that was stopped answers: one
@@ -27,7 +27,7 @@ pub const WAITED: &str =
 /// writer has said so itself, once a minute for each database
 /// (`garrison_core::sqlite`). `None` for any other error.
 #[must_use]
-pub fn stopped(cause: &rusqlite::Error, slow: &'static str) -> Option<ApiError> {
+pub(crate) fn stopped(cause: &rusqlite::Error, slow: &'static str) -> Option<ApiError> {
     if held_by_the_writer(cause) {
         Some(ApiError::new(503, WAITED))
     } else if out_of_time(cause) {
@@ -39,13 +39,13 @@ pub fn stopped(cause: &rusqlite::Error, slow: &'static str) -> Option<ApiError> 
 
 /// What a read stopped by its own time says where there is no filter to
 /// narrow and no period to shorten.
-pub const SLOW: &str = "The query took too long; try again in a moment";
+pub(crate) const SLOW: &str = "The query took too long; try again in a moment";
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{detail}")]
 pub struct ApiError {
-    pub status: StatusCode,
-    pub detail: String,
+    pub(crate) status: StatusCode,
+    pub(crate) detail: String,
     /// What failed inside, for the journal only.
     cause: Option<String>,
 }
@@ -53,10 +53,10 @@ pub struct ApiError {
 /// The cause of an internal error on its way from the answer to the journal;
 /// the reference middleware takes it off before the answer leaves.
 #[derive(Clone, Debug)]
-pub struct Cause(pub String);
+pub(crate) struct Cause(pub(crate) String);
 
 impl ApiError {
-    pub fn new(status: u16, detail: impl Into<String>) -> Self {
+    pub(crate) fn new(status: u16, detail: impl Into<String>) -> Self {
         ApiError {
             status: StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             detail: detail.into(),
@@ -65,16 +65,16 @@ impl ApiError {
     }
 
     /// A request parameter or body did not match the API.
-    pub fn invalid() -> Self {
+    pub(crate) fn invalid() -> Self {
         ApiError::new(400, "Invalid request parameters")
     }
 
-    pub fn not_found() -> Self {
+    pub(crate) fn not_found() -> Self {
         ApiError::new(404, "Not found")
     }
 
     /// Something failed inside the service; the cause is logged, not sent.
-    pub fn internal(cause: &dyn std::fmt::Display) -> Self {
+    pub(crate) fn internal(cause: &dyn std::fmt::Display) -> Self {
         ApiError {
             cause: Some(cause.to_string()),
             ..ApiError::new(500, "Internal error")
@@ -148,11 +148,11 @@ impl From<HistoryError> for ApiError {
     }
 }
 
-pub type ApiResult<T> = Result<T, ApiError>;
+pub(crate) type ApiResult<T> = Result<T, ApiError>;
 
 /// Run blocking work (SQLite, the broker socket, Stalwart) off the async
 /// threads.
-pub async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> ApiResult<T> + Send + 'static,
 ) -> ApiResult<T> {
     tokio::task::spawn_blocking(work)

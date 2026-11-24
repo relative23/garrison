@@ -59,7 +59,7 @@ fn a_refused_key_gets_the_setups_advice_on_the_management_api_card() {
 /// Each call of the first request answers for itself, and so do the
 /// accounts' pages. Where Stalwart refused the key some of them, as it
 /// refuses every call of a key that may only authenticate (measured on
-/// Stalwart 1.1.0), or answered one in a form this release does not read,
+/// Stalwart 1.2.0), or answered one in a form this release does not read,
 /// the Management API card says which, beside the cards the other calls
 /// fill.
 #[test]

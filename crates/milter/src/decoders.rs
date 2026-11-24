@@ -55,7 +55,7 @@ fn run(symbols: &[u8], out: &mut Vec<u8>) {
 /// is `=`, the third unless the fourth is; a group the end cuts short gives
 /// nothing.
 #[must_use]
-pub fn glib(body: &[u8]) -> Vec<u8> {
+pub(crate) fn glib(body: &[u8]) -> Vec<u8> {
     let tokens = tokens(body);
     let mut out = Vec::new();
     for group in tokens.as_chunks::<4>().0 {
@@ -76,7 +76,7 @@ pub fn glib(body: &[u8]) -> Vec<u8> {
 /// third unless the fourth is; at the end, as `Flush` does, one or two bytes
 /// of a group cut short.
 #[must_use]
-pub fn mimekit(body: &[u8]) -> Vec<u8> {
+pub(crate) fn mimekit(body: &[u8]) -> Vec<u8> {
     let tokens = tokens(body);
     let (groups, rest) = tokens.as_chunks::<4>();
     let mut out = Vec::new();
@@ -108,7 +108,7 @@ pub fn mimekit(body: &[u8]) -> Vec<u8> {
 /// Thunderbird: one byte fewer for each `=` in a group, one at least; what
 /// the end cuts short is written as the characters it is.
 #[must_use]
-pub fn thunderbird(body: &[u8]) -> Vec<u8> {
+pub(crate) fn thunderbird(body: &[u8]) -> Vec<u8> {
     let tokens = tokens(body);
     let (groups, rest) = tokens.as_chunks::<4>();
     let mut out = Vec::new();
@@ -126,7 +126,7 @@ pub fn thunderbird(body: &[u8]) -> Vec<u8> {
 /// PHP's `base64_decode` outside strict mode and Python's `email` (3.13 and
 /// later): every `=` is dropped with the other bytes outside the alphabet.
 #[must_use]
-pub fn dropped(body: &[u8]) -> Vec<u8> {
+pub(crate) fn dropped(body: &[u8]) -> Vec<u8> {
     let symbols: Vec<u8> = body
         .iter()
         .copied()
@@ -140,7 +140,7 @@ pub fn dropped(body: &[u8]) -> Vec<u8> {
 /// Python's `email` package, 3.14 (`_encoded_words.decode_b`): as
 /// [`dropped`], and the text as it stands where one symbol is left over.
 #[must_use]
-pub fn python(body: &[u8]) -> Vec<u8> {
+pub(crate) fn python(body: &[u8]) -> Vec<u8> {
     let joined: Vec<u8> = body
         .iter()
         .copied()
@@ -155,7 +155,7 @@ pub fn python(body: &[u8]) -> Vec<u8> {
 /// The first `=` ends the data, after the bytes its group's symbols give:
 /// Perl's `MIME::Base64`, mime4j, Node's `Buffer` with this alphabet.
 #[must_use]
-pub fn stopped(body: &[u8]) -> Vec<u8> {
+pub(crate) fn stopped(body: &[u8]) -> Vec<u8> {
     let end = body
         .iter()
         .position(|byte| *byte == b'=')
@@ -167,7 +167,7 @@ pub fn stopped(body: &[u8]) -> Vec<u8> {
 /// place ends the group (at the third, a second `=` must follow), the next
 /// group starts after it, and any other `=` ends the data with an error.
 #[must_use]
-pub fn jakarta(body: &[u8]) -> Vec<u8> {
+pub(crate) fn jakarta(body: &[u8]) -> Vec<u8> {
     let tokens = tokens(body);
     let mut out = Vec::new();
     let mut group = Vec::with_capacity(4);
@@ -197,7 +197,7 @@ pub fn jakarta(body: &[u8]) -> Vec<u8> {
 }
 
 /// A decoder by its name, as the tests and the fuzz targets list them.
-pub type Decoder = (&'static str, fn(&[u8]) -> Vec<u8>);
+pub(crate) type Decoder = (&'static str, fn(&[u8]) -> Vec<u8>);
 
 /// The decoders whose reading the scan follows, alone or as a part of
 /// another's: a document any of them hands over is found. Those it does not
