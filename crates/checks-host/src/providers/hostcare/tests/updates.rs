@@ -430,9 +430,8 @@ impl Runner for Late {
     }
 }
 
-/// A package manager that the collector ended at its time for a command
-/// ran: the card says that it did not finish in that time, and how long it
-/// is.
+/// A package manager that gave no answer in the collector's time for a
+/// command: the card says so, and how long that time is.
 #[test]
 fn a_package_manager_ended_at_its_time_limit_is_named_so() {
     let root = tempfile::tempdir().unwrap();
@@ -448,8 +447,7 @@ fn a_package_manager_ended_at_its_time_limit_is_named_so() {
         (
             State::Unknown,
             vec![
-                "The pending updates are not known: dnf did not finish within 8 seconds and was \
-                 ended."
+                "The pending updates are not known: dnf did not answer within 8 seconds."
                     .to_owned()
             ]
         )

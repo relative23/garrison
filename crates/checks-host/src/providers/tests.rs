@@ -363,7 +363,7 @@ impl crate::command::Runner for Gives {
 }
 
 /// A version command that gives no version says why: it could not be run,
-/// did not finish in the collector's time for a command, ended with a
+/// gave no answer in the collector's time for a command, ended with a
 /// status or by a signal, wrote nothing to the output that is read, or
 /// nothing that `pattern` finds there, within the part that is read.
 #[test]
@@ -382,7 +382,7 @@ fn a_version_command_without_a_version_says_why() {
             Gives(Err(|| {
                 std::io::Error::new(std::io::ErrorKind::TimedOut, "command timed out")
             })),
-            "/usr/bin/c did not finish within 8 seconds and was ended.",
+            "/usr/bin/c did not answer within 8 seconds.",
         ),
         (
             output(Some(2), "c 1.2.3\n"),

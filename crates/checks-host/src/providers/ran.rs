@@ -22,11 +22,13 @@ pub(crate) fn silent(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::TimedOut
 }
 
-/// Why `program` gave no answer: it could not be started, or it did not
-/// finish in the collector's time for a command and was ended.
+/// Why `program` gave no answer: it could not be started, or it gave none
+/// in the collector's time for a command. The runner does not tell apart a
+/// command that did not finish, which it ends, from one that exited and
+/// left a process behind that keeps its output open, which runs on.
 pub(crate) fn not_run(program: &str, error: &io::Error) -> String {
     if error.kind() == io::ErrorKind::TimedOut {
-        format!("{program} did not finish within {SECONDS} seconds and was ended")
+        format!("{program} did not answer within {SECONDS} seconds")
     } else {
         format!("{program} could not be run: {error}")
     }

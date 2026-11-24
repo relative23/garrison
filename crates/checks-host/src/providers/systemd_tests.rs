@@ -162,13 +162,13 @@ fn a_unit_without_an_answer_of_its_own_is_unknown_and_says_why() {
             observation.findings
         );
     }
-    // A systemctl that ran and was ended at the collector's time limit.
+    // A systemctl that gave no answer in the collector's time for a command.
     for observation in observed(units, &Late) {
         assert_eq!(
             (observation.state, observation.findings),
             (
                 State::Unknown,
-                vec!["systemctl show did not finish within 8 seconds and was ended.".to_owned()]
+                vec!["systemctl show did not answer within 8 seconds.".to_owned()]
             )
         );
     }
