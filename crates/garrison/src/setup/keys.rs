@@ -97,7 +97,7 @@ fn owner(admin: &Admin, target: &Path) -> Result<Option<Session>, State> {
 /// What setup says where Stalwart does not show the administrator the
 /// account that a file's key belongs to: JMAP's `accountNotFound`, as
 /// Stalwart answers a user without its administrator rights who asks for
-/// that account's keys (measured on Stalwart 1.1.0).
+/// that account's keys (measured on Stalwart 1.2.0).
 fn unseen(failed: Failed, target: &Path) -> State {
     if failed.is("accountNotFound") {
         return states::account_unseen(target, &failed.state);
