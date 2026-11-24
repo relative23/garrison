@@ -365,9 +365,9 @@ scenario_restart() {
     inside 'nohup systemctl reboot --force --force >/dev/null 2>&1 &' || true
     sleep 10
     vm_wait || exit 1
-    # Its connection went with the guest.
-    kill "$cut" 2>/dev/null || true
-    wait "$cut" || true
+    # Its connection went with the guest; the shell's notice of the signal is
+    # no check.
+    { kill "$cut"; wait "$cut"; } 2>/dev/null || true
     echo "ok    the guest restarted while the play's second install ran"
     stand_in_again
     play "$older"
