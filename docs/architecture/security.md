@@ -113,12 +113,14 @@ brokers never repeat a job; pending jobs become "uncertain".
   unless the operator chose otherwise: one larger than `max_message_mib`, one
   whose archives unpack to more than 16 MiB a file or 64 MiB together or are
   compressed by another method than deflate (bzip2, LZMA and the like), one
-  with a part that declares a transfer encoding the filter does not decode, a
-  uuencode block begun and not ended, or a body nested in more than three
-  transfer encodings, one that needs more decoding than 48 times its size (a
-  message attached as base64 inside another, with a quoted-printable part and
-  an attachment of its own, does), and one whose scan was not done within 20
-  seconds. By default (`on_incomplete = "tag"`) it arrives with the header
+  with a part that declares a transfer encoding the filter does not decode (or
+  a body that quotes such a header line, as a forwarded raw message does: the
+  filter cannot tell it from a real one), a uuencode block begun and not
+  ended, or a body nested in more than three transfer encodings, one that
+  needs more decoding than 48 times its size (a message attached as base64
+  inside another, with a quoted-printable part and an attachment of its own,
+  does), and one whose scan was not done within 20 seconds. By default
+  (`on_incomplete = "tag"`) it arrives with the header
   `X-Garrison-Scan: unscanned`, and it is up to a Sieve rule or the mail
   program to act on that; `"defer"` and `"refuse"` keep it out.
 - A flood of sign-in callbacks from more than 4096 networks within a minute

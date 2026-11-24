@@ -330,7 +330,9 @@ clean. That is a message
 - with a zip archive packed otherwise than by deflate (bzip2, LZMA, zstd,
   Deflate64 and the like),
 - with a part that declares a transfer encoding the filter does not decode
-  (any but 7bit, 8bit, binary, base64, quoted-printable and uuencode), that
+  (any but 7bit, 8bit, binary, base64, quoted-printable and uuencode; also
+  such a header line quoted in a body, as a forwarded raw message holds, which
+  the filter cannot tell from a real one), that
   holds a yEnc or a BinHex block, which the filter does not decode either, or
   a uuencode block begun and not ended, or that nests more than three
   transfer encodings deep,
