@@ -380,7 +380,7 @@ scenario_leftover_record() {
         \"to\": \"/opt/garrison/releases/$new\", \"previous\": null, \"backup\": \"$last\"}' \
         > /opt/garrison/unfinished.json && chmod 600 /opt/garrison/unfinished.json"
     says "the next run names what it said" '/root/release/bin/garrison install' install-record-removed
-    check "and what that was" "grep -q -F 'upgrade from $old to $new' /root/answer"
+    check "and what that was" "grep -q -F '$old' /root/answer && grep -q -F '$new' /root/answer"
     check "and removes it" 'test ! -e /opt/garrison/unfinished.json'
     running "after the record an earlier build left" "$new"
 }

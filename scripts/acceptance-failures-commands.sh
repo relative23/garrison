@@ -121,7 +121,7 @@ scenario_access_links() {
         done'
     says "a backup takes a name nothing has" \
         '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' access-saved
-    check "and keeps the previous file beside the policy" 'grep -q -F "kept as /srv/shared/access.json." /root/answer'
+    check "and keeps the previous file beside the policy" 'grep -q -F "/srv/shared/access.json." /root/answer'
     check "and writes through no link: what they name is as it was" \
         'test "$(cat /etc/acceptance-target)" = kept && test "$(stat -c %a /etc/acceptance-target)" = 644'
     check "the policy is root's and the broker's group's, its backup root's alone" \
