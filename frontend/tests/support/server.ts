@@ -26,7 +26,7 @@ interface Reply {
 }
 
 /** A fixed reply, or a function of the request; a thrown error is a network failure. */
-type Route = Reply | ((call: Call) => Reply | Promise<Reply>);
+export type Route = Reply | ((call: Call) => Reply | Promise<Reply>);
 
 const PREFIX = "/api/";
 

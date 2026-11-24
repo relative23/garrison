@@ -207,14 +207,16 @@ describe("maintenance actions", () => {
 
   it("say what the server answered where it gave no reason", async () => {
     // Over HTTP/2 an answer has no status text, and a proxy's error no JSON.
+    // What a proxy refuses never reached Garrison; its 502 is no answer at
+    // all (tests/writes.test.tsx).
     serve({
       "GET actions": { body: catalog() },
-      "POST actions": { status: 502, raw: "<html>Bad Gateway</html>", statusText: "" },
+      "POST actions": { status: 413, raw: "<html>Request Entity Too Large</html>", statusText: "" },
     });
     renderView(<Actions />);
     await loaded();
     fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
-    expect(await screen.findByText("The server answered with status 502 and gave no reason.")).toBeTruthy();
+    expect(await screen.findByText("The server answered with status 413 and gave no reason.")).toBeTruthy();
     expect(dialogOpen()).toBe(true);
   });
 

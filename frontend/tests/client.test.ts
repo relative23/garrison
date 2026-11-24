@@ -63,6 +63,22 @@ describe("API client", () => {
     await expect(api.status()).rejects.toMatchObject({ status: 502, message: "Error" });
   });
 
+  it("takes a server error that is not the service's own as no answer to a write, and to nothing else", async () => {
+    const write = () => api.savePreferences({ theme: "dark", hiddenModules: [], showSwitch: true }).catch((reason: unknown) => reason);
+    // nginx's page while the web service restarts: the write may have been done.
+    serve({ "PUT preferences": { status: 502, raw: "<html>Bad gateway</html>" } });
+    expect(await write()).not.toBeInstanceOf(ApiError);
+    // The service's own error says the write was not done.
+    serve({ "PUT preferences": { status: 503, body: { detail: "Busy" } } });
+    expect(await write()).toMatchObject({ status: 503, message: "Busy" });
+    // What a proxy refuses never reached the service.
+    serve({ "PUT preferences": { status: 413, raw: "<html>Too large</html>" } });
+    expect(await write()).toBeInstanceOf(ApiError);
+    // A read changes nothing, so its error stays an answer.
+    serve({ "GET status": { status: 502, raw: "<html>Bad gateway</html>" } });
+    await expect(api.status()).rejects.toBeInstanceOf(ApiError);
+  });
+
   it("signs out once when the server ends the session", async () => {
     serve({ "GET status": { status: 401, body: { detail: "Sign in again" } } });
     const signedOut = vi.fn();

@@ -88,13 +88,22 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
   });
   if (!response.ok) {
     let detail = response.statusText;
+    let own = false;
     try {
       // The service's own errors are ErrorDetail; a proxy's need not be.
       const body = (await response.json()) as Partial<Record<keyof Schemas["ErrorDetail"], unknown>>;
-      if (typeof body.detail === "string") detail = body.detail;
+      if (typeof body.detail === "string") {
+        detail = body.detail;
+        own = true;
+      }
     } catch {
       // A non-JSON error body keeps the status text.
     }
+    // A server error that is not the service's own, such as nginx's 502 while
+    // the service restarts, says nothing of what became of a write: it may
+    // have been done before the service went away. That is no answer, as a
+    // lost connection is none, and no ApiError.
+    if (write && !own && response.status >= 500) throw new Error(`No answer of the service's own: status ${response.status}.`);
     // HTTP/2 has no status text, and a proxy's own error page no detail: the
     // status is then all there is to say, and saying nothing would leave an
     // empty notice.

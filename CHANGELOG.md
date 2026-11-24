@@ -211,8 +211,9 @@ Notable changes for operators and users. The format follows
   of when the status is, or that the collector has produced none yet, as
   every page that shows checks does.
 - **A write without an answer no longer says what became of it.** Where
-  no readable answer came, as when the connection broke after the request
-  went out, the maintenance dialog said "The request could not be sent."
+  no answer of Garrison's came, as when the connection broke after the
+  request went out or nginx answered 502 while the web service restarted,
+  the maintenance dialog said "The request could not be sent."
   though the broker may have started the job, the account page said that
   the browser was still signed in though the session may have ended, and
   the settings said they could not be saved though they may have been.
