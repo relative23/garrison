@@ -371,47 +371,36 @@ fn outgoing_message(events: &mut Events, number: i64) {
 /// The event batches of the busy server, oldest first, each small enough for
 /// the receiver.
 pub(crate) fn events(now: i64) -> Vec<Vec<Value>> {
-    let mut events = Events {
-        now,
-        random: Random(0x9e37_79b9_7f4a_7c15),
-        list: Vec::new(),
-    };
-    events.add(
-        19 * DAY + 5 * 3600,
-        "server.startup",
-        json!({"version": "1.1.0"}),
-    );
-    sign_in_attacks(&mut events);
-    mail(&mut events, 9_000, 7_000);
-    batches(events)
+    made(now, true, 9_000, 7_000)
 }
 
 /// A week of the busy server's mail alone, `incoming` sessions and
 /// `outgoing` messages of it, as the cards that count mail read it.
 #[cfg(test)]
 pub(crate) fn mail_alone(now: i64, incoming: i64, outgoing: i64) -> Vec<Vec<Value>> {
+    made(now, false, incoming, outgoing)
+}
+
+fn made(now: i64, attacks: bool, incoming: i64, outgoing: i64) -> Vec<Vec<Value>> {
     let mut events = Events {
         now,
         random: Random(0x9e37_79b9_7f4a_7c15),
         list: Vec::new(),
     };
-    mail(&mut events, incoming, outgoing);
-    batches(events)
-}
-
-fn mail(events: &mut Events, incoming: i64, outgoing: i64) {
+    if attacks {
+        let started = json!({"version": "1.1.0"});
+        events.add(19 * DAY + 5 * 3600, "server.startup", started);
+        sign_in_attacks(&mut events);
+    }
     for number in 0..incoming {
-        incoming_session(events, number);
+        incoming_session(&mut events, number);
     }
     for number in 0..outgoing {
-        outgoing_message(events, number);
+        outgoing_message(&mut events, number);
     }
     for day in 0..7 {
         events.add(day * DAY + 9 * 3600, "spam.train-completed", json!({}));
     }
-}
-
-fn batches(mut events: Events) -> Vec<Vec<Value>> {
     events.list.sort_by_key(|(at, _)| *at);
     let list: Vec<Value> = events.list.into_iter().map(|(_, event)| event).collect();
     list.chunks(500).map(<[Value]>::to_vec).collect()
