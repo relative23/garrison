@@ -52,6 +52,10 @@ Notable changes for operators and users. The format follows
   accounts the checks read. Until then the DNS records, Blocklists, Reverse
   names and TLS certificates cards say that Stalwart did not give its
   domains, and the Management API card that it refused `x:Account/query`.
+- **The first play of the Ansible role runs the installer and, where
+  `garrison_stalwart_admin` is set, `garrison stalwart setup`, also on a host
+  that an earlier release's role set up.** Stalwart must answer then, and that
+  administrator must still work.
 
 ### Added
 
@@ -2064,6 +2068,9 @@ Notable changes for operators and users. The format follows
   not finish or `garrison.toml` changed since, and finds the access policy
   where `[broker] policy` keeps it**; where the policy binds no role and no
   account, the play stops and says how to bind one.
+- **A dry run of the Ansible role (`ansible-playbook --check`) checks the
+  signature and runs to its end on a host the role set up**, where it stopped
+  saying that the signature belonged to another release.
 
 ## [0.1.2] - 2026-11-13
 
