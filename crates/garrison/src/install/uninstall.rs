@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use super::files::{Step, announce, io, lock, must, run};
 use super::requirements::root_with_systemctl;
+use super::system::snippets;
 use super::{BACKUPS, BASE, CONFIG, LOCK, SYSTEMCTL, UNITS, command, states};
 use crate::state::State;
 
@@ -126,26 +127,6 @@ fn policy_unknown(settings: &Path) -> Option<State> {
     }
     let error = garrison_core::config::load(settings).err()?;
     Some(states::policy_unknown(settings, error))
-}
-
-fn snippets(root: &Path) -> Vec<PathBuf> {
-    let folder = root.join("etc/nginx/snippets");
-    // nginx reads `.conf` exactly; other cases are not snippets.
-    #[allow(clippy::case_sensitive_file_extension_comparisons)]
-    let ours = |name: &str| name.starts_with("garrison") && name.ends_with(".conf");
-    let mut found: Vec<PathBuf> = fs::read_dir(&folder)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(ours)
-        })
-        .collect();
-    found.sort();
-    found
 }
 
 /// The installer's own backups and the link to the one a rollback restores.
