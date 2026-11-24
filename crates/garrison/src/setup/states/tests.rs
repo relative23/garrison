@@ -269,6 +269,15 @@ Setup changed nothing. Run `garrison stalwart setup` again once this is mended. 
 fn outcomes() -> Rows {
     vec![
         (
+            as_asked(),
+            "Stalwart is set up as asked; nothing was changed. [setup-as-asked]",
+        ),
+        (
+            reloaded(Some(&restarted("garrison-ingest", true))),
+            "Settings reloaded. garrison-ingest restarted with the new secret. [setup-restarted] \
+             [setup-reloaded]",
+        ),
+        (
             restart_asked("garrison-ingest and garrison-broker", false),
             "Restart garrison-ingest and garrison-broker so they read the new secrets. \
              [setup-restart-asked]",
@@ -301,6 +310,7 @@ fn others() -> Rows {
     let unavailable = || call_failed("x:ApiKey/set", "Stalwart answered HTTP 503");
     let reload = call_failed("x:Action/set", "Stalwart answered HTTP 503");
     vec![
+        (reloaded(None), "Settings reloaded. [setup-reloaded]"),
         (
             left_in(unwritten(file, "Permission denied (os error 13)")),
             "Could not write /etc/garrison/credentials/broker-native-key: Permission denied (os \

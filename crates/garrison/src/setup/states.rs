@@ -234,6 +234,25 @@ pub(super) fn event_forbidden(kind: &str) -> State {
     )
 }
 
+/// A run's last line where Stalwart and the files were as asked: the
+/// Ansible role reads it as a play that changed nothing.
+pub(super) fn as_asked() -> State {
+    State::new(
+        "setup-as-asked",
+        "Stalwart is set up as asked; nothing was changed.",
+    )
+}
+
+/// A run's outcome where it changed something, once Stalwart reloaded its
+/// settings; `restart`, what the services that hold the new secrets do.
+pub(super) fn reloaded(restart: Option<&State>) -> State {
+    let text = match restart {
+        Some(restart) => format!("Settings reloaded. {restart}"),
+        None => "Settings reloaded.".to_owned(),
+    };
+    State::new("setup-reloaded", text)
+}
+
 /// Start the services `named` again so that they read their new secrets,
 /// or it its (`one`): asked where setup runs without root, or where root's
 /// restart failed.

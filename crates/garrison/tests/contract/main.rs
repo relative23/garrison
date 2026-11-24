@@ -263,9 +263,13 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
     refused_without_the_gateway(&mut lab, directory.path(), &credential);
 }
 
-/// What setup says, and nothing else on standard output, where it finds
+/// Whether setup's last line on standard output says that it found
 /// everything as asked.
-const UNCHANGED: &str = "Stalwart is set up as asked; nothing was changed.";
+fn as_asked(output: &Output) -> bool {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let last = stdout.lines().last().unwrap_or_default();
+    support::states(last.as_bytes()) == ["setup-as-asked"]
+}
 
 /// The run after a first setup, with the same arguments, through a relay
 /// that keeps every request: it finds everything as asked, so it writes no
@@ -304,8 +308,7 @@ fn unchanged(lab: &Lab, directory: &std::path::Path, credential: &str, gateway: 
             .any(|name| restarts.contains(&name.as_str())),
         "{said}"
     );
-    let stdout = String::from_utf8_lossy(&again.stdout);
-    assert_eq!(stdout.lines().last(), Some(UNCHANGED), "{said}");
+    assert!(as_asked(&again), "{said}");
 }
 
 /// `access init` signs in with the new broker key and finds the

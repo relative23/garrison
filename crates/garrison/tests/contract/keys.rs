@@ -335,8 +335,7 @@ fn a_second_administrator_finds_the_keys_the_first_made() {
     let said = text(&plain);
     assert_eq!(plain.status.code(), Some(0), "{said}");
     // The first one's keys, which the files hold, are as asked: nothing changes.
-    let stdout = String::from_utf8_lossy(&plain.stdout);
-    assert_eq!(stdout.lines().last(), Some(super::UNCHANGED), "{said}");
+    assert!(super::as_asked(&plain), "{said}");
     let context = "a plain run as the second administrator";
     assert_keys_held_in(&lab, &[None], &credentials, &setup.gateway, context);
     let rotated = setup.run(&["--rotate"]);

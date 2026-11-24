@@ -131,10 +131,6 @@ fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), Stat
     Ok(())
 }
 
-/// What setup says, and nothing else on standard output, where it finds
-/// everything as asked.
-const UNCHANGED: &str = "Stalwart is set up as asked; nothing was changed.";
-
 /// Everything setup makes in Stalwart and here, each step said once it is
 /// done. What Stalwart holds is read first, so that what refuses refuses
 /// before anything changes, and only what differs from what was asked is
@@ -214,14 +210,12 @@ fn configure(
     };
     let retired = milter::retire(config)?;
     let changed = started.is_some() || keys_changed || !steps.is_empty();
+    // Where it finds everything as asked, the one line on standard output.
     if !changed && stale.is_empty() && retired.is_empty() {
-        say(UNCHANGED);
+        say(&states::as_asked().to_string());
         return Ok(());
     }
-    match restarted {
-        None => say("Settings reloaded."),
-        Some(said) => say(&format!("Settings reloaded. {said}")),
-    }
+    say(&states::reloaded(restarted.as_ref()).to_string());
     for step in &retired {
         say(&format!("- {step}"));
     }

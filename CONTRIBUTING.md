@@ -436,8 +436,8 @@ such as `<code>`. `npm run lint` rejects text written directly in JSX, and
 A refusal a command ends with, and an outcome another program acts on, is a
 `State` (`crates/garrison/src/state.rs`): its name, its sentence and, where it
 is said apart, what mends it. One constructor function makes each, in the
-`states.rs` of its area (`install/`, `upgrade/`, and `src/states/` for the
-other commands); no sentence of a state is built anywhere else. A name is
+`states.rs` of its area (`install/`, `upgrade/`, `setup/`, and `src/states/`
+for the other commands); no sentence of a state is built anywhere else. A name is
 lower-case words joined by hyphens, the area first (`install-no-room`), and
 never changes once released. Functions return `Result<T, State>`. Tests compare
 a state with its constructor, or look for its name (`support::states` in

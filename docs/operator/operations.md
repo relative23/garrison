@@ -293,13 +293,15 @@ Stalwart WebUI if you no longer need them.
 
 ## Troubleshooting
 
-What the installer, `garrison upgrade`, `access`, `check-config`, `backup-check`,
-`backup`, `self-check`, `notify-test`, `modules` and `garrison setup` refuse,
-and the outcomes scripts act on, end with a name in brackets, such as
-`[install-no-room]`: the name of that state, which stays from release to
-release while its words may change. So do the lines the services and the watch
-over the collector write to the journal when a service stops, a collection run
-collects nothing or the watch has looked. A script looks for the name.
+What the installer, `garrison upgrade`, `garrison stalwart setup`, `access`,
+`check-config`, `backup-check`, `backup`, `self-check`, `notify-test`, `modules`
+and `garrison setup` refuse, and the outcomes scripts act on, end with a name in
+brackets, such as `[install-no-room]`: the name of that state, which stays from
+release to release while its words may change. So do the lines the services and
+the watch over the collector write to the journal when a service stops, a
+collection run collects nothing or the watch has looked. A script looks for the
+name. Lines that only report progress, such as the installer's `==>` lines and
+setup's steps, carry none.
 
 | Symptom | Check |
 |---|---|
