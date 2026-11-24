@@ -23,9 +23,9 @@ use tokio::time::timeout;
 use crate::error::{ApiError, ApiResult, blocking};
 
 /// History queries that run at once.
-pub(crate) const RUNNING: usize = 2;
+pub const RUNNING: usize = 2;
 /// History queries that may wait for a turn beside those that run.
-pub(crate) const WAITING: usize = 8;
+pub const WAITING: usize = 8;
 /// How long a history query may run, and so how long the next one waits.
 pub(crate) const BUDGET: Duration = Duration::from_secs(2);
 

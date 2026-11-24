@@ -16,7 +16,7 @@ const MAX_FILE: usize = 65536;
 
 /// Every directive of a file with its values in the order of the file, or why
 /// the file cannot be read or split, in words for a finding.
-pub(crate) fn values(path: &Path) -> Result<BTreeMap<String, Vec<String>>, String> {
+pub fn values(path: &Path) -> Result<BTreeMap<String, Vec<String>>, String> {
     // A named pipe would hold the open until a writer came. Only root writes
     // ClamAV's files, so a look before the open is enough here.
     if !std::fs::metadata(path)
