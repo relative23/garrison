@@ -90,7 +90,7 @@ const SYSTEM: &str = "below `root`, the host's own system folders";
 
 /// Every call on the file system in this crate's code: the file, the form,
 /// how often it stands there, and what it reads, with what bounds its wait.
-const KNOWN: [(&str, &str, usize, &str); 28] = [
+const KNOWN: [(&str, &str, usize, &str); 30] = [
     (
         "providers/backupcheck.rs",
         "files::changed_only_by_trusted",
@@ -145,10 +145,17 @@ const KNOWN: [(&str, &str, usize, &str); 28] = [
         1,
         "statvfs of `disk_path`, in answered_by",
     ),
-    ("providers/hostcare/packages.rs", ".exists()", 1, SYSTEM),
+    ("providers/hostcare/packages.rs", ".exists()", 2, SYSTEM),
     ("providers/hostcare/packages.rs", ".metadata()", 1, SYSTEM),
-    ("providers/hostcare/packages.rs", "fs::metadata(", 1, SYSTEM),
-    ("providers/hostcare/packages.rs", "read_dir(", 3, SYSTEM),
+    ("providers/hostcare/packages.rs", "File::open(", 1, SYSTEM),
+    ("providers/hostcare/packages.rs", "fs::metadata(", 2, SYSTEM),
+    ("providers/hostcare/packages.rs", "read_dir(", 4, SYSTEM),
+    (
+        "providers/hostcare/packages.rs",
+        "read_to_string(",
+        1,
+        "below `root`, the head of a Release file of apt's",
+    ),
     ("providers/hostcare/restart.rs", ".exists()", 1, SYSTEM),
     ("providers/hostcare/restart.rs", "read_dir(", 1, SYSTEM),
     (

@@ -1377,6 +1377,10 @@ Notable changes for operators and users. The format follows
   names what a mount shows the collector by its place on the host.** Where
   the collector's user may not search a folder, let the job write the
   receipt where it may, and set `path` to it.
+- **The updates card warns where the package lists are a week old or
+  have expired.** It counted from lists that the host had stopped fetching,
+  however old; `apt-get update` or `dnf makecache` fetches them, as the
+  host's update job should.
 - **The updates card's advice for a dnf cache that only root may read
   mends it.** `chmod 755` on the cache folders left dnf's files in them
   closed; make the cache again under umask 022, as the card says.

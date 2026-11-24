@@ -172,6 +172,23 @@ pub(super) fn trend(samples: &[Sample]) -> Option<f64> {
     (below > 0.0).then(|| above / below * 86_400.0)
 }
 
+/// The seconds since the epoch of a date as apt's Release files write it,
+/// `Thu, 22 Oct 2026 00:34:34 UTC`, in UTC with the day of the week first.
+pub(super) fn release_date(text: &str) -> Option<i64> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    let [_, day, month, year, clock, "UTC" | "GMT" | "+0000"] = parts[..] else {
+        return None;
+    };
+    let month = MONTHS.iter().position(|name| *name == month)? + 1;
+    let day: u8 = day.parse().ok()?;
+    let year: u16 = year.parse().ok()?;
+    let written = format!("{year:04}-{month:02}-{day:02}T{clock}Z");
+    garrison_core::time::parse(&written).map(garrison_core::time::Timestamp::as_second)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,6 +232,29 @@ mod tests {
             Obsoleting Packages\nnew.x86_64  1.0  baseos\n    old.x86_64  0.9  @System\n";
         assert_eq!(dnf_updates(updates), 2);
         assert_eq!(dnf_updates(""), 0);
+    }
+
+    /// A Release file's dates as Debian 13's lists carry them (measured
+    /// 2026-11-24); another form is no date.
+    #[test]
+    fn a_release_files_date_is_read_in_utc() {
+        let at = |text: &str| garrison_core::time::parse(text).unwrap().as_second();
+        assert_eq!(
+            release_date("Tue, 01 Dec 2026 00:34:34 UTC"),
+            Some(at("2026-12-01T00:34:34Z"))
+        );
+        assert_eq!(
+            release_date("Sat, 21 Nov 2026 09:15:44 UTC"),
+            Some(at("2026-11-21T09:15:44Z"))
+        );
+        for other in [
+            "2026-12-01T00:34:34Z",
+            "Tue, 01 Dec 2026 00:34:34 CET",
+            "Tue, 31 Feb 2026 00:00:00 UTC",
+            "",
+        ] {
+            assert_eq!(release_date(other), None, "{other}");
+        }
     }
 
     #[test]

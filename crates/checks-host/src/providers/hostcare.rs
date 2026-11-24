@@ -227,6 +227,15 @@ impl HostCare {
                 )),
             ),
         };
+        // Counts from metadata out of date leave out what was published since.
+        let outdated = asked
+            .pending
+            .and_then(|_| packages::stale(&self.root, context.now.as_second()));
+        let state = if outdated.is_some() {
+            State::Warning
+        } else {
+            state
+        };
         let observation = self
             .observation(context, "updates", "System updates", state, &asked.source)?
             .with_scope(
@@ -238,7 +247,7 @@ impl HostCare {
                 Field::new("Other updates", asked.pending.map(|pending| pending.other), Format::Number),
                 Field::new("Asked", kept.asked(), Format::Datetime),
             ])
-            .with_findings(finding.into_iter().collect());
+            .with_findings(finding.into_iter().chain(outdated).collect());
         // The card is as old as the package manager's answer.
         Ok(kept.dated(observation))
     }

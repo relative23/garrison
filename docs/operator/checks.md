@@ -73,7 +73,10 @@ changes nothing; one that cannot be made is Unknown.
   archive it comes from. It reads the metadata the host has fetched, so it is
   as fresh as the host's own update job keeps it; where apt has fetched no
   package lists at all (`/var/lib/apt/lists`), as a container image leaves
-  it, the card is Unknown and says so. It asks again within
+  it, the card is Unknown and says so. Where the package manager has not
+  fetched its metadata, nor tried to, for a week, as where that job stopped,
+  or a list of apt's has expired (its `Valid-Until`), the card warns: updates
+  published since are not counted. It asks again within
   five minutes once packages are installed or removed or new metadata is
   fetched, and otherwise every six hours. It reads `apt` (Debian, Ubuntu) and
   `dnf` 4 (the RHEL family, Amazon Linux); elsewhere it is Unknown. The
