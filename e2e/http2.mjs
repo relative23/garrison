@@ -57,6 +57,12 @@ export async function startHttp2(target, port = 18443, answer = () => null) {
     const request = http.request(
       { host: upstream.hostname, port: upstream.port, method: headers[":method"], path: headers[":path"], headers: forward },
       (response) => {
+        // A page may have given the request up meanwhile: a stream the
+        // browser closed takes no answer.
+        if (stream.destroyed) {
+          response.destroy();
+          return;
+        }
         const back = { ":status": response.statusCode };
         for (const [name, value] of Object.entries(response.headers)) if (!HOP_BY_HOP.has(name)) back[name] = value;
         stream.respond(back);
@@ -64,10 +70,13 @@ export async function startHttp2(target, port = 18443, answer = () => null) {
       },
     );
     request.on("error", () => {
+      if (stream.destroyed) return;
       if (!stream.headersSent) stream.respond({ ":status": 502 });
       stream.end();
     });
     stream.on("error", () => request.destroy());
+    // What the browser gave up is given up at the preview too.
+    stream.on("close", () => request.destroy());
     stream.pipe(request);
   });
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
