@@ -3,6 +3,7 @@
 //! supported Stalwart releases are named.
 
 use garrison_testing::http::{answer, serve};
+use serde::de::IgnoredAny;
 use serde_json::json;
 
 use super::*;
@@ -66,6 +67,76 @@ fn a_refused_administrator_is_said_as_such() {
     assert!(
         said()
             .starts_with("Stalwart refused the administrator from this host's address (HTTP 403)"),
+    );
+    server.requests();
+}
+
+/// A failure names the run that mends it: inside `garrison setup` the
+/// wizard, which also takes the steps after this one, and not `garrison
+/// stalwart setup`; so does a failure before Stalwart is asked anything.
+#[test]
+fn a_failure_names_the_run_that_mends_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let server = serve(vec![answer(401, "{}")]);
+    let config = garrison_testing::config(directory.path(), &server.url);
+    let credential = directory.path().join("admin.json");
+    garrison_testing::write_private(&credential, br#"{"apiKey": "an-unknown-key"}"#);
+    let asked = |again| Asked {
+        skip_metrics: true,
+        webhook_url: None,
+        allowed: &[],
+        rotate: false,
+        again,
+    };
+    let refused = setup(&config, &Source::File(credential), &asked("garrison setup"));
+    server.requests();
+    assert_eq!(
+        refused,
+        Err(
+            "Stalwart refused the administrator (HTTP 401): check the user name and the password, \
+             or the API key. Run `garrison setup` again once this is mended."
+                .to_owned()
+        )
+    );
+    let missing = directory.path().join("missing.json");
+    let unread = setup(
+        &config,
+        &Source::File(missing.clone()),
+        &asked("garrison stalwart setup --rotate"),
+    );
+    assert_eq!(
+        unread,
+        Err(format!(
+            "Protected file is unavailable: {}. Run `garrison stalwart setup --rotate` again \
+             once this is mended.",
+            missing.display()
+        ))
+    );
+}
+
+/// Where the answer to the reload is lost, Stalwart may have reloaded all
+/// the same and taken the new secrets: setup says what goes without them
+/// until it runs again.
+#[test]
+fn a_reload_without_an_answer_says_what_goes_without_the_new_secrets() {
+    let server = serve(vec![answer(503, "{}"), answer(503, "{}")]);
+    let admin = Admin {
+        url: format!("{}/jmap/", server.url),
+        authorization: "Bearer key".to_owned(),
+    };
+    assert_eq!(
+        reload(&admin, false, false),
+        Err("x:Action/set: Stalwart answered HTTP 503".to_owned())
+    );
+    assert_eq!(
+        reload(&admin, true, true),
+        Err(
+            "x:Action/set: Stalwart answered HTTP 503; where Stalwart reloaded its settings all \
+             the same, the receiver refuses Stalwart's batches until setup runs again, and \
+             Stalwart sends them again for an hour; the exporter refuses the collector's scrape \
+             until setup runs again"
+                .to_owned()
+        )
     );
     server.requests();
 }

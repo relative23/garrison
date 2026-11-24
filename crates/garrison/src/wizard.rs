@@ -188,7 +188,10 @@ fn guided(path: &Path) -> Result<(), String> {
         allow_network: Vec::new(),
         rotate: false,
     };
-    finish(setup::run(&config, &command), "Connecting Stalwart")?;
+    // Setup's own message names this command as the run that mends it.
+    if setup::run_in_wizard(&config, &command) != 0 {
+        return Err("Connecting Stalwart did not succeed.".to_owned());
+    }
     step(4, "Access");
     if config.broker.policy.exists() {
         say("The access policy exists; `garrison access` changes it.");

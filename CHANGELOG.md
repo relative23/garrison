@@ -464,9 +464,11 @@ Notable changes for operators and users. The format follows
   that time every check of a signed-in user's rights answered "Garrison is
   not set up to check access rights", the broker's journal logged an error,
   and nobody could sign in. The old keys now go only after the services
-  that hold them have restarted with the new ones. If the command stops
-  with an error after it made new keys, they are removed all the same, and
-  it says to restart the services.
+  that hold them have restarted with the new ones; where Stalwart's limit
+  of five API keys an account leaves no room, the broker's goes first, and
+  setup restarts the broker as soon as its new key is written. If the
+  command stops with an error after it made new keys, they are removed all
+  the same, and it says to restart the services.
 - **`check-config` and the installer say why on standard error.**
   `check-config` printed an access policy it could not use on standard
   output, and the installer printed there what a failed `check-config` had
@@ -1608,9 +1610,17 @@ Notable changes for operators and users. The format follows
   key a file holds: where Stalwart has more than one key of a description,
   a plain run now makes one anew and removes them all, and where the quota
   leaves the new key no room beside the old ones, these go first.
-- **A failed `garrison stalwart setup` no longer leaves the broker or the
-  receiver with a key that Stalwart no longer takes.** Its message names
-  the run that mends it.
+- **A failed `garrison stalwart setup` names the run that mends it.** Where
+  Stalwart's limit of five API keys an account made an old key go before
+  the new one could be made, it also says what goes without a key until
+  then.
+- **A `garrison stalwart setup` that fails no longer takes the receiver
+  down.** It restarts a service only for a secret it wrote anew, and never
+  onto a key file that holds no key.
+- **`garrison stalwart setup` gives a key or credential whose file other
+  users may read a new secret, in a file that only its owner reads.**
+- **Where `garrison setup` fails to connect Stalwart, it names itself as
+  the run that mends it,** which takes the steps after that one too.
 - **Setup run as another administrator keeps, or with `--rotate`
   removes, the API keys the one before made.** They stayed valid, also
   after a rotation.

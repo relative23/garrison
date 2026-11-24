@@ -5,17 +5,18 @@ use serde_json::json;
 
 use super::*;
 
-const OLD: &str = "the-key-stalwart-has-0123456789";
-const NEW: &str = "the-key-stalwart-made-0123456789";
-const COLLECTOR: Key = Key {
+pub(super) const OLD: &str = "the-key-stalwart-has-0123456789";
+pub(super) const NEW: &str = "the-key-stalwart-made-0123456789";
+pub(super) const COLLECTOR: Key = Key {
     file: "collector-native-key",
     description: "garrison collector",
     permissions: &["authenticate"],
     held: false,
+    without: "the cards that need the collector's key cannot read Stalwart",
 };
 
 /// Stalwart's list of an account's keys of the collector's description.
-fn listed(account: &str, ids: &[&str]) -> String {
+pub(super) fn listed(account: &str, ids: &[&str]) -> String {
     let list: Vec<_> = ids
         .iter()
         .map(|id| json!({"id": id, "description": "garrison collector"}))
@@ -25,7 +26,7 @@ fn listed(account: &str, ids: &[&str]) -> String {
 }
 
 /// The session a key opens, which names the account it belongs to.
-fn session(account: &str) -> String {
+pub(super) fn session(account: &str) -> String {
     json(&json!({"username": "admin@example.test",
         "primaryAccounts": {"urn:stalwart:jmap": account}}))
 }
@@ -93,6 +94,44 @@ fn a_key_file_that_holds_no_key_gets_a_new_one() {
     );
 }
 
+/// A key whose file other users may read may have been seen: it gets a new
+/// key, written for this user alone, and the old one goes, so that the
+/// cards that name setup as the fix for such a file are right.
+#[test]
+fn a_key_file_others_may_read_gets_a_new_key() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join(COLLECTOR.file);
+    garrison_testing::write_private(&file, format!("{OLD}\n").as_bytes());
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let set = json(&json!({"methodResponses": [["x:ApiKey/set",
+        {"created": {"new": {"id": "fresh", "secret": NEW}}, "updated": {"old": null}}, "0"]]}));
+    let server = serve(vec![listed("b", &["old"]), set]);
+    let admin = Admin {
+        url: format!("{}/jmap/", server.url),
+        authorization: "Bearer admin".to_owned(),
+    };
+    let networks = Enabled::of(["127.0.0.1/32"]);
+    let done = ensure(&admin, directory.path(), &COLLECTOR, &networks, false).unwrap();
+    server.requests();
+    let step = done
+        .step
+        .replace(&directory.path().display().to_string(), "DIR");
+    let replaced: Vec<String> = done.replaced.iter().map(|key| key.id.clone()).collect();
+    assert_eq!(
+        (step.as_str(), replaced, done.made),
+        (
+            "created API key 'garrison collector' -> DIR/collector-native-key",
+            vec!["old".to_owned()],
+            true
+        )
+    );
+    let written = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        (std::fs::read_to_string(&file).unwrap(), written),
+        (format!("{NEW}\n"), 0o600)
+    );
+}
+
 /// Where Stalwart has two keys of the description, as after a rotation
 /// that was stopped before it removed the old one, no run can tell which
 /// the file holds: a plain run makes one anew and replaces both, where
@@ -145,9 +184,58 @@ fn a_full_quota_lets_the_old_keys_go_first() {
         "replaced API key 'garrison collector' -> DIR/collector-native-key (the old ones \
          went first: Stalwart's quota of API keys left no room)"
     );
-    assert_eq!((done.replaced, done.made), (Vec::<Replaced>::new(), true));
+    assert_eq!(
+        (done.replaced, done.made, done.gone_first),
+        (Vec::<Replaced>::new(), true, true)
+    );
     let held = std::fs::read_to_string(directory.path().join(COLLECTOR.file)).unwrap();
     assert_eq!(held, format!("{NEW}\n"));
+}
+
+/// Where the old keys went for the quota and the new one cannot be made,
+/// or where their removal failed, the error says what goes without a key
+/// Stalwart takes until a run of setup makes one.
+#[test]
+fn a_new_key_that_finds_no_room_says_what_goes_without_one() {
+    let full = json(
+        &json!({"methodResponses": [["x:ApiKey/set", {"notCreated": {"new": {
+        "type": "overQuota", "description": "You have exceeded your quota of 5 API keys."}}},
+        "0"]]}),
+    );
+    let gone = json(&json!({"methodResponses": [["x:ApiKey/set", {"destroyed": ["old"]}, "0"]]}));
+    let quota = "Stalwart's quota of API keys left the new key no room";
+    let without =
+        "the cards that need the collector's key cannot read Stalwart until setup makes its key";
+    let cases = [
+        (
+            vec![listed("b", &["old"]), full.clone(), gone, answer(503, "{}")],
+            format!(
+                "x:ApiKey/set: Stalwart answered HTTP 503 (Stalwart did not return the new API \
+                 key secret); {quota}, so the old ones went first: {without}"
+            ),
+        ),
+        (
+            vec![listed("b", &["old"]), full, answer(503, "{}")],
+            format!(
+                "x:ApiKey/set: Stalwart answered HTTP 503; {quota}, so setup was removing the \
+                 old ones first: where they are gone, {without}"
+            ),
+        ),
+    ];
+    for (answers, said) in cases {
+        let directory = tempfile::tempdir().unwrap();
+        let server = serve(answers);
+        let admin = Admin {
+            url: format!("{}/jmap/", server.url),
+            authorization: "Bearer admin".to_owned(),
+        };
+        let networks = Enabled::of(["127.0.0.1/32"]);
+        let error = ensure(&admin, directory.path(), &COLLECTOR, &networks, true)
+            .err()
+            .unwrap();
+        server.requests();
+        assert_eq!(error, said);
+    }
 }
 
 /// A key whose file cannot be written goes again, so that Stalwart keeps
@@ -187,106 +275,6 @@ fn a_new_key_whose_file_cannot_be_written_goes_again() {
         requests[2].contains(r#""destroy":["fresh"]"#),
         "{}",
         requests[2]
-    );
-}
-
-/// What `ensure` does where the file's key belongs to another
-/// administrator's account, `c`, which holds the key `k` of the
-/// description: the step, the keys it replaces, and the requests.
-fn ensured_elsewhere(rotate: bool) -> (String, Vec<Replaced>, Vec<String>) {
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join(COLLECTOR.file);
-    garrison_testing::write_private(&file, format!("{OLD}\n").as_bytes());
-    let done = json(&json!({"methodResponses": [["x:ApiKey/set",
-        {"created": {"new": {"id": "fresh", "secret": NEW}}, "updated": {"k": null}}, "0"]]}));
-    let answers = vec![listed("b", &[]), session("c"), listed("c", &["k"]), done];
-    let server = serve(answers);
-    let admin = Admin {
-        url: format!("{}/jmap/", server.url),
-        authorization: "Bearer admin".to_owned(),
-    };
-    let networks = Enabled::of(["127.0.0.1/32"]);
-    let done = ensure(&admin, directory.path(), &COLLECTOR, &networks, rotate).unwrap();
-    let step = done
-        .step
-        .replace(&directory.path().display().to_string(), "DIR");
-    (step, done.replaced, server.requests())
-}
-
-/// The keys setup makes are the administrator's, and another administrator
-/// lists only its own account's: a run as a second administrator found none
-/// of the first one's, made new keys and left those valid for good, after a
-/// rotation too. The account the file's key belongs to is now asked as
-/// well: its key is kept and updated there, and a rotation replaces it.
-#[test]
-fn the_keys_another_administrator_made_are_kept_or_replaced_in_its_account() {
-    let (step, replaced, requests) = ensured_elsewhere(false);
-    assert_eq!(
-        step,
-        "updated API key 'garrison collector' (secret unchanged)"
-    );
-    assert_eq!(replaced, Vec::new());
-    assert!(
-        requests[1].starts_with("GET /jmap/session "),
-        "{}",
-        requests[1]
-    );
-    assert!(requests[1].contains(&format!("Bearer {OLD}")));
-    assert!(
-        requests[2].contains(r#""accountId":"c""#),
-        "{}",
-        requests[2]
-    );
-    assert!(
-        requests[3].contains(r#""accountId":"c""#) && requests[3].contains(r#""update":{"k""#),
-        "{}",
-        requests[3]
-    );
-    let (step, replaced, requests) = ensured_elsewhere(true);
-    assert_eq!(
-        step,
-        "replaced API key 'garrison collector' -> DIR/collector-native-key"
-    );
-    let theirs = Replaced {
-        account: Some("c".to_owned()),
-        id: "k".to_owned(),
-    };
-    assert_eq!(replaced, vec![theirs]);
-    // The new key is the administrator's own.
-    assert!(!requests[3].contains("accountId"), "{}", requests[3]);
-}
-
-/// Each replaced key goes from the account that holds it.
-#[test]
-fn a_replaced_key_goes_from_its_account() {
-    let gone =
-        |id: &str| json(&json!({"methodResponses": [["x:ApiKey/set", {"destroyed": [id]}, "0"]]}));
-    let server = serve(vec![gone("k"), gone("x")]);
-    let admin = Admin {
-        url: format!("{}/jmap/", server.url),
-        authorization: "Bearer admin".to_owned(),
-    };
-    let replaced = [
-        Replaced {
-            account: Some("c".to_owned()),
-            id: "k".to_owned(),
-        },
-        Replaced {
-            account: None,
-            id: "x".to_owned(),
-        },
-    ];
-    remove(&admin, &replaced).unwrap();
-    let requests = server.requests();
-    assert!(
-        requests[0].contains(r#""accountId":"c","destroy":["k"]"#),
-        "{}",
-        requests[0]
-    );
-    assert!(
-        requests[1].contains(r#""destroy":["x"]"#) && !requests[1].contains("accountId"),
-        "{}",
-        requests[1]
     );
 }
 

@@ -196,7 +196,7 @@ fn a_second_administrator_finds_the_keys_the_first_made() {
         assert!(said.contains(&kept), "{said}");
     }
     let context = "a plain run as the second administrator";
-    assert_keys_held_in(&lab, None, &credentials, &setup.gateway, context);
+    assert_keys_held_in(&lab, &[None], &credentials, &setup.gateway, context);
     let rotated = setup.run(&["--rotate"]);
     let said = text(&rotated);
     assert_eq!(rotated.status.code(), Some(0), "{said}");
@@ -208,7 +208,13 @@ fn a_second_administrator_finds_the_keys_the_first_made() {
     });
     assert_eq!(left.count(), 0, "{said}");
     let context = "a rotation as the second administrator";
-    assert_keys_held_in(&lab, Some(&second), &credentials, &setup.gateway, context);
+    assert_keys_held_in(
+        &lab,
+        &[Some(&second)],
+        &credentials,
+        &setup.gateway,
+        context,
+    );
     assert_webhook_held(&lab, &credentials, &capture, context);
     assert_exporter_held(&lab, &credentials, context);
     // The second administrator's keys go before its account does.
