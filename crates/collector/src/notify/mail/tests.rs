@@ -292,7 +292,8 @@ fn a_reply_line_without_an_end_is_read_only_so_far() {
 }
 
 /// The greeting and the Message-ID name this installation's host without
-/// the port `public_origin` may name.
+/// the port `public_origin` may name; the greeting names an address as an
+/// address literal (RFC 5321, 4.1.3).
 #[test]
 fn the_greeting_and_the_message_id_name_the_host_alone() {
     let certificates = certificates();
@@ -307,8 +308,10 @@ fn the_greeting_and_the_message_id_name_the_host_alone() {
             "garrison.example.org",
             "garrison.example.org",
         ),
-        ("192.0.2.1:8443", "192.0.2.1", "192.0.2.1"),
-        ("[2001:db8::1]:8443", "[2001:db8::1]", "[2001:db8::1]"),
+        ("192.0.2.1", "[192.0.2.1]", "192.0.2.1"),
+        ("192.0.2.1:8443", "[192.0.2.1]", "192.0.2.1"),
+        ("[2001:db8::1]", "[IPv6:2001:db8::1]", "[2001:db8::1]"),
+        ("[2001:db8::1]:8443", "[IPv6:2001:db8::1]", "[2001:db8::1]"),
     ] {
         let (port, received) = server(&certificates, "235 OK\r\n", "250 OK\r\n");
         submit(

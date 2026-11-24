@@ -121,6 +121,20 @@ fn host_name(name: &str) -> &str {
     }
 }
 
+/// What this installation greets with: its host, or an address as an
+/// address literal, `[192.0.2.1]` or `[IPv6:2001:db8::1]` (RFC 5321, 4.1.3).
+fn greeting(name: &str) -> String {
+    let host = host_name(name);
+    match host
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
+        Some(address) => format!("[IPv6:{address}]"),
+        None if host.parse::<std::net::Ipv4Addr>().is_ok() => format!("[{host}]"),
+        None => host.to_owned(),
+    }
+}
+
 /// The message: its text in base64, so that any character and any length of
 /// line arrives as it was written.
 pub fn message(mail: &Mail, name: &str, subject: &str, text: &str, now: time::Timestamp) -> String {
@@ -190,7 +204,7 @@ pub fn submit_over(
     let login = STANDARD.encode(format!("\0{}\0{}", mail.user, mail.password.text()?));
     let steps = [
         (None, 220, "greet"),
-        (Some(format!("EHLO {}\r\n", host_name(name))), 250, "greet"),
+        (Some(format!("EHLO {}\r\n", greeting(name))), 250, "greet"),
         (Some(format!("AUTH PLAIN {login}\r\n")), 235, "sign in"),
         (
             Some(format!("MAIL FROM:<{}>\r\n", mail.from)),
