@@ -91,9 +91,19 @@ fn calls_that_gave_nothing_are_named_on_the_management_api_card() {
             )]
         )
     );
+    // The mailbox card says it too, as the cards of the other checks say
+    // what mends a key that may not read what they read.
+    let mailboxes = cards_of(&refused, "stalwart.mailboxes");
     assert_eq!(
-        cards_of(&refused, "stalwart.mailboxes").state,
-        State::Unknown
+        (mailboxes.state, mailboxes.findings.clone()),
+        (
+            State::Unknown,
+            vec![
+                "Not readable: access denied; run `garrison stalwart setup` again, which gives \
+                 the collector's API key the permissions it needs."
+                    .to_owned()
+            ]
+        )
     );
     // One refused, one Stalwart does not know, the accounts not answered,
     // the others answered: the queue is read.

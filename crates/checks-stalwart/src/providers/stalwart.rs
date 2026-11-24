@@ -360,10 +360,14 @@ impl Provider for Stalwart {
         let listed: Option<&Listed<MailboxAccount>> =
             accounts.as_ref().and_then(|read| read.as_ref().ok());
         let mut storage = mailboxes(context, listed, self.max_accounts)?;
-        if accounts.is_none() {
-            storage
+        match &accounts {
+            None => storage
                 .findings
-                .push("Not asked: the collection run's time was used up.".to_owned());
+                .push("Not asked: the collection run's time was used up.".to_owned()),
+            Some(Err(error)) => storage
+                .findings
+                .push(format!("Not readable: {}.", unread(error))),
+            Some(Ok(_)) => {}
         }
         report.observations.push(storage);
         let queue = answers.queue;
