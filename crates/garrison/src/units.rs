@@ -21,8 +21,8 @@ pub(crate) const WATCH: &str = "garrison-watch.service";
 pub(crate) const WATCH_TIMER: &str = "garrison-watch.timer";
 /// The macro milter; it runs only where the configuration switches it on.
 pub(crate) const MILTER: &str = "garrison-milter.service";
-/// Where releases up to 0.1.2 noted the ID of the filter's entry in
-/// Stalwart, in the credentials directory; setup removes it.
+/// Where earlier releases noted the ID of the filter's entry in Stalwart,
+/// in the credentials directory; setup removes it.
 pub(crate) const MILTER_ENTRY: &str = "stalwart-milter-id";
 
 /// What is active on a host where Garrison runs, in the order `detect` and

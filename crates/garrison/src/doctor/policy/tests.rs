@@ -318,9 +318,9 @@ fn a_closed_folder_on_the_way_to_the_default_place_is_opened() {
     }
 }
 
-/// A policy behind a linked folder is judged by every folder the broker
-/// passes on its way, the link's target and the folders above it too: one
-/// it may not enter fails, as the broker cannot open the policy.
+/// A policy behind a linked folder is judged by the folders above where it
+/// lies too: one the broker may not enter fails, as the broker cannot open
+/// the policy.
 #[test]
 fn the_folders_behind_a_linked_folder_are_judged() {
     use std::os::unix::fs::{PermissionsExt, symlink};
