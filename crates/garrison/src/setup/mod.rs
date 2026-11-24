@@ -75,7 +75,8 @@ const MAX_ANSWER: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-    /// Create webhook, API keys and metrics access.
+    /// Connect Stalwart: the webhook, the API keys, the sign-in client, the
+    /// metrics access and the macro filter's entry.
     Setup {
         /// The Stalwart administrator: a 0600 JSON file with {"username","secret"}
         /// or {"apiKey"}, or `-` for that JSON on standard input. Without it, the

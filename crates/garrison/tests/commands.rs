@@ -244,7 +244,7 @@ const ROWS: [Row; 30] = [
     ),
     (
         &["stalwart", "setup"],
-        "Create webhook, API keys and metrics access",
+        "Connect Stalwart: the webhook, the API keys, the sign-in client, the metrics access and the macro filter's entry",
         Follows,
         Some(2),
     ),
