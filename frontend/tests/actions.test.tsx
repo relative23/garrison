@@ -180,6 +180,31 @@ describe("maintenance actions", () => {
     expect(notice?.className).toContain(tone);
   });
 
+  it("ask for the list of actions at its own refresh while following a job, and once more at its end", async () => {
+    // Each answer to either costs a check of the user's rights at Stalwart.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const server = serve({
+      "GET actions": { body: catalog() },
+      "POST actions": { status: 202, body: { job: job(), replayed: false } },
+      [`GET ${JOB}`]: { body: job({ status: "running", message: "Started" }) },
+    });
+    renderView(<Actions />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const listed = server.requests("GET actions").length;
+    // A minute, a look at a time: each look sets the next once it is answered.
+    for (let look = 0; look < 20; look += 1) await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(server.requests(`GET ${JOB}`)).toHaveLength(20);
+    expect(server.requests("GET actions").length - listed).toBe(4);
+    // Its result goes into Recent jobs at once.
+    server.answer(`GET ${JOB}`, { body: job({ status: "succeeded", message: "Done." }) });
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(screen.getByText("Job 01234567: Succeeded — Done.")).toBeTruthy();
+    expect(server.requests("GET actions").length - listed).toBe(5);
+  });
+
   it("keep following a job whose status could not be read once, and say so meanwhile", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const server = serve({

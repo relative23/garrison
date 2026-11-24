@@ -126,7 +126,10 @@ export function Actions() {
 
   // Follow a started job until it reaches a final state. A look that fails
   // changes nothing of the job, so the failures count as well: each one
-  // sets the next look, later than the one before.
+  // sets the next look, later than the one before. Each look and each read
+  // of the list costs a check of the user's rights at Stalwart, so the list
+  // of recent jobs takes the job's result once it has one, and follows it
+  // meanwhile at its own refresh (docs/architecture/security.md).
   const failures = lost?.times ?? 0;
   useEffect(() => {
     if (!watched || TERMINAL.has(watched.status)) return undefined;
@@ -135,13 +138,13 @@ export function Actions() {
         (job) => {
           setLost(null);
           setWatched(job);
+          if (TERMINAL.has(job.status)) reloadCatalog();
         },
         (reason: unknown) => {
           const error = reason instanceof Error ? reason : new Error(String(reason));
           setLost((before) => ({ error, times: (before?.times ?? 0) + 1 }));
         },
       );
-      reloadCatalog();
     });
   }, [watched, failures, reloadCatalog]);
   const follow = (job: Job, again: boolean) => {

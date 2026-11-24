@@ -173,6 +173,9 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **Following a started job costs Stalwart about 30 checks of rights a
+  minute, not 50.** The Maintenance page no longer reads its list again with
+  every look at the job; the list takes the result when the job ends.
 - **A ban reason the page does not know is shown as the server named it.**
   A page loaded before an upgrade that adds one showed "attacks.reason.…".
 - **An empty Recent jobs list no longer says that the audit holds no job.**
