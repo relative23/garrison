@@ -1377,6 +1377,9 @@ Notable changes for operators and users. The format follows
   names what a mount shows the collector by its place on the host.** Where
   the collector's user may not search a folder, let the job write the
   receipt where it may, and set `path` to it.
+- **The updates card's advice for a dnf cache that only root may read
+  mends it.** `chmod 755` on the cache folders left dnf's files in them
+  closed; make the cache again under umask 022, as the card says.
 - **A receipt reached through a link names the link and where it leads.**
   Where it leads into a place the collector's unit hides, the card says
   so, and names `path`, which is to follow the receipt to its new place.

@@ -79,7 +79,8 @@ changes nothing; one that cannot be made is Unknown.
   `dnf` 4 (the RHEL family, Amazon Linux); elsewhere it is Unknown. The
   collector's user reads dnf's cache in `/var/cache/dnf`: where only root may
   read a cache folder, as a dnf run under umask 077 leaves it, the finding
-  names the repository.
+  names the repository and says to make the cache again under umask 022,
+  since such a run leaves the files in it closed too.
 - `restart`: whether installed updates need a restart of the host. On every
   distribution a kernel installed in `/lib/modules` that is newer than the
   one that runs, and of its flavor, is a warning. The flavor is the

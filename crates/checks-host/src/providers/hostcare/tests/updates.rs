@@ -406,7 +406,8 @@ fn a_dnf_cache_that_only_root_may_read_is_named_with_its_remedy() {
         both.findings,
         [
             "The pending updates are not known: only root may read the dnf cache folders of \
-             docker-ce-stable and epel in /var/cache/dnf; chmod 755 on them lets this check read them."
+             docker-ce-stable and epel in /var/cache/dnf: make the cache again under umask 022 \
+             (dnf clean all; umask 022; dnf makecache)."
         ]
     );
     open("epel-74fe7744c98fc60d", 0o755);
@@ -415,7 +416,8 @@ fn a_dnf_cache_that_only_root_may_read_is_named_with_its_remedy() {
         one.findings,
         [
             "The pending updates are not known: only root may read the dnf cache folder of \
-             docker-ce-stable in /var/cache/dnf; chmod 755 on it lets this check read it."
+             docker-ce-stable in /var/cache/dnf: make the cache again under umask 022 (dnf clean \
+             all; umask 022; dnf makecache)."
         ]
     );
 }

@@ -176,16 +176,19 @@ fn repository(folder: &str) -> String {
         .to_owned()
 }
 
-/// What to tell when unreadable cache folders are why dnf failed.
+/// What to tell when unreadable cache folders are why dnf failed. Under
+/// umask 077 dnf makes the files in them as closed as the folders, so only
+/// the cache made again under the default umask mends it (measured,
+/// 2026-11-24).
 fn locked_out(repositories: &[String]) -> Option<String> {
     let (last, rest) = repositories.split_last()?;
-    let (names, folder, them) = if rest.is_empty() {
-        (last.clone(), "folder", "it")
+    let (names, folder) = if rest.is_empty() {
+        (last.clone(), "folder")
     } else {
-        (format!("{} and {last}", rest.join(", ")), "folders", "them")
+        (format!("{} and {last}", rest.join(", ")), "folders")
     };
     Some(format!(
-        "only root may read the dnf cache {folder} of {names} in /var/cache/dnf; \
-         chmod 755 on {them} lets this check read {them}"
+        "only root may read the dnf cache {folder} of {names} in /var/cache/dnf: make the cache \
+         again under umask 022 (dnf clean all; umask 022; dnf makecache)"
     ))
 }
