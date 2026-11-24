@@ -84,6 +84,9 @@ pub struct Clamav {
 /// The daily signature database is older than this only where updates no
 /// longer arrive: a new one is published every day.
 const STALE_AFTER_HOURS: f64 = 48.0;
+/// Two clocks may differ by this many hours before a file's time counts as
+/// one from the future, of which no age is known.
+const AHEAD_HOURS: f64 = 5.0 / 60.0;
 
 impl Clamav {
     pub fn new(raw: &toml::Table) -> Checked<Self> {
@@ -251,25 +254,10 @@ impl Clamav {
             label: label.to_owned(),
             format,
         };
-        // Files that exist are not yet signatures that are current.
-        let (state, finding) = match daily {
-            _ if rows.is_empty() => (State::Unknown, None),
-            None => (
-                State::Unknown,
-                Some(
-                    "No daily signature database (daily.cld or daily.cvd) is among the files; \
-                     how current the signatures are is not known."
-                        .to_owned(),
-                ),
-            ),
-            Some((name, hours)) if hours > STALE_AFTER_HOURS => (
-                State::Warning,
-                Some(format!(
-                    "{name} was last updated {hours:.0} hours ago; ClamAV's signatures change \
-                     every day, so the updates do not arrive."
-                )),
-            ),
-            Some(_) => (State::Ok, None),
+        let (state, finding) = if rows.is_empty() {
+            (State::Unknown, None)
+        } else {
+            current(daily)
         };
         let mut findings: Vec<String> = finding.into_iter().collect();
         // A refresh log that is named and cannot be read leaves its column
@@ -311,7 +299,43 @@ impl Clamav {
             rows,
         })
         .with_max_age(900);
-        Ok((observation, daily.map(|(_, hours)| hours)))
+        let age = daily
+            .map(|(_, hours)| hours)
+            .filter(|hours| *hours >= -AHEAD_HOURS)
+            .map(|hours| hours.max(0.0));
+        Ok((observation, age))
+    }
+}
+
+/// What the newest daily database, by its name and age in hours, says of
+/// how current the signatures are: files that exist are not yet signatures
+/// that are current.
+fn current(daily: Option<(&str, f64)>) -> (State, Option<String>) {
+    match daily {
+        None => (
+            State::Unknown,
+            Some(
+                "No daily signature database (daily.cld or daily.cvd) is among the files; how \
+                 current the signatures are is not known."
+                    .to_owned(),
+            ),
+        ),
+        Some((name, hours)) if hours < -AHEAD_HOURS => (
+            State::Warning,
+            Some(format!(
+                "{name} is dated {:.0} minutes ahead of this host's clock; one of the two clocks \
+                 is wrong, so its age is not known.",
+                -hours * 60.0
+            )),
+        ),
+        Some((name, hours)) if hours > STALE_AFTER_HOURS => (
+            State::Warning,
+            Some(format!(
+                "{name} was last updated {hours:.0} hours ago; ClamAV's signatures change every \
+                 day, so the updates do not arrive."
+            )),
+        ),
+        Some(_) => (State::Ok, None),
     }
 }
 

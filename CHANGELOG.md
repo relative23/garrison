@@ -300,6 +300,9 @@ Notable changes for operators and users. The format follows
   1.1.0), and the Test messages card was in order for a day although
   nothing had been scanned. A temporary reply (4xx) is now "not tested",
   Unknown, and that test is tried again after an hour.
+- **A daily signature database dated ahead of the clock is a warning.** The
+  Signature databases card called it current however long updates had
+  stopped; it now says that one of the two clocks is wrong.
 - **One damaged event in the history no longer stops the mail flow and the
   sending addresses.** Its time or fields of another type made all their
   cards Unknown; such an event is now left out, and the cards say how many

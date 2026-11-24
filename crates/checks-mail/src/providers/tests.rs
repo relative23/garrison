@@ -34,7 +34,16 @@ fn clamav_policy_drift_is_a_finding() {
     .unwrap();
     let config = config(directory.path());
     let runner = Canned(String::new());
-    let report = provider.collect(&context(&config, &runner)).unwrap();
+    let context = context(&config, &runner);
+    // Updated at the tests' clock, not at the clock of the host they run on.
+    let updated = std::time::SystemTime::UNIX_EPOCH
+        + std::time::Duration::from_secs(u64::try_from(context.now.as_second()).unwrap());
+    let daily = std::fs::File::options()
+        .write(true)
+        .open(path("daily.cld"))
+        .unwrap();
+    daily.set_modified(updated).unwrap();
+    let report = provider.collect(&context).unwrap();
     let configuration = &report.observations[0];
     assert_eq!(configuration.state, State::Warning);
     assert!(configuration.findings[0].contains("Accept"));
@@ -138,6 +147,55 @@ fn signatures_that_were_not_updated_for_two_days_are_a_warning() {
 
 /// The antivirus configuration card over a milter file of `text` and a
 /// scanner file of `scan`, with `options` for the check.
+#[test]
+fn a_daily_database_dated_ahead_of_the_clock_has_no_age() {
+    use std::time::{Duration, SystemTime};
+    let directory = tempfile::tempdir().unwrap();
+    let daily = directory.path().join("daily.cld");
+    std::fs::write(&daily, "signatures").unwrap();
+    let provider = Clamav::new(&table(&format!(
+        "type = \"clamav\"\nmilter_config = \"{0}/milter.conf\"\nclamd_config = \"{0}/scan.conf\"\ndatabase_directory = \"{0}\"",
+        directory.path().display()
+    )))
+    .unwrap();
+    let config = config(directory.path());
+    let runner = Canned(String::new());
+    let context = context(&config, &runner);
+    let checked = SystemTime::UNIX_EPOCH
+        + Duration::from_secs(u64::try_from(context.now.as_second()).unwrap());
+    let dated = |ahead: u64| {
+        let file = std::fs::File::options().write(true).open(&daily).unwrap();
+        file.set_modified(checked + Duration::from_secs(ahead))
+            .unwrap();
+        provider.collect(&context).unwrap()
+    };
+    // Written while a clock ran two hours ahead: how long updates have
+    // stopped since is not known.
+    let ahead = dated(2 * 3600);
+    let card = &ahead.observations[1];
+    assert_eq!(
+        (card.state, card.findings.clone()),
+        (
+            State::Warning,
+            vec![
+                "daily.cld is dated 120 minutes ahead of this host's clock; one of the two clocks \
+                 is wrong, so its age is not known."
+                    .to_owned()
+            ]
+        )
+    );
+    assert_eq!(ahead.gauges.get("signature_age_hours"), None);
+    // A minute is two clocks that agree.
+    let near = dated(60);
+    assert_eq!(
+        (
+            near.observations[1].state,
+            near.gauges["signature_age_hours"]
+        ),
+        (State::Ok, 0.0)
+    );
+}
+
 fn configuration(text: &str, scan: &str, options: &str) -> (Observation, String) {
     let directory = tempfile::tempdir().unwrap();
     let (milter, scanner) = (
