@@ -52,6 +52,17 @@ const COLLECT_SETS: [&str; 5] = [
     "ProtectKernelLogs=true",
 ];
 
+/// The settings of [`HIDDEN`] that any of Garrison's service units sets.
+/// Each starts its service from the release, which none of them may hide.
+const ANY_SETS: [&str; 6] = [
+    "ProtectHome=true",
+    "PrivateTmp=true",
+    "PrivateDevices=true",
+    "ProtectKernelModules=true",
+    "ProtectKernelTunables=true",
+    "ProtectKernelLogs=true",
+];
+
 /// The place that a unit with the settings `sets` hides and that holds
 /// `path`, the setting that hides it and whether statvfs there measures the
 /// host's file system.
@@ -160,6 +171,32 @@ fn hidden_check(
              or show the collector that place read-only at another one \
              (docs/operator/checks.md, \"Paths the collector cannot see\")"
         ),
+    ))
+}
+
+/// Why the units cannot start the release at `base`, and what to do;
+/// `None` where they can. Every unit starts its service from `base`, and
+/// one that hides the place `base` leads to through a link finds no
+/// program there.
+pub(crate) fn hidden_base(base: &Path) -> Option<String> {
+    base_hidden_at(base, resolved(base).as_deref())
+}
+
+fn base_hidden_at(base: &Path, resolved: Option<&Path>) -> Option<String> {
+    let (at, (place, setting, _)) = hidden_place(base, &ANY_SETS)
+        .map(|found| (base, found))
+        .or_else(|| resolved.and_then(|at| Some((at, hidden_place(at, &ANY_SETS)?))))?;
+    let through = if at == base {
+        String::new()
+    } else {
+        format!(" leads to {}, which lies", at.display())
+    };
+    Some(format!(
+        "{}{through} under {place}, which Garrison's units hide from their services \
+         ({setting}): none of them could start the program there. Link {} to a folder \
+         outside /home, /root, /run/user, /tmp and /var/tmp, or mount the disk there",
+        base.display(),
+        base.display()
     ))
 }
 

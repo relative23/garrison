@@ -1257,6 +1257,9 @@ Notable changes for operators and users. The format follows
   listed a message that a milter or a hook had refused among the messages
   waiting for delivery, for seven days. Such a message never reached the
   queue and is not counted there any more.
+- **The installer refuses `/opt/garrison` where a link puts it under `/home`,
+  `/root`, `/tmp` or `/var/tmp`**, where no service could start; link it
+  elsewhere or mount the disk at `/opt/garrison`.
 - **An installation under a linked `/opt` keeps its rollback release.**
   Where `/opt` or `/opt/garrison` is a link to another disk, every upgrade
   removed all releases but the newest, the one to roll back to included; a

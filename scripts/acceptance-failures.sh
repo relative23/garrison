@@ -124,6 +124,20 @@ scenario_refusals() {
     running "after the refusals" "$old"
 }
 
+scenario_base_hidden() {
+    step "A release base that a link puts under /home, which the units hide, is refused before anything changes"
+    upgraded
+    # The disk under /home that /opt/garrison is linked to, as a RHEL host's
+    # large partition is.
+    inside 'mv /opt/garrison /home/garrison && ln -s /home/garrison /opt/garrison'
+    pid=$(inside 'systemctl show -p MainPID --value garrison-web.service')
+    refused "an installer whose release base leads under /home is refused" \
+        '/root/release/bin/garrison install' "/opt/garrison leads to /home/garrison, which lies under /home"
+    check "and nothing stopped" "test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
+    inside 'rm /opt/garrison && mv /home/garrison /opt/garrison'
+    running "after the base under /home" "$new"
+}
+
 scenario_failed_start() {
     step "A release that does not start is switched back"
     # The web service of this copy exits right after it starts.
@@ -389,7 +403,7 @@ install_previous
 old=$(inside 'cat /root/previous/VERSION')
 new=$(inside 'cat /root/release/VERSION')
 running "installed" "$old"
-for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check failed_start crash_loop migrated_then_failed \
+for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check base_hidden failed_start crash_loop migrated_then_failed \
     switch_back_room concurrent \
     upgrade_killed switch_back_failed_early upgrade_resumed rollback_killed restore_killed upgrade_came_up restore_came_up \
     rollback_state_killed rollback_came_up \

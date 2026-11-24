@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use garrison_core::config::{self, Database};
 
 use super::files::{Step, io, run};
-use super::{CONFIG, SYSTEMCTL};
+use super::{BASE, CONFIG, SYSTEMCTL};
 
 /// `LoadCredential=` in the units arrived with systemd 247.
 const SYSTEMD: u32 = 247;
@@ -57,6 +57,15 @@ pub(super) fn preflight() -> Step {
         );
     }
     Ok(())
+}
+
+/// Before a command that starts the services: the units must find the
+/// release where it lies, not through a link into a place they hide.
+pub(super) fn base_shown() -> Step {
+    match crate::units::hidden_base(Path::new(BASE)) {
+        Some(why) => Err(format!("{why}; nothing was changed.")),
+        None => Ok(()),
+    }
 }
 
 /// `systemd 257 (257.13-1~deb13u1)` is 257.

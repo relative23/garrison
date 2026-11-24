@@ -43,7 +43,7 @@ use std::process::Output;
 
 use crate::{say, units};
 use files::{Step, announce, copy_tree, exchange, fresh_folder, io, lock, place, run, switch};
-use requirements::{preflight, room, size, state_size};
+use requirements::{base_shown, preflight, room, size, state_size};
 pub(crate) use restore::run_restore;
 use services::{check_config, start, stop_services};
 use system::{install_system_files, protect_policy};
@@ -271,6 +271,7 @@ fn switch_to(release: &Path, old: Option<&Path>, configured: bool) -> Step {
 fn install() -> Step {
     // Root first: without it the release may not even be readable.
     preflight()?;
+    base_shown()?;
     let here = here()?;
     let version = verify::verify(&here)?;
     let _held = lock(Path::new(LOCK))?;
@@ -387,6 +388,7 @@ fn install() -> Step {
 /// runs from the installed release, which holds no archive to install from.
 pub(crate) fn start_installed() -> Step {
     preflight()?;
+    base_shown()?;
     let _held = lock(Path::new(LOCK))?;
     if let Seen::Holds(record) | Seen::Failed(record) = unfinished::read()? {
         return Err(record.not_started());

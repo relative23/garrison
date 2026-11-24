@@ -51,6 +51,7 @@ fn backup_at(from: &Path) -> Step<PathBuf> {
 
 fn restore(from: &Path) -> Step {
     preflight()?;
+    super::requirements::base_shown()?;
     let _held = lock(Path::new(LOCK))?;
     // An interrupted restore's copy stays the state from before, while
     // nothing has written the state since.
