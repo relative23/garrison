@@ -8,7 +8,8 @@
 # and waits for none that another process holds, makes a missing folder the
 # broker can read, names what a role lacks where none of Stalwart's
 # qualifies, and its profiles follow `[[actions]]`, which the broker and the
-# web service take once the installer ran again.
+# web service take once the installer ran again. check-config and the
+# installer judge the access policy as the broker meets it.
 # They use that script's helpers and its `new`.
 # shellcheck disable=SC2154
 
@@ -189,4 +190,30 @@ scenario_access_actions() {
     installer '/root/release/bin/garrison install'
     inside 'rm /root/garrison.toml.actions /root/garrison.toml.commands /root/web-started'
     running "after the actions changed" "$new"
+}
+
+scenario_policy_for_the_broker() {
+    step "check-config and the installer judge the access policy as the broker meets it"
+    upgraded
+    # A folder on the way that the broker may not enter hides the policy:
+    # refused with the chmod that opens it, by the installer too, which
+    # changes nothing.
+    inside 'chmod 700 /etc/garrison'
+    refused "check-config refuses a policy behind a folder the broker may not enter" \
+        '/opt/garrison/current/bin/garrison check-config' "garrison-broker may not enter /etc/garrison"
+    refused "and so does the installer run again, before anything stops" \
+        '/root/release/bin/garrison install' "Run \`chmod 755 /etc/garrison\`."
+    check "the release that ran still runs" \
+        "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$new' && systemctl is-active --quiet garrison-web"
+    inside 'chmod 755 /etc/garrison'
+    # A policy the broker owns, which the broker takes.
+    inside 'chown garrison-broker:garrison-broker /etc/garrison/access-policy.json &&
+        chmod 600 /etc/garrison/access-policy.json'
+    says "check-config takes a policy the broker owns, with a warning" \
+        '/opt/garrison/current/bin/garrison check-config' "Warning: garrison-broker owns the access policy"
+    check "doctor fails nothing of it" \
+        "! /opt/garrison/current/bin/garrison doctor 2>&1 | grep -q 'FAIL  the access policy'"
+    inside 'chown root:garrison-broker /etc/garrison/access-policy.json &&
+        chmod 640 /etc/garrison/access-policy.json'
+    running "after the policy and its folder are as the installer makes them" "$new"
 }
