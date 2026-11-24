@@ -19,6 +19,10 @@ use super::files::{Step, announce, io, run};
 const SEMODULE: &str = "/usr/sbin/semodule";
 /// The module as last loaded; `semodule -r garrison` removes it.
 pub(super) const MODULE: &str = "/opt/garrison/selinux/garrison.cil";
+/// The module while it loads: semodule names a module by its file, so this
+/// one bears the same name in a folder of its own, and becomes `MODULE`
+/// only once it loaded.
+const LOADING: &str = "/opt/garrison/selinux/loading/garrison.cil";
 /// The web service's default port, for a configuration that cannot be loaded.
 const DEFAULT_PORT: u16 = 8091;
 
@@ -48,7 +52,9 @@ fn loaded() -> bool {
 
 /// Load the module for the configured web port where SELinux is in use. A
 /// failure warns instead of stopping the installation: Garrison itself runs,
-/// and the warning names the broader way out.
+/// and the warning names the broader way out. The file of the module as
+/// last loaded is written only after a load that succeeded, so that the
+/// next run tries again after one that failed.
 pub(super) fn install() -> Step {
     if !enabled() {
         return Ok(());
@@ -60,27 +66,66 @@ pub(super) fn install() -> Step {
     if loaded() && fs::read_to_string(path).is_ok_and(|current| current == text) {
         return Ok(());
     }
-    if let Some(folder) = path.parent() {
+    let loading = Path::new(LOADING);
+    if let Some(folder) = loading.parent() {
         io(fs::create_dir_all(folder), folder)?;
     }
-    io(fs::write(path, &text), path)?;
+    io(fs::write(loading, &text), loading)?;
     announce(&format!(
         "Loading the SELinux module that lets nginx reach Garrison on port {port}"
     ));
-    let output = run(SEMODULE, &["-i", MODULE])?;
-    if !output.status.success() {
-        announce(&format!(
-            "The SELinux module did not load, so nginx may not reach Garrison: {}. \
-             `setsebool -P httpd_can_network_connect 1` allows it more broadly.",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+    let output = run(SEMODULE, &["-i", LOADING])?;
+    if output.status.success() {
+        return io(fs::rename(loading, path), path);
     }
+    let _ = fs::remove_file(loading);
+    announce(&format!(
+        "The SELinux module did not load, so nginx may not reach Garrison: {}. \
+         `setsebool -P httpd_can_network_connect 1` allows it more broadly.",
+        said(&output)
+    ));
     Ok(())
+}
+
+/// What semodule said of a load that failed, or how it ended where it said
+/// nothing.
+fn said(output: &std::process::Output) -> String {
+    let said = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if said.is_empty() {
+        format!(
+            "`semodule -i` said nothing and ended with {}",
+            output.status
+        )
+    } else {
+        said
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{ExitStatus, Output};
+
     use super::*;
+
+    /// A failed load is worded by what semodule said, or, where it said
+    /// nothing, by how it ended.
+    #[test]
+    fn a_failed_load_says_why() {
+        let output = |stderr: &str| Output {
+            status: ExitStatus::from_raw(1 << 8),
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        assert_eq!(
+            said(&output("libsemanage: conflict\n")),
+            "libsemanage: conflict"
+        );
+        assert_eq!(
+            said(&output("")),
+            "`semodule -i` said nothing and ended with exit status: 1"
+        );
+    }
 
     #[test]
     fn the_module_labels_only_the_web_port_and_allows_only_nginx() {
