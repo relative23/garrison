@@ -1868,6 +1868,9 @@ Notable changes for operators and users. The format follows
 - **After the host's clock went back, the Maintenance page lists the job
   started last first**, a job recorded while it ran ahead leaves the audit
   with the jobs after it, and a session signed in meanwhile ends.
+- **The polkit rule's first line names the command that writes it,
+  `garrison polkit-rule`**, where it named one that does not exist, and says
+  to run the installer again after `[[actions]]` changed.
 
 ## [0.1.2] - 2026-11-13
 
