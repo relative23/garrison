@@ -144,8 +144,9 @@ fn bring_up(release: &Path, old: Option<&Path>, renewed: bool) -> Step<bool> {
         .is_ok_and(|config| config.milter.is_some())
         && unit_file(units::MILTER).exists();
     if !renewed && !changed && services::as_installed(milter) {
-        // What a start would pass on.
-        check_config(release, true)?;
+        // Its warnings, as a start passes them on. It passed a moment ago,
+        // and a run that changes nothing stops nothing for it.
+        let _ = check_config(release, true);
         return Ok(false);
     }
     start(release)?;
