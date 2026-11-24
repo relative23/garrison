@@ -45,7 +45,7 @@ observation the checks report is in [observation ids](observations.md).
 | `stalwart` | `milter_host`, `milter_port`, `max_accounts` | Spam settings, classifier, milter, queue, mailbox storage, running version |
 | `prometheus` | `path` | Native counters and gauges for the dashboard |
 | `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
-| `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning, and where both are there the newer one counts, also for the dashboard's signature age |
+| `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning, and so is one dated more than five minutes ahead of the host's clock, whose age is not known; where both are there the newer one counts, also for the dashboard's signature age |
 | `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30), `verify_days` (0: not expected), `restore_days` (0), `path`, `modules` | What the backup tool reported of its repository; see below |
 | `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity: a bundle (`plugins/<id>.js`) that does not match the SHA-256 in `plugins/registry.json` is a failure. A plugin whose bundle cannot be checked, as one the registry does not list or lists twice, gives no hash for, or whose bundle is missing, a link, unreadable or larger than 2 MiB, is named with why; the card is then Partial, or Unknown where no bundle could be checked, as without `plugins`, which name the plugins to check |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
@@ -151,7 +151,9 @@ bounces. Where there are more, the usual number is that of the whole days
 before the last one that were read, none is named where fewer than three
 were, and the card says so; where the last day itself was not read whole,
 or bounces were left, its figures are a part, and the card is Partial where
-it would be OK.
+it would be OK. An event whose time or fields are not what the event
+receiver writes, as in a history damaged or edited by hand, is left out:
+the card says how many were, and is Partial where it would be OK.
 
 ## `tls`
 
@@ -183,17 +185,20 @@ minutes. They count; none of them is a verdict, except where it says so.
   went to, which Stalwart's accounts name. Where Stalwart did not give them
   to the collector's key, or the collector has no key for Stalwart, that
   mail is counted under "unknown", and the card by domain is Unknown and
-  says why; the first run with a key reads them at once. The other cards
+  says why; the first run with a key reads them at once, and while Stalwart
+  does not give them, each run asks it again, so that the card follows its
+  next answer, as once setup gave the key its rights. The other cards
   need no account, and a Stalwart that is slow to answer costs them
   nothing: it is asked before the history is read.
 - `milter`: what Stalwart's milters said of the mail they were shown (a
   virus scanner's, Garrison's own macro filter), by day, on the Antivirus
   page. A milter that could not be reached since yesterday is a warning,
-  and so is one that deferred every message it was shown since yesterday
-  and passed or refused none, as a scanner does that cannot scan. A reply
-  of the milter's own, with which Garrison's macro filter refuses a
-  message, is counted apart: Stalwart's event does not say whether it
-  refused or deferred. A host without a milter has no such card.
+  and so is a deferral of every message the milters were shown since
+  yesterday, as a scanner gives that cannot scan, also where another milter
+  passed them first. A reply of the milter's own, with which Garrison's
+  macro filter refuses a message, is counted apart: Stalwart's event does
+  not say whether it refused or deferred, so a milter that defers with one
+  is not warned of. A host without a milter has no such card.
 - `authentication`: how many senders passed SPF, DKIM, DMARC, ARC and the
   check of the reverse name, on the Spam filter page; and the sender domains
   whose mail failed SPF or DMARC, which are forged senders or senders whose
@@ -208,7 +213,12 @@ without TLS, are made from the newest 50 000 events of each kind in the
 seven days, and show the 20 busiest rows. A card whose list read only the
 newest events says so and is Partial where it would be OK; one that shows
 the 20 busiest of more says how many there are. The counts by day and the
-numbers of mail with and without TLS count every event of the week.
+numbers of mail with and without TLS count every event of the week. An event
+whose time or fields are not what the event receiver writes, as in a history
+damaged or edited by hand, is left out: every card says how many were, and
+is Partial where it would be OK. A reading has two seconds: a week too large
+to count in them, some millions of events, leaves every card Unknown with
+"interrupted".
 
 A summary is in order only over a history that holds the week. While the
 event receiver has not reported for five minutes or runs without storing
@@ -475,14 +485,20 @@ The collector hands two messages to the local SMTP listener without signing
 in: the antivirus test file (EICAR), which a scanner must refuse, and the spam
 test text (GTUBE), which must be refused or filed as spam. The event history
 shows how an accepted one was filed. The check runs only where you name a
-`recipient`. Make a mailbox of its own for it: a test that goes wrong leaves a
-harmless message there.
+`recipient`. Make a mailbox of its own for it: it receives a harmless message
+in each round in which a test is refused, a day by default, and one from a
+test that goes wrong.
 
 Each test is sent again `every_hours` after it was sent. One that did not
 happen, because no session came about, the server turned it away before
 the message or it deferred the message with a temporary reply (4xx), is
 "not tested": it alone is tried again after an hour, and the table says when
-each test was sent. A deferral is no verdict: Stalwart defers a message
+each test was sent. A refusal counts only where the server takes the
+harmless message the collector sends after it in the same run ("Garrison
+mail test: Harmless message (control)"); where the server refuses that one
+too, as clamav-milter does with `OnFail Reject` while clamd is down, or it
+does not get through, the refused tests are "not tested" as well. A
+deferral is no verdict: Stalwart defers a message
 where a milter defers it, as a scanner that cannot scan does
 (clamav-milter's `OnFail Defer` while clamd is down), and where it cannot
 reach a milter whose entry says to defer then, as setup writes Garrison's
@@ -514,7 +530,10 @@ value clamav-milter does not take there, a typo or `Quarantine` and
 `Blackhole` for `OnFail`, is a warning: clamav-milter does not start with
 such a file. A file that cannot be read is named with why, and the card is
 Unknown; a policy that was read stays a warning where only clamd's file
-cannot be read. `garrison check-config` takes for `expect_on_infected` only
+cannot be read. One that is not there names its option and
+`garrison detect --format toml`, which prints where this host keeps it, as
+the card "Signature databases" does where none of its files is in
+`database_directory`. `garrison check-config` takes for `expect_on_infected` only
 `Accept`, `Reject`, `Defer`, `Blackhole` and `Quarantine`, and for
 `expect_on_fail` only the first three.
 

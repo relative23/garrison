@@ -123,10 +123,13 @@ fn a_refused_test_file_and_spam_text_filed_as_spam_are_in_order() {
     let (port, handle) = server([
         "550 5.7.1 Virus found: Eicar-Signature",
         "250 2.0.0 Message queued with id 4b786a6d0a00200.",
+        "250 2.0.0 Message queued with id 4b786a6d0a00300.",
     ]);
     let provider = provider(port);
     let memory = Remembered::default();
     // Right after the session nothing is known of the accepted message yet.
+    // The harmless message after the refusal was taken, so the refusal is
+    // the scanner's.
     let first = collected(&provider, &memory, 0, &[]);
     assert_eq!(first.state, State::Unknown);
     assert_eq!(
@@ -134,6 +137,7 @@ fn a_refused_test_file_and_spam_text_filed_as_spam_are_in_order() {
         [
             "refused: 550 5.7.1 Virus found: Eicar-Signature",
             "accepted; the event history does not show yet how it was filed",
+            "accepted",
         ]
     );
     // A minute later the history has it; no second session is opened.
@@ -155,7 +159,7 @@ fn a_refused_test_file_and_spam_text_filed_as_spam_are_in_order() {
     assert_dated(&filed, 0, 86_400);
     assert_eq!(filed.modules, [ModuleId::Antivirus, ModuleId::Spam].into());
     let sessions = handle.join().unwrap();
-    assert_eq!(sessions.len(), 2);
+    assert_eq!(sessions.len(), 3);
     // A stranger's session: no sign-in, the null sender, the named recipient.
     assert!(
         sessions[0].contains("MAIL FROM:<>\r\nRCPT TO:<garrison-test@example.test>\r\nDATA\r\n"),
@@ -230,6 +234,7 @@ fn a_message_the_server_defers_is_not_tested_and_is_tried_again_within_the_hour(
         "550 virus",
         "550 spam",
         "550 macro",
+        "250 2.0.0 Message queued with id c.",
     ]);
     let memory = Remembered::default();
     let deferred = collected(&with_macros(port), &memory, 0, &[]);
@@ -252,7 +257,90 @@ fn a_message_the_server_defers_is_not_tested_and_is_tried_again_within_the_hour(
     assert_dated(&deferred, 0, AGAIN);
     let again = collected(&with_macros(port), &memory, AGAIN, &[]);
     assert_eq!(again.state, State::Ok, "{:?}", again.findings);
-    assert_eq!(handle.join().unwrap().len(), 6);
+    assert_eq!(handle.join().unwrap().len(), 7);
+}
+
+/// What a server answers that refuses every message at its end: a scanner
+/// that fails closed, as clamav-milter with `OnFail Reject` while clamd is
+/// down, another milter or a policy of the server.
+const REFUSING: &str = "550 5.7.1 Service unavailable";
+
+#[test]
+fn a_refusal_where_the_server_refuses_a_harmless_message_too_is_not_tested() {
+    let (port, handle) = server([REFUSING; 3]);
+    let memory = Remembered::default();
+    let refused = collected(&provider(port), &memory, 0, &[]);
+    let like = format!("not tested: refused like a harmless message: {REFUSING}");
+    assert_eq!(
+        (refused.state, results(&refused)),
+        (
+            State::Unknown,
+            vec![
+                like.as_str(),
+                like.as_str(),
+                "refused: 550 5.7.1 Service unavailable"
+            ]
+        )
+    );
+    assert_eq!(
+        refused.findings.last().map(String::as_str),
+        Some(
+            "Harmless message (control): refused: 550 5.7.1 Service unavailable. The server \
+             refuses mail that carries nothing to refuse, as clamav-milter does with `OnFail \
+             Reject` while clamd is down, so no refusal of a test counts."
+        )
+    );
+    // Not a result to keep for a day.
+    assert_dated(&refused, 0, AGAIN);
+    let sessions = handle.join().unwrap();
+    assert_eq!(sessions.len(), 3);
+    // The third message carries nothing that a scanner or a filter refuses.
+    let harmless = &sessions[2];
+    assert!(
+        harmless.contains("Subject: Garrison mail test: Harmless message (control)\r\n"),
+        "{harmless}"
+    );
+    assert!(
+        !harmless.contains("EICAR") && !harmless.contains("GTUBE"),
+        "{harmless}"
+    );
+
+    // An hour later the server takes it: the tests are sent again with it,
+    // and their refusals count.
+    let (port, handle) = server([
+        "550 virus",
+        "550 spam",
+        "250 2.0.0 Message queued with id c.",
+    ]);
+    let again = collected(&provider(port), &memory, AGAIN, &[]);
+    assert_eq!(
+        (again.state, results(&again)),
+        (
+            State::Ok,
+            vec!["refused: 550 virus", "refused: 550 spam", "accepted"]
+        )
+    );
+    assert_eq!(handle.join().unwrap().len(), 3);
+}
+
+#[test]
+fn a_refusal_without_a_harmless_message_taken_beside_it_is_not_tested() {
+    // The harmless message did not get through: nothing to compare with.
+    let (port, handle) = server(["550 virus", "550 spam", "at RCPT: 451 4.7.1 not now"]);
+    let card = collected(&provider(port), &Remembered::default(), 0, &[]);
+    assert_eq!(
+        (card.state, results(&card)),
+        (
+            State::Unknown,
+            vec![
+                "not tested: refused, and no harmless message got through to compare: 550 virus",
+                "not tested: refused, and no harmless message got through to compare: 550 spam",
+                "not tested: 451 4.7.1 not now",
+            ]
+        )
+    );
+    assert_dated(&card, 0, AGAIN);
+    assert_eq!(handle.join().unwrap().len(), 3);
 }
 
 #[test]
@@ -265,7 +353,12 @@ fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
         .unwrap()
     };
     let refusal = "550 5.7.1 Message refused: an attached Office document contains macros.";
-    let (port, handle) = server(["550 virus", "550 spam", refusal]);
+    let (port, handle) = server([
+        "550 virus",
+        "550 spam",
+        refusal,
+        "250 2.0.0 Message queued with id c.",
+    ]);
     let memory = Remembered::default();
     let refused = collected(&with_macros(port), &memory, 0, &[]);
     assert_eq!(refused.state, State::Ok, "{:?}", refused.findings);
@@ -291,16 +384,24 @@ fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
 
     // The result was kept with the macro test: switched off, the provider
     // tests anew, without the document; and on again likewise.
-    let (port, handle) = server(["550 virus", "550 spam"]);
+    let (port, handle) = server([
+        "550 virus",
+        "550 spam",
+        "250 2.0.0 Message queued with id d.",
+    ]);
     let without = collected(&provider(port), &memory, 60, &[]);
-    assert_eq!(results(&without).len(), 2);
-    assert_eq!(handle.join().unwrap().len(), 2);
+    assert_eq!(
+        results(&without),
+        ["refused: 550 virus", "refused: 550 spam", "accepted"]
+    );
+    assert_eq!(handle.join().unwrap().len(), 3);
 
     // A document that is taken means nothing filters macros.
     let (port, handle) = server([
         "550 virus",
         "550 spam",
         "250 2.0.0 Message queued with id a.",
+        "250 2.0.0 Message queued with id e.",
     ]);
     let taken = collected(&with_macros(port), &memory, 120, &[]);
     handle.join().unwrap();
@@ -312,6 +413,37 @@ fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
              the test document."
         ]
     );
+}
+
+#[test]
+fn the_greeting_and_the_message_id_name_the_host_without_its_port() {
+    for (origin, host) in [
+        ("https://garrison.example.org:8443", "garrison.example.org"),
+        ("https://[2001:db8::1]:8443", "[2001:db8::1]"),
+        ("https://garrison.example.org", "garrison.example.org"),
+    ] {
+        let (port, handle) = server([
+            "250 2.0.0 Message queued with id a.",
+            "250 2.0.0 Message queued with id b.",
+        ]);
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = config(directory.path());
+        config.deployment.public_origin = origin.to_owned();
+        let runner = Canned(String::new());
+        let context = crate::testing::context(&config, &runner);
+        provider(port).collect(&context).unwrap();
+        let sessions = handle.join().unwrap();
+        for session in &sessions {
+            assert!(
+                session.starts_with(&format!("EHLO {host}\r\n")),
+                "{origin}: {session}"
+            );
+            assert!(
+                session.contains(&format!("@{host}>\r\n")),
+                "{origin}: {session}"
+            );
+        }
+    }
 }
 
 #[test]

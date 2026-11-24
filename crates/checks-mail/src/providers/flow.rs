@@ -32,7 +32,7 @@ use read::{DAY, DAYS, Limits, Week};
 use super::history;
 
 use crate::context::{Collected, Context, NO_KEY, Provider, ProviderError, Report};
-use crate::kept::{Kept, cached};
+use crate::kept::{Kept, cached, recalled};
 use crate::options::{Checked, Options, fail};
 
 const CHECKS: [&str; 4] = ["spam", "milter", "authentication", "tls"];
@@ -58,6 +58,13 @@ struct Read {
     no_native_key: bool,
 }
 
+impl Read {
+    /// Whether Stalwart did not give the accounts to the collector's key.
+    fn of_stalwart(&self) -> bool {
+        self.domains_unread.is_some() && !self.no_native_key
+    }
+}
+
 #[derive(Debug)]
 pub struct Flow {
     checks: BTreeSet<String>,
@@ -73,13 +80,14 @@ struct Account {
 }
 
 /// Why Stalwart did not give the collector's key its accounts, by what went
-/// wrong: it did not answer, or refused the key for its rate limit, which
-/// both pass by themselves; it refused the key, which the setup mends; or
-/// it answered in a form this release does not read, which no setup mends.
+/// wrong: it could not be reached or failed on its side, which the client's
+/// words name, or refused the key for its rate limit, which both pass by
+/// themselves; it refused the key, which the setup mends; or it answered in
+/// a form this release does not read, which no setup mends.
 fn unread(error: &Error) -> String {
     match error {
-        Error::Unavailable(_) => {
-            "Stalwart did not answer the collector's request for its accounts".to_owned()
+        Error::Unavailable(how) => {
+            format!("Stalwart did not complete the collector's request for its accounts ({how})")
         }
         Error::Limited(_) => "Stalwart refused the collector's key for its rate limit (HTTP 429), \
                               so its accounts could not be read"
@@ -148,12 +156,22 @@ impl Flow {
     }
 
     /// The last reading, or a new one where that is due: every ten minutes,
-    /// and at once for one made without the collector's key where this run
-    /// has it.
+    /// at once for one of another shape, as a damaged status database holds
+    /// it, for one made without the collector's key where this run has it,
+    /// and for one Stalwart did not give the accounts for where it answers
+    /// otherwise now. Setup may change only the key's rights, so
+    /// nothing but asking shows the change: while it lasts, each run asks
+    /// Stalwart alone.
     fn known(context: &Context<'_>) -> Kept<Read> {
         let keyed = context.native_key.is_some();
+        let asked = recalled::<Read>(context, MEMORY)
+            .filter(|(_, read)| keyed && read.of_stalwart())
+            .map(|_| Self::accounts(context).err());
         let wait = |_, read: &Read| {
-            if read.no_native_key && keyed {
+            let answered = asked
+                .as_ref()
+                .is_some_and(|why| read.of_stalwart() && *why != read.domains_unread);
+            if !read.week.whole() || (read.no_native_key && keyed) || answered {
                 0
             } else {
                 EVERY
@@ -203,7 +221,8 @@ impl Flow {
 
     /// An observation of this provider; Unknown, with the reason, where the
     /// history could not be read, and where it would be in order over a
-    /// history that does not hold the week.
+    /// history that does not hold the week; Partial, with their number,
+    /// where it would be in order and the reading left events out.
     fn observation(
         &self,
         context: &Context<'_>,
@@ -216,6 +235,7 @@ impl Flow {
         let unknown = read.problem.as_ref();
         // What was seen stays what it is; only "in order" needs all of it.
         let incomplete = read.uncovered.as_ref().filter(|_| unknown.is_none());
+        let left_out = history::left_out(read.week.unreadable).filter(|_| unknown.is_none());
         let observation = Observation::new(Required {
             id: &format!("flow.{id}"),
             provider: self.name(),
@@ -226,22 +246,24 @@ impl Flow {
                 || (incomplete.is_some() && matches!(state, State::Ok | State::Partial))
             {
                 State::Unknown
+            } else if left_out.is_some() && state == State::Ok {
+                State::Partial
             } else {
                 state
             },
             checked_at: &context.checked_at(),
             source: "event history",
         })?;
-        Ok(match (unknown, incomplete) {
-            (Some(problem), _) => {
-                observation.with_findings(vec![format!("Nothing could be counted: {problem}.")])
-            }
-            (None, Some(reason)) => observation.with_findings(vec![format!(
+        let mut findings = match (unknown, incomplete) {
+            (Some(problem), _) => vec![format!("Nothing could be counted: {problem}.")],
+            (None, Some(reason)) => vec![format!(
                 "The event history is not current: {reason}. What is counted here may be too \
                  little."
-            )]),
-            (None, None) => observation,
-        })
+            )],
+            (None, None) => Vec::new(),
+        };
+        findings.extend(left_out);
+        Ok(observation.with_findings(findings))
     }
 }
 
@@ -303,3 +325,5 @@ mod cut_tests;
 mod history_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod work_tests;

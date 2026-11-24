@@ -2,8 +2,6 @@
 //! that did not happen within the hour, and results kept by an earlier
 //! release are used with their one time.
 
-use std::net::TcpListener;
-
 use super::tests::{collected, provider, results, server};
 use super::*;
 use crate::context::Memory;
@@ -18,13 +16,9 @@ fn sent(observation: &Observation) -> Vec<&str> {
 #[test]
 fn a_test_is_repeated_only_after_its_hours_and_no_session_is_no_result() {
     // Nothing listens there: unknown, with the reason, and tried again
-    // within the hour.
-    let silent = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let none = collected(&provider(silent), &Remembered::default(), 0, &[]);
+    // within the hour. Port 9, as the tests' Stalwart: a port given up by a
+    // listener of this test may be taken by another test's server meanwhile.
+    let none = collected(&provider(9), &Remembered::default(), 0, &[]);
     assert_eq!(none.state, State::Unknown);
     assert!(
         results(&none)[0].starts_with("not tested: no session: "),
@@ -39,6 +33,7 @@ fn a_test_is_repeated_only_after_its_hours_and_no_session_is_no_result() {
         "at RCPT: 451 4.7.1 not now",
         "550 no",
         "550 no",
+        "250 2.0.0 Message queued with id c.",
     ]);
     let provider = provider(port);
     let memory = Remembered::default();
@@ -54,10 +49,14 @@ fn a_test_is_repeated_only_after_its_hours_and_no_session_is_no_result() {
     assert_dated(&tested, AGAIN, 86_400);
     // Tests that happened are repeated only after their hours: a session
     // before that would find nobody listening and change the result.
-    assert_eq!(handle.join().unwrap().len(), 4);
+    assert_eq!(handle.join().unwrap().len(), 5);
     let kept = collected(&provider, &memory, AGAIN + 86_399, &[]);
     assert_eq!(results(&kept), results(&tested));
-    let (port, handle) = server(["550 again", "550 again"]);
+    let (port, handle) = server([
+        "550 again",
+        "550 again",
+        "250 2.0.0 Message queued with id d.",
+    ]);
     let next = collected(&self::provider(port), &memory, AGAIN + 86_400, &[]);
     assert_eq!(results(&next)[0], "refused: 550 again");
     handle.join().unwrap();
@@ -65,7 +64,8 @@ fn a_test_is_repeated_only_after_its_hours_and_no_session_is_no_result() {
 
 #[test]
 fn results_kept_by_an_earlier_release_are_used_with_their_one_time() {
-    // As 0.1.2 kept them: one time for the round, none for each test.
+    // As 0.1.2 kept them: one time for the round, none for each test, and no
+    // harmless message beside the refusals.
     let memory = Remembered::default();
     let refused =
         |reply: &str| json!({"reply": reply, "code": 550, "queue": null, "at_data": true});
@@ -76,23 +76,38 @@ fn results_kept_by_an_earlier_release_are_used_with_their_one_time() {
         "macros": null,
     });
     memory.keep(MEMORY, &kept.to_string());
-    // Nothing listens there: a session would change the results.
-    let silent = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let used = collected(&provider(silent), &memory, 60, &[]);
-    assert_eq!(results(&used), ["refused: 550 virus", "refused: 550 spam"]);
-    assert_eq!(sent(&used), ["2026-10-29T12:00:00+00:00"; 2]);
-    assert_dated(&used, 0, 86_400);
+    // The next run sends the harmless message alone; the tests stay.
+    let (port, handle) = server(["250 2.0.0 Message queued with id c."]);
+    let used = collected(&provider(port), &memory, 60, &[]);
+    assert_eq!(
+        results(&used),
+        ["refused: 550 virus", "refused: 550 spam", "accepted"]
+    );
+    assert_eq!(
+        sent(&used),
+        [
+            "2026-10-29T12:00:00+00:00",
+            "2026-10-29T12:00:00+00:00",
+            "2026-10-29T12:01:00+00:00"
+        ]
+    );
+    assert_dated(&used, 60, 86_400 - 60);
+    let sessions = handle.join().unwrap();
+    assert!(
+        sessions[0].contains("Harmless message (control)"),
+        "{}",
+        sessions[0]
+    );
 }
 
 #[test]
 fn results_for_another_listener_recipient_or_sender_are_not_kept() {
     // The results kept for a day are those of the tests as configured: each
     // change of where they go or come from sends them anew in the next run.
-    let (port, handle) = server(["550 a", "550 a", "550 b", "550 b", "550 c", "550 c"]);
+    let taken = "250 2.0.0 Message queued with id c.";
+    let (port, handle) = server([
+        "550 a", "550 a", taken, "550 b", "550 b", taken, "550 c", "550 c", taken,
+    ]);
     let made = |port: u16, options: &str| {
         MailTest::new(&table(&format!(
             "type = \"mail-test\"\nport = {port}\n{options}"
@@ -112,18 +127,18 @@ fn results_for_another_listener_recipient_or_sender_are_not_kept() {
         (120, sender.as_str(), "refused: 550 c"),
     ] {
         let card = collected(&made(port, options), &memory, later, &[]);
-        assert_eq!(results(&card), [result; 2], "{options}");
+        assert_eq!(results(&card), [result, result, "accepted"], "{options}");
     }
     let sessions = handle.join().unwrap();
     assert!(
-        sessions[2].contains("RCPT TO:<other-test@example.test>"),
+        sessions[3].contains("RCPT TO:<other-test@example.test>"),
         "{}",
-        sessions[2]
+        sessions[3]
     );
     assert!(
-        sessions[4].contains("MAIL FROM:<garrison@example.test>"),
+        sessions[6].contains("MAIL FROM:<garrison@example.test>"),
         "{}",
-        sessions[4]
+        sessions[6]
     );
     // Another host, where nothing listens on that port: a session is
     // tried, and the results of the last are not shown.
@@ -137,9 +152,12 @@ fn results_for_another_listener_recipient_or_sender_are_not_kept() {
         results(&tried)
     );
     // And another port.
-    let (moved, handle) = server(["550 d", "550 d"]);
+    let (moved, handle) = server(["550 d", "550 d", taken]);
     let card = collected(&made(moved, &sender), &memory, 240, &[]);
-    assert_eq!(results(&card), ["refused: 550 d"; 2]);
+    assert_eq!(
+        results(&card),
+        ["refused: 550 d", "refused: 550 d", "accepted"]
+    );
     handle.join().unwrap();
 }
 
@@ -150,30 +168,40 @@ fn only_the_test_that_did_not_happen_is_tried_again() {
     let (port, handle) = server([
         "550 virus",
         "at RCPT: 451 4.7.1 try later",
+        "250 2.0.0 Message queued with id c.",
         "550 5.7.1 spam",
+        "250 2.0.0 Message queued with id d.",
     ]);
     let memory = Remembered::default();
     let first = collected(&provider(port), &memory, 0, &[]);
     assert_eq!(first.state, State::Unknown);
     assert_eq!(
         results(&first),
-        ["refused: 550 virus", "not tested: 451 4.7.1 try later"]
+        [
+            "refused: 550 virus",
+            "not tested: 451 4.7.1 try later",
+            "accepted"
+        ]
     );
     assert_dated(&first, 0, AGAIN);
-    // An hour later one session: the spam text alone, and the test file's
-    // result stays the one of its own session.
+    // An hour later the spam text alone, with a harmless message after its
+    // refusal, and the test file's result stays the one of its own session.
     let again = collected(&provider(port), &memory, AGAIN, &[]);
     let sessions = handle.join().unwrap();
-    assert_eq!(sessions.len(), 3);
-    assert!(sessions[2].contains("GTUBE"), "{}", sessions[2]);
+    assert_eq!(sessions.len(), 5);
+    assert!(sessions[3].contains("GTUBE"), "{}", sessions[3]);
     assert_eq!(again.state, State::Ok);
     assert_eq!(
         results(&again),
-        ["refused: 550 virus", "refused: 550 5.7.1 spam"]
+        ["refused: 550 virus", "refused: 550 5.7.1 spam", "accepted"]
     );
     assert_eq!(
         sent(&again),
-        ["2026-10-29T12:00:00+00:00", "2026-10-29T13:00:00+00:00"]
+        [
+            "2026-10-29T12:00:00+00:00",
+            "2026-10-29T13:00:00+00:00",
+            "2026-10-29T13:00:00+00:00"
+        ]
     );
     // The test file is due first, a day after its own session.
     assert_dated(&again, AGAIN, 86_400 - AGAIN);

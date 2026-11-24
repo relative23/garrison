@@ -6,9 +6,12 @@
 //! down), and a milter Stalwart cannot reach whose entry has
 //! `tempFailOnError`, as `garrison stalwart setup` writes Garrison's filter
 //! for `when_unreachable = "defer"`: Stalwart defers each test message at its
-//! end, and the card says "not tested", Unknown. Beside it, the events
-//! Stalwart records of what a milter answered, by which the mail flow's
-//! milter card counts.
+//! end, and the card says "not tested", Unknown. A milter that refuses every
+//! message, as a scanner that fails closed does, refuses the harmless
+//! message beside the tests too, and no test is judged; one that refuses
+//! only the tests lets their refusals count. Beside it, the events Stalwart
+//! records of what a milter answered, by which the mail flow's milter card
+//! counts.
 //! Needs `GARRISON_LAB_SMTP` and `GARRISON_LAB_CALLBACK_HOST` besides the
 //! lab variables, as `cargo xtask lab start` prints them; run with `cargo
 //! test --workspace --test contract -- --ignored`.
@@ -35,27 +38,63 @@ fn one_at_a_time() -> MutexGuard<'static, ()> {
     LAB.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// A milter on `host` that answers every message's end with `reply`.
-fn milter(host: &str, reply: Reply) -> u16 {
+/// What a stand-in milter answers at a message's end.
+#[derive(Clone)]
+enum Answer {
+    Reply(Reply),
+    /// `SMFIR_REJECT`, a refusal in the server's own words, as a filter
+    /// built on libmilter sends it where it has no reply of its own.
+    Reject,
+}
+
+/// What a stand-in milter makes of a message: its headers and body as
+/// they came.
+type Judge = Arc<dyn Fn(&[u8]) -> Answer + Send + Sync>;
+
+/// A judge that answers every message alike.
+fn always(answer: Answer) -> Judge {
+    Arc::new(move |_| answer.clone())
+}
+
+/// A milter on `host` that answers each message's end as `judge` says.
+fn milter(host: &str, judge: Judge) -> u16 {
     let listener = TcpListener::bind((host, 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let mut stream = stream.unwrap();
-            let reply = reply.clone();
+            let judge = Arc::clone(&judge);
             std::thread::spawn(move || {
+                let mut message = Vec::new();
                 while let Ok(Some(command)) = protocol::read(&mut stream) {
                     let answer = match command {
-                        Command::Negotiate { .. } => Reply::Negotiate {
+                        Command::Negotiate { .. } => Answer::Reply(Reply::Negotiate {
                             actions: 0,
                             protocol: 0,
-                        },
-                        Command::EndOfBody => reply.clone(),
+                        }),
+                        Command::Header { name, value } => {
+                            message
+                                .extend([name, b": ".to_vec(), value, b"\r\n".to_vec()].concat());
+                            Answer::Reply(Reply::Continue)
+                        }
+                        Command::Body(data) => {
+                            message.extend(data);
+                            Answer::Reply(Reply::Continue)
+                        }
+                        Command::EndOfBody => judge(&std::mem::take(&mut message)),
                         Command::Quit => break,
-                        Command::Abort | Command::Other(b'D') => continue,
-                        _ => Reply::Continue,
+                        Command::Abort => {
+                            message.clear();
+                            continue;
+                        }
+                        Command::Other(b'D') => continue,
+                        _ => Answer::Reply(Reply::Continue),
                     };
-                    if protocol::write(&mut stream, &answer).is_err() {
+                    let written = match answer {
+                        Answer::Reply(reply) => protocol::write(&mut stream, &reply),
+                        Answer::Reject => stream.write_all(&[0, 0, 0, 1, b'r']),
+                    };
+                    if written.is_err() {
                         break;
                     }
                 }
@@ -73,6 +112,13 @@ fn milter_entry(lab: &mut Lab, host: &str, port: u16) {
         &json!({"host": host, "port": port, "tempFailOnError": true}),
     );
     reload(lab);
+}
+
+/// The entry made last taken out, and one to `port` on `host` in its place.
+fn milter_entry_instead(lab: &mut Lab, host: &str, port: u16) {
+    let (kind, entry) = lab.created.pop().unwrap();
+    lab.call(&format!("x:{kind}/set"), &json!({"destroy": [entry]}));
+    milter_entry(lab, host, port);
 }
 
 fn reload(lab: &Lab) {
@@ -114,7 +160,7 @@ fn a_test_message_that_stalwart_defers_is_not_tested() {
     let smtp = std::env::var("GARRISON_LAB_SMTP").expect("GARRISON_LAB_SMTP");
     let callback = std::env::var("GARRISON_LAB_CALLBACK_HOST").expect("GARRISON_LAB_CALLBACK_HOST");
     // A scanner that cannot scan.
-    let port = milter(&callback, Reply::TempFail);
+    let port = milter(&callback, always(Answer::Reply(Reply::TempFail)));
     milter_entry(&mut lab, &callback, port);
     let deferred = tested(&smtp);
     eprintln!("a milter that defers: {:?}", results(&deferred));
@@ -126,15 +172,75 @@ fn a_test_message_that_stalwart_defers_is_not_tested() {
     let closed = TcpListener::bind((callback.as_str(), 0)).unwrap();
     let gone = closed.local_addr().unwrap().port();
     drop(closed);
-    let (kind, entry) = lab.created.pop().unwrap();
-    lab.call(&format!("x:{kind}/set"), &json!({"destroy": [entry]}));
-    milter_entry(&mut lab, &callback, gone);
+    milter_entry_instead(&mut lab, &callback, gone);
     let unreached = tested(&smtp);
     eprintln!("a milter that cannot be reached: {:?}", results(&unreached));
     assert_eq!(unreached.state, State::Unknown, "{unreached:?}");
     for result in results(&unreached) {
         assert!(result.starts_with("not tested: 4"), "{result}");
     }
+}
+
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn a_refusal_counts_only_where_stalwart_takes_the_harmless_message() {
+    let _one = one_at_a_time();
+    let mut lab = Lab::from_environment();
+    let smtp = std::env::var("GARRISON_LAB_SMTP").expect("GARRISON_LAB_SMTP");
+    let callback = std::env::var("GARRISON_LAB_CALLBACK_HOST").expect("GARRISON_LAB_CALLBACK_HOST");
+    // A scanner that fails closed, in Stalwart's words and in its own.
+    let refusing = [
+        Answer::Reject,
+        Answer::Reply(Reply::Refuse(
+            "550 5.7.1 Refused by the contract test.".into(),
+        )),
+    ];
+    for (round, answer) in refusing.into_iter().enumerate() {
+        let port = milter(&callback, always(answer));
+        if round == 0 {
+            milter_entry(&mut lab, &callback, port);
+        } else {
+            milter_entry_instead(&mut lab, &callback, port);
+        }
+        let card = tested(&smtp);
+        let rows = results(&card);
+        eprintln!("a milter that refuses every message: {rows:?}");
+        assert_eq!((card.state, rows.len()), (State::Unknown, 3), "{card:?}");
+        for row in &rows[..2] {
+            assert!(
+                row.starts_with("not tested: refused like a harmless message: 5"),
+                "{row}"
+            );
+        }
+        assert!(rows[2].starts_with("refused: 5"), "{rows:?}");
+    }
+    // A scanner that refuses what it knows and takes the rest.
+    let known = [
+        "EICAR-STANDARD-ANTIVIRUS-TEST-FILE",
+        "GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL",
+    ];
+    let port = milter(
+        &callback,
+        Arc::new(move |message: &[u8]| {
+            let text = String::from_utf8_lossy(message);
+            if known.iter().any(|known| text.contains(known)) {
+                Answer::Reply(Reply::Refuse(
+                    "550 5.7.1 Found by the contract test.".into(),
+                ))
+            } else {
+                Answer::Reply(Reply::Accept)
+            }
+        }),
+    );
+    milter_entry_instead(&mut lab, &callback, port);
+    let card = tested(&smtp);
+    let rows = results(&card);
+    eprintln!("a milter that refuses the tests alone: {rows:?}");
+    assert_eq!((card.state, rows.len()), (State::Ok, 3), "{card:?}");
+    for row in &rows[..2] {
+        assert!(row.starts_with("refused: 5"), "{row}");
+    }
+    assert_eq!(rows[2], "accepted");
 }
 
 /// The events Stalwart posts to a webhook on `host`, as they come.
@@ -171,37 +277,6 @@ fn webhook(host: &str) -> (u16, Arc<Mutex<Vec<Value>>>) {
         }
     });
     (port, events)
-}
-
-/// A milter on `host` that answers each message's end with what `reply`
-/// holds at that moment.
-fn milter_answering(host: &str, reply: Arc<Mutex<Reply>>) -> u16 {
-    let listener = TcpListener::bind((host, 0)).unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let mut stream = stream.unwrap();
-            let reply = Arc::clone(&reply);
-            std::thread::spawn(move || {
-                while let Ok(Some(command)) = protocol::read(&mut stream) {
-                    let answer = match command {
-                        Command::Negotiate { .. } => Reply::Negotiate {
-                            actions: 0,
-                            protocol: 0,
-                        },
-                        Command::EndOfBody => reply.lock().unwrap().clone(),
-                        Command::Quit => break,
-                        Command::Abort | Command::Other(b'D') => continue,
-                        _ => Reply::Continue,
-                    };
-                    if protocol::write(&mut stream, &answer).is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-    });
-    port
 }
 
 /// What Stalwart answers at the end of one message with `subject`.
@@ -290,7 +365,11 @@ fn stalwart_records_what_a_milter_answered() {
     let (hook, events) = webhook(&callback);
     milter_webhook(&mut lab, &callback, hook);
     let reply = Arc::new(Mutex::new(Reply::Accept));
-    let port = milter_answering(&callback, Arc::clone(&reply));
+    let now = Arc::clone(&reply);
+    let port = milter(
+        &callback,
+        Arc::new(move |_| Answer::Reply(now.lock().unwrap().clone())),
+    );
     milter_entry(&mut lab, &callback, port);
     for (subject, answer, code, kind) in [
         ("accepted", Reply::Accept, "250", "milter.action-accept"),
@@ -338,9 +417,7 @@ fn stalwart_records_what_a_milter_answered() {
     let closed = TcpListener::bind((callback.as_str(), 0)).unwrap();
     let gone = closed.local_addr().unwrap().port();
     drop(closed);
-    let (kind, entry) = lab.created.pop().unwrap();
-    lab.call(&format!("x:{kind}/set"), &json!({"destroy": [entry]}));
-    milter_entry(&mut lab, &callback, gone);
+    milter_entry_instead(&mut lab, &callback, gone);
     let (said, arrived) = recorded(&smtp, &events, "unreached");
     eprintln!(
         "unreached: SMTP {said:?}; events {}",
@@ -364,4 +441,57 @@ fn stalwart_records_what_a_milter_answered() {
             }),
         "{types:?}"
     );
+}
+
+/// Two milters on one message, as Garrison's macro filter beside
+/// clamav-milter while clamd is down: Stalwart asks the second after the
+/// first passed the message, defers it for the second, and records both
+/// answers under the message's session, by which the milter card counts
+/// messages. A deferral asked first ends the message.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn two_milters_answer_one_message_in_its_session() {
+    let _one = one_at_a_time();
+    let mut lab = Lab::from_environment();
+    let smtp = std::env::var("GARRISON_LAB_SMTP").expect("GARRISON_LAB_SMTP");
+    let callback = std::env::var("GARRISON_LAB_CALLBACK_HOST").expect("GARRISON_LAB_CALLBACK_HOST");
+    let (hook, events) = webhook(&callback);
+    milter_webhook(&mut lab, &callback, hook);
+    let passing = milter(&callback, always(Answer::Reply(Reply::Accept)));
+    let deferring = milter(&callback, always(Answer::Reply(Reply::TempFail)));
+    for (order, first, second, expected) in [
+        (
+            "passing first",
+            passing,
+            deferring,
+            &["milter.action-accept", "milter.action-temp-fail"][..],
+        ),
+        (
+            "deferring first",
+            deferring,
+            passing,
+            &["milter.action-temp-fail"][..],
+        ),
+    ] {
+        milter_entry(&mut lab, &callback, first);
+        milter_entry(&mut lab, &callback, second);
+        let (said, arrived) = recorded(&smtp, &events, order);
+        let seen = Value::Array(arrived.clone());
+        assert!(said.starts_with("451"), "{order}: {said}; {seen}");
+        let types: Vec<&str> = arrived
+            .iter()
+            .filter_map(|event| event["type"].as_str())
+            .collect();
+        assert_eq!(types, expected, "{order}: {seen}");
+        let spans: std::collections::BTreeSet<String> = arrived
+            .iter()
+            .map(|event| event["data"]["spanId"].to_string())
+            .collect();
+        assert_eq!(spans.len(), 1, "{order}: {seen}");
+        for _ in 0..2 {
+            let (kind, entry) = lab.created.pop().unwrap();
+            lab.call(&format!("x:{kind}/set"), &json!({"destroy": [entry]}));
+        }
+        reload(&lab);
+    }
 }

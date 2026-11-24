@@ -300,14 +300,30 @@ Notable changes for operators and users. The format follows
   1.1.0), and the Test messages card was in order for a day although
   nothing had been scanned. A temporary reply (4xx) is now "not tested",
   Unknown, and that test is tried again after an hour.
+- **The ClamAV cards name the setting for a file they do not find.** A
+  missing configuration file, or a signature directory without the listed
+  files, names its option and `garrison detect --format toml`, which prints
+  where this host keeps it.
+- **A daily signature database dated ahead of the clock is a warning.** The
+  Signature databases card called it current however long updates had
+  stopped; it now says that one of the two clocks is wrong.
+- **One damaged event in the history no longer stops the mail flow and the
+  sending addresses.** Its time or fields of another type made all their
+  cards Unknown; such an event is now left out, and the cards say how many
+  were.
+- **The Test messages card is no longer in order where the server refuses
+  every message.** A refusal counts only where the server takes a harmless
+  message sent after it, which lands in the test mailbox once a day by
+  default.
 - **The milter verdicts card counts a milter's own replies apart, and
   warns where a milter judged nothing.** It counted a reply of the milter's
   own as deferred, though such a reply refuses a message as well: Garrison's
   macro filter refuses with one, so its refusals showed as deferrals.
   Stalwart's event for it names no code (measured with Stalwart 1.1.0), so
-  they now have a column of their own. A milter that deferred every message
-  it was shown since yesterday, as clamav-milter does while clamd is down,
-  left the card in order; it is now a warning.
+  they now have a column of their own. Where every message the milters were
+  shown since yesterday was deferred, as clamav-milter does while clamd is
+  down, the card was in order, also where another milter passed them first;
+  it is now a warning.
 - **A Stalwart that is slow to give its accounts no longer costs the mail
   flow its counts.** The mail flow opened the event history, whose reading
   has two seconds, and then asked Stalwart for its accounts, which may take
@@ -1027,20 +1043,22 @@ Notable changes for operators and users. The format follows
   reading now notes what it was made with, and one made otherwise is made
   again in the next run. A reading an earlier release kept says nothing of
   it, and the first run after the upgrade makes it again.
-- **The Blocklists and Reverse names cards follow Stalwart with the next
-  run.** Where Stalwart did not give the collector's key the mail hosts, as
-  before `garrison stalwart setup` gave the key its rights, while it was
-  down or over its rate limit, the reading kept that problem for an hour:
-  both cards still said to run setup again, or that Stalwart did not
-  answer, long after it was mended. Such a reading is now made again in the
+- **The Blocklists, Reverse names and Spam and ham by domain cards follow
+  Stalwart with the next run.** Where Stalwart did not give the collector's
+  key the mail hosts or the accounts, as before `garrison stalwart setup`
+  gave the key its rights, while it was down or over its rate limit, the
+  reading kept that problem for an hour, or ten minutes: the cards still
+  said to run setup again, or that Stalwart did not answer, long after it
+  was mended. Such a reading is now made again in the
   next run, which asks Stalwart alone, one request a minute while it lasts,
   as one made without the key is once there is one.
 - **The DNS and reputation cards name the option that gives them a
   resolver.** Where `/etc/resolv.conf` names no resolver, they said only
   that; they now add "name one with `resolver`".
-- **The DNS, TLS and reputation cards say how Stalwart failed a request.**
-  Where Stalwart answered the collector's request for its domains or
-  listeners with HTTP 5xx or 408, or with the JMAP error serverFail, the
+- **The DNS, TLS, reputation and Spam and ham by domain cards say how
+  Stalwart failed a request.** Where Stalwart answered the collector's
+  request for its domains, listeners or accounts with HTTP 5xx or 408, or
+  with the JMAP error serverFail, the
   cards said "Stalwart did not answer the collector's request", as where it
   could not be reached. They now say that Stalwart did not complete the
   request and how, such as "(Stalwart answered HTTP 503)" or "(Stalwart is

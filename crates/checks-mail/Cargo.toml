@@ -21,6 +21,8 @@ toml.workspace = true
 
 [dev-dependencies]
 garrison-checks = { workspace = true, features = ["testing"] }
+# The event history as the receiver keeps it, for the work tests.
+garrison-ingest.workspace = true
 garrison-testing.workspace = true
 rustix.workspace = true
 tempfile.workspace = true

@@ -16,3 +16,5 @@ pub use senders::Senders;
 mod pipe_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unreadable_tests;

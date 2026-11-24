@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use rusqlite::Connection;
+use rusqlite::types::ValueRef;
 use serde_json::Value;
 
 use super::{BOUNCED, Cut, DAY, KNOWN_DAYS, QUEUED, Read, Sender, Senders, USUAL_DAYS};
@@ -31,6 +32,14 @@ fn sender_address(fields: &Value) -> Option<String> {
     (!from.is_empty()).then_some(from)
 }
 
+/// A row's time and fields, where both are as the receiver writes them.
+fn readable(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<(i64, Value)>> {
+    Ok(match (row.get_ref(1)?, history::fields(row.get_ref(2)?)) {
+        (ValueRef::Integer(at), Some(fields)) => Some((at, fields)),
+        _ => None,
+    })
+}
+
 fn recipients(fields: &Value) -> u64 {
     match &fields["to"] {
         Value::Array(items) => items.len() as u64,
@@ -53,17 +62,20 @@ impl Senders {
             .is_none()
             .then(|| history::uncovered(db, since, today))
             .flatten();
-        let begins: Option<i64> =
-            db.query_row("SELECT MIN(created_at) FROM events", [], |row| row.get(0))?;
+        let begins = Self::begins(db)?;
         // The whole days before the last one that the history holds.
         let known = begins.map_or(0, |begins| (today - begins.max(since)) / DAY);
         let known = if unusual_unknown.is_some() { 0 } else { known };
         let mut sums: HashMap<String, Sums> = HashMap::new();
         let limit = i64::try_from(most + 1).unwrap_or(i64::MAX);
+        // A time that is no number sorts above every number: such an event
+        // is read, to be counted as left out.
         let mut statement = db.prepare(
             "SELECT seq,created_at,fields FROM events WHERE type=?1 AND created_at>=?2 \
-             AND created_at<=?3 ORDER BY seq DESC LIMIT ?4",
+             AND (created_at<=?3 OR typeof(created_at) IN ('text','blob')) ORDER BY seq DESC \
+             LIMIT ?4",
         )?;
+        let mut unreadable = 0;
         // The number of the oldest submission read, where there are more.
         let mut left_below = None;
         let mut oldest = None;
@@ -77,9 +89,8 @@ impl Senders {
             read += 1;
             let seq: i64 = row.get(0)?;
             oldest = Some(seq);
-            let at: i64 = row.get(1)?;
-            let text: String = row.get(2)?;
-            let Ok(fields) = serde_json::from_str::<Value>(&text) else {
+            let Some((at, fields)) = readable(row)? else {
+                unreadable += 1;
                 continue;
             };
             let Some(address) = sender_address(&fields) else {
@@ -109,23 +120,9 @@ impl Senders {
         // The usual volume is of whole days that the history holds and that
         // were read.
         let days = cut.as_ref().map_or(known, |cut| cut.days);
-        let mut rows = statement.query((BOUNCED, today, now, limit))?;
-        let mut bounced = 0;
-        let mut bounces_cut = false;
-        while let Some(row) = rows.next()? {
-            if bounced == most {
-                bounces_cut = true;
-                break;
-            }
-            bounced += 1;
-            let text: String = row.get(2)?;
-            let sender = serde_json::from_str::<Value>(&text)
-                .ok()
-                .and_then(|fields| sender_address(&fields));
-            if let Some(entry) = sender.and_then(|sender| sums.get_mut(&sender)) {
-                entry.bounces += 1;
-            }
-        }
+        let (bounces_cut, unread_bounces) =
+            Self::bounces(&mut statement, (today, now), most, &mut sums)?;
+        unreadable += unread_bounces;
         let senders: Vec<Sender> = sums
             .into_iter()
             .filter(|(_, sums)| sums.messages > 0)
@@ -149,7 +146,58 @@ impl Senders {
             problem: None,
             uncovered,
             unusual_unknown,
+            unreadable,
         })
+    }
+
+    /// The bounces from `today` to `now`, at most `most`, counted to the
+    /// senders in `sums` by `statement`; whether more came, and how many could
+    /// not be read.
+    fn bounces(
+        statement: &mut rusqlite::Statement<'_>,
+        (today, now): (i64, i64),
+        most: usize,
+        sums: &mut HashMap<String, Sums>,
+    ) -> rusqlite::Result<(bool, u64)> {
+        let limit = i64::try_from(most + 1).unwrap_or(i64::MAX);
+        let mut rows = statement.query((BOUNCED, today, now, limit))?;
+        let (mut bounced, mut unreadable) = (0, 0);
+        while let Some(row) = rows.next()? {
+            if bounced == most {
+                return Ok((true, unreadable));
+            }
+            bounced += 1;
+            let Some((_, fields)) = readable(row)? else {
+                unreadable += 1;
+                continue;
+            };
+            let sender = sender_address(&fields);
+            if let Some(entry) = sender.and_then(|sender| sums.get_mut(&sender)) {
+                entry.bounces += 1;
+            }
+        }
+        Ok((false, unreadable))
+    }
+
+    /// The time of the history's oldest event, of those whose time is a
+    /// whole second. The first look takes it from the index; only where that
+    /// time is of another type is the history searched.
+    fn begins(db: &Connection) -> rusqlite::Result<Option<i64>> {
+        let oldest = db.query_row("SELECT MIN(created_at) FROM events", [], |row| {
+            Ok(match row.get_ref(0)? {
+                ValueRef::Integer(at) => Some(Some(at)),
+                ValueRef::Null => Some(None),
+                _ => None,
+            })
+        })?;
+        match oldest {
+            Some(oldest) => Ok(oldest),
+            None => db.query_row(
+                "SELECT MIN(created_at) FROM events WHERE typeof(created_at)='integer'",
+                [],
+                |row| row.get(0),
+            ),
+        }
     }
 
     /// What of the 15 days `since` to `now`, the last day from `today`, was
@@ -163,8 +211,8 @@ impl Senders {
         seq: i64,
     ) -> rusqlite::Result<Cut> {
         let left: Option<i64> = db.query_row(
-            "SELECT MAX(created_at) FROM events WHERE type=?1 AND created_at>=?2 \
-             AND created_at<=?3 AND seq<?4",
+            "SELECT MAX(CASE WHEN typeof(created_at)='integer' THEN created_at END) FROM events \
+             WHERE type=?1 AND created_at>=?2 AND created_at<=?3 AND seq<?4",
             (QUEUED, since, now, seq),
             |row| row.get(0),
         )?;
