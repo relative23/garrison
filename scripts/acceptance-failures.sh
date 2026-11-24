@@ -385,6 +385,24 @@ scenario_rotation() {
     running "after the rotation" "$new"
 }
 
+scenario_milter_sandbox() {
+    step "The macro filter's unit writes nowhere: no /tmp of its own, not the host's shared memory"
+    upgraded
+    # Tried within the unit before its service starts, as the filter itself
+    # would; it needs no [milter] section for that.
+    inside_input 'mkdir -p /etc/systemd/system/garrison-milter.service.d &&
+        cat > /etc/systemd/system/garrison-milter.service.d/acceptance-probe.conf && systemctl daemon-reload' <<'PROBE'
+[Service]
+ExecStartPre=/bin/sh -c 'for place in /dev/shm /dev/mqueue /tmp /var/tmp; do if : > "$$place/garrison-milter-probe" 2>/dev/null; then echo "writable $$place"; fi; done'
+PROBE
+    inside 'systemctl start garrison-milter.service >/dev/null 2>&1; systemctl stop garrison-milter.service;
+        systemctl reset-failed garrison-milter.service' || true
+    check "the filter's unit writes in none of those places" \
+        '! journalctl -u garrison-milter.service --no-pager | grep "writable /" && test ! -e /dev/shm/garrison-milter-probe'
+    inside 'rm -r /etc/systemd/system/garrison-milter.service.d && systemctl daemon-reload'
+    running "after the filter's unit" "$new"
+}
+
 scenario_collect_beside() {
     step "A collection run beside one under way collects nothing"
     upgraded
@@ -419,7 +437,7 @@ for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check base_hidden fai
     rollback_refused_config rollback_room \
     interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere \
     policy_foreign unwritten \
-    rotation collect_beside restore_leftovers access_links access_folder access_actions}; do
+    rotation milter_sandbox collect_beside restore_leftovers access_links access_folder access_actions}; do
     "scenario_$scenario"
 done
 

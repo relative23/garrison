@@ -97,13 +97,19 @@ fn a_release_base_no_unit_hides_is_the_only_one_taken() {
         super::super::WATCH,
         super::super::MILTER,
     ];
-    // ProtectProc= and ProcSubset= touch /proc alone, where no release lies.
+    // ProtectProc= and ProcSubset= touch /proc alone, where no release lies;
+    // the macro filter's own two hide what PrivateTmp= and PrivateDevices=
+    // already count among the places hidden.
+    let elsewhere = [
+        "ProtectProc=invisible",
+        "ProcSubset=pid",
+        "TemporaryFileSystem=/tmp:ro /var/tmp:ro",
+        "InaccessiblePaths=-/dev/shm -/dev/mqueue",
+    ];
     let any: BTreeSet<String> = services
         .iter()
         .flat_map(|unit| hiding_of(unit))
-        .filter(|setting| {
-            !setting.starts_with("ProtectProc=") && !setting.starts_with("ProcSubset=")
-        })
+        .filter(|setting| !elsewhere.contains(&setting.as_str()))
         .collect();
     let listed: BTreeSet<String> = ANY_SETS.iter().map(ToString::to_string).collect();
     assert_eq!(any, listed);
