@@ -147,6 +147,7 @@ event_types! {
         SecurityAuthenticationBan => "security.authentication-ban",
         SecurityLoiterBan => "security.loiter-ban",
         SecurityScanBan => "security.scan-ban",
+        SecurityIpBlocked => "security.ip-blocked",
         MessageIngestDuplicate => "message-ingest.duplicate",
         MessageIngestError => "message-ingest.error",
         MessageIngestHam => "message-ingest.ham",

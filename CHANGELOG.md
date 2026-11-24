@@ -57,6 +57,10 @@ Notable changes for operators and users. The format follows
   `garrison_stalwart_admin` is set, also on a host that an earlier release's
   role set up.** Stalwart must answer then, and that administrator must still
   work.
+- **Stalwart sends the further events this release reads, such as the
+  connections it refused from a blocked address, once `garrison stalwart
+  setup` has run again.** Until then Attacks & bans shows those refusals as
+  "Not recorded yet".
 
 ### Added
 
@@ -128,6 +132,8 @@ Notable changes for operators and users. The format follows
   refuses, before anything stops, until the address is written into
   `garrison.toml` again. See
   [configuration](docs/operator/configuration.md#an-address-that-is-a-secret).
+- **Attacks & bans counts the connections Stalwart refused from an address
+  it blocks.** They are counted by address and network, beside the bans.
 - **Attacks & bans names the /64 that Stalwart 1.2.0 blocks with a banned
   IPv6 address.** Stalwart's list of blocked IPs holds that network, not the
   address its event names, so look for the /64 there.

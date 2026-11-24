@@ -55,6 +55,8 @@
     "checksUnread": "The collector's checks of this module could not be read.",
     "footer": "From recorded events between {{from}} and {{to}}. Each list shows at most 50 rows.",
     "networks": "Networks with several addresses",
+    "notRecorded": "Not recorded yet",
+    "refusedNotRecorded": "The history holds no connection that Stalwart refused while it blocked its address: Stalwart sends them once <code>garrison stalwart setup</code> has run with this release of Garrison.",
     "sources": "Addresses",
     "truncated": "More events were recorded in this period than are counted here; the figures are those of the newest events.",
     "withNetwork": "with its /64, {{network}}",
@@ -70,17 +72,19 @@
       "lastSeen": "Last seen",
       "network": "Network",
       "reason": "Reason",
+      "refused": "Refused",
       "tlsErrors": "TLS errors"
     },
     "empty": {
       "accounts": "No failed sign-in named an existing account.",
       "bans": "Stalwart banned no address in this period.",
       "networks": "No network was seen with more than one address.",
-      "sources": "No failed sign-in, ban or TLS error was recorded in this period."
+      "sources": "No failed sign-in, ban, refused connection or TLS error was recorded in this period."
     },
     "figure": {
       "bans": "Bans",
       "failedSignIns": "Failed sign-ins",
+      "refused": "Refused while blocked",
       "sources": "Addresses",
       "tlsErrors": "TLS handshake errors",
       "unknownAccounts": "For no existing account"

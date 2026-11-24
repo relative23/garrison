@@ -183,6 +183,10 @@
           "network": {
             "type": "string"
           },
+          "refused": {
+            "format": "int64",
+            "type": "integer"
+          },
           "sources": {
             "format": "int64",
             "type": "integer"
@@ -198,13 +202,14 @@
           "failedSignIns",
           "tlsErrors",
           "bans",
+          "refused",
           "lastSeen"
         ],
         "type": "object"
       },
       "AttackSource": {
         "additionalProperties": false,
-        "description": "One address that failed to sign in, was banned or failed a TLS handshake.",
+        "description": "One address that failed to sign in, was banned or refused, or failed a\nTLS handshake.",
         "properties": {
           "accounts": {
             "description": "The existing accounts it tried.",
@@ -240,6 +245,11 @@
             "description": "The /24 of an IPv4 address, the /64 of an IPv6 address.",
             "type": "string"
           },
+          "refused": {
+            "description": "Its connections that Stalwart refused while it blocked the address or\nits network.",
+            "format": "int64",
+            "type": "integer"
+          },
           "tlsErrors": {
             "format": "int64",
             "type": "integer"
@@ -252,6 +262,7 @@
           "accounts",
           "tlsErrors",
           "bans",
+          "refused",
           "firstSeen",
           "lastSeen",
           "listeners"
@@ -268,6 +279,14 @@
           "failedSignIns": {
             "format": "int64",
             "type": "integer"
+          },
+          "refused": {
+            "description": "Connections Stalwart refused while it blocked their address; null\nwhere the history holds none at all, as before `garrison stalwart\nsetup` asked Stalwart for them.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "sources": {
             "description": "Every address seen, also beyond the rows of the list.",

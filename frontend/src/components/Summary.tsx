@@ -39,14 +39,14 @@ export function PeriodTabs({ period, onChange, children }: { period: Period; onC
   );
 }
 
-/** Counts side by side, each under its label. */
-export function Figures({ items }: { items: [label: string, value: number][] }) {
+/** Counts side by side, each under its label; a text stands where there is no count. */
+export function Figures({ items }: { items: [label: string, value: number | string][] }) {
   return (
-    <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+    <dl className={cn("grid grid-cols-2 gap-4 sm:grid-cols-3", items.length > 5 ? "xl:grid-cols-6" : "xl:grid-cols-5")}>
       {items.map(([label, value]) => (
         <div key={label} className={cn(CARD, "p-4")}>
           <dt className="text-xs text-muted-foreground">{label}</dt>
-          <dd className="mt-1.5 text-2xl font-semibold tracking-tight">{number(value)}</dd>
+          <dd className="mt-1.5 text-2xl font-semibold tracking-tight">{typeof value === "number" ? number(value) : value}</dd>
         </div>
       ))}
     </dl>

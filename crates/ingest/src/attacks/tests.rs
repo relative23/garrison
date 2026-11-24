@@ -68,13 +68,14 @@ fn sign_ins_bans_and_handshakes_are_summed_by_address_network_and_account() {
     assert!(!summary.truncated);
     assert_eq!(
         json!(summary.totals),
-        json!({"failedSignIns": 5, "unknownAccounts": 1, "tlsErrors": 2, "bans": 2, "sources": 3})
+        json!({"failedSignIns": 5, "unknownAccounts": 1, "tlsErrors": 2, "bans": 2, "refused": null,
+               "sources": 3})
     );
     assert_eq!(
         json!(summary.sources[0]),
         json!({
             "address": "192.0.2.10", "network": "192.0.2.0/24", "failedSignIns": 4,
-            "accounts": 2, "tlsErrors": 0, "bans": 1,
+            "accounts": 2, "tlsErrors": 0, "bans": 1, "refused": 0,
             "firstSeen": MIDNIGHT + 36_000, "lastSeen": MIDNIGHT + 36_061,
             "listeners": ["imaps", "submission"],
         })
@@ -89,7 +90,7 @@ fn sign_ins_bans_and_handshakes_are_summed_by_address_network_and_account() {
     assert_eq!(
         json!(summary.networks),
         json!([{"network": "192.0.2.0/24", "sources": 2, "failedSignIns": 5, "tlsErrors": 1,
-                "bans": 1, "lastSeen": MIDNIGHT + 41_400}])
+                "bans": 1, "refused": 0, "lastSeen": MIDNIGHT + 41_400}])
     );
     assert_eq!(
         json!(summary.accounts),
@@ -137,6 +138,50 @@ fn a_ban_of_an_ipv6_address_names_the_64_blocked_with_it() {
              "reason": "authentication"},
         ])
     );
+}
+
+/// Stalwart refuses every connection of an address or network it blocks;
+/// the summary counts those refusals where it counts the rest, and says
+/// that it has none to count where the history never held one, as before
+/// setup asked Stalwart for them.
+#[test]
+fn refusals_of_a_blocked_network_count_by_address_and_network() {
+    let events = [
+        other(
+            1,
+            "security.authentication-ban",
+            "10:00:00",
+            "2001:db8:1:2::5",
+        ),
+        other(2, "security.ip-blocked", "10:00:01", "2001:db8:1:2::5"),
+        other(3, "security.ip-blocked", "10:00:02", "2001:db8:1:2::99"),
+        other(4, "security.ip-blocked", "10:00:03", "2001:db8:1:2::99"),
+    ];
+    let day = summary(&events, MIDNIGHT, MIDNIGHT + 86_399);
+    assert_eq!(json!(day.totals)["refused"], json!(3));
+    let refused: Vec<(Value, Value)> = day
+        .sources
+        .iter()
+        .map(|source| (json!(source.address), json!(source)["refused"].clone()))
+        .collect();
+    assert_eq!(
+        refused,
+        [
+            (json!("2001:db8:1:2::99"), json!(2)),
+            (json!("2001:db8:1:2::5"), json!(1)),
+        ]
+    );
+    assert_eq!(
+        json!(day.networks),
+        json!([{"network": "2001:db8:1:2::/64", "sources": 2, "failedSignIns": 0, "tlsErrors": 0,
+                "bans": 1, "refused": 3, "lastSeen": MIDNIGHT + 36_003}])
+    );
+    // A stretch without one counts none, once the history has held one.
+    let later = summary(&events, MIDNIGHT + 40_000, MIDNIGHT + 86_399);
+    assert_eq!(json!(later.totals)["refused"], json!(0));
+    let never = summary(&events[..1], MIDNIGHT, MIDNIGHT + 86_399);
+    assert_eq!(json!(never.totals)["refused"], Value::Null);
+    assert_eq!(json!(never.sources[0])["refused"], json!(0));
 }
 
 #[test]

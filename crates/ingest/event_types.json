@@ -295,6 +295,10 @@
   "label": "Banned due to authentication errors",
   "explanation": "IP address was banned due to multiple authentication errors"
  },
+ "security.ip-blocked": {
+  "label": "Blocked IP address",
+  "explanation": "Rejected connection from blocked IP address"
+ },
  "security.loiter-ban": {
   "label": "Banned due to loitering",
   "explanation": "IP address was banned due to multiple loitering events"

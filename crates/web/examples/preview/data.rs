@@ -362,8 +362,9 @@ fn recent(events: &Value, now: i64) -> Vec<Value> {
 }
 
 /// A morning of attacks for the Attacks page: one address that guesses
-/// passwords until Stalwart bans it, a second one in its network that stays
-/// under the limit, and a scanner whose TLS handshakes fail.
+/// passwords until Stalwart bans it and then comes back to be refused, a
+/// second one in its network that stays under the limit, and a scanner
+/// whose TLS handshakes fail, refused with its /64 once banned.
 fn attacks(now: i64) -> Vec<Value> {
     let mut events = Vec::new();
     let mut add = |ago: i64, kind: &str, data: Value| {
@@ -413,6 +414,20 @@ fn attacks(now: i64) -> Vec<Value> {
         "security.scan-ban",
         json!({"remoteIp": "2001:db8:40:1::5"}),
     );
+    for ago in [6200, 5800, 4100] {
+        add(
+            ago,
+            "security.ip-blocked",
+            json!({"remoteIp": "203.0.113.24", "listenerId": "submission"}),
+        );
+    }
+    for (ago, address) in [(1700, "2001:db8:40:1::5"), (1500, "2001:db8:40:1::9")] {
+        add(
+            ago,
+            "security.ip-blocked",
+            json!({"remoteIp": address, "listenerId": "imaps"}),
+        );
+    }
     events
 }
 

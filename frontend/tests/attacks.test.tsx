@@ -43,6 +43,31 @@ describe("Attacks & bans", () => {
     expect(screen.getByText(/Stalwart blocks an IPv6 address with its \/64/)).toBeTruthy();
   });
 
+  it("count the connections Stalwart refused while it blocked them, once it reports them", async () => {
+    const refused = attacks({
+      totals: { failedSignIns: 1205, unknownAccounts: 1100, tlsErrors: 3, bans: 1, refused: 40, sources: 2 },
+      sources: attacks().sources.map((source, index) => (index === 0 ? { ...source, refused: 40 } : source)),
+    });
+    serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: refused } });
+    renderView(<Attacks />);
+    const sources = await screen.findByRole("table", { name: "Addresses" });
+    expect(screen.getByText("Refused while blocked").nextElementSibling?.textContent).toBe("40");
+    expect(within(sources).getByRole("columnheader", { name: "Refused" })).toBeTruthy();
+    expect(within(table("Networks with several addresses")).getByRole("columnheader", { name: "Refused" })).toBeTruthy();
+    expect(screen.queryByText(/sends them once/)).toBeNull();
+  });
+
+  it("say that no refused connection is recorded where Stalwart reported none yet", async () => {
+    serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks() } });
+    renderView(<Attacks />);
+    const sources = await screen.findByRole("table", { name: "Addresses" });
+    expect(screen.getByText("Refused while blocked").nextElementSibling?.textContent).toBe("Not recorded yet");
+    expect(screen.getByText("garrison stalwart setup").closest("p")?.textContent).toContain(
+      "Stalwart sends them once garrison stalwart setup has run",
+    );
+    expect(within(sources).queryByRole("columnheader", { name: "Refused" })).toBeNull();
+  });
+
   it("ask for the period that is chosen", async () => {
     const server = serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks() } });
     renderView(<Attacks />);
@@ -57,7 +82,7 @@ describe("Attacks & bans", () => {
   it("say so when a quiet period has nothing and when a busy one is cut", async () => {
     const quiet = attacks({
       truncated: true,
-      totals: { failedSignIns: 0, unknownAccounts: 0, tlsErrors: 0, bans: 0, sources: 0 },
+      totals: { failedSignIns: 0, unknownAccounts: 0, tlsErrors: 0, bans: 0, refused: 0, sources: 0 },
       sources: [],
       networks: [],
       accounts: [],
@@ -65,7 +90,7 @@ describe("Attacks & bans", () => {
     });
     serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: quiet } });
     renderView(<Attacks />);
-    expect(await screen.findByText("No failed sign-in, ban or TLS error was recorded in this period.")).toBeTruthy();
+    expect(await screen.findByText("No failed sign-in, ban, refused connection or TLS error was recorded in this period.")).toBeTruthy();
     expect(screen.getByText("Stalwart banned no address in this period.")).toBeTruthy();
     expect(screen.getByText("No failed sign-in named an existing account.")).toBeTruthy();
     expect(screen.getByText("No network was seen with more than one address.")).toBeTruthy();

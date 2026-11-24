@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// One address that failed to sign in, was banned or failed a TLS handshake.
+/// One address that failed to sign in, was banned or refused, or failed a
+/// TLS handshake.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AttackSource {
@@ -15,6 +16,9 @@ pub struct AttackSource {
     pub accounts: i64,
     pub tls_errors: i64,
     pub bans: i64,
+    /// Its connections that Stalwart refused while it blocked the address or
+    /// its network.
+    pub refused: i64,
     pub first_seen: i64,
     pub last_seen: i64,
     pub listeners: Vec<String>,
@@ -29,6 +33,7 @@ pub struct AttackNetwork {
     pub failed_sign_ins: i64,
     pub tls_errors: i64,
     pub bans: i64,
+    pub refused: i64,
     pub last_seen: i64,
 }
 
@@ -71,6 +76,10 @@ pub struct AttackTotals {
     pub unknown_accounts: i64,
     pub tls_errors: i64,
     pub bans: i64,
+    /// Connections Stalwart refused while it blocked their address; null
+    /// where the history holds none at all, as before `garrison stalwart
+    /// setup` asked Stalwart for them.
+    pub refused: Option<i64>,
     /// Every address seen, also beyond the rows of the list.
     pub sources: i64,
 }

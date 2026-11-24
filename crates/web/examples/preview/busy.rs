@@ -153,6 +153,7 @@ fn sign_in_attacks(events: &mut Events) {
         (48, "security.scan-ban", 40),
         (22, "security.loiter-ban", 60),
         (9, "security.abuse-ban", 12),
+        (600, "security.ip-blocked", 90),
     ] {
         for _ in 0..count {
             let source = events.random.skewed(sources);

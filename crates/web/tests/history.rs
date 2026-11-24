@@ -320,13 +320,14 @@ async fn the_attack_summary_covers_the_period_asked_for() {
     let day = setup.client.get(&api("attacks")).await.json();
     assert_eq!(
         day["totals"],
-        json!({"failedSignIns": 1, "unknownAccounts": 0, "tlsErrors": 0, "bans": 1, "sources": 1})
+        json!({"failedSignIns": 1, "unknownAccounts": 0, "tlsErrors": 0, "bans": 1, "refused": null,
+               "sources": 1})
     );
     assert_eq!(
         day["sources"],
         json!([{
             "address": "192.0.2.1", "network": "192.0.2.0/24", "failedSignIns": 1, "accounts": 1,
-            "tlsErrors": 0, "bans": 1, "firstSeen": now - 60, "lastSeen": now - 30,
+            "tlsErrors": 0, "bans": 1, "refused": 0, "firstSeen": now - 60, "lastSeen": now - 30,
             "listeners": ["submission"],
         }])
     );

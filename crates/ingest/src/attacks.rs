@@ -1,5 +1,6 @@
-//! Attacks and bans: who tries to sign in and fails, whom Stalwart banned and
-//! whose TLS handshakes fail, summed over a stretch of the event history.
+//! Attacks and bans: who tries to sign in and fails, whom Stalwart banned,
+//! whose connections it refused while it blocked them and whose TLS
+//! handshakes fail, summed over a stretch of the event history.
 //!
 //! Stalwart counts failed sign-ins itself and bans an address after too many.
 //! This summary shows that work and what it cannot catch: an address that
@@ -28,7 +29,8 @@ const BANS: [(EventType, &str); 4] = [
     (EventType::SecurityLoiterBan, "loiter"),
 ];
 
-/// One address that failed to sign in, was banned or failed a TLS handshake.
+/// One address that failed to sign in, was banned or refused, or failed a
+/// TLS handshake.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
@@ -40,6 +42,9 @@ pub struct Source {
     pub accounts: u64,
     pub tls_errors: u64,
     pub bans: u64,
+    /// Its connections that Stalwart refused while it blocked the address or
+    /// its network.
+    pub refused: u64,
     pub first_seen: i64,
     pub last_seen: i64,
     /// The listeners it reached, such as `submission` or `imaps`.
@@ -55,6 +60,7 @@ pub struct Network {
     pub failed_sign_ins: u64,
     pub tls_errors: u64,
     pub bans: u64,
+    pub refused: u64,
     pub last_seen: i64,
 }
 
@@ -92,6 +98,10 @@ pub struct Totals {
     pub unknown_accounts: u64,
     pub tls_errors: u64,
     pub bans: u64,
+    /// Connections Stalwart refused while it blocked their address; `None`
+    /// where the history holds none at all, as before setup asked Stalwart
+    /// for them: none recorded is no count of none refused.
+    pub refused: Option<u64>,
     /// Every address seen, also beyond the rows of the list.
     pub sources: u64,
 }
@@ -135,6 +145,12 @@ pub fn network(address: &str) -> String {
         }
         Err(_) => address.to_owned(),
     }
+}
+
+/// Whether the history holds any event of `kind`, in any stretch.
+fn recorded(db: &Connection, kind: EventType) -> Result<bool> {
+    let mut statement = db.prepare_cached("SELECT EXISTS(SELECT 1 FROM events WHERE type=?1)")?;
+    Ok(statement.query_row([kind.as_str()], |row| row.get(0))?)
 }
 
 /// The /64 that Stalwart blocks with an IPv6 address it bans; an IPv4
@@ -263,6 +279,20 @@ impl Sums {
                 });
             })?;
         }
+        let mut refused = 0;
+        sums.read(
+            db,
+            EventType::SecurityIpBlocked,
+            stretch,
+            |sums, _, address, _| {
+                refused += 1;
+                sums.source(address).source.refused += 1;
+            },
+        )?;
+        sums.totals.refused = match refused {
+            0 => recorded(db, EventType::SecurityIpBlocked)?.then_some(0),
+            count => Some(count),
+        };
         Ok(sums)
     }
 }
@@ -286,6 +316,7 @@ fn networks(sources: &[Source]) -> Vec<Network> {
         network.failed_sign_ins += source.failed_sign_ins;
         network.tls_errors += source.tls_errors;
         network.bans += source.bans;
+        network.refused += source.refused;
         network.last_seen = network.last_seen.max(source.last_seen);
     }
     let mut networks: Vec<Network> = found
@@ -300,7 +331,7 @@ fn networks(sources: &[Source]) -> Vec<Network> {
         &mut networks,
         |network| {
             (
-                network.failed_sign_ins + network.tls_errors,
+                network.failed_sign_ins + network.tls_errors + network.refused,
                 network.last_seen,
             )
         },
@@ -333,7 +364,7 @@ pub fn attacks(db: &Connection, since: i64, until: i64) -> Result<Attacks> {
         &mut sources,
         |source| {
             (
-                source.failed_sign_ins + source.tls_errors + source.bans,
+                source.failed_sign_ins + source.tls_errors + source.bans + source.refused,
                 source.last_seen,
             )
         },

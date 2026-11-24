@@ -205,6 +205,37 @@ fn an_ipv6_address_banned_for_its_own_sign_ins_blocks_its_64() {
         &json!({"filter": {"address": "2001:db8:c0:1::5"}}),
     );
     assert_eq!(found["ids"], json!([]), "{found:?}");
+    // Stalwart names each address it refused while the /64 was blocked, and
+    // the page counts the neighbour's refusal to it and to the network.
+    let summary = summary_once(&path, |summary| {
+        summary
+            .sources
+            .iter()
+            .any(|source| source.address == "2001:db8:c0:1::77" && source.refused > 0)
+    });
+    let neighbour = summary
+        .sources
+        .iter()
+        .find(|source| source.address == "2001:db8:c0:1::77")
+        .unwrap();
+    assert_eq!(
+        (
+            neighbour.failed_sign_ins,
+            neighbour.bans,
+            neighbour.listeners.as_slice()
+        ),
+        (0, 0, ["http".to_owned()].as_slice())
+    );
+    let network = &summary.networks[0];
+    assert_eq!(
+        (network.network.as_str(), network.bans),
+        ("2001:db8:c0:1::/64", 1)
+    );
+    assert!(network.refused >= neighbour.refused, "{network:?}");
+    assert_eq!(
+        summary.totals.refused,
+        Some(summary.sources.iter().map(|source| source.refused).sum())
+    );
 
     // Addresses of other networks that each tried one account once: the one
     // that trips the account's count is blocked alone.

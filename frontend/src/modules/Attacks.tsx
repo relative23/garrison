@@ -1,5 +1,6 @@
-// Attacks & bans: failed sign-ins, Stalwart's bans and TLS handshake errors
-// from the recorded events, by address, network and account.
+// Attacks & bans: failed sign-ins, Stalwart's bans, the connections it refused
+// while it blocked them and TLS handshake errors from the recorded events, by
+// address, network and account.
 import { useState } from "react";
 
 import { api, type Attacks as Summary } from "../api/client";
@@ -10,12 +11,14 @@ import { EvidenceLegend, Loading, Meta, Notice } from "../components/Status";
 import { StatusNotice } from "../components/StatusNotice";
 import { COUNT, Figures, PeriodTabs, Section, type Period } from "../components/Summary";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableHeadRow, TableRow } from "../components/ui/table";
-import { useTranslation } from "../i18n";
+import { Trans, useTranslation } from "../i18n";
 import { useApp } from "../lib/context";
 import { dateTime, number } from "../lib/format";
 import { useResource } from "../lib/useResource";
 
-function Sources({ sources }: { sources: Summary["sources"] }) {
+// The refusals are a column only where Stalwart has reported one: before,
+// a zero there would say that none was refused.
+function Sources({ sources, refused }: { sources: Summary["sources"]; refused: boolean }) {
   const { t } = useTranslation();
   return (
     <Table aria-labelledby="attacks-sources">
@@ -26,11 +29,12 @@ function Sources({ sources }: { sources: Summary["sources"] }) {
           <TableHead className={COUNT}>{t("attacks.column.accounts")}</TableHead>
           <TableHead className={COUNT}>{t("attacks.column.tlsErrors")}</TableHead>
           <TableHead className={COUNT}>{t("attacks.column.bans")}</TableHead>
+          {refused && <TableHead className={COUNT}>{t("attacks.column.refused")}</TableHead>}
           <TableHead>{t("attacks.column.lastSeen")}</TableHead>
         </TableHeadRow>
       </TableHeader>
       <TableBody>
-        {sources.length === 0 && <TableEmpty columns={6}>{t("attacks.empty.sources")}</TableEmpty>}
+        {sources.length === 0 && <TableEmpty columns={refused ? 7 : 6}>{t("attacks.empty.sources")}</TableEmpty>}
         {sources.map((source) => (
           <TableRow key={source.address}>
             <TableCell>
@@ -41,6 +45,7 @@ function Sources({ sources }: { sources: Summary["sources"] }) {
             <TableCell className={COUNT}>{number(source.accounts)}</TableCell>
             <TableCell className={COUNT}>{number(source.tlsErrors)}</TableCell>
             <TableCell className={COUNT}>{number(source.bans)}</TableCell>
+            {refused && <TableCell className={COUNT}>{number(source.refused)}</TableCell>}
             <TableCell className="whitespace-nowrap">{dateTime(source.lastSeen)}</TableCell>
           </TableRow>
         ))}
@@ -49,7 +54,7 @@ function Sources({ sources }: { sources: Summary["sources"] }) {
   );
 }
 
-function Networks({ networks }: { networks: Summary["networks"] }) {
+function Networks({ networks, refused }: { networks: Summary["networks"]; refused: boolean }) {
   const { t } = useTranslation();
   return (
     <Table aria-labelledby="attacks-networks">
@@ -60,11 +65,12 @@ function Networks({ networks }: { networks: Summary["networks"] }) {
           <TableHead className={COUNT}>{t("attacks.column.failedSignIns")}</TableHead>
           <TableHead className={COUNT}>{t("attacks.column.tlsErrors")}</TableHead>
           <TableHead className={COUNT}>{t("attacks.column.bans")}</TableHead>
+          {refused && <TableHead className={COUNT}>{t("attacks.column.refused")}</TableHead>}
           <TableHead>{t("attacks.column.lastSeen")}</TableHead>
         </TableHeadRow>
       </TableHeader>
       <TableBody>
-        {networks.length === 0 && <TableEmpty columns={6}>{t("attacks.empty.networks")}</TableEmpty>}
+        {networks.length === 0 && <TableEmpty columns={refused ? 7 : 6}>{t("attacks.empty.networks")}</TableEmpty>}
         {networks.map((network) => (
           <TableRow key={network.network}>
             <TableCell className="wrap-anywhere">{network.network}</TableCell>
@@ -72,6 +78,7 @@ function Networks({ networks }: { networks: Summary["networks"] }) {
             <TableCell className={COUNT}>{number(network.failedSignIns)}</TableCell>
             <TableCell className={COUNT}>{number(network.tlsErrors)}</TableCell>
             <TableCell className={COUNT}>{number(network.bans)}</TableCell>
+            {refused && <TableCell className={COUNT}>{number(network.refused)}</TableCell>}
             <TableCell className="whitespace-nowrap">{dateTime(network.lastSeen)}</TableCell>
           </TableRow>
         ))}
@@ -152,6 +159,7 @@ export function Attacks() {
   const { status } = useApp();
   if (!coverage.data && !coverage.error) return <Loading />;
   const data = summary.data;
+  const refused = data?.totals.refused;
   const checks = (status.data?.observations ?? []).filter((item) => item.modules.includes("attacks"));
   return (
     <>
@@ -167,15 +175,21 @@ export function Attacks() {
                 [t("attacks.figure.failedSignIns"), data.totals.failedSignIns],
                 [t("attacks.figure.unknownAccounts"), data.totals.unknownAccounts],
                 [t("attacks.figure.bans"), data.totals.bans],
+                [t("attacks.figure.refused"), typeof refused === "number" ? refused : t("attacks.notRecorded")],
                 [t("attacks.figure.tlsErrors"), data.totals.tlsErrors],
                 [t("attacks.figure.sources"), data.totals.sources],
               ]}
             />
+            {typeof refused !== "number" && (
+              <Meta>
+                <Trans i18nKey="attacks.refusedNotRecorded" components={{ code: <code className="rounded bg-muted px-1 py-0.5" /> }} />
+              </Meta>
+            )}
             <Section id="attacks-sources" title={t("attacks.sources")}>
-              <Sources sources={data.sources} />
+              <Sources sources={data.sources} refused={typeof refused === "number"} />
             </Section>
             <Section id="attacks-networks" title={t("attacks.networks")}>
-              <Networks networks={data.networks} />
+              <Networks networks={data.networks} refused={typeof refused === "number"} />
             </Section>
             <Section id="attacks-accounts" title={t("attacks.accounts")}>
               <Accounts accounts={data.accounts} />
