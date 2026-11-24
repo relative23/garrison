@@ -134,8 +134,8 @@ sudo garrison upgrade garrison-<version>-<arch>.tar.gz
 ```
 
 The installed release checks the signature with the keys compiled into it,
-refuses an archive for another architecture or a version that is not newer,
-unpacks exactly the bytes it checked and runs the new release's installer.
+refuses an archive for another architecture or an older version, unpacks
+exactly the bytes it checked and runs that release's installer.
 Releases that trust no key yet, and every archive you checked by hand, are
 installed directly:
 
