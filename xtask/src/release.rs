@@ -170,18 +170,34 @@ fn checksums(stage: &Path) -> Result<(), String> {
     fs::write(stage.join("SHA256SUMS"), lines.join("\n") + "\n").map_err(|error| error.to_string())
 }
 
-/// GNU tar and gzip with every varying field fixed.
+/// GNU tar and gzip with every varying field fixed, one after the other: a
+/// pipe ends with gzip's status alone, and a tar that failed would leave an
+/// archive of what it wrote until then.
 fn pack(dist: &Path, name: &str, epoch: &str) -> Result<PathBuf, String> {
     let archive = dist.join(format!("{name}.tar.gz"));
-    let tar = format!(
-        "tar --sort=name --mtime=@{epoch} --owner=0 --group=0 --numeric-owner \
-         --mode=u=rwX,go=rX --format=pax \
-         --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
-         -C '{dist}' -cf - '{name}' | gzip -n -9 > '{archive}'",
-        dist = dist.display(),
-        archive = archive.display()
-    );
-    run(Command::new("sh").args(["-c", &tar]))?;
+    let tar = dist.join(format!("{name}.tar"));
+    let packed = run(Command::new("tar")
+        .args([
+            "--sort=name",
+            &format!("--mtime=@{epoch}"),
+            "--owner=0",
+            "--group=0",
+            "--numeric-owner",
+            "--mode=u=rwX,go=rX",
+            "--format=pax",
+            "--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime",
+            "-C",
+        ])
+        .arg(dist)
+        .arg("-cf")
+        .arg(&tar)
+        .arg(name))
+    // gzip puts the archive in the tar file's place.
+    .and_then(|()| run(Command::new("gzip").args(["-n", "-9", "-f"]).arg(&tar)));
+    if let Err(error) = packed {
+        let _ = fs::remove_file(&tar);
+        return Err(error);
+    }
     let digest = Sha256::digest(fs::read(&archive).map_err(|error| error.to_string())?);
     let sum = hex::encode(&digest);
     let file = archive
@@ -388,6 +404,18 @@ mod tests {
             options(&arguments(&["x86_64", "riscv64"])),
             Err("unknown architecture riscv64; known: aarch64, x86_64".to_owned())
         );
+    }
+
+    /// What tar wrote before it failed is never packed, hashed and signed.
+    #[test]
+    fn a_tar_that_fails_fails_the_packing() {
+        let dist = tempfile::tempdir().unwrap();
+        // Nothing is staged under this name, so tar cannot read it.
+        let name = "garrison-0.0.0-x86_64";
+        let packed = pack(dist.path(), name, "0");
+        assert!(packed.is_err(), "{packed:?}");
+        let left: Vec<_> = fs::read_dir(dist.path()).unwrap().flatten().collect();
+        assert!(left.is_empty(), "{left:?}");
     }
 
     #[test]
