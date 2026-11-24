@@ -45,8 +45,10 @@ is shipped.
 ## Request paths
 
 **Sign-in.** Authorization Code with PKCE (S256), scope `openid` only. The
-state and verifier stay in a short-lived HttpOnly cookie, so a visitor who is
-not signed in writes nothing on the server. The callback exchanges the code,
+state and verifier stay in a short-lived HttpOnly cookie, so a sign-in that is
+begun stores nothing on the server; a callback with its cookie's state counts
+in a bounded budget of code exchanges per client network
+([security](security.md#known-limits)). The callback exchanges the code,
 then asks the broker for a grant. Without one, the token is revoked and no
 session is created. Sessions are stored as SHA-256 digests of a random
 identifier in a `__Host-` cookie of Garrison's own host name.

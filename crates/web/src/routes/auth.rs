@@ -1,8 +1,10 @@
 //! OAuth 2.0 Authorization Code with PKCE (S256), scope `openid` only.
 //!
 //! The state and the PKCE verifier of a sign-in live only in the browser's
-//! `HttpOnly` login cookie. A request that is not signed in writes nothing on the
-//! server, so nobody can fill a table and lock other users out of signing in.
+//! `HttpOnly` login cookie, so a sign-in that is begun stores nothing on the
+//! server. A callback with the state of its cookie, which anyone can make,
+//! counts in the bounded budget of `attempts`, and a flood of them from more
+//! networks than it counts is the security model's known limit.
 //!
 //! A browser comes to these routes, not the interface's requests: whatever
 //! keeps a sign-in from its session sends it back to the sign-in page with a
