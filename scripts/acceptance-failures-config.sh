@@ -58,8 +58,9 @@ scenario_policy_elsewhere() {
     check "the installer makes that policy root's, readable for the broker's group alone" \
         'test "$(stat -c "%U %G %a" /etc/garrison-policy/access.json)" = "root garrison-broker 640"'
     check "the broker grants by that policy" "$catalog | grep -q run_check"
-    check "doctor finds that policy private" \
-        '/opt/garrison/current/bin/garrison doctor | grep -q "ok    the access policy is private (640)"'
+    check "doctor finds that the broker may read that policy, and only root change it" \
+        '/opt/garrison/current/bin/garrison doctor |
+            grep -q -F "ok    the broker may read the access policy, which only root may change (root:garrison-broker, mode 640)"'
     # A folder named as the policy is none: the installer leaves it as it is
     # and refuses, and a purge would not take it.
     inside 'mkdir -p /srv/policy-folder/mail && echo kept > /srv/policy-folder/mail/inbox &&
