@@ -19,6 +19,11 @@ pub(crate) fn run(config: &Config) -> u8 {
         }
         return 2;
     }
+    // Without root no secret reads, and every channel would look broken.
+    if !rustix::process::geteuid().is_root() {
+        complain("Run as root: the channels' secrets are files only root may read.");
+        return 2;
+    }
     let credentials = credentials(config);
     let secrets = Secrets::read(&credentials, &config.notifications);
     let channels = Channels::of(config, secrets).located(&credentials);

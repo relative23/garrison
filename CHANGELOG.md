@@ -680,6 +680,8 @@ Notable changes for operators and users. The format follows
 - **The refusals of `garrison access` and a failed check or restore of
   `garrison backup-check` are said on standard error**, as the installation
   guide says of every command.
+- **`garrison notify-test` without root says to run it as root and ends with
+  2**, as `garrison doctor` does.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year

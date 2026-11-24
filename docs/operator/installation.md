@@ -432,8 +432,8 @@ Every command exits with 0 on success and 1 on failure, with the reason on
 standard error; 2 means it was called wrongly or found no usable
 configuration. `doctor` and `self-check` write their whole report on
 standard output, failures among it, and end with 1 where it holds one. Run
-without root, `doctor`, `setup` and `stalwart setup` exit with 2, and
-`install`, `upgrade`, `restore` and `uninstall` with 1.
+without root, `doctor`, `notify-test`, `setup` and `stalwart setup` exit
+with 2, and `install`, `upgrade`, `restore` and `uninstall` with 1.
 
 ```sh
 tar xzf garrison-<version>-<arch>.tar.gz
