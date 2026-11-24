@@ -290,6 +290,18 @@ fn a_run_says_why_it_keeps_nothing_and_names_what_the_file_names() {
         )
     );
     assert_eq!(read(&case.report)["repositoryId"], Value::Null);
+    // A listing that fails is said first, and is the cause.
+    case.checked(&HERE, &id(OLD));
+    let unlisted = case.run(&HERE, &[("REPO_ID", OLD), ("BROKEN", "snapshots")]);
+    assert_eq!(unlisted.status.code(), Some(1));
+    assert_eq!(
+        text(&unlisted.stderr),
+        format!(
+            "restic did not list its snapshots: Fatal: the repository is locked by another \
+             process\nThe last report, {to}, is not known to be of this repository, since restic \
+             could not list it: {lost}"
+        )
+    );
     assert_eq!(
         after(&[], &id(OLD)),
         format!(

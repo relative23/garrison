@@ -218,18 +218,16 @@ pub(super) fn place(
 /// a copy elsewhere from this repository. Of another repository, or of one
 /// this run cannot tell from another, nothing is kept, since the card would
 /// show it as this repository's; that is said where the report held a
-/// check or a restore. `name` is `None` where nothing places the repository.
-pub(super) fn kept(
-    path: &Path,
-    before: Report,
-    tool: Tool,
-    name: Option<&str>,
-    id: Option<&str>,
-) -> Option<Report> {
+/// check or a restore. `this` is the report of this run, with its listing;
+/// `placed` says whether anything places the repository.
+pub(super) fn kept(path: &Path, before: Report, this: &Report, placed: bool) -> Option<Report> {
+    let (tool, id) = (this.tool, this.repository_id.as_deref());
+    let name = placed.then_some(this.repository.as_str());
     let unknown = "is not known to be of this repository, since";
     let mut fix = "";
     let why = match (name, id, before.repository_id.as_deref()) {
         (None, _, _) => format!("{unknown} the command is not told where this one is"),
+        _ if this.problem.is_some() => format!("{unknown} {} could not list it", tool.name()),
         (_, None, _) => format!("{unknown} {} gave no ID for it", tool.name()),
         (_, _, None) => "holds no repository ID".to_owned(),
         (Some(name), Some(id), Some(theirs)) => {

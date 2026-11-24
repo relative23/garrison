@@ -267,20 +267,14 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
         Ok(place) => (place, true),
         Err(unplaced) => (unplaced, false),
     };
-    // What the last run wrote of this repository stays, where this one does
-    // not run that part.
-    let before = last_report(&path).and_then(|before| {
-        let name = placed.then_some(name.as_str());
-        kept(&path, before, tool, name, id.as_deref())
-    });
     let mut report = Report {
         tool,
         repository: name,
         repository_id: id,
         snapshots: None,
         problem: None,
-        verify: before.as_ref().and_then(|before| before.verify.clone()),
-        restore: before.as_ref().and_then(|before| before.restore.clone()),
+        verify: None,
+        restore: None,
     };
     let mut failed = false;
     let mut newest = None;
@@ -298,6 +292,13 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
             ));
             report.problem = Some(problem);
         }
+    }
+    // What the last run wrote of this repository stays, where this one does
+    // not run that part.
+    if let Some(before) = last_report(&path).and_then(|before| kept(&path, before, &report, placed))
+    {
+        report.verify = before.verify;
+        report.restore = before.restore;
     }
     if asked.verify && report.problem.is_none() {
         let run = repository.verify();
