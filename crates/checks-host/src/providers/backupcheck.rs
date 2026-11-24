@@ -103,13 +103,14 @@ impl BackupCheck {
         Ok(report)
     }
 
-    /// What a check or a restore that is expected every `days` days says.
     /// What the times of the newest snapshot and of the report say against
-    /// the repository, where they say anything.
+    /// the repository, where they say anything: `newest` as the report
+    /// gives it, `None` for a repository without one. A time that does not
+    /// read judges nothing.
     fn by_time(
         &self,
         context: &Context<'_>,
-        newest: Option<time::Timestamp>,
+        newest: Option<&str>,
         listed: Option<time::Timestamp>,
         noun: &str,
     ) -> Option<(State, String)> {
@@ -118,7 +119,10 @@ impl BackupCheck {
         let Some(newest) = newest else {
             return Some((State::Failed, format!("The repository holds no {noun}.")));
         };
-        if now - newest.as_second() > limit {
+        let newest = time::parse(newest);
+        if let Some(newest) = newest
+            && now - newest.as_second() > limit
+        {
             return Some((
                 State::Warning,
                 format!(
@@ -128,14 +132,15 @@ impl BackupCheck {
             ));
         }
         // A time ahead of this host's clock is no fresh one.
-        let from_the_future = ahead(context, newest, &format!("newest {noun}"))
+        let from_the_future = newest
+            .and_then(|newest| ahead(context, newest, &format!("newest {noun}")))
             .or_else(|| listed.and_then(|listed| ahead(context, listed, "report")));
         if let Some(finding) = from_the_future {
             return Some((State::Warning, finding));
         }
         // A report that is no longer written says nothing of today.
         listed
-            .is_none_or(|listed| now - listed.as_second() > limit)
+            .is_some_and(|listed| now - listed.as_second() > limit)
             .then(|| {
                 (
                     State::Warning,
@@ -163,7 +168,8 @@ impl BackupCheck {
             }
             Some(run) if days > 0 => {
                 let age = time::parse(&run.at).map(|at| context.now.as_second() - at.as_second());
-                if age.is_none_or(|age| age > days * DAY) && *state != State::Failed {
+                // A time that does not read judges nothing.
+                if age.is_some_and(|age| age > days * DAY) && *state != State::Failed {
                     *state = State::Warning;
                     findings.push(format!("The last {what} is older than {days} days."));
                 }
@@ -196,17 +202,45 @@ fn ahead(context: &Context<'_>, at: time::Timestamp, what: &str) -> Option<Strin
     })
 }
 
+/// A time of the report as the card shows it, one instant for every viewer:
+/// with its offset, as written; one without, which a browser reads in its
+/// own time zone, or that is no time, is not shown, and `unshown` says so.
+fn shown(label: &str, at: Option<&str>, unshown: &mut Vec<String>) -> Option<String> {
+    let at = at?;
+    let written = time::parse_written(at).map(time::isoformat_written);
+    if written.is_none() {
+        unshown.push(format!(
+            "{label} is not shown: {at:?} is no time with its offset, such as \
+             2026-11-17T03:00:00Z."
+        ));
+    }
+    written
+}
+
 /// The card's fields: the repository, its snapshots and the two kinds of run.
-fn fields(report: &Backup, noun: &str) -> Vec<Field> {
+fn fields(report: &Backup, noun: &str, unshown: &mut Vec<String>) -> Vec<Field> {
     let run = |run: Option<&Run>| run.map(|run| if run.ok { "passed" } else { "failed" });
     let snapshots = report.snapshots.as_ref();
+    let newest = format!("Newest {noun}");
+    let newest_at = shown(
+        &newest,
+        snapshots.and_then(|found| found.newest.as_deref()),
+        unshown,
+    );
+    let listed = shown("Listed", snapshots.map(|found| found.at.as_str()), unshown);
+    let checked = shown(
+        "Checked",
+        report.verify.as_ref().map(|run| run.at.as_str()),
+        unshown,
+    );
+    let restored = shown(
+        "Restored",
+        report.restore.as_ref().map(|run| run.at.as_str()),
+        unshown,
+    );
     vec![
         Field::text("Repository", report.repository.clone()),
-        Field::new(
-            format!("Newest {noun}"),
-            snapshots.and_then(|found| found.newest.clone()),
-            Format::Datetime,
-        ),
+        Field::new(newest, newest_at, Format::Datetime),
         Field::new(
             format!("{}s", noun[..1].to_uppercase() + &noun[1..]),
             snapshots.map(|found| found.count),
@@ -217,23 +251,11 @@ fn fields(report: &Backup, noun: &str) -> Vec<Field> {
             snapshots.and_then(|found| found.size_bytes),
             Format::Bytes,
         ),
-        Field::new(
-            "Listed",
-            snapshots.map(|found| found.at.clone()),
-            Format::Datetime,
-        ),
+        Field::new("Listed", listed, Format::Datetime),
         Field::text("Last integrity check", run(report.verify.as_ref())),
-        Field::new(
-            "Checked",
-            report.verify.as_ref().map(|run| run.at.clone()),
-            Format::Datetime,
-        ),
+        Field::new("Checked", checked, Format::Datetime),
         Field::text("Last test restore", run(report.restore.as_ref())),
-        Field::new(
-            "Restored",
-            report.restore.as_ref().map(|run| run.at.clone()),
-            Format::Datetime,
-        ),
+        Field::new("Restored", restored, Format::Datetime),
         Field::text(
             "What was restored",
             report
@@ -305,8 +327,8 @@ impl Provider for BackupCheck {
                 findings.push("The report holds no list of the repository.".to_owned());
             }
             (Some(snapshots), None) => {
-                let newest = snapshots.newest.as_deref().and_then(time::parse);
                 let listed = time::parse(&snapshots.at);
+                let newest = snapshots.newest.as_deref();
                 if let Some((by_time, finding)) = self.by_time(context, newest, listed, noun) {
                     state = by_time;
                     findings.push(finding);
@@ -329,13 +351,28 @@ impl Provider for BackupCheck {
             &mut state,
             &mut findings,
         );
+        // A time the card would judge that does not read leaves its age, and
+        // the repository's state, not known.
+        let unread = |at: Option<&str>| at.is_some_and(|at| time::parse(at).is_none());
+        let unjudged = report.snapshots.as_ref().is_some_and(|found| {
+            unread(found.newest.as_deref()) || unread(Some(found.at.as_str()))
+        }) || (self.verify_days > 0
+            && unread(report.verify.as_ref().map(|run| run.at.as_str())))
+            || (self.restore_days > 0
+                && unread(report.restore.as_ref().map(|run| run.at.as_str())));
+        if unjudged && state == State::Ok {
+            state = State::Unknown;
+        }
+        let mut unshown = Vec::new();
+        let fields = fields(&report, noun, &mut unshown);
+        findings.extend(unshown);
         let observation = base(state)?
             .with_scope(
                 "What the backup tool said of its repository when `garrison backup-check` last asked \
                  it. A test restore proves that the newest snapshot can be read with the password; \
                  it does not compare the restored files with the originals.",
             )
-            .with_fields(fields(&report, noun))
+            .with_fields(fields)
             .with_findings(findings)
             .with_max_age(900);
         Ok(Report::of(observation))
