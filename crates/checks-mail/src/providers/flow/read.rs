@@ -271,7 +271,7 @@ fn counted(db: &Connection, week: &mut Week, since: i64) -> rusqlite::Result<()>
 /// Whether a milter deferred every message that the milters answered since
 /// `since`, and there was one. Stalwart records each milter's answer under
 /// the message's session, and asks none after a deferral (measured with
-/// Stalwart 1.1.0); the history does not name the milter, so a message is
+/// Stalwart 1.2.0); the history does not name the milter, so a message is
 /// told by its session, and an answer without one is a message of its own.
 fn deferred_all(db: &Connection, since: i64) -> rusqlite::Result<bool> {
     db.query_row(

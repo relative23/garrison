@@ -2,7 +2,7 @@
 //! that asks Stalwart for objects: a list of a kind is read in pages
 //! (`JmapClient::listed`), which say how many objects there are, and never
 //! with one get of all of them, which Stalwart answers with the first 500
-//! alone and not a word of the rest (measured on 1.1.0). A new place that
+//! alone and not a word of the rest (measured on 1.2.0). A new place that
 //! asks Stalwart, or a new way of asking in a place, fails here until it is
 //! named below with what it asks.
 

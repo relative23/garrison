@@ -65,7 +65,7 @@ pub struct Problem {
 
 impl Problem {
     /// What this error of `method` means, where Stalwart did not fail on its
-    /// side: `forbidden` refuses the key (measured on 1.1.0 for a key without
+    /// side: `forbidden` refuses the key (measured on 1.2.0 for a key without
     /// the method's permission); any other, such as `unknownMethod` for a
     /// method Stalwart does not know (measured), is no answer this release
     /// reads. A type that is no plain name is not repeated.
@@ -164,7 +164,7 @@ impl JmapClient {
             401 | 403 => return Err(Error::denied("The native API key was rejected")),
             // Stalwart refuses a key with 401 or 403; another status, such
             // as 400 for a request whose capability it does not know, is
-            // no refusal (measured on 1.1.0).
+            // no refusal (measured on 1.1.0 only).
             status => {
                 return Err(Error::Unreadable(format!(
                     "Unexpected native API status {status}"
@@ -218,7 +218,7 @@ impl JmapClient {
     /// error, not a partial success, and so is an object `T` does not accept:
     /// a shape Garrison does not know must never be read as one it knows.
     /// Stalwart gives a `/get` of all objects the first 500 of them alone
-    /// (measured on 1.1.0): [`JmapClient::listed`] reads more, in pages.
+    /// (measured on 1.2.0): [`JmapClient::listed`] reads more, in pages.
     ///
     /// An ID that Stalwart says is not there is its answer to the request,
     /// [`Error::Denied`]; an answer without its list, without the objects

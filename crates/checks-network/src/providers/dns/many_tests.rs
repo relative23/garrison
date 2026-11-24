@@ -2,7 +2,7 @@
 //! `max_domains` of them, with their zone files, and count the rest, so
 //! that neither the number of domains nor the size of their zone files
 //! makes a request too large for them. Stalwart gives a request for all of
-//! its domains the first 500 alone (measured on 1.1.0).
+//! its domains the first 500 alone (measured on 1.1.0 only).
 
 use garrison_core::observations::State;
 use serde_json::{Value, json};

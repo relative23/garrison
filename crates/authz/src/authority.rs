@@ -208,7 +208,7 @@ impl Authority {
             // by hand, Garrison's own setup is broken; otherwise UserInfo and
             // the management API answered what does not fit together, which
             // refuses nobody. A removed account's token gets 403 at UserInfo
-            // first (Stalwart 1.1.0; the web's contract test).
+            // first (Stalwart 1.2.0; the web's contract test).
             Ok(Native::Missing) => {
                 let subject = &identity.subject;
                 return Err(if policy.subjects.contains_key(subject) {

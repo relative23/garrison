@@ -1,7 +1,7 @@
 //! Stalwart's accounts as many as it has: the mailbox storage reads up to
 //! `max_accounts` of them in pages, and says how many it left. Stalwart
 //! gives a request for all of its accounts the first 500 alone (measured on
-//! 1.1.0), so a full mailbox after them was never seen.
+//! 1.2.0), so a full mailbox after them was never seen.
 
 use serde_json::{Value, json};
 

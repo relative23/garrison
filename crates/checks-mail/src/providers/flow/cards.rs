@@ -198,7 +198,7 @@ impl Flow {
     /// The scanner's verdicts by day. A host without a milter has none, and
     /// then no card either. A reply of the milter's own may refuse a message
     /// or defer it, and Stalwart's event does not say which (measured with
-    /// Stalwart 1.1.0), so it is counted apart, and as an answer.
+    /// Stalwart 1.2.0), so it is counted apart, and as an answer.
     pub(super) fn milter(
         &self,
         context: &Context<'_>,

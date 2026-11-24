@@ -255,8 +255,8 @@ fn refusing() -> Vec<AtStalwart> {
         &value!({"id": "b", "@type": "User", "roles": {"@type": "Admin"},
                                   "permissions": {"@type": "Inherit"}, "memberTenantId": "t1"}),
     );
-    // As Stalwart 1.1.0 answers for a group: its roles are of a kind of
-    // their own.
+    // As Stalwart 1.1.0 answers for a group, measured there only: its roles
+    // are of a kind of their own.
     let group = account(
         &value!({"id": "b", "@type": "Group", "roles": {"@type": "Default"},
                                  "permissions": {"@type": "Inherit"}, "memberTenantId": null}),

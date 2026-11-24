@@ -345,7 +345,7 @@ pub enum Native {
 
 /// Whether Garrison evaluates the rights of the account `object`, by its
 /// type and tenant alone, before the rest of it is read: a group's roles are
-/// of a kind of their own (`Default`, measured on Stalwart 1.1.0), and an
+/// of a kind of their own (`Default`, measured on Stalwart 1.1.0 only), and an
 /// account Garrison evaluates no rights for is refused whatever its roles.
 /// A type this release does not know is an answer it does not read.
 fn evaluated(object: &Value) -> Result<bool, Error> {

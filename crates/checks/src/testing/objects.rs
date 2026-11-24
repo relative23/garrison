@@ -1,6 +1,6 @@
 //! A stand-in for Stalwart's management API that holds objects of one kind
 //! and answers `/query` and `/get` of them as Stalwart 1.2.0 does (measured
-//! in the lab, the 5000 on 1.1.0): a `/get` of all objects (`ids: null`)
+//! in the lab, the 5000 on 1.1.0 only): a `/get` of all objects (`ids: null`)
 //! gives the first 500 of them, the oldest first, and says nothing of the
 //! rest; a `/query` gives the IDs from `position` on, `limit` of them and
 //! 5000 at the most, the newest first, or the oldest first where it sorts
