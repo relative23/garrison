@@ -201,8 +201,7 @@ mod tests {
     }
 
     /// A credential whose file other users may read may have been seen:
-    /// Stalwart is given a new one, which `keep` writes for this user alone,
-    /// where setup once kept the file as it was and called it unchanged.
+    /// Stalwart is given a new one, which `keep` writes for this user alone.
     #[test]
     fn a_credential_file_others_may_read_gets_a_new_one() {
         let held = r#"{"username": "garrison", "secret": "the-scrape-secret"}"#;

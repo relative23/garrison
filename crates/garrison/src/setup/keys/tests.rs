@@ -95,9 +95,8 @@ fn a_key_file_that_holds_no_key_gets_a_new_one() {
 }
 
 /// A key whose file other users may read may have been seen: it gets a new
-/// key, written for this user alone, and the old one goes, where setup once
-/// kept it and said "secret unchanged". So the cards that name setup as
-/// the fix for such a file are right.
+/// key, written for this user alone, and the old one goes, so that the
+/// cards that name setup as the fix for such a file are right.
 #[test]
 fn a_key_file_others_may_read_gets_a_new_key() {
     let directory = tempfile::tempdir().unwrap();
