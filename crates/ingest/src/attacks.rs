@@ -218,6 +218,53 @@ impl Sums {
     fn source(&mut self, address: &str) -> &mut Seen {
         self.sources.entry(address.to_owned()).or_default()
     }
+
+    /// Every kind the summary counts, read for the stretch.
+    fn of(db: &Connection, stretch: (i64, i64)) -> Result<Self> {
+        let mut sums = Sums::default();
+        sums.read(
+            db,
+            EventType::AuthFailed,
+            stretch,
+            |sums, at, address, fields| {
+                sums.totals.failed_sign_ins += 1;
+                let seen = sums.source(address);
+                seen.source.failed_sign_ins += 1;
+                match &fields.account_name {
+                    Some(name) => {
+                        seen.accounts.insert(name.clone());
+                        let tried = sums.accounts.entry(name.clone()).or_default();
+                        tried.failed += 1;
+                        tried.sources.insert(address.to_owned());
+                        tried.last_seen = tried.last_seen.max(at);
+                    }
+                    None => sums.totals.unknown_accounts += 1,
+                }
+            },
+        )?;
+        sums.read(
+            db,
+            EventType::TlsHandshakeError,
+            stretch,
+            |sums, _, address, _| {
+                sums.totals.tls_errors += 1;
+                sums.source(address).source.tls_errors += 1;
+            },
+        )?;
+        for (kind, reason) in BANS {
+            sums.read(db, kind, stretch, |sums, at, address, _| {
+                sums.totals.bans += 1;
+                sums.source(address).source.bans += 1;
+                sums.bans.push(Ban {
+                    at,
+                    address: address.to_owned(),
+                    network: blocked_with(address),
+                    reason: reason.to_owned(),
+                });
+            })?;
+        }
+        Ok(sums)
+    }
 }
 
 /// Busiest first; among equals the one seen last, then by name, so that the
@@ -265,49 +312,7 @@ fn networks(sources: &[Source]) -> Vec<Network> {
 /// Failed sign-ins, bans and TLS handshake errors between `since` and
 /// `until`, by address, network and account.
 pub fn attacks(db: &Connection, since: i64, until: i64) -> Result<Attacks> {
-    let mut sums = Sums::default();
-    let stretch = (since, until);
-    sums.read(
-        db,
-        EventType::AuthFailed,
-        stretch,
-        |sums, at, address, fields| {
-            sums.totals.failed_sign_ins += 1;
-            let seen = sums.source(address);
-            seen.source.failed_sign_ins += 1;
-            match &fields.account_name {
-                Some(name) => {
-                    seen.accounts.insert(name.clone());
-                    let tried = sums.accounts.entry(name.clone()).or_default();
-                    tried.failed += 1;
-                    tried.sources.insert(address.to_owned());
-                    tried.last_seen = tried.last_seen.max(at);
-                }
-                None => sums.totals.unknown_accounts += 1,
-            }
-        },
-    )?;
-    sums.read(
-        db,
-        EventType::TlsHandshakeError,
-        stretch,
-        |sums, _, address, _| {
-            sums.totals.tls_errors += 1;
-            sums.source(address).source.tls_errors += 1;
-        },
-    )?;
-    for (kind, reason) in BANS {
-        sums.read(db, kind, stretch, |sums, at, address, _| {
-            sums.totals.bans += 1;
-            sums.source(address).source.bans += 1;
-            sums.bans.push(Ban {
-                at,
-                address: address.to_owned(),
-                network: blocked_with(address),
-                reason: reason.to_owned(),
-            });
-        })?;
-    }
+    let sums = Sums::of(db, (since, until))?;
 
     let mut sources: Vec<Source> = sums
         .sources
