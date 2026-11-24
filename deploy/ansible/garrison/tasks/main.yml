@@ -204,8 +204,8 @@
     fail_msg: >-
       {{ (garrison_access.stderr or garrison_policy.stderr or garrison_policy.msg) | trim if
       garrison_policy.rc != 0 else 'The access policy binds no role and no account, so nobody
-      can sign in: bind the role of your administrators with garrison access bind-role
-      <role-id> --profile administrator, then run the play again.' }}
+      can sign in: bind the role of your administrators (Roles in the native administration)
+      with garrison access bind-role <role-id> --profile administrator, then run the play again.' }}
     quiet: true
   when: not ansible_check_mode
 
