@@ -60,8 +60,8 @@ says() {
     echo "ok    $1"
 }
 
-# As `says`, for words that no state names: doctor's lines and setup's,
-# which report no states yet.
+# As `says`, for `3` as it is written, such as a state's name in its
+# brackets; the answer is read here.
 says_words() {
     answer=$(mktemp)
     if ! inside "umask 077 && $2" >"$answer" 2>&1 || ! grep -q -F -- "$3" "$answer"; then

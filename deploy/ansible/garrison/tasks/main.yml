@@ -125,7 +125,7 @@
       - "-"
     stdin: "{{ garrison_stalwart_admin | to_json }}"
   register: garrison_setup
-  changed_when: "'Stalwart is set up as asked; nothing was changed.' not in garrison_setup.stdout"
+  changed_when: "'[setup-as-asked]' not in garrison_setup.stdout"
   # Hides the administrator on standard input; what setup says holds no
   # secret and is shown next.
   no_log: true
@@ -175,7 +175,7 @@
   ansible.builtin.command:
     cmd: "/root/{{ garrison_name }}/bin/garrison install"
   register: garrison_install
-  changed_when: "'is running as installed; nothing was changed.' not in garrison_install.stdout"
+  changed_when: "'[install-as-installed]' not in garrison_install.stdout"
 
 - name: garrison doctor
   ansible.builtin.command:

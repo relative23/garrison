@@ -276,7 +276,7 @@ check "an upgrade to the same release leaves the filter running" \
         python3 /root/document-mail.py macro | grep -q '^550 '"
 check "uninstalling is refused while Stalwart asks the filter" \
     "! $garrison uninstall --dry-run > /root/uninstall-milter.log 2>&1 &&
-        grep -q 'Stalwart still asks' /root/uninstall-milter.log"
+        grep -q -F '[install-milter-still-asked]' /root/uninstall-milter.log"
 inside 'sed -i "/^\[milter\]$/d" /etc/garrison/garrison.toml'
 check "without the section setup takes the filter out and stops it" \
     "$garrison stalwart setup --admin-credential /root/stalwart-admin.json > /root/milter-off.log 2>&1 &&

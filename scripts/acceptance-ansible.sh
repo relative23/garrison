@@ -207,7 +207,7 @@ scenario_setup_refused() {
     inside 'cd /etc/garrison/credentials && rm webhook-signature-key collector-native-key broker-native-key &&
         touch /root/stand-in-refuses'
     # At -vvv a task without no_log shows what went in on its standard input.
-    stops "$newer" "Stalwart does not take the API key in" -vvv
+    stops "$newer" "[setup-key-untaken]" -vvv
     nothing_secret
     inside 'rm /root/stand-in-refuses'
     play "$newer"
@@ -227,9 +227,10 @@ acceptance_config: |
   policy = "/etc/garrison/policy/access.json"
 VARS
     play "$newer" -e "@$work/elsewhere.yml"
-    said "Stalwart is set up as asked; nothing was changed."
+    said "[setup-as-asked]"
     check "the installer took the policy there" \
-        '/opt/garrison/current/bin/garrison check-config 2>/dev/null | grep -q "Access policy valid: /etc/garrison/policy/access.json"'
+        '/opt/garrison/current/bin/garrison check-config 2>/dev/null | grep -F "[check-config-policy-valid]" |
+            grep -q -F /etc/garrison/policy/access.json'
     services "with the policy kept elsewhere"
     unchanged "a further run changes nothing" "$newer" -e "@$work/elsewhere.yml"
     inside 'mv /etc/garrison/policy/access.json /etc/garrison/access-policy.json && rmdir /etc/garrison/policy'
@@ -247,7 +248,7 @@ acceptance_config: |
   [notifications]
   token = "/etc/garrison/ntfy.token"
 VARS
-    stops "$newer" "Configuration not usable" -e "@$work/refused.yml"
+    stops "$newer" "[check-config-unloaded]" -e "@$work/refused.yml"
     check "Stalwart's webhook still names the port the receiver listens on" \
         'grep -q "127.0.0.1:8094/webhook" /root/stand-in-objects/WebHook'
     play "$newer"
@@ -282,7 +283,7 @@ startable() { inside 'rm -r /etc/systemd/system/garrison-web.service.d && system
 scenario_unbound() {
     step "A first play that stopped at access init is finished by the next"
     fresh
-    stops "$older" "garrison access bind-role" -e acceptance_policy=false
+    stops "$older" "[access-unbound]" -e acceptance_policy=false
     stops "$older" "binds no role and no account" -e acceptance_policy=false
     inside '/opt/garrison/current/bin/garrison access bind-role e --profile administrator >/dev/null'
     play "$older" -e acceptance_policy=false
@@ -299,7 +300,7 @@ scenario_first_unfinished() {
     copy_in "$previous" "/root/$name.tar.gz"
     inside "cd /root && chmod 600 $name.tar.gz && tar -xzf $name.tar.gz &&
         $name/bin/garrison install </dev/null >/dev/null && rm -r /etc/garrison"
-    stops "$older" "garrison access bind-role" -e acceptance_policy=false
+    stops "$older" "[access-unbound]" -e acceptance_policy=false
     inside '/opt/garrison/current/bin/garrison access bind-role e --profile administrator >/dev/null'
     play "$older" -e acceptance_policy=false
     services "after a first install that did not finish"
@@ -331,7 +332,7 @@ VARS
         'grep -q acceptance-other.service /etc/polkit-1/rules.d/50-garrison.rules'
     inside '/opt/garrison/current/bin/garrison install --rollback >/dev/null'
     names "a rollback by hand returned to $older" current "$older"
-    stops "$newer" "MiB free and the installation needs" -e "@$work/other.yml"
+    stops "$newer" "[install-no-room]" -e "@$work/other.yml"
     names "the upgrade without room left $older current" current "$older"
     check "the upgrade without room left $older running" 'systemctl is-active --quiet garrison-web.service'
     inside 'rm /root/filled'
@@ -349,7 +350,7 @@ scenario_upgrade_failed() {
     inside '/opt/garrison/current/bin/garrison install --rollback >/dev/null'
     names "a rollback by hand returned to $older" current "$older"
     unstartable
-    stops "$newer" "did not start"
+    stops "$newer" "[install-previous-failed]"
     startable
     play "$newer"
     names "the play finished the upgrade to $newer" current "$newer"
@@ -402,7 +403,7 @@ scenario_ignored() {
     edit='{"acceptance_config": "# changed by a play under ignore_errors"}'
     unstartable
     play "$newer" -e "$edit" -e '{"acceptance_ignore_errors": true}'
-    said "did not start"
+    said "[install-stopped]"
     startable
     play "$newer" -e "$edit"
     services "after an installer that failed under ignore_errors"
@@ -467,12 +468,12 @@ services "installed by the role"
 
 step "A second run changes nothing"
 unchanged "a second run changes nothing" "$older"
-said "Stalwart is set up as asked; nothing was changed."
+said "[setup-as-asked]"
 unchanged "a dry run changes nothing" "$older" --check
 
 step "A new version upgrades"
 play "$newer"
-said "Stalwart is set up as asked; nothing was changed."
+said "[setup-as-asked]"
 check "the role upgraded to $newer" "test \"\$(cat /opt/garrison/current/VERSION)\" = '$newer'"
 services "upgraded by the role"
 
