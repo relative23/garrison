@@ -1373,6 +1373,10 @@ Notable changes for operators and users. The format follows
 - **A receipt in a place the collector's unit hides, such as `/root` or
   `/tmp`, says so instead of asking for a `chmod`.** Let the job write it
   where the collector sees it, as under `/var/lib`.
+- **The receipt card no longer asks to open a folder to every user, and
+  names what a mount shows the collector by its place on the host.** Where
+  the collector's user may not search a folder, let the job write the
+  receipt where it may, and set `path` to it.
 - **A list receipt read by an entry for an object is Unknown and says how
   to read it, instead of Failed.** A list is read with `rows = []` and
   `row_date`.

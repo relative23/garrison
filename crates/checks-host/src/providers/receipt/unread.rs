@@ -9,7 +9,7 @@ use garrison_core::files::{answered_by, open_regular_file, read_json_with_metada
 use serde_json::Value;
 
 use super::{MAX_DOCUMENT, Receipt};
-use crate::providers::hidden;
+use crate::providers::hidden::{self, Seen};
 use crate::providers::ran::{SECONDS, silent};
 
 impl Receipt {
@@ -22,21 +22,22 @@ impl Receipt {
             Ok(Some((document, metadata))) if document.is_object() || document.is_array() => {
                 Ok((document, metadata))
             }
-            Ok(_) => Err(self.unread(hidden::place(&self.path).as_deref(), until)),
+            Ok(_) => Err(self.unread(&hidden::seen(&self.path), until)),
             Err(error) => Err(self.unanswered(&error)),
         }
     }
 
     /// Why there is no receipt to read, with what mends it, as the looks at
-    /// it answer by `until`: a place that the collector's sandbox hides,
-    /// `hidden` where it hides one of the path; none at its path, which a
-    /// job of the operator's writes; a folder on the way that the
-    /// collector's user may not search; a file it may not open, as one a job
-    /// writes under umask 027 or 077; a link or no plain file; or a file too
-    /// large or no JSON object or list.
-    pub(super) fn unread(&self, hidden: Option<&Path>, until: Instant) -> String {
-        let (path, hidden) = (self.path.clone(), hidden.map(Path::to_path_buf));
-        answered_by(until, move || why(&path, hidden.as_deref()))
+    /// it answer by `until`, its path `seen` as this process sees it: a place
+    /// that the collector's sandbox hides; none at its path, which a job of
+    /// the operator's writes; a folder on the way that the collector's user
+    /// may not search; a file it may not open, as one a job writes under
+    /// umask 027 or 077; a link or no plain file; or a file too large or no
+    /// JSON object or list. What a mount shows of another place of the host
+    /// is named by that place.
+    pub(super) fn unread(&self, seen: &Seen, until: Instant) -> String {
+        let (path, seen) = (self.path.clone(), seen.clone());
+        answered_by(until, move || why(&path, &seen))
             .unwrap_or_else(|error| self.unanswered(&error))
     }
 
@@ -56,7 +57,7 @@ impl Receipt {
 }
 
 /// [`Receipt::unread`] for the receipt at `path`, as the file system answers.
-fn why(path: &Path, hidden: Option<&Path>) -> String {
+fn why(path: &Path, seen: &Seen) -> String {
     let shown = path.display();
     let denied = |error: &io::Error| error.kind() == io::ErrorKind::PermissionDenied;
     let looked = std::fs::symlink_metadata(path);
@@ -71,6 +72,10 @@ fn why(path: &Path, hidden: Option<&Path>) -> String {
     // Neither a mode nor the job mends what the sandbox hides, and a home
     // folder, which the collector's unit hides, is opened to nobody.
     let home = folder.filter(|folder| hidden::HOMES.iter().any(|home| *folder == Path::new(home)));
+    let hidden = match seen {
+        Seen::Hidden(place) => Some(place.as_path()),
+        Seen::Host | Seen::Bound { .. } => None,
+    };
     if let Some(place) = hidden.or(home)
         && looked
             .as_ref()
@@ -84,11 +89,17 @@ fn why(path: &Path, hidden: Option<&Path>) -> String {
         );
     }
     match looked {
+        // Opening the folder to every user would open what else it holds.
         Err(error) if denied(&error) => {
-            let folder = folder.unwrap_or(path).display();
+            let folder = folder.unwrap_or(path);
+            let mounted = seen.on_host(folder).map_or_else(String::new, |host| {
+                format!(", a mount of the host's {}", host.display())
+            });
             format!(
                 "The receipt at {shown} cannot be looked for: the collector's user may not \
-                 search the folder {folder}; let every user search it (chmod o+x {folder})."
+                 search the folder {}{mounted}; let the job write it where that user may \
+                 search, and set `path` to it.",
+                folder.display()
             )
         }
         Err(error) if error.kind() != io::ErrorKind::NotFound => {
@@ -106,10 +117,16 @@ fn why(path: &Path, hidden: Option<&Path>) -> String {
         }
         // Opened as the read was, so that a FIFO put here since the look
         // above is not waited for.
-        Ok(_) if open_regular_file(path).is_err_and(|error| denied(&error)) => format!(
-            "The receipt at {shown} is there, but the collector's user may not open it: let the \
-             job write it with mode 0644 (chmod 0644 {shown})."
-        ),
+        Ok(_) if open_regular_file(path).is_err_and(|error| denied(&error)) => {
+            let file = seen.on_host(path).map_or_else(
+                || shown.to_string(),
+                |host| format!("{} on the host, which a mount shows there", host.display()),
+            );
+            format!(
+                "The receipt at {shown} is there, but the collector's user may not open it: let \
+                 the job write it with mode 0644 (chmod 0644 {file})."
+            )
+        }
         Ok(_) => format!(
             "The receipt at {shown} cannot be read: it must be at most {} KiB of JSON, an object \
              or a list.",

@@ -579,10 +579,14 @@ receipt, it says why and what mends it: the collector's unit hides the place,
 as it does `/home` and `/tmp` (see [below](#paths-the-collector-cannot-see));
 there is no file at `path`, which the
 job has not written; the collector's user may not search a folder on the way
-there (`chmod o+x` that folder) or may not open the file, as where a job
+there (let the job write it where that user may search, and set `path` to
+it: opening the folder to every user would open what else it holds) or may
+not open the file, as where a job
 under umask 027 or 077 writes it with mode 0640 or 0600 (mode `0644` mends
 it); it is a link, which is not followed, or no plain file; or it is larger
-than 1024 KiB or no JSON object or list.
+than 1024 KiB or no JSON object or list. A folder or a file that a mount
+shows the collector at another place, as below, is named by its place on
+the host.
 
 A receipt can list results, one row each: `rows = []` where the file itself
 is the list, or `rows = ["results"]` for a list under that key. `columns`
@@ -644,7 +648,9 @@ BindReadOnlyPaths=/home/webmail/bulwark:/srv/garrison/bulwark
 
 and `admin_directory = "/srv/garrison/bulwark"`. The collector then reads
 that folder there and nothing else of `/home`; root sees an empty folder at
-`/srv/garrison/bulwark`. For the free space of a file system mounted at
+`/srv/garrison/bulwark`. The folder keeps its own mode there, so the
+collector's user must be allowed to search it and read what the check reads.
+For the free space of a file system mounted at
 `/home`, show it an empty folder of that file system:
 `sudo mkdir -p /home/.garrison-disk /srv/garrison/home-disk`, the line
 `BindReadOnlyPaths=/home/.garrison-disk:/srv/garrison/home-disk` and
