@@ -36,6 +36,7 @@ mod keys;
 mod milter;
 mod refused;
 mod scene;
+mod secrets;
 mod stopper;
 mod stops;
 mod together;
