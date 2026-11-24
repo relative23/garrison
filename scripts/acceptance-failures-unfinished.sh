@@ -54,12 +54,14 @@ settling='p=$(cat /root/late.pid); quiet=0
     [ "$quiet" -ge 10 ] && test -d /proc/$p'
 
 scenario_killed_late() {
-    step "Installers killed as they back up, while the services settle and as they switch back"
+    step "Upgrades killed as they back up, while the services settle and as they switch back"
     upgraded
     before=$(events)
-    # A reinstall backs up and settles as an upgrade does. The backup a
-    # killed installer started runs on, into the folder it named.
+    # Each from the release before. The backup a killed installer started
+    # runs on, into the folder it named; after a kill while the services
+    # settle, the next run finds the release running and makes no copy.
     for when in "as the backup begins:true" "during the backup:sleep 0.5" "while the services settle:$settling"; do
+        installer '/root/previous/bin/garrison install'
         killed_once '/root/release/bin/garrison install' 'Backing up the running state' "${when#*:}" ' is running. Roll back with'
         if ! installer '/root/release/bin/garrison install > /root/next.log 2>&1'; then
             inside 'cat /root/next.log' || true
@@ -80,16 +82,22 @@ scenario_killed_late() {
             deploy/systemd/garrison-web.service &&
         grep -q absent.toml deploy/systemd/garrison-web.service &&
         find . -type f ! -name SHA256SUMS | sed "s|^\./||" | sort | xargs sha256sum > SHA256SUMS'
+    falling=$(inside 'cat /root/falling/VERSION')
     earlier=$(inside 'readlink -f /opt/garrison/previous 2>/dev/null || true')
     for pause in 0 1; do
         killed_once '/root/falling/bin/garrison install' 'switching back to the previous release' "sleep $pause" \
             'the previous release is running'
         installer '/root/release/bin/garrison install'
         running "after a kill $pause s into the switch back" "$new"
-        # Neither the release that fell nor the one that ran: the release
-        # before, which a rollback returns to.
-        check "after a kill $pause s into the switch back, previous is what it was before" \
-            "test \"\$(readlink -f /opt/garrison/previous 2>/dev/null || true)\" = '$earlier'"
+        # Where the switch back had set the links back, previous is the
+        # release before again; where current still named the release that
+        # fell, the next run made that one previous, as every run does.
+        check "after a kill $pause s into the switch back, previous is the release before or the one that fell" \
+            "now=\$(readlink -f /opt/garrison/previous 2>/dev/null || true)
+            test \"\$now\" = '$earlier' || test \"\$(basename \"\$now\")\" = '$falling'"
+        if [ -n "$earlier" ]; then
+            check "after a kill $pause s into the switch back, the release before stays unpacked" "test -d '$earlier'"
+        fi
     done
     check "no event was lost" "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -ge $before"
     check "no partly unpacked release is left" '! ls -A /opt/garrison/releases | grep -q "^\."'
@@ -133,6 +141,23 @@ hanging_release() {
     inside 'cat /root/hanging/VERSION'
 }
 
+# The same installer again after a kill goes forward: the release that does
+# not start is stopped, nothing goes back, and the answer names the rollback,
+# which returns to the release that ran.
+forward_then_back() {
+    refused "$1: the same installer again stops the release that does not start and names the rollback" \
+        '/root/hanging/bin/garrison install' "install --rollback\` returns to $new"
+    check "$1: nothing of the release that did not start runs" \
+        '! systemctl is-active --quiet garrison-web.service garrison-ingest.service garrison-collect.timer'
+    installer '/opt/garrison/current/bin/garrison install --rollback'
+    running "$1: after the rollback it names" "$new"
+    names "$1: previous is the release that did not start" previous "$hanging"
+    if [ -n "$earlier" ]; then
+        check "$1: the release before the upgrade stays unpacked" "test -d '$earlier'"
+    fi
+    check "$1: no record of the run is left" 'test ! -e /opt/garrison/unfinished.json'
+}
+
 scenario_upgrade_killed() {
     step "An upgrade killed once current named the new release, which does not start, then one more run"
     upgraded
@@ -141,25 +166,15 @@ scenario_upgrade_killed() {
     killed_at '/root/hanging/bin/garrison install' "$(current_is "$hanging")" 2 'did not start'
     check "the killed upgrade had switched current" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$hanging'"
-    refused "the next run switches back to the release that ran" '/root/hanging/bin/garrison install' \
-        "the previous release is running"
-    running "after the killed upgrade" "$new"
-    check "previous is what it was before the upgrade" "test \"\$(readlink -f /opt/garrison/previous 2>/dev/null || true)\" = '$earlier'"
-    check "nothing is left unfinished" 'test ! -e /opt/garrison/unfinished.json'
-    # Killed once that release was started: it may have recorded what no
-    # copy holds, so the next run copies the state before it switches back.
+    forward_then_back "killed while its release starts"
+    # Killed once that release was started, which may have recorded since.
     killed_at '/root/hanging/bin/garrison install' \
         "$(current_is "$hanging") && systemctl is-active --quiet garrison-ingest.service" 0 'did not start'
-    refused "after a kill once it was started, the next run copies the state and switches back" \
-        '/root/hanging/bin/garrison install' "the state as it is was copied to /var/backups/garrison/pre-switch-back-"
-    running "after the upgrade killed once it was started" "$new"
-    check "previous is still what it was before the upgrade" \
-        "test \"\$(readlink -f /opt/garrison/previous 2>/dev/null || true)\" = '$earlier'"
-    check "nothing is left unfinished after it either" 'test ! -e /opt/garrison/unfinished.json'
+    forward_then_back "killed once its release was started"
 }
 
 scenario_switch_back_failed_early() {
-    step "An upgrade killed before it switched, then a switch back that fails: current stays at the release that ran"
+    step "An upgrade killed as it stopped the services, then the release that ran, which does not start either"
     upgraded
     hanging=$(hanging_release)
     # The web service takes three seconds to stop, so that the kill comes
@@ -167,21 +182,22 @@ scenario_switch_back_failed_early() {
     inside 'mkdir -p /etc/systemd/system/garrison-web.service.d &&
         printf "[Service]\nExecStop=/bin/sleep 3\n" > /etc/systemd/system/garrison-web.service.d/acceptance-slow.conf &&
         systemctl daemon-reload'
-    killed_at '/root/hanging/bin/garrison install' 'test -e /opt/garrison/unfinished.json' 0 'did not start'
+    killed_at '/root/hanging/bin/garrison install' \
+        'test "$(systemctl show -p ActiveState --value garrison-web.service)" = deactivating' 0 'did not start'
     check "the killed upgrade had not switched current" "$(current_is "$new")"
     # The release that ran does not start either, for as long as the flag is there.
     inside 'rm /etc/systemd/system/garrison-web.service.d/acceptance-slow.conf &&
         printf "[Service]\nExecStartPre=+/bin/sh -c \"! test -e /run/garrison-acceptance-fail\"\n" \
             > /etc/systemd/system/garrison-web.service.d/acceptance-fail.conf &&
         systemctl daemon-reload && touch /run/garrison-acceptance-fail'
-    refused "the switch back the next run begins fails" '/root/release/bin/garrison install' \
-        "did not start either"
+    refused "the installer of the release that ran says that it does not start" '/root/release/bin/garrison install' \
+        "did not start"
     check "and leaves current at the release that ran" "$(current_is "$new")"
     inside 'rm /run/garrison-acceptance-fail /etc/systemd/system/garrison-web.service.d/acceptance-fail.conf &&
         rmdir /etc/systemd/system/garrison-web.service.d && systemctl daemon-reload'
     installer '/root/release/bin/garrison install'
-    running "after the switch back that failed early" "$new"
-    check "nothing is left unfinished after the switch back that failed early" \
+    running "after the start that failed early" "$new"
+    check "no record of the run is left after the start that failed early" \
         'test ! -e /opt/garrison/unfinished.json'
 }
 
@@ -197,8 +213,10 @@ scenario_upgrade_resumed() {
     killed_at "garrison upgrade /root/$archive" "$(current_is "$new")" 2 ' is running. Roll back with'
     check "the killed upgrade had switched current" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$new'"
+    # It starts the release where its start had not come so far, and says
+    # that nothing was changed where it had; both name the rollback.
     says "garrison upgrade again finishes the upgrade it began" "garrison upgrade /root/$archive" \
-        "Garrison $new is running. Roll back with: garrison install --rollback"
+        "Roll back with: garrison install --rollback"
     running "after the killed garrison upgrade" "$new"
     check "previous names the release the upgrade began from" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/previous)\")\" = '$old'"
@@ -213,8 +231,10 @@ scenario_rollback_killed() {
     for with in '' ' --restore-state'; do
         upgraded
         killed_at "/opt/garrison/current/bin/garrison install --rollback$with" "$(current_is "$old")" 2 'Rolled back to'
-        says "running the rollback$with again finishes it" \
-            "/opt/garrison/current/bin/garrison install --rollback$with" "Rolled back to $old."
+        finish="/opt/garrison/releases/$new/bin/garrison install --rollback$with"
+        check "the rollback$with's first line names the installer that finishes it" \
+            "grep -q -F 'if this is interrupted, run it again: $finish' /root/late.log"
+        says "running the rollback$with again with it finishes it" "$finish" "Rolled back to $old."
         running "after the killed rollback$with" "$old"
         check "previous names the release the rollback$with left" \
             "test \"\$(basename \"\$(readlink -f /opt/garrison/previous)\")\" = '$new'"
@@ -233,14 +253,12 @@ scenario_restore_killed() {
     killed_at '/opt/garrison/current/bin/garrison restore --from /root/kept-for-restore' \
         'grep -q -F "Restoring Garrison state from" /root/late.log' 0 'Restored the state'
     first=$(inside 'ls -d /var/backups/garrison/pre-restore-* | sort | tail -n 1')
-    # A copy made within the same second would take the first one's name.
-    inside 'sleep 1.1'
-    says "running the restore again finishes it and names the copy from before the first run" \
-        '/opt/garrison/current/bin/garrison restore --from /root/kept-for-restore' "The state from before is in $first."
-    check "that copy holds the state from before the first run" \
+    says "running the restore again finishes it" \
+        '/opt/garrison/current/bin/garrison restore --from /root/kept-for-restore' "Restored the state from /root/kept-for-restore"
+    check "the first run's copy keeps the state from before it" \
         "test \$(sqlite3 $first/ingest/events.sqlite 'SELECT count(*) FROM events') -eq $before"
-    check "the next run made no copy of what the first had put back" \
-        "test \"\$(ls -d /var/backups/garrison/pre-restore-* | sort | tail -n 1)\" = '$first'"
+    check "the next run copied the state it found into a folder of its own" \
+        "test \"\$(ls -d /var/backups/garrison/pre-restore-* | sort | tail -n 1)\" != '$first'"
     running "after the killed restore" "$new"
     inside 'rm -r /root/kept-for-restore'
 }
@@ -274,8 +292,8 @@ scenario_upgrade_came_up() {
     check "what the release of the killed upgrade recorded stays" \
         "test \"\$(sqlite3 -readonly /var/lib/garrison/collector/status.sqlite 'SELECT min(collected_at) FROM snapshots')\" = '$first' ||
             { cat /root/came-up.log; false; }"
-    check "the next installer says that it acts on nothing of that upgrade" \
-        'grep -q "but Garrison was started since" /root/came-up.log && ! grep -q "Switching back" /root/came-up.log'
+    check "the next installer puts nothing back of that upgrade" \
+        '! grep -q -e "Switching back" -e "went back to their copies" /root/came-up.log'
     names "it upgraded from the release that came up" previous "$again"
     running "after the upgrade that came up" "$new"
     # The links as the other scenarios take them: the release before, then this one.
@@ -317,27 +335,44 @@ scenario_rollback_state_killed() {
     stored_event rolled-away-event
     killed_at '/opt/garrison/current/bin/garrison install --rollback --restore-state' \
         'grep -q -F "Restoring Garrison state from" /root/late.log' 0 'Rolled back to'
-    refused "the next command names the rollback with the state" '/root/release/bin/garrison install' \
-        "install --rollback --restore-state\` to finish it"
-    says "the command it names finishes the rollback with the state" \
-        "/opt/garrison/releases/$new/bin/garrison install --rollback --restore-state" "Rolled back to $old."
+    finish="/opt/garrison/releases/$new/bin/garrison install --rollback --restore-state"
+    check "the rollback's first line names the command that finishes it" \
+        "grep -q -F 'if this is interrupted, run it again: $finish' /root/late.log"
+    says "the command it names finishes the rollback with the state" "$finish" "Rolled back to $old."
     check "the state from before the upgrade is back in full" "$(event_count rolled-away-event '= 0')"
     running "after the rollback killed as it put the state back" "$old"
     upgraded
 }
 
 scenario_rollback_came_up() {
-    step "A rollback with the state from before the upgrade killed once its release came up, then its first line's command"
+    step "A rollback with the state from before the upgrade killed once its release came up, then the installer its first line named"
     upgraded_from_old
     killed_at '/opt/garrison/current/bin/garrison install --rollback --restore-state' \
         "$(current_is "$old") && systemctl is-active --quiet garrison-web.service" 0 'Rolled back to'
     # The release it went back to runs and records on the state that went back.
     stored_event rolled-back-event
-    says "the command of its first line finishes the rollback" \
-        "/opt/garrison/releases/$new/bin/garrison install --rollback --restore-state" "Rolled back to $old."
+    # Run without --restore-state, the rollback puts nothing back.
+    says "that installer finishes the rollback without putting the state back again" \
+        "/opt/garrison/releases/$new/bin/garrison install --rollback" "Rolled back to $old."
     check "what was recorded once it came up stays" "$(event_count rolled-back-event '-ge 1')"
+    names "previous is the release the rollback left" previous "$new"
     running "after the rollback that came up" "$old"
     upgraded
+}
+
+scenario_leftover_record() {
+    step "A record of an unfinished run that an earlier build left is named, removed and not acted on"
+    upgraded
+    # As the development branch's installers wrote it before 0.2.0: an
+    # upgrade from the release before, whose backup is the newest one.
+    last=$(inside 'readlink -f /var/backups/garrison/last-pre-upgrade')
+    inside "printf '%s' '{\"command\": \"upgrade\", \"from\": \"/opt/garrison/releases/$old\",
+        \"to\": \"/opt/garrison/releases/$new\", \"previous\": null, \"backup\": \"$last\"}' \
+        > /opt/garrison/unfinished.json && chmod 600 /opt/garrison/unfinished.json"
+    says "the next run names what it said" '/root/release/bin/garrison install' \
+        "/opt/garrison/unfinished.json named an unfinished upgrade from $old to $new; nothing reads it any more"
+    check "and removes it" 'test ! -e /opt/garrison/unfinished.json'
+    running "after the record an earlier build left" "$new"
 }
 
 scenario_restore_came_up() {

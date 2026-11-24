@@ -12,7 +12,7 @@
 scenario_warnings() {
     step "The installer and doctor say what check-config warns of"
     upgraded
-    says "the installer passes check-config's warnings on as it starts the services" \
+    says "the installer passes check-config's warnings on" \
         '/root/release/bin/garrison install' \
         "Warning: deployment.public_origin https://admin.example.test is a placeholder"
     inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.warnings &&

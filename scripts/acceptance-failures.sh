@@ -4,7 +4,8 @@
 # a release that migrated a database before it failed leaves the old one a
 # state it can read, and an installer killed at any point, early or as it
 # backs up, waits for the services to settle or switches back, leaves
-# nothing a later run cannot finish. The installer passes on what
+# nothing a later run cannot go on from; a run where everything is as
+# installed changes nothing. The installer passes on what
 # check-config warns of, names a file it could not write, refuses a secret
 # its unit would not hand over, and a policy or a check's path that a unit
 # hides, which doctor names, and follows a policy kept elsewhere, but
@@ -262,6 +263,9 @@ scenario_switch_back_room() {
 
 scenario_concurrent() {
     step "Two installers at once"
+    # A secret file the run that holds the lock makes again, and then
+    # starts the services: it holds the lock while the other one asks.
+    inside 'rm /etc/garrison/credentials/ntfy-token'
     inside 'cd /root; umask 077
         { /root/release/bin/garrison install > one.log 2>&1; echo $? > one.status; } &
         { /root/release/bin/garrison install > two.log 2>&1; echo $? > two.status; } &
@@ -277,10 +281,16 @@ scenario_concurrent() {
 . "$(dirname "$0")/acceptance-failures-unfinished.sh"
 
 scenario_reinstall() {
-    step "Reinstalling the running release keeps the state to restore"
+    step "Installing the release that runs as installed changes nothing and keeps the state to restore"
     upgraded
     inside 'readlink /var/backups/garrison/last-pre-upgrade > /root/last-before'
-    installer '/root/release/bin/garrison install'
+    backups=$(inside 'ls /var/backups/garrison | wc -l')
+    pid=$(inside 'systemctl show -p MainPID --value garrison-web.service')
+    says "a reinstall of the release that runs as installed says that it changed nothing" \
+        '/root/release/bin/garrison install' "Garrison $new is running as installed; nothing was changed."
+    check "and stops nothing and copies nothing" "
+        test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid' &&
+            test \$(ls /var/backups/garrison | wc -l) -eq $backups"
     check "a reinstall keeps last-pre-upgrade" \
         'test "$(readlink /var/backups/garrison/last-pre-upgrade)" = "$(cat /root/last-before)"'
     names "a reinstall keeps the previous release" previous "$old"
@@ -288,7 +298,7 @@ scenario_reinstall() {
     inside 'mv /opt/garrison/previous /root/previous.link'
     installer '/root/release/bin/garrison install > /root/reinstall.log 2>&1'
     check "a reinstall without a previous release names no rollback" \
-        "{ ! grep -q 'Roll back with' /root/reinstall.log && grep -q -F 'Garrison $new is running.' /root/reinstall.log; } ||
+        "{ ! grep -q 'Roll back with' /root/reinstall.log && grep -q -F 'Garrison $new is running' /root/reinstall.log; } ||
             { cat /root/reinstall.log; false; }"
     inside 'mv /root/previous.link /opt/garrison/previous && rm /root/reinstall.log'
     running "after the reinstall" "$new"
@@ -451,7 +461,7 @@ running "installed" "$old"
 for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check base_hidden failed_start crash_loop migrated_then_failed \
     switch_back_room concurrent \
     upgrade_killed switch_back_failed_early upgrade_resumed rollback_killed restore_killed upgrade_came_up restore_came_up \
-    rollback_state_killed rollback_came_up \
+    rollback_state_killed rollback_came_up leftover_record \
     restore_refused restore_refused_config restore_policy \
     restore_policy_link restore_room rollback_after_restore elsewhere_unloadable elsewhere_purge rollback_refused \
     rollback_refused_config rollback_room \
