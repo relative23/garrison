@@ -16,21 +16,20 @@
 //! anew, and a service whose restart it names finds a secret in its file
 //! that it can start with and that Stalwart takes. A run that ends by
 //! itself leaves the broker with a key Stalwart takes, or says that the
-//! broker goes without one until setup makes it. A run that was interrupted
-//! restarts nothing: there the next run's look at the copies systemd keeps,
-//! which only root makes, restarts each service whose file it wrote anew,
-//! which the test takes as done, for those files alone and onto a secret it
-//! can use as well.
+//! broker goes without one until setup makes it; stopped at the reload,
+//! which alone can part them, it leaves the receiver with the key Stalwart
+//! signs with, or says that the receiver refuses Stalwart's batches until
+//! setup runs again. A run that was interrupted restarts nothing: there the
+//! next run's look at the copies systemd keeps, which only root makes,
+//! restarts each service whose file it wrote anew, which the test takes as
+//! done, for those files alone and onto a secret it can use as well.
 //!
 //! Not held here: what root alone does (the restart itself, and how it
 //! looks at the copies systemd keeps, which a user cannot read; a unit test
-//! of `setup/restart.rs` holds the look); whether Stalwart
-//! still signs with the running receiver's key between a stopped run and
-//! the next, as after a lost answer to the reload, which only a delivery
-//! shows (the next run mends it, and Stalwart sends a refused batch again
-//! for an hour); a configuration changed between a stopped run and the
-//! next, such as `[milter]` taken out after a stop that entered the filter;
-//! and two installations of Garrison against one Stalwart.
+//! of `setup/restart.rs` holds the look); a configuration changed between a
+//! stopped run and the next, such as `[milter]` taken out after a stop that
+//! entered the filter; and two installations of Garrison against one
+//! Stalwart.
 
 use std::any::Any;
 use std::fs;
@@ -116,6 +115,32 @@ fn broker_unsaid(lab: &Lab, held: Option<&[String; 2]>, said: &str) -> Option<St
     let taken = key_status(&lab.url, &held[0]) == 200;
     (!taken && !told).then(|| {
         "the broker holds a key Stalwart no longer takes, and the run did not say so".to_owned()
+    })
+}
+
+/// After a run that ended by itself at the reload, which Stalwart may have
+/// made without its answer coming back: Stalwart signs with the running
+/// receiver's key, or the run said that the receiver refuses Stalwart's
+/// batches until setup runs again. Only a delivery shows which key Stalwart
+/// signs with, and only the reload can part the two.
+fn receiver_unsaid(
+    lab: &Lab,
+    capture: &Capture,
+    setup: &Setup,
+    held: Option<&[String; 2]>,
+    said: &str,
+    context: &str,
+) -> Option<String> {
+    let held = held?;
+    let copy = setup.directory.join("held");
+    fs::create_dir_all(&copy).unwrap();
+    fs::write(copy.join(HELD[1]), &held[1]).unwrap();
+    let signs = || assert_webhook_held(lab, &copy, capture, context);
+    let signed = std::panic::catch_unwind(AssertUnwindSafe(signs)).is_ok();
+    let told = said.contains("the receiver refuses Stalwart's batches until setup runs again");
+    (!signed && !told).then(|| {
+        "Stalwart signs with another key than the running receiver's, and the run did not say so"
+            .to_owned()
     })
 }
 
@@ -256,6 +281,10 @@ fn mended(
         (_, Stop::Interrupted) => Vec::new(),
         _ => {
             faults.extend(broker_unsaid(lab, held.as_ref(), &said));
+            if request == "x:Action/set create" {
+                let unsaid = receiver_unsaid(lab, capture, setup, held.as_ref(), &said, &context);
+                faults.extend(unsaid);
+            }
             Vec::new()
         }
     };

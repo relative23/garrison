@@ -113,3 +113,30 @@ fn a_failure_names_the_run_that_mends_it() {
         ))
     );
 }
+
+/// Where the answer to the reload is lost, Stalwart may have reloaded all
+/// the same and taken the new secrets: setup says what goes without them
+/// until it runs again.
+#[test]
+fn a_reload_without_an_answer_says_what_goes_without_the_new_secrets() {
+    let server = serve(vec![answer(503, "{}"), answer(503, "{}")]);
+    let admin = Admin {
+        url: format!("{}/jmap/", server.url),
+        authorization: "Bearer key".to_owned(),
+    };
+    assert_eq!(
+        reload(&admin, false, false),
+        Err("x:Action/set: Stalwart answered HTTP 503".to_owned())
+    );
+    assert_eq!(
+        reload(&admin, true, true),
+        Err(
+            "x:Action/set: Stalwart answered HTTP 503; where Stalwart reloaded its settings all \
+             the same, the receiver refuses Stalwart's batches until setup runs again, and \
+             Stalwart sends them again for an hour; the exporter refuses the collector's scrape \
+             until setup runs again"
+                .to_owned()
+        )
+    );
+    server.requests();
+}

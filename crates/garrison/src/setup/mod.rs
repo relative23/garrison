@@ -221,7 +221,7 @@ fn configure(
         credential = exported.new_credential;
     }
     steps.extend(milter::ensure(admin, config, directory)?);
-    admin.set("x:Action/set", &Set::create(Action::ReloadSettings))?;
+    reload(admin, webhook.new_key.is_some(), credential.is_some())?;
     // Stalwart signs with the webhook's new key and takes the new scrape
     // credential from now on, so their files follow.
     if let Some(key) = &webhook.new_key {
@@ -238,6 +238,33 @@ fn configure(
         say(&format!("- {step}"));
     }
     tried(admin, config, networks, done)
+}
+
+/// Stalwart reads its settings again, which is when it takes a new
+/// signature key or scrape credential. An answer lost on the way may come
+/// of a reload all the same, after which the services that hold the old
+/// ones go without, until a run writes the new ones to their files.
+fn reload(admin: &Admin, signature: bool, scrape: bool) -> Result<(), String> {
+    let reloaded = admin.set("x:Action/set", &Set::create(Action::ReloadSettings));
+    let mut without = Vec::new();
+    if signature {
+        without.push(
+            "the receiver refuses Stalwart's batches until setup runs again, and Stalwart \
+             sends them again for an hour",
+        );
+    }
+    if scrape {
+        without.push("the exporter refuses the collector's scrape until setup runs again");
+    }
+    reloaded.map_err(|error| {
+        if without.is_empty() {
+            return error;
+        }
+        format!(
+            "{error}; where Stalwart reloaded its settings all the same, {}",
+            without.join("; ")
+        )
+    })
 }
 
 /// The broker started again at once with the new key this run made, so that
