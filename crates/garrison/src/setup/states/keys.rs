@@ -31,7 +31,7 @@ pub(in crate::setup) fn owner_unknown(file: &Path, why: impl Display) -> State {
 
 /// Stalwart does not show the administrator the account that the key in
 /// `file` belongs to (`error`, JMAP's accountNotFound), as it answers a
-/// user without its administrator rights (measured on Stalwart 1.1.0).
+/// user without its administrator rights (measured on Stalwart 1.2.0).
 pub(in crate::setup) fn account_unseen(file: &Path, error: &State) -> State {
     State::new(
         "setup-account-unseen",
@@ -62,7 +62,7 @@ pub(in crate::setup) fn account_full(held: &str, description: &str) -> State {
 
 /// The administrator may not grant the key of `description` its
 /// permissions (`error`, JMAP's forbidden), as Stalwart answers a user
-/// without its administrator rights (measured on Stalwart 1.1.0).
+/// without its administrator rights (measured on Stalwart 1.1.0 only).
 pub(in crate::setup) fn key_not_granted(description: &str, error: &State) -> State {
     State::new(
         "setup-key-not-granted",

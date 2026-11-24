@@ -97,7 +97,7 @@ fn owner(admin: &Admin, target: &Path) -> Result<Option<Session>, State> {
 /// What setup says where Stalwart does not show the administrator the
 /// account that a file's key belongs to: JMAP's `accountNotFound`, as
 /// Stalwart answers a user without its administrator rights who asks for
-/// that account's keys (measured on Stalwart 1.1.0).
+/// that account's keys (measured on Stalwart 1.2.0).
 fn unseen(failed: Failed, target: &Path) -> State {
     if failed.is("accountNotFound") {
         return states::account_unseen(target, &failed.state);
@@ -330,7 +330,7 @@ pub(super) fn take_up(key: &Key) -> Result<(), State> {
 /// What setup says where Stalwart made no new key. A user without
 /// administrator rights reads the list of keys, its own, but may not grant
 /// a key the permissions it lacks: JMAP's `forbidden`, as Stalwart answers
-/// it (measured on Stalwart 1.1.0). JMAP's error type stays with it.
+/// it (measured on Stalwart 1.1.0 only). JMAP's error type stays with it.
 fn refused(failed: Failed, description: &str) -> Failed {
     let state = if failed.is("forbidden") {
         states::key_not_granted(description, &failed.state)

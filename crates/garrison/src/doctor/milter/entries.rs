@@ -3,7 +3,7 @@
 //! by and `garrison doctor` judges by, so that what doctor names setup
 //! mends. Each run reads the entries as Stalwart holds them then.
 //!
-//! A milter has no name in Stalwart (1.1.0's entry has no field for one), so
+//! A milter has no name in Stalwart (1.2.0's schema gives it no field), so
 //! an entry is the filter's where it asks this host, under any name the
 //! resolver gives a loopback or the unspecified address, at the filter's
 //! port: the one the configuration gives it, or one the running filter
@@ -60,7 +60,7 @@ impl Entry {
     /// The addresses Stalwart asks it at: its host and port as this host's
     /// resolver gives them, as Stalwart looks a milter's host up (it fails
     /// to read its settings with the resolver's words for a name that does
-    /// not resolve, measured on 1.1.0).
+    /// not resolve, measured on 1.1.0 only).
     fn addresses(&self) -> Vec<SocketAddr> {
         let host = self.host.0.as_ref().and_then(Value::as_str);
         match (host, self.port()) {
@@ -269,17 +269,7 @@ mod tests {
     /// without a port, is not.
     #[test]
     fn an_entry_is_asked_in_vain_where_no_milter_answers_it() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let milter = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
-            garrison_milter::server::serve(
-                &listener,
-                garrison_milter::Settings {
-                    max_bytes: 1024,
-                    ..Default::default()
-                },
-            );
-        });
+        let milter = crate::doctor::answering_milter();
         let (_held, silent) = crate::doctor::silent_port();
         let stored = read(&json!([
             {"id": "a", "host": "127.0.0.1", "port": milter},

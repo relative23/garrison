@@ -370,21 +370,6 @@ scenario_rollback_came_up() {
     upgraded
 }
 
-scenario_leftover_record() {
-    step "A record of an unfinished run that an earlier build left is named, removed and not acted on"
-    upgraded
-    # As the development branch's installers wrote it before 0.2.0: an
-    # upgrade from the release before, whose backup is the newest one.
-    last=$(inside 'readlink -f /var/backups/garrison/last-pre-upgrade')
-    inside "printf '%s' '{\"command\": \"upgrade\", \"from\": \"/opt/garrison/releases/$old\",
-        \"to\": \"/opt/garrison/releases/$new\", \"previous\": null, \"backup\": \"$last\"}' \
-        > /opt/garrison/unfinished.json && chmod 600 /opt/garrison/unfinished.json"
-    says "the next run names what it said" '/root/release/bin/garrison install' install-record-removed
-    check "and what that was" "grep -q -F '$old' /root/answer && grep -q -F '$new' /root/answer"
-    check "and removes it" 'test ! -e /opt/garrison/unfinished.json'
-    running "after the record an earlier build left" "$new"
-}
-
 scenario_restore_came_up() {
     step "A restore killed once Garrison came up on the state it put back, which then records, then the same restore again"
     upgraded

@@ -38,7 +38,7 @@ pub(super) const NAMES: [&str; 8] = [
 ];
 
 /// A port of this host where a milter answers, for as long as the test runs.
-fn filter() -> u16 {
+pub(super) fn filter() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || {

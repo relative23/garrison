@@ -8,21 +8,34 @@ use std::path::{Path, PathBuf};
 use super::files::{Step, announce, io, must, put, relabel, run};
 use super::{CONFIG, SYSTEMCTL, UNITS, cli, command, states};
 
-fn nginx_files() -> Vec<(String, Vec<u8>)> {
-    let mut found: Vec<(String, Vec<u8>)> = fs::read_dir("/etc/nginx/snippets")
+/// Garrison's nginx snippets below `root` (`/` outside tests), in order.
+pub(super) fn snippets(root: &Path) -> Vec<PathBuf> {
+    let folder = root.join("etc/nginx/snippets");
+    // nginx reads `.conf` exactly; other cases are not snippets.
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    let ours = |name: &str| name.starts_with("garrison") && name.ends_with(".conf");
+    let mut found: Vec<PathBuf> = fs::read_dir(&folder)
         .into_iter()
         .flatten()
         .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            // nginx reads `.conf` exactly; other cases are not snippets.
-            #[allow(clippy::case_sensitive_file_extension_comparisons)]
-            let snippet = name.starts_with("garrison") && name.ends_with(".conf");
-            snippet.then(|| (name, fs::read(entry.path()).unwrap_or_default()))
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(ours)
         })
         .collect();
     found.sort();
     found
+}
+
+/// The snippets with what they hold, to tell whether a run changed them.
+fn nginx_files() -> Vec<(PathBuf, Vec<u8>)> {
+    let read = |path: PathBuf| {
+        let held = fs::read(&path).unwrap_or_default();
+        (path, held)
+    };
+    snippets(Path::new("/")).into_iter().map(read).collect()
 }
 
 /// Apply changed snippets (a new script hash, for example) if nginx accepts them.

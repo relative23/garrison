@@ -107,8 +107,11 @@ fn a_refused_administrator_is_said_as_such() {
 
 /// A user without administrator rights is told to run setup as an
 /// administrator also where setup ran before: the files' keys then belong
-/// to an account that Stalwart does not show that user. The keys the
-/// administrator made stay as they are, held by their files.
+/// to an account that Stalwart does not show that user (JMAP's
+/// accountNotFound). The user may read what setup reads before the keys,
+/// the milter entries and its own API keys, so that setup asks for that
+/// account's keys. The keys the administrator made stay as they are, held
+/// by their files.
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn a_user_without_rights_is_told_so_where_setup_ran_before() {
@@ -120,6 +123,7 @@ fn a_user_without_rights_is_told_so_where_setup_ran_before() {
     assert_eq!(first.status.code(), Some(0), "{}", text(&first));
     let domains = lab.call("x:Domain/get", &json!({"ids": null, "properties": ["id"]}));
     let (user, password) = (unique(), random_hex(18));
+    let reads = json!({"sysMtaMilterGet": true, "sysApiKeyGet": true});
     lab.create(
         "Account",
         &json!({
@@ -128,7 +132,8 @@ fn a_user_without_rights_is_told_so_where_setup_ran_before() {
             "domainId": domains["list"][0]["id"],
             "credentials": {"0": {"@type": "Password", "secret": password}},
             "roles": {"@type": "User"},
-            "permissions": {"@type": "Inherit"},
+            "permissions": {"@type": "Merge", "enabledPermissions": reads,
+                "disabledPermissions": {}},
         }),
     );
     let administrator = fs::read(&setup.credential).unwrap();
@@ -137,16 +142,12 @@ fn a_user_without_rights_is_told_so_where_setup_ran_before() {
     let output = setup.run(&[]);
     write_private(Path::new(&setup.credential), &administrator);
     let said = text(&output);
-    // Stalwart shows the user neither the milters nor the account of the
-    // files' keys: each says to run setup as an administrator.
+    // Stalwart shows the user the milters, but not the account of the files'
+    // keys: setup says to run it as an administrator.
     let named = support::states(&output.stderr);
-    let told = named.last().map(String::as_str);
     assert!(
         output.status.code() == Some(1)
-            && matches!(
-                told,
-                Some("setup-milters-unreadable" | "setup-account-unseen")
-            ),
+            && named.last().map(String::as_str) == Some("setup-account-unseen"),
         "exit {:?}: {said}",
         output.status.code()
     );

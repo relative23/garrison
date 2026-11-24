@@ -41,7 +41,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use crate::state::State;
 use crate::units;
 use files::{Step, announce, io, lock, run};
 use requirements::{base_shown, preflight};
@@ -127,7 +126,6 @@ pub(crate) fn start_installed() -> Step {
     preflight()?;
     base_shown()?;
     let _held = lock(Path::new(LOCK))?;
-    leftover()?;
     let current = io(
         fs::canonicalize(Path::new(BASE).join("current")),
         &Path::new(BASE).join("current"),
@@ -146,36 +144,6 @@ pub(super) fn name(release: &Path) -> String {
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned()
-}
-
-/// Installers built before 0.2.0 from the development branch left
-/// `unfinished.json` for the next run. Nothing reads it any more: each run
-/// that holds the lock names one it finds and removes it, and says whether
-/// there was one.
-pub(super) fn leftover() -> Step<bool> {
-    let found = leftover_in(Path::new(BASE))?;
-    if let Some(said) = &found {
-        announce(&said.to_string());
-    }
-    Ok(found.is_some())
-}
-
-fn leftover_in(base: &Path) -> Step<Option<State>> {
-    let path = base.join("unfinished.json");
-    let Ok(text) = fs::read(&path) else {
-        return Ok(None);
-    };
-    io(fs::remove_file(&path), &path)?;
-    let record: serde_json::Value = serde_json::from_slice(&text).unwrap_or_default();
-    let release = |key: &str| record[key].as_str().map(|path| name(Path::new(path)));
-    let recorded = match (record["command"].as_str(), release("from"), release("to")) {
-        (Some(command @ ("upgrade" | "rollback")), Some(from), Some(to)) => {
-            states::Recorded::Switch(command, from, to)
-        }
-        (Some("restore"), ..) => states::Recorded::Restore(record["source"].as_str()),
-        _ => states::Recorded::Unknown,
-    };
-    Ok(Some(states::record_removed(&path, &recorded)))
 }
 
 pub(crate) fn run_installer(rollback_requested: bool, with_state: bool) -> u8 {
@@ -211,42 +179,5 @@ mod tests {
         let named = garrison_testing::config_text(config, "http://127.0.0.1:9");
         fs::write(config.join("garrison.toml"), named).unwrap();
         assert_eq!(policy_in(config), config.join("policy.json"));
-    }
-
-    /// A record as the development branch's installers wrote it, of each
-    /// kind, and one that cannot be read: named once, removed, and then
-    /// there is nothing more to say.
-    #[test]
-    fn a_record_an_earlier_installer_left_is_named_and_removed() {
-        let directory = tempfile::tempdir().unwrap();
-        let base = directory.path();
-        assert_eq!(leftover_in(base), Ok(None));
-        for (record, named) in [
-            (
-                r#"{"command": "upgrade", "from": "/opt/garrison/releases/0.1.2",
-                    "to": "/opt/garrison/releases/0.2.0", "previous": null,
-                    "backup": "/var/backups/garrison/pre-upgrade-20261124T080000",
-                    "written": {"boot": "b", "starts": {}}}"#,
-                states::Recorded::Switch("upgrade", "0.1.2".into(), "0.2.0".into()),
-            ),
-            (
-                r#"{"command": "rollback", "from": "/opt/garrison/releases/0.2.0",
-                    "to": "/opt/garrison/releases/0.1.2", "previous": null, "state": null}"#,
-                states::Recorded::Switch("rollback", "0.2.0".into(), "0.1.2".into()),
-            ),
-            (
-                r#"{"command": "restore", "source": "/root/kept",
-                    "kept": "/var/backups/garrison/pre-restore-20261124T080000"}"#,
-                states::Recorded::Restore(Some("/root/kept")),
-            ),
-            ("not a record", states::Recorded::Unknown),
-        ] {
-            let path = base.join("unfinished.json");
-            fs::write(&path, record).unwrap();
-            let said = leftover_in(base).unwrap().unwrap();
-            assert_eq!(said, states::record_removed(&path, &named));
-            assert!(!path.exists());
-            assert_eq!(leftover_in(base), Ok(None));
-        }
     }
 }

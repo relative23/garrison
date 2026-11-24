@@ -408,7 +408,7 @@ running "installed" "$old"
 for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check base_hidden failed_start crash_loop migrated_then_failed \
     switch_back_room concurrent \
     upgrade_killed switch_back_failed_early upgrade_resumed rollback_killed restore_killed upgrade_came_up restore_came_up \
-    rollback_state_killed rollback_came_up leftover_record \
+    rollback_state_killed rollback_came_up \
     restore_refused restore_refused_config restore_policy \
     restore_policy_link restore_room rollback_after_restore elsewhere_unloadable elsewhere_purge rollback_refused \
     rollback_refused_config rollback_room \

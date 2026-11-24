@@ -41,7 +41,6 @@ fn restore(from: &Path) -> Step {
     preflight()?;
     super::requirements::base_shown()?;
     let _held = lock(Path::new(LOCK))?;
-    super::leftover()?;
     let source = backup_at(from)?;
     let link = Path::new(BASE).join("current");
     let current = io(fs::canonicalize(&link), &link)?;
@@ -58,7 +57,8 @@ fn restore(from: &Path) -> Step {
         return Err(states::copies_refused(&place, said.trim()));
     }
     let settings = Path::new(CONFIG).join("garrison.toml");
-    let config = config::load(&settings).map_err(|error| states::unloadable(&settings, error))?;
+    let config = config::load(&settings)
+        .map_err(|error| crate::states::config::unloadable(&settings, error))?;
     let owner = state::policy_owner()?;
     // The release that starts again takes today's configuration with the
     // access policy that comes back, which the services still run without.

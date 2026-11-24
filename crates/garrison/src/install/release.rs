@@ -15,7 +15,7 @@ use super::system::{install_system_files, protect_policy, unit_file};
 use super::unpack::{clear_staging, install_release, installed_now, unpacked_as};
 use super::{
     BACKUPS, BASE, CONFIG, LAST, LOCK, cli, command, configured, fallback, here, housekeeping,
-    leftover, name, rollback, states, verify,
+    name, rollback, states, verify,
 };
 use crate::state::State;
 use crate::{say, units};
@@ -185,7 +185,6 @@ pub(super) fn install() -> Step {
     let here = here()?;
     let version = verify::verify(&here)?;
     let _held = lock(Path::new(LOCK))?;
-    let left = leftover()?;
     let base = Path::new(BASE);
     let old = fs::canonicalize(base.join("current")).ok();
     let earlier = fs::canonicalize(base.join("previous")).ok();
@@ -208,7 +207,7 @@ pub(super) fn install() -> Step {
         needs.push((Path::new(BACKUPS), state_size()));
     }
     room(&needs, "the installation")?;
-    let mut altered = clear_staging(&base.join("releases"))? || left;
+    let mut altered = clear_staging(&base.join("releases"))?;
     if unpack {
         install_release(&here, &version)?;
         altered = true;

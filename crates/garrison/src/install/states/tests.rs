@@ -100,14 +100,7 @@ fn checks() -> Rows {
 }
 
 fn runs() -> Rows {
-    let recorded = Recorded::Switch("upgrade", "0.1.2".into(), "0.2.0".into());
     vec![
-        (
-            record_removed(Path::new("/opt/garrison/unfinished.json"), &recorded),
-            "/opt/garrison/unfinished.json named an unfinished upgrade from 0.1.2 to 0.2.0; nothing \
-             reads it any more: it was removed, and nothing was done on its word. \
-             [install-record-removed]",
-        ),
         (
             running("0.2.0", Some("garrison install --rollback")),
             "Garrison 0.2.0 is running. [install-running]\n      Roll back with: garrison install \
@@ -267,11 +260,11 @@ fn system() -> Rows {
              failed: Cannot load /etc/garrison/garrison.toml: unknown key [install-unwritten]",
         ),
         (
-            policy_foreign(Path::new("/srv/access.json"), 65534),
+            unchanged(policy_foreign(Path::new("/srv/access.json"), 65534)),
             "/srv/access.json, the access policy that broker.policy names, belongs to the user with \
              ID 65534, not to root: the installer makes no other user's file the policy, and the \
              broker takes none. Where it is the policy you mean, `chown root /srv/access.json` and \
-             run this again [install-policy-foreign]",
+             run this again. Nothing was changed. [install-policy-foreign]",
         ),
         (
             link_taken(

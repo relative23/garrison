@@ -52,7 +52,7 @@ fn state_fits(target: &Path, source: &Path, comes_back: bool) -> Step<(Uid, Gid)
     let owner = state::policy_owner()?;
     let settings = Path::new(CONFIG).join("garrison.toml");
     let config = config::load(&settings)
-        .map_err(|error| states::unchanged(states::unloadable(&settings, error)))?;
+        .map_err(|error| states::unchanged(crate::states::config::unloadable(&settings, error)))?;
     if comes_back {
         precheck::policy_place(&config)?;
         if let Err(said) = precheck::policy_comes_back(target, source)? {
@@ -69,7 +69,8 @@ fn state_fits(target: &Path, source: &Path, comes_back: bool) -> Step<(Uid, Gid)
 fn restore_state(source: &Path, owner: (Uid, Gid), restored: &mut state::Returned) -> Step {
     // The configured state directories, which need not be the defaults.
     let settings = Path::new(CONFIG).join("garrison.toml");
-    let config = config::load(&settings).map_err(|error| states::unloadable(&settings, error))?;
+    let config = config::load(&settings)
+        .map_err(|error| crate::states::config::unloadable(&settings, error))?;
     state::restore_all(source, &config, owner, restored)
 }
 
@@ -136,7 +137,6 @@ pub(super) fn rollback(with_state: bool) -> Step {
     preflight()?;
     super::requirements::base_shown()?;
     let _held = lock(Path::new(LOCK))?;
-    super::leftover()?;
     let base = Path::new(BASE);
     let Plan {
         target,

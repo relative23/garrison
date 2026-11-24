@@ -15,6 +15,7 @@ use garrison_core::json;
 use serde::Deserialize;
 
 use super::states;
+use crate::selection::ask;
 use crate::state::State;
 use crate::{complain, say};
 
@@ -77,7 +78,7 @@ impl Source {
                 "Delete {} when you no longer need it: it holds a Stalwart administrator secret.",
                 path.display()
             ));
-        } else if confirm(&question, &mut io::stdin().lock(), &mut io::stdout()) {
+        } else if ask(&question, true, &mut io::stdin().lock(), &mut io::stdout()) {
             match fs::remove_file(path) {
                 Ok(()) => say(&format!("Deleted {}.", path.display())),
                 Err(error) => complain(&format!("{}: {error}", path.display())),
@@ -149,17 +150,6 @@ fn secret(prompt: &str) -> Result<String, State> {
     Ok(secret.to_owned())
 }
 
-/// Yes unless the answer is no.
-fn confirm(question: &str, input: &mut impl BufRead, output: &mut impl Write) -> bool {
-    let _ = write!(output, "{question} ");
-    let _ = output.flush();
-    let mut answer = String::new();
-    if input.read_line(&mut answer).is_err() {
-        return false;
-    }
-    !matches!(answer.trim(), "n" | "N" | "no")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,10 +189,11 @@ mod tests {
     #[test]
     fn deleting_the_file_is_the_default_answer() {
         let mut output = Vec::new();
-        assert!(confirm("Delete?", &mut "\n".as_bytes(), &mut output));
-        assert!(confirm("Delete?", &mut "y\n".as_bytes(), &mut output));
-        assert!(!confirm("Delete?", &mut "n\n".as_bytes(), &mut output));
-        assert!(!confirm("Delete?", &mut "no\n".as_bytes(), &mut output));
+        let mut confirm = |answer: &str| ask("Delete?", true, &mut answer.as_bytes(), &mut output);
+        assert!(confirm("\n"));
+        assert!(confirm("y\n"));
+        assert!(!confirm("n\n"));
+        assert!(!confirm("no\n"));
         assert!(String::from_utf8(output).unwrap().starts_with("Delete? "));
     }
 

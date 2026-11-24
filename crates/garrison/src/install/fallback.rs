@@ -82,8 +82,9 @@ fn switched_back(
     stop_services();
     if let Some(backup) = backup {
         let settings = Path::new(CONFIG).join("garrison.toml");
-        let config = config::load(&settings)
-            .map_err(|error| Failure::Before(states::unloadable(&settings, error)))?;
+        let config = config::load(&settings).map_err(|error| {
+            Failure::Before(crate::states::config::unloadable(&settings, error))
+        })?;
         state::restore_migrated(backup, &config, returned).map_err(Failure::Before)?;
         if let Some(went) = returned.said(backup) {
             announce(&states::migrated_back(&went).to_string());

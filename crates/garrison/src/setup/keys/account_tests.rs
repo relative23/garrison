@@ -54,7 +54,7 @@ fn a_key_stalwart_does_not_know_or_refuses_here_names_no_account() {
 
 /// A user without administrator rights is not shown the account that an
 /// administrator's key belongs to, which Stalwart answers accountNotFound
-/// (measured on Stalwart 1.1.0): setup says to run it as an administrator,
+/// (measured on Stalwart 1.2.0): setup says to run it as an administrator,
 /// as where such a user may not make a key.
 #[test]
 fn an_account_the_administrator_may_not_see_is_said_as_such() {

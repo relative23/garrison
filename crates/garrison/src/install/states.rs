@@ -180,36 +180,6 @@ pub(super) fn bad_version(version: &str) -> State {
     )
 }
 
-/// What a record an earlier installer left named.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum Recorded<'a> {
-    /// An upgrade or a rollback, with the releases it went from and to.
-    Switch(&'a str, String, String),
-    Restore(Option<&'a str>),
-    Unknown,
-}
-
-pub(super) fn record_removed(path: &Path, recorded: &Recorded<'_>) -> State {
-    let named = match recorded {
-        Recorded::Switch(command, from, to) => {
-            format!("an unfinished {command} from {from} to {to}")
-        }
-        Recorded::Restore(source) => format!(
-            "an unfinished restore from {}",
-            source.unwrap_or("a backup")
-        ),
-        Recorded::Unknown => "a run it could not say".to_owned(),
-    };
-    State::new(
-        "install-record-removed",
-        format!(
-            "{} named {named}; nothing reads it any more: it was removed, and nothing was done on \
-             its word.",
-            path.display()
-        ),
-    )
-}
-
 /// The run's last line where it changed something; `rollback`, the command
 /// that returns to the release before, where there is one.
 pub(super) fn running(version: &str, rollback: Option<&str>) -> State {

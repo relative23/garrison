@@ -188,7 +188,7 @@ pub(super) fn administrator_refused() -> State {
 
 /// A credential Stalwart knows, from an address it does not take it from:
 /// an API key's networks. An address it blocked gets its connections
-/// closed (measured on 1.1.0), so not this answer.
+/// closed (measured on 1.1.0 only), so not this answer.
 pub(super) fn administrator_refused_here() -> State {
     State::new(
         "setup-administrator-refused-here",
