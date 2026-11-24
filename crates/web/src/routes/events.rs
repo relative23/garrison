@@ -224,7 +224,9 @@ async fn coverage(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Js
         let db = reading(&app.config.database(Database::Events), READ_BUDGET)?;
         let now = time::now().as_second();
         let coverage = history::read(db.as_deref(), now).map_err(|error| failed(&error, SLOW))?;
-        Ok(Json(recorded::coverage(coverage, now)))
+        // The age of the last batch is counted at the answer: the receiver
+        // may have stored one in a second that began after `now` was read.
+        Ok(Json(recorded::coverage(coverage, time::now().as_second())))
     })
     .await
 }

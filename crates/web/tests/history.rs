@@ -11,6 +11,9 @@ use garrison_core::config::Database;
 use garrison_core::time;
 use garrison_ingest::store::{EventStore, Limits};
 use serde_json::json;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use support::{grant, setup};
 
 fn api(path: &str) -> String {
@@ -212,6 +215,46 @@ async fn coverage_states_where_the_history_begins_and_what_is_missing_inside() {
             "limitations": garrison_ingest::coverage::LIMITATIONS,
         })
     );
+}
+
+/// The receiver stores batches while the web service answers. One stored in
+/// a second that began during an answer is not dated ahead of that answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_batch_stored_while_the_coverage_is_answered_has_an_age() {
+    let mut setup = setup();
+    let store = EventStore::open(
+        &setup.config.database(Database::Events),
+        Limits::new(30, 1_000_000, 64 << 20),
+    )
+    .unwrap();
+    store.start(time::now().as_second()).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let receiver = {
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            for id in 5_000_000_u64.. {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                let now = time::now();
+                let event = json!({"id": id.to_string(), "createdAt": time::isoformat(now), "type": "auth.failed", "data": {}});
+                store.ingest(&[event], now.as_second()).unwrap();
+            }
+        })
+    };
+    setup.client.sign_in("code-admin").await;
+    // Over three changes of the second; each is a chance of about one in ten.
+    let end = Instant::now() + Duration::from_secs(3);
+    let mut without = Vec::new();
+    while Instant::now() < end {
+        let answer = setup.client.get(&api("coverage")).await.json();
+        if !answer["lastBatchAt"].is_null() && answer["lastBatchAge"].is_null() {
+            without.push(answer["lastBatchAt"].clone());
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    receiver.join().unwrap();
+    assert_eq!(without, Vec::<serde_json::Value>::new());
 }
 
 #[tokio::test]
