@@ -77,18 +77,30 @@ fn no_command_writes_a_policy_larger_than_the_broker_reads() {
     let text_of = serde_json::to_string_pretty(&over).unwrap();
     assert!(text_of.len() > MOST);
     garrison_testing::write_private(&path, text_of.as_bytes());
-    let undone = run(directory.path(), &["access", "deny", &subject, "--undo"]);
-    assert_eq!(
-        (undone.status.code(), text(&undone.stderr)),
-        (
-            Some(1),
-            format!(
-                "The access policy {} is larger than the broker reads (64 KiB), so it is no \
-                 policy: copy back the last backup beside it ({}.<time>.bak) with sudo cp.\n",
-                path.display(),
-                path.display()
-            )
-        )
+    // Every command says it alike, with a way out that is always there.
+    let large = format!(
+        "The access policy {} is larger than the broker reads (64 KiB), so it is no policy: move \
+         it away and run `garrison access init`, or copy back the newest backup beside it \
+         ({}.<time>.bak) with sudo cp where there is one.\n",
+        path.display(),
+        path.display()
+    );
+    let undo = ["access", "deny", subject.as_str(), "--undo"];
+    // init --force says it too, where Stalwart answers (links.rs).
+    for command in [&["access", "list"][..], &undo, &["access", "update"]] {
+        let said = run(directory.path(), command);
+        assert_eq!(
+            (said.status.code(), text(&said.stderr)),
+            (Some(1), large.clone()),
+            "{command:?}"
+        );
+    }
+    let checked = run(directory.path(), &["check-config"]);
+    assert_eq!(checked.status.code(), Some(1));
+    assert!(
+        text(&checked.stderr).ends_with(&format!("Access policy not usable: {large}")),
+        "{}",
+        text(&checked.stderr)
     );
 }
 

@@ -406,7 +406,16 @@ fn what_the_policy_grants_is_read_as_the_broker_reads_it() {
     for (what, made) in ways {
         made();
         let read = broker();
-        assert_eq!(granted(&config), read, "{what}");
+        // The broker words a policy too large so; check-config and doctor
+        // say it with the way out.
+        let granted = granted(&config).map_err(|unread| match unread {
+            Unread::TooLarge => format!(
+                "Garrison access policy: Protected file is too large: {}",
+                path.display()
+            ),
+            Unread::Other(error) => error,
+        });
+        assert_eq!(granted, read, "{what}");
         assert_eq!(read.is_ok(), what == "a policy", "{what}: {read:?}");
     }
 }

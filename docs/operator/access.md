@@ -94,8 +94,9 @@ policy's folder and write over nothing there: a lock at
 `access-policy.json.lock` that is a link, no file, another user's file or a
 second name of another file (a hard link) is refused and left as it is, and
 so is a policy that is a link or no file; a policy larger than the broker
-reads (64 KiB) is no policy, no command writes one, and `init --force`
-leaves it as it is too. A lock that another process holds is not waited
+reads (64 KiB) is no policy, which every command and `check-config` say with
+what mends it, no command writes one, and `init --force` leaves it as it is
+too. A lock that another process holds is not waited
 for: the command says so and ends. There is deliberately no web page that
 edits the policy.
 

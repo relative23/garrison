@@ -241,19 +241,33 @@ fn action_ids(config: &Config) -> BTreeSet<&str> {
         .collect()
 }
 
+/// What mends a policy larger than the broker reads, which is no policy:
+/// a way out that is always there, and one where a backup is.
+pub(crate) fn way_out(path: &Path) -> String {
+    format!(
+        "move it away and run `garrison access init`, or copy back the newest backup beside it \
+         ({}.<time>.bak) with sudo cp where there is one",
+        path.display()
+    )
+}
+
+/// What every command says of a policy larger than the broker reads.
+pub(crate) fn too_large(path: &Path) -> String {
+    format!(
+        "The access policy {} is larger than the broker reads ({} KiB), so it is no policy: {}.",
+        path.display(),
+        MAX_POLICY / 1024,
+        way_out(path)
+    )
+}
+
 /// The policy as it is written, actions that garrison.toml no longer has
 /// among them, which `update` takes out.
 fn written(config: &Config) -> Result<Policy, String> {
     let path = &config.broker.policy;
     there(path)?;
     let raw = read_protected(path, MAX_POLICY).map_err(|error| match error {
-        ProtectedFileError::TooLarge(_) => format!(
-            "The access policy {} is larger than the broker reads ({} KiB), so it is no policy: \
-             copy back the last backup beside it ({}.<time>.bak) with sudo cp.",
-            path.display(),
-            MAX_POLICY / 1024,
-            path.display()
-        ),
+        ProtectedFileError::TooLarge(_) => too_large(path),
         error => format!("Garrison access policy: {error}"),
     })?;
     let named = named(config);

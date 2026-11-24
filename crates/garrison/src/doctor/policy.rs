@@ -272,18 +272,17 @@ fn beyond(config: &Config) -> Vec<String> {
 /// and with the actions garrison.toml names. Root reads more than the broker
 /// does, but `read_protected` as root would refuse a policy the broker owns,
 /// which the broker takes.
-pub(crate) fn granted(config: &Config) -> Result<Policy, String> {
+pub(crate) fn granted(config: &Config) -> Result<Policy, Unread> {
     let path = &config.broker.policy;
-    let unread = |error: ProtectedFileError| format!("Garrison access policy: {error}");
+    let unread =
+        |error: ProtectedFileError| Unread::Other(format!("Garrison access policy: {error}"));
     let mut data = Vec::new();
     open_regular_file(path)
         .and_then(|file| file.take(LIMIT as u64 + 1).read_to_end(&mut data))
         .map_err(|_| unread(ProtectedFileError::Unavailable(path.clone())))?;
-    let raw = json::parse(&data, LIMIT).map_err(|error| {
-        unread(match error {
-            JsonError::TooLarge => ProtectedFileError::TooLarge(path.clone()),
-            JsonError::Invalid(_) => ProtectedFileError::InvalidJson(path.clone()),
-        })
+    let raw = json::parse(&data, LIMIT).map_err(|error| match error {
+        JsonError::TooLarge => Unread::TooLarge,
+        JsonError::Invalid(_) => unread(ProtectedFileError::InvalidJson(path.clone())),
     })?;
     let actions: BTreeSet<&str> = config
         .broker
@@ -291,14 +290,37 @@ pub(crate) fn granted(config: &Config) -> Result<Policy, String> {
         .iter()
         .map(|action| action.id.as_str())
         .collect();
-    parse_policy(&raw, &actions).map_err(|error| error.to_string())
+    parse_policy(&raw, &actions).map_err(|error| Unread::Other(error.to_string()))
+}
+
+/// Why what a policy grants does not read.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Unread {
+    /// The file is larger than the broker reads, so it is no policy.
+    TooLarge,
+    /// Anything else, in the broker's words.
+    Other(String),
 }
 
 /// What the policy grants, read and checked as the broker reads it.
 pub(super) fn content(config: &Config) -> Finding {
     let policy = match granted(config) {
         Ok(policy) => policy,
-        Err(error) => {
+        Err(Unread::TooLarge) => {
+            let path = &config.broker.policy;
+            let mut fix = crate::access::way_out(path);
+            fix.replace_range(..1, &fix[..1].to_uppercase());
+            return Finding::fail(
+                format!(
+                    "the access policy is larger than the broker reads ({} KiB), so nobody can \
+                     sign in: {}",
+                    LIMIT / 1024,
+                    path.display()
+                ),
+                format!("{fix}."),
+            );
+        }
+        Err(Unread::Other(error)) => {
             let beyond = beyond(config);
             if !beyond.is_empty() {
                 return Finding::fail(

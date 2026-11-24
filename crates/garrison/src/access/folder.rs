@@ -210,12 +210,7 @@ impl Folder {
             .read_to_end(&mut data)
             .map_err(|error| failed(&path, error))?;
         if data.len() > MAX_POLICY {
-            return Err(format!(
-                "{} is larger than a policy can be ({} KiB), so it is no policy of `garrison \
-                 access`: move it away, then run the command again.",
-                path.display(),
-                MAX_POLICY / 1024
-            ));
+            return Err(super::too_large(&path));
         }
         Ok(data)
     }

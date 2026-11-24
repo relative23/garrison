@@ -5,7 +5,7 @@ use std::path::Path;
 
 use garrison_core::config::{self, Config};
 
-use crate::doctor::policy::{self, Met};
+use crate::doctor::policy::{self, Met, Unread};
 use crate::{complain, dqs, loaded, placeholder, say, unfollowed, units};
 
 pub(crate) fn run(config: &Config, path: &Path) -> u8 {
@@ -87,7 +87,12 @@ pub(crate) fn run(config: &Config, path: &Path) -> u8 {
             ));
             0
         }
-        Err(error) => {
+        Err(Unread::TooLarge) => {
+            let said = crate::access::too_large(&config.broker.policy);
+            complain(&format!("Access policy not usable: {said}"));
+            1
+        }
+        Err(Unread::Other(error)) => {
             complain(&format!("Access policy not usable: {error}"));
             1
         }
