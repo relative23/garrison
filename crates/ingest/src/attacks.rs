@@ -75,6 +75,11 @@ pub struct Account {
 pub struct Ban {
     pub at: i64,
     pub address: String,
+    /// The /64 of an IPv6 address. Stalwart's event names the address, and
+    /// Stalwart 1.2.0 blocks the whole /64 with it, which its own list of
+    /// blocked IPs names, unless an account's count of failed sign-ins alone
+    /// banned the address (measured).
+    pub network: Option<String>,
     /// Why: `authentication`, `abuse`, `scan` or `loiter`.
     pub reason: String,
 }
@@ -130,6 +135,16 @@ pub fn network(address: &str) -> String {
         }
         Err(_) => address.to_owned(),
     }
+}
+
+/// The /64 that Stalwart blocks with an IPv6 address it bans; an IPv4
+/// address it blocks alone.
+fn blocked_with(address: &str) -> Option<String> {
+    let ipv6 = matches!(
+        address.parse::<IpAddr>().map(|ip| ip.to_canonical()),
+        Ok(IpAddr::V6(_))
+    );
+    ipv6.then(|| network(address))
 }
 
 #[derive(Default)]
@@ -288,6 +303,7 @@ pub fn attacks(db: &Connection, since: i64, until: i64) -> Result<Attacks> {
             sums.bans.push(Ban {
                 at,
                 address: address.to_owned(),
+                network: blocked_with(address),
                 reason: reason.to_owned(),
             });
         })?;

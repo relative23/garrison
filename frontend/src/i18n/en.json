@@ -51,11 +51,13 @@
     "accounts": "Accounts under attack",
     "accountsNote": "A name someone tried is shown only where an account of that name exists. Other names are not recorded: they may be passwords typed into the wrong field.",
     "bans": "Stalwart's bans",
+    "bansNote": "Stalwart blocks an IPv6 address with its /64, which its list of blocked IPs then names; an address banned only because an account it tried was tried too often is blocked alone.",
     "checksUnread": "The collector's checks of this module could not be read.",
     "footer": "From recorded events between {{from}} and {{to}}. Each list shows at most 50 rows.",
     "networks": "Networks with several addresses",
     "sources": "Addresses",
     "truncated": "More events were recorded in this period than are counted here; the figures are those of the newest events.",
+    "withNetwork": "with its /64, {{network}}",
     "column": {
       "account": "Account",
       "accounts": "Accounts tried",

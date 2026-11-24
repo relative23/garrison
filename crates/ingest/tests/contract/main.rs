@@ -26,6 +26,16 @@ use garrison_testing::lab::{Lab, random_hex};
 use garrison_testing::smtp::Smtp;
 use serde_json::{Value, json};
 
+mod bans;
+
+/// The tests of this binary change Stalwart's settings or count on them:
+/// one at a time.
+fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    ONE.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn create_webhook(lab: &mut Lab, url: &str, key: &str) {
     let events: Value = event_types()
         .into_iter()
@@ -142,6 +152,7 @@ fn kinds_until(path: &Path, queue: &str, wanted: fn(&str) -> bool) -> Vec<String
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn a_signed_webhook_records_a_complete_smtp_session() {
+    let _one = one_at_a_time();
     let mut lab = Lab::from_environment();
     let smtp = std::env::var("GARRISON_LAB_SMTP").expect("GARRISON_LAB_SMTP");
     let callback = std::env::var("GARRISON_LAB_CALLBACK_HOST").expect("GARRISON_LAB_CALLBACK_HOST");

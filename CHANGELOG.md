@@ -128,6 +128,9 @@ Notable changes for operators and users. The format follows
   refuses, before anything stops, until the address is written into
   `garrison.toml` again. See
   [configuration](docs/operator/configuration.md#an-address-that-is-a-secret).
+- **Attacks & bans names the /64 that Stalwart 1.2.0 blocks with a banned
+  IPv6 address.** Stalwart's list of blocked IPs holds that network, not the
+  address its event names, so look for the /64 there.
 
 ### Changed
 

@@ -57,6 +57,9 @@ pub enum BanReason {
 pub struct Ban {
     pub at: i64,
     pub address: String,
+    /// The /64 of an IPv6 address, which Stalwart blocks with it unless an
+    /// account's count of failed sign-ins alone banned the address.
+    pub network: Option<String>,
     pub reason: BanReason,
 }
 

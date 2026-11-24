@@ -101,8 +101,40 @@ fn sign_ins_bans_and_handshakes_are_summed_by_address_network_and_account() {
     assert_eq!(
         json!(summary.bans),
         json!([
-            {"at": MIDNIGHT + 43_201, "address": "2001:db8:1:2:aaaa::1", "reason": "scan"},
-            {"at": MIDNIGHT + 36_061, "address": "192.0.2.10", "reason": "authentication"},
+            {"at": MIDNIGHT + 43_201, "address": "2001:db8:1:2:aaaa::1",
+             "network": "2001:db8:1:2::/64", "reason": "scan"},
+            {"at": MIDNIGHT + 36_061, "address": "192.0.2.10", "network": null,
+             "reason": "authentication"},
+        ])
+    );
+}
+
+/// Stalwart names the address it banned; for an IPv6 one it blocks the /64
+/// with it, which its own list of blocked IPs names and finds.
+#[test]
+fn a_ban_of_an_ipv6_address_names_the_64_blocked_with_it() {
+    let events = [
+        other(
+            1,
+            "security.authentication-ban",
+            "10:00:00",
+            "2001:db8:1:2::5",
+        ),
+        other(2, "security.scan-ban", "10:00:01", "2001:db8:5c:1::7"),
+        other(3, "security.authentication-ban", "10:00:02", "192.0.2.7"),
+        // An IPv4 address a dual-stack listener reports in IPv6 form.
+        other(4, "security.loiter-ban", "10:00:03", "::ffff:198.51.100.9"),
+    ];
+    let summary = summary(&events, MIDNIGHT, MIDNIGHT + 86_399);
+    assert_eq!(
+        json!(summary.bans),
+        json!([
+            {"at": MIDNIGHT + 36_003, "address": "::ffff:198.51.100.9", "network": null, "reason": "loiter"},
+            {"at": MIDNIGHT + 36_002, "address": "192.0.2.7", "network": null, "reason": "authentication"},
+            {"at": MIDNIGHT + 36_001, "address": "2001:db8:5c:1::7", "network": "2001:db8:5c:1::/64",
+             "reason": "scan"},
+            {"at": MIDNIGHT + 36_000, "address": "2001:db8:1:2::5", "network": "2001:db8:1:2::/64",
+             "reason": "authentication"},
         ])
     );
 }

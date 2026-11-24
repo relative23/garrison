@@ -166,6 +166,7 @@ fn ban(ban: found::Ban) -> ApiResult<Ban> {
     let found::Ban {
         at,
         address,
+        network,
         reason,
     } = ban;
     let reason = match reason.as_str() {
@@ -178,6 +179,7 @@ fn ban(ban: found::Ban) -> ApiResult<Ban> {
     Ok(Ban {
         at,
         address,
+        network,
         reason,
     })
 }

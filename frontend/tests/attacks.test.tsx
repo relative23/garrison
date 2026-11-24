@@ -2,7 +2,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 
 import { ApiError } from "../src/api/client";
 import { Attacks } from "../src/modules/Attacks";
-import { attacks, coverage, observation, status } from "./support/fixtures";
+import { NOW, attacks, coverage, observation, status } from "./support/fixtures";
 import { renderView } from "./support/render";
 import { serve } from "./support/server";
 
@@ -27,6 +27,20 @@ describe("Attacks & bans", () => {
     expect(within(table("Accounts under attack")).getByText("anna@example.test")).toBeTruthy();
     expect(within(table("Stalwart's bans")).getByText("Too many failed sign-ins")).toBeTruthy();
     expect(screen.queryByText(/More events were recorded/)).toBeNull();
+  });
+
+  it("name the /64 that Stalwart blocks with an IPv6 address it banned", async () => {
+    const bans = [
+      { at: NOW - 60, address: "2001:db8:1:2::5", network: "2001:db8:1:2::/64", reason: "scan" as const },
+      { at: NOW - 120, address: "192.0.2.10", network: null, reason: "authentication" as const },
+    ];
+    serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks({ bans }) } });
+    renderView(<Attacks />);
+    const [, first, second] = within(await screen.findByRole("table", { name: "Stalwart's bans" })).getAllByRole("row");
+    expect(first?.textContent).toContain("2001:db8:1:2::5");
+    expect(first?.textContent).toContain("with its /64, 2001:db8:1:2::/64");
+    expect(second?.textContent).not.toContain("/64");
+    expect(screen.getByText(/Stalwart blocks an IPv6 address with its \/64/)).toBeTruthy();
   });
 
   it("ask for the period that is chosen", async () => {

@@ -387,6 +387,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "network": {
+            "description": "The /64 of an IPv6 address, which Stalwart blocks with it unless an\naccount's count of failed sign-ins alone banned the address.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "reason": {
             "$ref": "#/components/schemas/BanReason"
           }

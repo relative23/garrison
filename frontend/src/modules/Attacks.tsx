@@ -129,7 +129,12 @@ function Bans({ bans }: { bans: Summary["bans"] }) {
         {bans.map((ban) => (
           <TableRow key={`${ban.at}-${ban.address}-${ban.reason}`}>
             <TableCell className="whitespace-nowrap">{dateTime(ban.at)}</TableCell>
-            <TableCell className="wrap-anywhere">{ban.address}</TableCell>
+            <TableCell className="wrap-anywhere">
+              {ban.address}
+              {ban.network && (
+                <span className="block text-xs text-muted-foreground">{t("attacks.withNetwork", { network: ban.network })}</span>
+              )}
+            </TableCell>
             {/* A reason this build does not know is shown as the server named it. */}
             <TableCell>{isReason(ban.reason) ? t(`attacks.reason.${ban.reason}`) : ban.reason}</TableCell>
           </TableRow>
@@ -178,6 +183,7 @@ export function Attacks() {
             </Section>
             <Section id="attacks-bans" title={t("attacks.bans")}>
               <Bans bans={data.bans} />
+              <Meta>{t("attacks.bansNote")}</Meta>
             </Section>
             <Meta>{t("attacks.footer", { from: dateTime(data.since), to: dateTime(data.until) })}</Meta>
           </>

@@ -336,7 +336,7 @@ async fn the_attack_summary_covers_the_period_asked_for() {
     );
     assert_eq!(
         day["bans"],
-        json!([{"at": now - 30, "address": "192.0.2.1", "reason": "authentication"}])
+        json!([{"at": now - 30, "address": "192.0.2.1", "network": null, "reason": "authentication"}])
     );
     assert_eq!(day["networks"], json!([]));
     assert_eq!(day["truncated"], false);

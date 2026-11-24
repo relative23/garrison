@@ -393,6 +393,11 @@ export interface components {
             address: string;
             /** Format: int64 */
             at: number;
+            /**
+             * @description The /64 of an IPv6 address, which Stalwart blocks with it unless an
+             *     account's count of failed sign-ins alone banned the address.
+             */
+            network?: string | null;
             reason: components["schemas"]["BanReason"];
         };
         /**
