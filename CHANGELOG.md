@@ -52,6 +52,10 @@ Notable changes for operators and users. The format follows
   accounts the checks read. Until then the DNS records, Blocklists, Reverse
   names and TLS certificates cards say that Stalwart did not give its
   domains, and the Management API card that it refused `x:Account/query`.
+- **The first play of the Ansible role runs the installer and, where
+  `garrison_stalwart_admin` is set, `garrison stalwart setup`, also on a host
+  that an earlier release's role set up.** Stalwart must answer then, and that
+  administrator must still work.
 
 ### Added
 
