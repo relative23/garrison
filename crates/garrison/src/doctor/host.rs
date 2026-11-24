@@ -128,21 +128,24 @@ pub(super) fn synchronized(answer: Option<&str>) -> Finding {
 /// the nearest folder of it that exists, where it will be made: the
 /// installer's room check judges it so.
 pub(super) fn room(path: &str) -> Finding {
+    match nearest(path) {
+        Err(error) => Finding::unknown(states::space_unknown(path, error)),
+        Ok((at, free)) if free >= 1024 => Finding::ok(states::room(path, at, free)),
+        Ok((at, free)) => Finding::warn(states::little_room(path, at, free)),
+    }
+}
+
+/// The nearest folder of `path` that exists, and the MiB free on its disk.
+fn nearest(path: &str) -> rustix::io::Result<(&Path, u64)> {
     let mut at = Path::new(path);
-    let stat = loop {
+    loop {
         match rustix::fs::statvfs(at) {
-            Ok(stat) => break stat,
+            Ok(stat) => return Ok((at, stat.f_bavail.saturating_mul(stat.f_frsize) >> 20)),
             Err(rustix::io::Errno::NOENT) if at.parent().is_some() => {
                 at = at.parent().unwrap_or(at);
             }
-            Err(error) => return Finding::unknown(states::space_unknown(path, error)),
+            Err(error) => return Err(error),
         }
-    };
-    let free = stat.f_bavail.saturating_mul(stat.f_frsize) >> 20;
-    if free >= 1024 {
-        Finding::ok(states::room(path, at, free))
-    } else {
-        Finding::warn(states::little_room(path, at, free))
     }
 }
 
