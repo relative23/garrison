@@ -29,7 +29,7 @@ struct Broken {
 /// The hosts where one claim does not hold.
 type Hosts = &'static [fn() -> Broken];
 
-const PLACES: [(&str, &str, Hosts); 23] = [
+const PLACES: [(&str, &str, Hosts); 24] = [
     (
         "host.rs",
         "a release, and the one before",
@@ -91,6 +91,11 @@ const PLACES: [(&str, &str, Hosts); 23] = [
         ],
     ),
     (
+        "keys.rs",
+        "Stalwart takes a service's API key from this host",
+        &[outside::stalwart_does_not_know_the_brokers_key],
+    ),
+    (
         "milter.rs",
         "the macro milter answers",
         &[local::milter_silent],
@@ -143,10 +148,11 @@ const PLACES: [(&str, &str, Hosts); 23] = [
 ];
 
 /// doctor's checks, as their source holds them.
-const CHECKS: [(&str, &str); 7] = [
+const CHECKS: [(&str, &str); 8] = [
     ("mod.rs", include_str!("mod.rs")),
     ("host.rs", include_str!("host.rs")),
     ("files.rs", include_str!("files.rs")),
+    ("keys.rs", include_str!("keys.rs")),
     ("policy.rs", include_str!("policy.rs")),
     ("milter.rs", include_str!("milter.rs")),
     ("notify.rs", include_str!("notify.rs")),

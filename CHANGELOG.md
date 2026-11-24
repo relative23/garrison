@@ -1862,6 +1862,9 @@ Notable changes for operators and users. The format follows
   reading takes it**: one the broker owns is a warning, no longer a failure,
   one it does not take is named with why, and a closed `/etc/garrison` with
   the `chmod` that opens it.
+- **`garrison doctor` tries the broker's and the collector's API keys with
+  Stalwart**, as their services use them, and fails one Stalwart no longer
+  knows, with which nobody can sign in, with the setup that makes a new one.
 
 ## [0.1.2] - 2026-11-13
 
