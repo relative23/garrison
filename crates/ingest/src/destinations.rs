@@ -16,9 +16,9 @@ use crate::event_type::EventType;
 use crate::queries::Result;
 
 /// The newest events of one type that are read.
-pub const MAX_EVENTS: usize = 100_000;
+pub(crate) const MAX_EVENTS: usize = 100_000;
 /// The rows of each list.
-pub const MAX_ROWS: usize = 50;
+pub(crate) const MAX_ROWS: usize = 50;
 const MAX_CAUSE: usize = 120;
 /// A message that neither completed nor failed for good counts as waiting
 /// for this long after it was queued; Stalwart gives up on older ones.
@@ -104,7 +104,7 @@ struct Fields {
 }
 
 /// The domain of an address, in lower case; `None` for text without one.
-pub fn domain(address: &str) -> Option<String> {
+pub(crate) fn domain(address: &str) -> Option<String> {
     let (_, domain) = address.trim_matches(['<', '>']).rsplit_once('@')?;
     let domain = domain.trim().trim_end_matches('.').to_lowercase();
     (!domain.is_empty()).then_some(domain)

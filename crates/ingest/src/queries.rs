@@ -23,17 +23,16 @@ use select::{chosen, clause, conditions, foldable, searched};
 
 const MAX_RESPONSE_BYTES: usize = 768 * 1024;
 
-/// Stalwart's own label and explanation of an event type (generated data).
+/// Stalwart's own label of an event type (generated data).
 #[derive(Debug, Deserialize)]
-pub struct Labels {
-    pub label: String,
-    pub explanation: String,
+pub(crate) struct Labels {
+    pub(crate) label: String,
 }
 
 static LABELS: LazyLock<BTreeMap<String, Labels>> =
     LazyLock::new(|| serde_json::from_str(include_str!("../event_types.json")).unwrap_or_default());
 
-pub fn labels(event_type: &str) -> Option<&'static Labels> {
+pub(crate) fn labels(event_type: &str) -> Option<&'static Labels> {
     LABELS.get(event_type)
 }
 
@@ -48,13 +47,6 @@ pub enum QueryError {
     Unreadable(String),
     #[error("{0}")]
     Sqlite(#[from] rusqlite::Error),
-}
-
-impl QueryError {
-    /// The reader's progress handler interrupted a query over its time budget.
-    pub fn is_interrupted(&self) -> bool {
-        matches!(self, QueryError::Sqlite(error) if garrison_core::sqlite::out_of_time(error))
-    }
 }
 
 pub(crate) type Result<T> = std::result::Result<T, QueryError>;

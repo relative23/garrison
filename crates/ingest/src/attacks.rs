@@ -18,9 +18,9 @@ use crate::queries::Result;
 
 /// The newest events of one type that are read. Where a type has more in the
 /// stretch, the summary says that it is cut.
-pub const MAX_EVENTS: usize = 100_000;
+pub(crate) const MAX_EVENTS: usize = 100_000;
 /// The rows of each list.
-pub const MAX_ROWS: usize = 50;
+pub(crate) const MAX_ROWS: usize = 50;
 
 /// The sign-ins Stalwart refused: a wrong password or name, the right
 /// password without its second factor, and a credential used from an
@@ -144,7 +144,7 @@ struct Fields {
 
 /// The network an address counts to: its /24, or its /64 for IPv6. Text that
 /// is no address is its own network.
-pub fn network(address: &str) -> String {
+pub(crate) fn network(address: &str) -> String {
     match address.parse::<IpAddr>().map(|ip| ip.to_canonical()) {
         Ok(IpAddr::V4(ip)) => {
             let [a, b, c, _] = ip.octets();

@@ -1,7 +1,6 @@
 use serde_json::json;
 
 use super::*;
-use crate::event_type::Group;
 
 #[test]
 fn identifiers_are_positive_integers_kept_as_text() {
@@ -111,22 +110,6 @@ fn the_event_lists_are_disjoint_and_never_forbidden() {
     assert_eq!((names.len(), EventType::ALL.len()), (127, 127));
     assert_eq!(EventType::QueueRescheduled.as_str(), "queue.rescheduled");
     assert_eq!(EventType::MtaHookActionReject.category(), "mta-hook");
-    // The summaries of sessions and deliveries read the events of their group.
-    let of = |group: Group| {
-        EventType::ALL
-            .iter()
-            .filter(|kind| kind.group() == group)
-            .count()
-    };
-    assert_eq!(
-        (of(Group::Session), of(Group::Delivery), of(Group::Other)),
-        (42, 49, 36)
-    );
-    assert!(
-        EventType::ALL
-            .iter()
-            .all(|kind| { (kind.group() == Group::Session) == (kind.category() == "smtp") })
-    );
     assert_eq!(category("message-ingest.spam"), "message-ingest");
     assert_eq!(category("plain"), "plain");
 }

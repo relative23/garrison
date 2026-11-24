@@ -36,11 +36,11 @@ pub struct Health {
     /// Since when no batch was stored whole, while that lasts.
     pub failing_since: Option<i64>,
     /// Batches refused for their signature or because storing failed.
-    pub refused: u64,
+    pub(crate) refused: u64,
     /// Events of a recorded type that could not be read.
     pub unreadable: u64,
     /// Events that were stored already: a batch that came again.
-    pub duplicate: u64,
+    pub(crate) duplicate: u64,
 }
 
 /// What an earlier run of the receiver left, if it ended while it failed.

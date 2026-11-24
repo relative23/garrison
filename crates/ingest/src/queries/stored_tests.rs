@@ -47,6 +47,4 @@ fn an_event_whose_fields_cannot_be_read_is_the_historys_fault() {
         said(session_detail(&db, &SPAN.to_string()).unwrap_err()),
         reason
     );
-    // Such a fault is no query that ran out of its time.
-    assert!(!QueryError::Unreadable(reason.to_owned()).is_interrupted());
 }
