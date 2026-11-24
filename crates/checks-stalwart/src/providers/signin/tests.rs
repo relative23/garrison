@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
 
+use garrison_core::time::Timestamp;
 use garrison_testing::http::{answer, serve};
 
 use super::*;

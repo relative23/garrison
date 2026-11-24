@@ -19,14 +19,17 @@ use std::collections::BTreeSet;
 use garrison_core::config::Deployment;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
-use garrison_core::time::Timestamp;
 use garrison_stalwart::sign_in_page::{self, Kind};
 use serde::{Deserialize, Serialize};
 
-use crate::context::{Collected, Context, Deadline, Provider, Report};
-use crate::fetch::{self, Answer, Roots, origin};
+use crate::context::{Collected, Context, Provider, Report};
+use crate::fetch::{self, Roots, origin};
 use crate::kept::{Kept, keep, recalled};
 use crate::options::{Checked, Options};
+
+mod asking;
+
+pub use asking::Asking;
 
 /// The most files of one page that are asked for; a page that loads more is
 /// in order only as far as they go.
@@ -38,37 +41,6 @@ const EVERY: i64 = 300;
 const KEPT: &str = "signin.page";
 /// Why an examination stopped before it had asked everything.
 const RUN_OVER: &str = "the collection run's time was used up";
-
-/// How an examination asks for the page and its files: the authorities
-/// their server's certificate must come from, until when it asks, and the
-/// time it judges that certificate at, a run's, as every check judges what
-/// it finds; `None` judges by the clock.
-#[derive(Clone, Copy, Debug)]
-pub struct Asking<'a> {
-    pub roots: &'a Roots,
-    pub deadline: Deadline,
-    pub at: Option<Timestamp>,
-}
-
-impl<'a> Asking<'a> {
-    /// Asked by hand, as `garrison doctor` asks: no run's time to keep, and
-    /// the certificate judged by the clock.
-    #[must_use]
-    pub fn by_hand(roots: &'a Roots) -> Self {
-        Asking {
-            roots,
-            deadline: Deadline::NONE,
-            at: None,
-        }
-    }
-
-    fn get(self, url: &str) -> Result<Answer, String> {
-        match self.at {
-            Some(at) => fetch::get_at(url, self.roots, at),
-            None => fetch::get(url, self.roots),
-        }
-    }
-}
 
 /// What an examination of the page found.
 #[derive(Clone, Debug, PartialEq, Eq)]
