@@ -160,10 +160,7 @@ fn current(daily: Option<(&str, f64)>) -> (State, Option<String>) {
 /// name, from the refresh log of its database at `path`; or why it could not
 /// be read. The reader's time bounds the scan, and the names kept are the
 /// listed ones, whatever the log's writer put there.
-pub(in crate::providers) fn refresh_log(
-    path: &Path,
-    listed: &[String],
-) -> Result<BTreeMap<String, String>, String> {
+fn refresh_log(path: &Path, listed: &[String]) -> Result<BTreeMap<String, String>, String> {
     let text = |error: rusqlite::Error| error.to_string();
     let db = reading(path, Duration::from_secs(2))
         .map_err(|error| error.to_string())?
@@ -200,3 +197,6 @@ fn sql_text(value: rusqlite::types::Value) -> String {
         rusqlite::types::Value::Blob(_) => String::new(),
     }
 }
+
+#[cfg(test)]
+mod tests;

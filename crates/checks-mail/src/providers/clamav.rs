@@ -19,9 +19,6 @@ use policy::{ON_FAIL, ON_INFECTED};
 mod policy;
 mod signatures;
 
-#[cfg(test)]
-pub(super) use signatures::refresh_log;
-
 const DEFAULT_SIGNATURES: [&str; 6] = [
     "main.cvd",
     "main.cld",
