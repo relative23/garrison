@@ -18,8 +18,9 @@ Notable changes for operators and users. The format follows
   `backup.service` for `backup.timer`; check-config names it.
 - A zone of Spamhaus' Data Query Service written with its key in `lists`,
   such as `KEY.zen.dq.spamhaus.net`, keeps working, and `check-config`,
-  the installer and `garrison doctor` warn of it: write the zone without
-  the key, `zen.dq.spamhaus.net`, keep the key in
+  the installer and `garrison doctor` warn of it. Once the upgrade is done,
+  since a release before this one refuses `collector.dqs_key`: write the
+  zone without the key, `zen.dq.spamhaus.net`, keep the key in
   `/etc/garrison/credentials/spamhaus-dqs-key` (root, mode 0600) and set
   `collector.dqs_key = "credential:spamhaus-dqs-key"`. A zone written
   without its key while that setting is missing is refused, and with it the

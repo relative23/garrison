@@ -180,10 +180,19 @@ fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
     let output = cli(current, &["backup", "--to", &target.display().to_string()])?;
     if !output.status.success() {
         let _ = fs::remove_dir_all(&target);
-        return Err(format!(
-            "backup failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        let said = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        // The running release makes this backup: a setting that only the new
+        // release knows keeps it from loading the configuration.
+        if said.starts_with("Cannot load") {
+            let running = fs::canonicalize(current).unwrap_or_else(|_| current.to_owned());
+            return Err(format!(
+                "backup failed: {said}; {}, the release that runs, makes the backup before the \
+                 upgrade and cannot load {CONFIG}/garrison.toml: take out the settings it does \
+                 not know, upgrade, then put them back",
+                unfinished::name(&running)
+            ));
+        }
+        return Err(format!("backup failed: {said}"));
     }
     copy_config(Path::new(CONFIG), &target.join("etc"))?;
     if upgrade {

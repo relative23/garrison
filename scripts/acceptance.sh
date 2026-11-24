@@ -36,6 +36,28 @@ before=$(events)
 old=$(inside 'cat /root/previous/VERSION')
 new=$(inside 'cat /root/release/VERSION')
 
+step "A setting only the release under test knows, written before the upgrade"
+# As the upgrade note of Spamhaus' Data Query Service has it: the release
+# that runs makes the backup before the upgrade, and an older one refuses
+# collector.dqs_key.
+inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.before-new &&
+    printf "\n[collector]\ndqs_key = \"credential:spamhaus-dqs-key\"\n" >> /etc/garrison/garrison.toml'
+if inside '/root/previous/bin/garrison --config /etc/garrison/garrison.toml check-config' >/dev/null 2>&1; then
+    echo "skip  the previous release knows collector.dqs_key, so the upgrade is not refused for it"
+else
+    answer=$(mktemp)
+    if installer '/root/release/bin/garrison install' >"$answer" 2>&1 ||
+        ! grep -q "$old, the release that runs, makes the backup before the upgrade" "$answer"; then
+        cat "$answer"
+        echo "FAIL  an upgrade over a setting the release that runs does not know names that release"
+        exit 1
+    fi
+    echo "ok    an upgrade over a setting the release that runs does not know names that release"
+    rm -f "$answer"
+    names "current is still the release before" current "$old"
+fi
+inside 'cp -p /root/garrison.toml.before-new /etc/garrison/garrison.toml'
+
 step "Upgrading to the release under test"
 upgrade=$(mktemp)
 if ! installer '/root/release/bin/garrison install' >"$upgrade" 2>&1; then
