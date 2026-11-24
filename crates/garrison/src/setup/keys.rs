@@ -126,45 +126,55 @@ pub(super) struct Found {
 }
 
 /// The keys of `keys` as Stalwart and the files hold them: the
-/// administrator's own keys, listed once, and those of the account each
-/// file's key opens a session in. The keys setup makes are the
-/// administrator's that made them, and an administrator lists only its own
-/// account's keys unless it names another (Stalwart 1.1.0).
+/// administrator's own keys and those of every account a file's key opens a
+/// session in, each account listed once, so that a key that a run moved out
+/// of an account and could not remove there is found while any file names
+/// that account. The keys setup makes are the administrator's that made
+/// them, and an administrator lists only its own account's keys unless it
+/// names another (Stalwart 1.1.0).
 pub(super) fn find(
     admin: &Admin,
     directory: &Path,
     keys: &[&Key],
     rotate: bool,
 ) -> Result<Vec<Found>, String> {
-    let own: Listed<Stored> = admin.list_in("ApiKey", None)?;
-    let named: Vec<String> = own
-        .list
+    let Listed { account_id, list } = admin.list_in::<Stored>("ApiKey", None)?;
+    let named: Vec<String> = list
         .iter()
         .map(|item| match item.text("description") {
             Some(text) => format!("'{text}'"),
             None => format!("one without a description ({})", item.id),
         })
         .collect();
-    let mut found = Vec::new();
+    let mut held: Vec<(Option<String>, Stored)> =
+        list.into_iter().map(|item| (None, item)).collect();
+    let (mut sessions, mut listed) = (Vec::new(), vec![account_id]);
     for key in keys {
         let target = directory.join(key.file);
-        let ours = |item: &&Stored| item.text("description") == Some(key.description);
-        let mut found_keys: Vec<(Option<String>, Stored)> = own
-            .list
-            .iter()
-            .filter(ours)
-            .map(|item| (None, item.clone()))
-            .collect();
         let session = owner(admin, &target)?;
         if let Some(Session::Of(account)) = &session
-            && *account != own.account_id
+            && !listed.contains(account)
         {
             let theirs = admin.list_in::<Stored>("ApiKey", Some(account));
             let theirs = theirs.map_err(|error| unseen(error, &target))?;
-            let theirs = theirs.list.iter().filter(ours);
-            found_keys.extend(theirs.map(|item| (Some(account.clone()), item.clone())));
+            held.extend(
+                theirs
+                    .list
+                    .into_iter()
+                    .map(|item| (Some(account.clone()), item)),
+            );
+            listed.push(account.clone());
         }
-        let existing: Vec<AccountKey> = found_keys
+        sessions.push(session);
+    }
+    let mut found = Vec::new();
+    for (key, session) in keys.iter().zip(sessions) {
+        let target = directory.join(key.file);
+        let ours: Vec<&(Option<String>, Stored)> = held
+            .iter()
+            .filter(|(_, item)| item.text("description") == Some(key.description))
+            .collect();
+        let existing: Vec<AccountKey> = ours
             .iter()
             .map(|(account, item)| AccountKey {
                 account: account.clone(),
@@ -176,7 +186,7 @@ pub(super) fn find(
         // the old one went, no run can tell which one the file holds, since
         // Stalwart shows no key's secret: a new key replaces them all.
         let known = matches!(session, Some(Session::Of(_) | Session::Refused));
-        let keep = match (existing.as_slice(), found_keys.as_slice()) {
+        let keep = match (existing.as_slice(), ours.as_slice()) {
             ([only], [(_, stored)]) if known && !rotate && holds_key(&target) => {
                 Some((only.clone(), stored.clone()))
             }

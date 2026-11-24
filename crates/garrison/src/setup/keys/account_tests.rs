@@ -160,3 +160,61 @@ fn a_file_that_holds_no_key_is_not_asked_whose_it_is() {
     assert_eq!(found.len(), 1);
     assert_eq!((&found[0].existing, &found[0].keep), (&Vec::new(), &None));
 }
+
+/// A key that a run moved out of another administrator's account and could
+/// not remove there is found while another file's key names that account:
+/// each account the files' keys name is listed once, for every description.
+#[test]
+fn a_key_left_in_an_account_another_file_names_is_found() {
+    const BROKER: Key = Key {
+        file: "broker-native-key",
+        description: "garrison broker",
+        permissions: &["authenticate"],
+        held: false,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    for name in [BROKER.file, tests::COLLECTOR.file] {
+        garrison_testing::write_private(
+            &directory.path().join(name),
+            format!("{OLD}\n").as_bytes(),
+        );
+    }
+    let keys = |account: &str, keys: &[(&str, &str)]| {
+        let list: Vec<_> = keys
+            .iter()
+            .map(|(id, description)| json!({"id": id, "description": description}))
+            .collect();
+        json(&json!({"methodResponses": [["x:ApiKey/get",
+            {"accountId": account, "list": list}, "0"]]}))
+    };
+    let answers = vec![
+        keys("b", &[("new", "garrison broker")]),
+        session("b"),
+        session("c"),
+        keys(
+            "c",
+            &[("k", "garrison collector"), ("left", "garrison broker")],
+        ),
+    ];
+    let server = serve(answers);
+    let admin = Admin {
+        url: format!("{}/jmap/", server.url),
+        authorization: "Bearer admin".to_owned(),
+    };
+    let found = find(
+        &admin,
+        directory.path(),
+        &[&BROKER, &tests::COLLECTOR],
+        false,
+    )
+    .unwrap();
+    server.requests();
+    let at = |account: Option<&str>, id: &str| AccountKey {
+        account: account.map(str::to_owned),
+        id: id.to_owned(),
+    };
+    assert_eq!(found[0].existing, [at(None, "new"), at(Some("c"), "left")]);
+    assert_eq!(found[0].keep, None);
+    assert_eq!(found[1].existing, [at(Some("c"), "k")]);
+    assert!(found[1].keep.is_some());
+}
