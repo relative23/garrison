@@ -198,12 +198,15 @@ impl JobStore {
         Ok(store)
     }
 
-    /// Expire old records, but keep anything that may still be running.
+    /// Expire old records, but keep anything that may still be running. A
+    /// job recorded before one that is old enough was created before it,
+    /// whatever its own date, as a date from while the clock ran ahead.
     pub fn prune(&self) -> rusqlite::Result<()> {
         self.db.execute(
-            "DELETE FROM jobs WHERE created_at < ? AND may_still_run=0 \
-             AND status NOT IN ('queued','running')",
-            [now() - RETENTION_SECONDS],
+            "DELETE FROM jobs WHERE may_still_run=0 AND status NOT IN ('queued','running') \
+             AND (created_at < ?1 OR rowid < (SELECT max(rowid) FROM jobs \
+             WHERE created_at BETWEEN ?2 AND ?1))",
+            [now() - RETENTION_SECONDS, time::Timestamp::MIN.as_second()],
         )?;
         Ok(())
     }
@@ -230,10 +233,11 @@ impl JobStore {
         rows.collect()
     }
 
-    /// The newest jobs first; of one second, the one recorded last.
+    /// The jobs recorded last first, as [`JobStore::latest_created`] takes
+    /// the newest, whatever their dates say after the clock went back.
     pub fn recent(&self, limit: i64) -> rusqlite::Result<Vec<Job>> {
         self.many(
-            &format!("SELECT {COLUMNS} FROM jobs ORDER BY created_at DESC, rowid DESC LIMIT ?"),
+            &format!("SELECT {COLUMNS} FROM jobs ORDER BY rowid DESC LIMIT ?"),
             Some(limit),
         )
     }

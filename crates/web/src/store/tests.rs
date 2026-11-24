@@ -158,6 +158,31 @@ fn ended_sessions_wait_for_their_tokens_revocation() {
     assert_eq!(ended(1), std::slice::from_ref(&early.id_hash));
 }
 
+/// A session signed in while the clock ran ahead, then the clock put
+/// right: how long ago it began is not known, so it has ended, and its
+/// token is to be revoked, as when its time is over.
+#[test]
+fn a_session_dated_ahead_of_the_clock_has_ended() {
+    let (store, _directory) = store();
+    let (cookie, session) = store.create(&new_session(1800)).unwrap();
+    store
+        .db()
+        .execute(
+            "UPDATE sessions SET created_at = created_at + 86400, \
+             expires_at = expires_at + 86400",
+            [],
+        )
+        .unwrap();
+    assert_eq!(store.get(&cookie).unwrap(), None);
+    let ended: Vec<String> = store
+        .ended(10)
+        .unwrap()
+        .into_iter()
+        .map(|(id_hash, _)| id_hash)
+        .collect();
+    assert_eq!(ended, [session.id_hash]);
+}
+
 #[test]
 fn random_tokens_are_base64url_of_their_length() {
     let (state, verifier) = (random_token(32).unwrap(), random_token(48).unwrap());

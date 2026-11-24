@@ -188,7 +188,7 @@ impl WebStore {
         Ok(db
             .query_row(
                 "SELECT id_hash,subject,email,token,csrf,client_ip,expires_at FROM sessions \
-                 WHERE id_hash=? AND expires_at > ?",
+                 WHERE id_hash=?1 AND expires_at > ?2 AND created_at <= ?2",
                 params![digest(identifier), now()],
                 |row| {
                     Ok(Session {
@@ -228,11 +228,14 @@ impl WebStore {
     }
 
     /// The digest and token of at most `limit` sessions that have ended,
-    /// those that ended first first.
+    /// those that ended first first. A session dated ahead of the clock, as
+    /// one signed in while it ran ahead, began at a time not known: it has
+    /// ended too, as no cookie finds it.
     pub fn ended(&self, limit: u16) -> Result<Vec<(String, String)>, StoreError> {
         let db = self.db();
         let mut statement = db.prepare(
-            "SELECT id_hash,token FROM sessions WHERE expires_at <= ? ORDER BY expires_at LIMIT ?",
+            "SELECT id_hash,token FROM sessions WHERE expires_at <= ?1 OR created_at > ?1 \
+             ORDER BY expires_at LIMIT ?2",
         )?;
         let rows =
             statement.query_map(params![now(), limit], |row| Ok((row.get(0)?, row.get(1)?)))?;

@@ -107,11 +107,12 @@ fn finished_jobs_expire_after_thirty_days() {
         may_still_run,
         ..job(id, status)
     };
+    // In the order the audit records them, oldest first.
     for record in [
         aged("old", 31, JobStatus::Succeeded, false),
-        aged("recent", 29, JobStatus::Failed, false),
         aged("unsure", 31, JobStatus::Uncertain, true),
         aged("waiting", 31, JobStatus::Queued, false),
+        aged("recent", 29, JobStatus::Failed, false),
     ] {
         store.insert(&record).unwrap();
     }
@@ -120,6 +121,64 @@ fn finished_jobs_expire_after_thirty_days() {
     assert_eq!(store.count().unwrap(), 3);
     assert!(store.get("old").unwrap().is_none());
     for kept in ["recent", "unsure", "waiting"] {
+        assert!(store.get(kept).unwrap().is_some(), "{kept}");
+    }
+}
+
+/// Jobs recorded while the host's clock ran ahead, then one after it was
+/// put right: the audit's own order says which came last, not their dates.
+#[test]
+fn after_the_clock_went_back_the_job_recorded_last_is_listed_first() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = JobStore::open(&directory.path().join("jobs.sqlite")).unwrap();
+    let day = 86400;
+    for (id, created_at) in [
+        ("before", now() - day),
+        ("ahead-1", now() + 2 * day),
+        ("ahead-2", now() + day),
+        ("after", now()),
+    ] {
+        let record = Job {
+            created_at,
+            ..job(id, JobStatus::Succeeded)
+        };
+        store.insert(&record).unwrap();
+    }
+    let listed: Vec<String> = store
+        .recent(3)
+        .unwrap()
+        .into_iter()
+        .map(|job| job.id)
+        .collect();
+    assert_eq!(listed, ["after", "ahead-2", "ahead-1"]);
+}
+
+/// A job recorded before another was created before it, whatever the clock
+/// said: once the later one is past the thirty days, so is the earlier one,
+/// though it was dated ahead. What may still run stays.
+#[test]
+fn a_job_dated_ahead_expires_with_the_jobs_recorded_after_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = JobStore::open(&directory.path().join("jobs.sqlite")).unwrap();
+    let day = 86400;
+    let aged = |id: &str, days: i64, status: JobStatus, may_still_run: bool| Job {
+        created_at: now() - days * day,
+        may_still_run,
+        ..job(id, status)
+    };
+    for record in [
+        aged("ahead", 21, JobStatus::Succeeded, false),
+        aged("unsure", 20, JobStatus::Uncertain, true),
+        aged("later", 31, JobStatus::Failed, false),
+        aged("recent", 1, JobStatus::Succeeded, false),
+    ] {
+        store.insert(&record).unwrap();
+    }
+    store.prune().unwrap();
+    for gone in ["ahead", "later"] {
+        assert!(store.get(gone).unwrap().is_none(), "{gone}");
+    }
+    for kept in ["unsure", "recent"] {
         assert!(store.get(kept).unwrap().is_some(), "{kept}");
     }
 }

@@ -1865,6 +1865,9 @@ Notable changes for operators and users. The format follows
 - **Of two sign-ins begun in one browser, as from two tabs, the one begun
   last completes**; the other's return, or one a page made up, no longer
   ends it.
+- **After the host's clock went back, the Maintenance page lists the job
+  started last first**, a job recorded while it ran ahead leaves the audit
+  with the jobs after it, and a session signed in meanwhile ends.
 
 ## [0.1.2] - 2026-11-13
 

@@ -160,7 +160,7 @@ async fn session(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Jso
 /// The seconds a session that ends at `expires_at` has left at `now`, a
 /// begun second counted whole, so that a page asks no earlier than the store
 /// ends it; none where the end lies further ahead than `lifetime`, as for a
-/// row written while the clock ran ahead.
+/// session begun under a longer `session_minutes`.
 fn time_left(expires_at: i64, now: time::Timestamp, lifetime: i64) -> Option<i64> {
     let left = expires_at.checked_sub(now.as_second())?;
     (left <= lifetime).then_some(left.max(0))
