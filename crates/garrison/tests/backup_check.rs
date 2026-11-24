@@ -9,6 +9,8 @@
 mod support;
 
 // The tests of one part, beside this crate's root.
+#[path = "backup_check/case.rs"]
+mod case;
 #[path = "backup_check/repositories.rs"]
 mod repositories;
 
