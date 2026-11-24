@@ -591,6 +591,7 @@ dependencies = [
  "base64",
  "garrison-checks",
  "garrison-core",
+ "garrison-ingest",
  "garrison-milter",
  "garrison-stalwart",
  "garrison-testing",

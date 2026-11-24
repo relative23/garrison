@@ -214,7 +214,9 @@ the 20 busiest of more says how many there are. The counts by day and the
 numbers of mail with and without TLS count every event of the week. An event
 whose time or fields are not what the event receiver writes, as in a history
 damaged or edited by hand, is left out: every card says how many were, and
-is Partial where it would be OK.
+is Partial where it would be OK. A reading has two seconds: a week too large
+to count in them, some millions of events, leaves every card Unknown with
+"interrupted".
 
 A summary is in order only over a history that holds the week. While the
 event receiver has not reported for five minutes or runs without storing

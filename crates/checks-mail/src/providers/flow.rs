@@ -325,3 +325,5 @@ mod cut_tests;
 mod history_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod work_tests;
