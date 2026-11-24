@@ -47,9 +47,10 @@ RESTIC
         runuser -u nobody -- mkdir -m 700 garrison-restore-00000000000000c3 &&
         runuser -u nobody -- touch -d "-2 hours" garrison-restore-00000000000000c3 &&
         runuser -u nobody -- ln -s /etc garrison-restore-00000000000000c4'
-    says_words "a test restore removes the copy an interrupted one left" \
+    says "a test restore removes the copy an interrupted one left" \
         '/opt/garrison/current/bin/garrison backup-check restic --repo /srv/repo --restore /etc/hosts --report /root/restic.json' \
-        "Removed /var/tmp/garrison-restore-00000000000000c1, a copy of restored data that an interrupted test restore left."
+        backup-check-leftover-removed
+    check "and names that copy" 'grep -q -F /var/tmp/garrison-restore-00000000000000c1 /root/answer'
     check "and leaves a copy that has just been made, another user's folder and a link of that name" \
         'cd /var/tmp && test ! -e garrison-restore-00000000000000c1 && test -s garrison-restore-00000000000000c2/inbox &&
             test "$(stat -c %U garrison-restore-00000000000000c3)" = nobody &&
@@ -65,9 +66,9 @@ RESTIC
  "problem": null, "snapshots": null, "restore": null,
  "verify": {"at": "2026-11-16T03:00:00+00:00", "ok": true, "detail": "no errors were found"}}
 REPORT
-    says_words "backup-check keeps no check from a report another user could write" \
+    says "backup-check keeps no check from a report another user could write" \
         '/opt/garrison/current/bin/garrison backup-check restic --repo /srv/repo --report /srv/reports/restic.json' \
-        "/srv/reports/restic.json, can be changed by users other than root: its last integrity check"
+        backup-check-report-foreign
     check "and writes its own report in its place, without that check" \
         'test "$(stat -c %U /srv/reports/restic.json)" = root && grep -q "\"verify\": null" /srv/reports/restic.json'
     inside 'rm -r /srv/reports'
@@ -86,23 +87,20 @@ scenario_access_links() {
             /etc/garrison/garrison.toml > /root/shared.toml && grep -q /srv/shared /root/shared.toml &&
         printf "kept\n" > /etc/acceptance-target && chmod 644 /etc/acceptance-target &&
         runuser -u nobody -- ln -s /etc/acceptance-target /srv/shared/access.json.lock'
-    refused_words "a lock that is a link is refused" \
-        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' \
-        "/srv/shared/access.json.lock is a link, not the lock of \`garrison access\`"
+    refused "a lock that is a link is refused" \
+        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' access-lock-link
     check "and what it names is as it was" \
         'test "$(cat /etc/acceptance-target)" = kept && test "$(stat -c %a /etc/acceptance-target)" = 644 &&
             test -L /srv/shared/access.json.lock'
     inside 'rm /srv/shared/access.json.lock && runuser -u nobody -- touch /srv/shared/access.json.lock'
-    refused_words "a lock that another user made is refused" \
-        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' \
-        "/srv/shared/access.json.lock is another user's file, not the lock of \`garrison access\`"
+    refused "a lock that another user made is refused" \
+        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' access-lock-foreign
     check "and stays that user's" 'test "$(stat -c %U /srv/shared/access.json.lock)" = nobody'
     # What another user can link there where fs.protected_hardlinks is 0:
     # here root makes the second name.
     inside 'rm /srv/shared/access.json.lock && ln /etc/acceptance-target /srv/shared/access.json.lock'
-    refused_words "a lock that is a second name of another file is refused" \
-        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' \
-        "/srv/shared/access.json.lock has another name too (a hard link)"
+    refused "a lock that is a second name of another file is refused" \
+        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' access-lock-linked
     check "and that file keeps its mode" \
         'test "$(cat /etc/acceptance-target)" = kept && test "$(stat -c %a /etc/acceptance-target)" = 644'
     # A lock that an earlier release made readable for others, which a
@@ -111,9 +109,8 @@ scenario_access_links() {
         chmod 644 /srv/shared/access.json.lock &&
         (runuser -u nobody -- flock -x /srv/shared/access.json.lock sleep 10 </dev/null >/dev/null 2>&1 &) &&
         sleep 1'
-    refused_words "a lock that another user's process holds is said at once, not waited for" \
-        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' \
-        "/srv/shared/access.json.lock is held by another process"
+    refused "a lock that another user's process holds is said at once, not waited for" \
+        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' access-lock-held
     # Until that process has ended.
     inside 'flock -x /srv/shared/access.json.lock true'
     # Links at every name a backup may take in the next seconds.
@@ -122,8 +119,9 @@ scenario_access_links() {
             stamp=$(date -u -d "@$((now + second))" +%Y%m%dT%H%M%S)
             runuser -u nobody -- ln -s /etc/acceptance-target "/srv/shared/access.json.$stamp.bak"
         done'
-    says_words "a backup takes a name nothing has" \
-        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' "the previous file is kept as /srv/shared/access.json."
+    says "a backup takes a name nothing has" \
+        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' access-saved
+    check "and keeps the previous file beside the policy" 'grep -q -F "kept as /srv/shared/access.json." /root/answer'
     check "and writes through no link: what they name is as it was" \
         'test "$(cat /etc/acceptance-target)" = kept && test "$(stat -c %a /etc/acceptance-target)" = 644'
     check "the policy is root's and the broker's group's, its backup root's alone" \
@@ -140,16 +138,19 @@ scenario_access_folder() {
     inside 'sed "s|^\[deployment\]$|[broker]\npolicy = \"/etc/garrison/policy/access.json\"\n\n[deployment]|" \
         /etc/garrison/garrison.toml > /root/folder.toml && grep -q /etc/garrison/policy /root/folder.toml'
     # The stand-in names no default administrator role.
-    refused_words "init without an administrator role says how to bind one" \
-        '/opt/garrison/current/bin/garrison --config /root/folder.toml access init' \
-        "garrison access bind-role <role-id> --profile administrator"
+    refused "init without an administrator role says how to bind one" \
+        '/opt/garrison/current/bin/garrison --config /root/folder.toml access init' access-unbound
+    check "and names the command that binds one" \
+        'grep -q -F "garrison access bind-role <role-id> --profile administrator" /root/answer'
     check "init made the folder, readable for the broker under umask 077, and the policy in it" \
         'test "$(stat -c "%U %a" /etc/garrison/policy)" = "root 755" &&
             test "$(stat -c "%U %G %a" /etc/garrison/policy/access.json)" = "root garrison-broker 640" &&
             grep -q "\"roleBindings\": {}" /etc/garrison/policy/access.json'
-    says_words "bind-role binds the stand-in's role e, and says what it lacks for the profile" \
+    says "bind-role binds the stand-in's role e, and says what it lacks for the profile" \
         '/opt/garrison/current/bin/garrison --config /root/folder.toml access bind-role e --profile administrator' \
-        "Note: role e lacks sysAccountUpdate and sysDomainUpdate, which the profile administrator requires"
+        access-role-lacks
+    check "and names the rights it lacks" \
+        'grep -q -F sysAccountUpdate /root/answer && grep -q -F sysDomainUpdate /root/answer'
     check "and the policy binds it" 'grep -q "\"e\": \"administrator\"" /etc/garrison/policy/access.json'
     # The stand-in's role e lacks two of the rights the default administrator
     # profile requires: a broker that reads the policy refuses its user (403),
@@ -173,8 +174,10 @@ scenario_access_actions() {
             >> /etc/garrison/garrison.toml'
     web_started='systemctl show -p ActiveEnterTimestampMonotonic --value garrison-web'
     inside "$web_started > /root/web-started"
-    says_words "update gives the administrator profile an action added later, and says to run the installer" \
-        '/opt/garrison/current/bin/garrison access update' "Profile administrator: run_other added."
+    says "update gives the administrator profile an action added later, and says to run the installer" \
+        '/opt/garrison/current/bin/garrison access update' access-profile-changed
+    check "the action, and the installer to run" \
+        'grep -q -F run_other /root/answer && acceptance-state /root/answer access-run-installer'
     # As update says: the installer writes the polkit rule and restarts the
     # broker and the web service, which both read the actions when they start.
     installer '/root/release/bin/garrison install'
@@ -182,9 +185,10 @@ scenario_access_actions() {
     check "the installer restarted the web service with the broker" \
         "test \"\$($web_started)\" != \"\$(cat /root/web-started)\""
     inside 'cat /root/garrison.toml.actions > /etc/garrison/garrison.toml'
-    refused_words "a policy that names an action garrison.toml no longer has says what takes it out" \
-        '/opt/garrison/current/bin/garrison access list' "run \`garrison access update\`, which takes it out"
-    says_words "update takes it out" '/opt/garrison/current/bin/garrison access update' "Profile administrator: run_other taken out."
+    refused "a policy that names an action garrison.toml no longer has says what takes it out" \
+        '/opt/garrison/current/bin/garrison access list' access-actions-gone
+    says "update takes it out" '/opt/garrison/current/bin/garrison access update' access-profile-changed
+    check "the action it takes out" 'grep -q -F run_other /root/answer'
     check "and the installer's check of the configuration takes the policy again" \
         '/opt/garrison/current/bin/garrison check-config && ! grep -q run_other /etc/garrison/access-policy.json'
     installer '/root/release/bin/garrison install'
@@ -199,18 +203,19 @@ scenario_policy_for_the_broker() {
     # refused with the chmod that opens it, by the installer too, which
     # changes nothing.
     inside 'chmod 700 /etc/garrison'
-    refused_words "check-config refuses a policy behind a folder the broker may not enter" \
-        '/opt/garrison/current/bin/garrison check-config' "garrison-broker may not enter /etc/garrison"
-    refused_words "and so does the installer run again, before anything stops" \
-        '/root/release/bin/garrison install' "Run \`chmod 755 /etc/garrison\`."
+    refused "check-config refuses a policy behind a folder the broker may not enter" \
+        '/opt/garrison/current/bin/garrison check-config' check-config-policy-refused
+    refused "and so does the installer run again, before anything stops" \
+        '/root/release/bin/garrison install' check-config-policy-refused
+    check "with the command that opens the folder" 'grep -q -F "chmod 755 /etc/garrison" /root/answer'
     check "the release that ran still runs" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$new' && systemctl is-active --quiet garrison-web"
     inside 'chmod 755 /etc/garrison'
     # A policy the broker owns, which the broker takes.
     inside 'chown garrison-broker:garrison-broker /etc/garrison/access-policy.json &&
         chmod 600 /etc/garrison/access-policy.json'
-    says_words "check-config takes a policy the broker owns, with a warning" \
-        '/opt/garrison/current/bin/garrison check-config' "Warning: garrison-broker owns the access policy"
+    says "check-config takes a policy the broker owns, with a warning" \
+        '/opt/garrison/current/bin/garrison check-config' check-config-policy-warned
     check "doctor fails nothing of it" \
         "! /opt/garrison/current/bin/garrison doctor 2>&1 | grep -q 'FAIL  the access policy'"
     inside 'chown root:garrison-broker /etc/garrison/access-policy.json &&

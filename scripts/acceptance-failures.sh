@@ -58,23 +58,8 @@ says() {
     echo "ok    $1"
 }
 
-# As `refused` and `says`, for words a command prints that no state names.
-refused_words() {
-    answer=$(mktemp)
-    if inside "umask 077 && $2" >"$answer" 2>&1; then
-        cat "$answer"
-        echo "FAIL  $1: the installer succeeded"
-        exit 1
-    fi
-    if ! grep -q -F -- "$3" "$answer"; then
-        cat "$answer"
-        echo "FAIL  $1: the answer does not say \"$3\""
-        exit 1
-    fi
-    rm -f "$answer"
-    echo "ok    $1"
-}
-
+# As `says`, for words that no state names: doctor's lines and setup's,
+# which report no states yet.
 says_words() {
     answer=$(mktemp)
     if ! inside "umask 077 && $2" >"$answer" 2>&1 || ! grep -q -F -- "$3" "$answer"; then

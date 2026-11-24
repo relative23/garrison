@@ -19,6 +19,8 @@ use rusqlite::{Connection, OpenFlags};
 use serde_json::{Map, Value, json};
 
 use crate::say;
+use crate::state::State;
+use crate::states::commands as states;
 
 /// The access policy's name inside a backup, whatever its configured name.
 pub(crate) const POLICY_COPY: &str = "access-policy.json";
@@ -33,16 +35,16 @@ pub(crate) fn schema_version(database: Database) -> usize {
     }
 }
 
-fn private_directory(path: &Path) -> Result<(), String> {
+fn private_directory(path: &Path) -> Result<(), State> {
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(path)
-        .map_err(|error| error.to_string())
+        .map_err(|error| states::backup_io(path.display(), error))
 }
 
-fn copy(database: Database, source: &Path, destination: &Path) -> Result<(), String> {
-    let failed = |error: &dyn std::fmt::Display| format!("{}: {error}", database.writer());
+fn copy(database: Database, source: &Path, destination: &Path) -> Result<(), State> {
+    let failed = |error: &dyn std::fmt::Display| states::backup_io(database.writer(), error);
     let partial = destination.with_extension("partial");
     let _ = fs::remove_file(&partial);
     // Root reads a file that a service user writes and may have replaced.
@@ -63,21 +65,22 @@ fn copy(database: Database, source: &Path, destination: &Path) -> Result<(), Str
     }
     drop(writer);
     fs::set_permissions(&partial, fs::Permissions::from_mode(0o600))
-        .map_err(|error| error.to_string())?;
-    fs::rename(&partial, destination).map_err(|error| error.to_string())
+        .map_err(|error| states::backup_io(partial.display(), error))?;
+    fs::rename(&partial, destination)
+        .map_err(|error| states::backup_io(destination.display(), error))
 }
 
 pub(crate) fn backup(config: &Config, target: &Path) -> u8 {
     match write_backup(config, target) {
         Ok(()) => 0,
-        Err(error) => {
-            crate::complain(&error);
+        Err(refusal) => {
+            crate::complain(&refusal.to_string());
             1
         }
     }
 }
 
-fn write_backup(config: &Config, target: &Path) -> Result<(), String> {
+fn write_backup(config: &Config, target: &Path) -> Result<(), State> {
     private_directory(target)?;
     let mut databases = Map::new();
     for database in Database::ALL {
@@ -95,9 +98,9 @@ fn write_backup(config: &Config, target: &Path) -> Result<(), String> {
     let policy = &config.broker.policy;
     if policy.is_file() {
         let copied = target.join(POLICY_COPY);
-        fs::copy(policy, &copied).map_err(|error| error.to_string())?;
+        fs::copy(policy, &copied).map_err(|error| states::backup_io(policy.display(), error))?;
         fs::set_permissions(&copied, fs::Permissions::from_mode(0o600))
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| states::backup_io(copied.display(), error))?;
     }
     // The release that wrote the copies: only it and newer ones read them.
     let report = json!({
@@ -106,8 +109,9 @@ fn write_backup(config: &Config, target: &Path) -> Result<(), String> {
         "databases": databases,
     });
     let text = serde_json::to_string_pretty(&report).unwrap_or_default();
-    atomic_write(&target.join("backup.json"), text.as_bytes(), 0o600)
-        .map_err(|error| error.to_string())?;
+    let manifest = target.join("backup.json");
+    atomic_write(&manifest, text.as_bytes(), 0o600)
+        .map_err(|error| states::backup_io(manifest.display(), error))?;
     for (name, state) in &databases {
         say(&format!("- {name}: {}", state.as_str().unwrap_or_default()));
     }
@@ -202,7 +206,7 @@ pub(crate) fn self_check(config: &Config, state: Option<&Path>, receipt: Option<
     if let Some(receipt) = receipt
         && let Err(error) = atomic_write(receipt, text.as_bytes(), 0o644)
     {
-        crate::complain(&format!("Cannot write {}: {error}", receipt.display()));
+        crate::complain(&states::receipt_unwritten(receipt, error).to_string());
         return 1;
     }
     say(&text);
@@ -272,7 +276,12 @@ mod tests {
             &foreign,
             &root.join("foreign-copy.sqlite"),
         );
-        assert!(refused.unwrap_err().contains("never creates"));
+        let refusal =
+            sqlite::open_untrusted(&foreign, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap_err();
+        assert_eq!(
+            refused.unwrap_err(),
+            states::backup_io(Database::Events.writer(), refusal)
+        );
         let checked = check_database(&foreign, 9);
         assert_eq!(checked["ok"], false);
         assert!(

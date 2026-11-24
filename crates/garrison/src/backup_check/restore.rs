@@ -16,6 +16,8 @@ use garrison_collector::backups::{Run, Tool};
 use rustix::fs::{FlockOperation, Mode, OFlags};
 
 use super::{Ran, Repository, now, run};
+use crate::state::State;
+use crate::states::backup_check as states;
 use crate::{complain, say};
 
 /// Restores go to disk, not into `/tmp`, which may be memory.
@@ -117,7 +119,7 @@ fn leftover(path: &Path) -> Option<File> {
 
 /// Remove what interrupted restores left in `folder`: each copy removed,
 /// or why it could not be.
-fn leftovers_in(folder: &Path) -> Vec<Result<PathBuf, String>> {
+fn leftovers_in(folder: &Path) -> Vec<Result<PathBuf, State>> {
     let Ok(entries) = fs::read_dir(folder) else {
         return Vec::new();
     };
@@ -133,7 +135,7 @@ fn leftovers_in(folder: &Path) -> Vec<Result<PathBuf, String>> {
         // `remove_dir_all` follows no link inside the folder.
         removed.push(match fs::remove_dir_all(&path) {
             Ok(()) => Ok(path),
-            Err(error) => Err(not_removed(&path, &error)),
+            Err(error) => Err(states::not_removed(&path, &error)),
         });
         drop(held);
     }
@@ -141,17 +143,8 @@ fn leftovers_in(folder: &Path) -> Vec<Result<PathBuf, String>> {
 }
 
 /// Remove what interrupted restores left in `/var/tmp`.
-fn leftovers() -> Vec<Result<PathBuf, String>> {
+fn leftovers() -> Vec<Result<PathBuf, State>> {
     leftovers_in(Path::new(RESTORES))
-}
-
-fn not_removed(path: &Path, error: &std::io::Error) -> String {
-    format!(
-        "{} could not be removed ({error}); it holds a copy of what the backup holds: \
-         remove it as root with rm -r {}",
-        path.display(),
-        path.display()
-    )
 }
 
 /// The test restore of `path` as a run makes it: what interrupted restores
@@ -162,27 +155,21 @@ pub(super) fn tested(repository: &Repository, path: &str, newest: Option<&str>) 
     let mut failed = false;
     for removed in leftovers() {
         match removed {
-            Ok(copy) => say(&format!(
-                "Removed {}, a copy of restored data that an interrupted test restore left.",
-                copy.display()
-            )),
+            Ok(copy) => say(&states::leftover_removed(&copy).to_string()),
             Err(why) => {
-                complain(&format!(
-                    "A copy that an interrupted test restore left: {why}"
-                ));
+                complain(&states::leftover_kept(&why).to_string());
                 failed = true;
             }
         }
     }
     let (run, left) = repository.restore(path, newest);
-    let said = if run.ok { say } else { complain };
-    said(&format!(
-        "Restore test: {} ({})",
-        if run.ok { "passed" } else { "FAILED" },
-        run.detail
-    ));
+    if run.ok {
+        say(&states::restored(&run.detail).to_string());
+    } else {
+        complain(&states::restore_failed(&run.detail).to_string());
+    }
     if let Some(why) = left {
-        complain(&format!("This test restore's copy: {why}"));
+        complain(&states::copy_kept(&why).to_string());
         failed = true;
     }
     failed |= !run.ok;
@@ -193,7 +180,7 @@ impl Repository {
     /// Restore `path` from the newest snapshot into a directory of its own,
     /// count what arrived and remove it again; and why the directory could
     /// not be removed, where it could not.
-    fn restore(&self, path: &str, newest: Option<&str>) -> (Run, Option<String>) {
+    fn restore(&self, path: &str, newest: Option<&str>) -> (Run, Option<State>) {
         let at = now();
         let failed = |detail: String| Run {
             at: at.clone(),
@@ -240,7 +227,7 @@ impl Repository {
         let (files, bytes) = restored(&directory);
         let left = fs::remove_dir_all(&directory)
             .err()
-            .map(|error| not_removed(&directory, &error));
+            .map(|error| states::not_removed(&directory, &error));
         drop(held);
         if !ran.ok {
             return (failed(ran.last), left);
@@ -365,13 +352,7 @@ mod tests {
         fs::set_permissions(&inner, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(said.len(), 1);
         let why = said[0].clone().unwrap_err();
-        assert!(
-            why.starts_with(&format!("{} could not be removed (", stuck.display()))
-                && why.ends_with(&format!(
-                    "it holds a copy of what the backup holds: remove it as root with rm -r {}",
-                    stuck.display()
-                )),
-            "{why}"
-        );
+        let denied = std::io::Error::from_raw_os_error(rustix::io::Errno::ACCESS.raw_os_error());
+        assert_eq!(why, states::not_removed(&stuck, &denied));
     }
 }

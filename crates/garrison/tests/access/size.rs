@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use super::support::{prepared, run, text};
+use super::support::{prepared, run, states, text};
 
 /// As much as the broker reads of the policy.
 const MOST: usize = 64 * 1024;
@@ -61,15 +61,8 @@ fn no_command_writes_a_policy_larger_than_the_broker_reads() {
     let subject = "s".repeat(128);
     let denied = run(directory.path(), &["access", "deny", &subject]);
     assert_eq!(
-        (denied.status.code(), text(&denied.stderr)),
-        (
-            Some(1),
-            format!(
-                "The policy would be larger than the broker reads (64 KiB): the change is not \
-                 saved, and {} stays as it is.\n",
-                path.display()
-            )
-        )
+        (denied.status.code(), states(&denied.stderr)),
+        (Some(1), vec!["access-save-too-large".to_owned()])
     );
     assert_eq!(std::fs::read(&path).unwrap(), before);
     let mut over = full;
@@ -78,27 +71,23 @@ fn no_command_writes_a_policy_larger_than_the_broker_reads() {
     assert!(text_of.len() > MOST);
     garrison_testing::write_private(&path, text_of.as_bytes());
     // Every command says it alike, with a way out that is always there.
-    let large = format!(
-        "The access policy {} is larger than the broker reads (64 KiB), so it is no policy: move \
-         it away and run `garrison access init`, or copy back the newest backup beside it \
-         ({}.<time>.bak) with sudo cp where there is one.\n",
-        path.display(),
-        path.display()
-    );
     let undo = ["access", "deny", subject.as_str(), "--undo"];
     // init --force says it too, where Stalwart answers (links.rs).
     for command in [&["access", "list"][..], &undo, &["access", "update"]] {
         let said = run(directory.path(), command);
         assert_eq!(
-            (said.status.code(), text(&said.stderr)),
-            (Some(1), large.clone()),
+            (said.status.code(), states(&said.stderr)),
+            (Some(1), vec!["access-too-large".to_owned()]),
             "{command:?}"
         );
     }
     let checked = run(directory.path(), &["check-config"]);
     assert_eq!(checked.status.code(), Some(1));
     assert!(
-        text(&checked.stderr).ends_with(&format!("Access policy not usable: {large}")),
+        states(&checked.stderr).ends_with(&[
+            "access-too-large".to_owned(),
+            "check-config-policy-refused".to_owned()
+        ]),
         "{}",
         text(&checked.stderr)
     );

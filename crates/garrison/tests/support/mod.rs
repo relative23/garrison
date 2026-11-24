@@ -73,6 +73,29 @@ pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// The states `bytes` say, in their order: each state's name, which the
+/// binary prints in brackets after its sentence, and after the sentence of
+/// a state that carries it. A name is lower-case words joined by hyphens,
+/// two at least, so that `[deployment]` in a sentence is none.
+pub(crate) fn states(bytes: &[u8]) -> Vec<String> {
+    let said = text(bytes);
+    said.split('[')
+        .skip(1)
+        .filter_map(|rest| {
+            let name = rest.split_once(']')?.0;
+            let words: Vec<&str> = name.split('-').collect();
+            let named = words.len() >= 2
+                && words.iter().all(|word| {
+                    !word.is_empty()
+                        && word.chars().all(|character| {
+                            character.is_ascii_lowercase() || character.is_ascii_digit()
+                        })
+                });
+            named.then(|| name.to_owned())
+        })
+        .collect()
+}
+
 /// A configuration in a fresh directory, with the standard policy.
 pub(crate) fn prepared() -> tempfile::TempDir {
     let directory = against("http://127.0.0.1:9");

@@ -213,7 +213,7 @@ inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.before-dqs &&
     printf "\n[[providers]]\ntype = \"reputation\"\nresolver = \"127.0.0.1:5353\"\nhosts = [\"mail.example.test\"]\nlists = [\"zen.dq.spamhaus.net\"]\nlists_ipv6 = []\n" \
         >> /etc/garrison/garrison.toml'
 check "check-config refuses a list written without its key while collector.dqs_key is unset" \
-    '! garrison check-config >/root/check.log 2>&1 && grep -q "written without its key" /root/check.log'
+    '! garrison check-config >/root/check.log 2>&1 && acceptance-state /root/check.log check-config-dqs-refused'
 inside 'printf "\n[collector]\ndqs_key = \"credential:spamhaus-dqs-key\"\n" >> /etc/garrison/garrison.toml'
 check "check-config takes it with collector.dqs_key" 'garrison check-config >/dev/null'
 # One collection run each; a check repeats only its look at what the run left.

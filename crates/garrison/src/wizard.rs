@@ -9,6 +9,8 @@ use std::path::Path;
 
 use garrison_core::config::{self, Config};
 
+use crate::state::State;
+use crate::states::commands as states;
 use crate::{access, complain, nginx, placeholder, say, selection, setup};
 
 /// The `[deployment]` keys the questions fill, in the order they are asked.
@@ -19,7 +21,7 @@ fn step(number: u8, title: &str) {
 }
 
 /// One answer; Enter takes `default`. The end of input ends the setup.
-fn ask(question: &str, default: Option<&str>) -> Result<String, String> {
+fn ask(question: &str, default: Option<&str>) -> Result<String, State> {
     loop {
         let mut terminal = io::stdout().lock();
         let _ = match default {
@@ -32,10 +34,10 @@ fn ask(question: &str, default: Option<&str>) -> Result<String, String> {
         if io::stdin()
             .lock()
             .read_line(&mut answer)
-            .map_err(|error| error.to_string())?
+            .map_err(|error| states::wizard_io("standard input", error))?
             == 0
         {
-            return Err("The setup was ended; run `garrison setup` again to continue.".into());
+            return Err(states::wizard_ended());
         }
         let answer = answer.trim().trim_end_matches('/');
         match (answer.is_empty(), default) {
@@ -159,9 +161,9 @@ fn current(config: &Config, key: &str) -> Option<String> {
     (!placeholder(value)).then(|| value.trim_end_matches('/').to_owned())
 }
 
-fn addresses(path: &Path) -> Result<(), String> {
+fn addresses(path: &Path) -> Result<(), State> {
     step(1, "Addresses");
-    let failed = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
+    let failed = |error: &dyn std::fmt::Display| states::wizard_io(path.display(), error);
     loop {
         let text = std::fs::read_to_string(path).map_err(|error| failed(&error))?;
         let config = config::from_text(&text).map_err(|error| failed(&error))?;
@@ -192,7 +194,7 @@ fn addresses(path: &Path) -> Result<(), String> {
                 return Ok(());
             }
             Written::Changed(updated) => {
-                let previous = crate::config_file::replace(path, &text, &updated)?;
+                let previous = crate::config_file::replace(path, &text, &updated, failed)?;
                 say(&format!(
                     "Written; the previous file is {}.",
                     previous.display()
@@ -200,41 +202,30 @@ fn addresses(path: &Path) -> Result<(), String> {
                 return Ok(());
             }
             Written::Invalid(error) => say(&format!("{error}\nLet's try again.")),
-            Written::Unwritable => {
-                let [own, issuer, local, webui] = &answers;
-                return Err(format!(
-                    "The addresses cannot be written into {}: its deployment table is not one \
-                     [deployment] section with a line for each, as dotted keys write it. Write \
-                     public_origin = \"{own}\", issuer = \"{issuer}\", stalwart_url = \"{local}\" \
-                     and admin_url = \"{webui}\" under [deployment] there, then run `garrison \
-                     setup` again.",
-                    path.display()
-                ));
-            }
+            Written::Unwritable => return Err(states::addresses_unwritable(path, &answers)),
         }
     }
 }
 
-fn load(path: &Path) -> Result<Config, String> {
-    config::load(path).map_err(|error| format!("Cannot load {}: {error}", path.display()))
+fn load(path: &Path) -> Result<Config, State> {
+    config::load(path).map_err(|error| crate::states::config::unloadable(path, error))
 }
 
-fn finish(code: u8, what: &str) -> Result<(), String> {
+fn finish(code: u8, what: &str) -> Result<(), State> {
     if code == 0 {
         Ok(())
     } else {
-        Err(format!(
-            "{what} did not succeed; fix the cause above and run `garrison setup` again."
-        ))
+        Err(states::step_failed(what))
     }
 }
 
-fn guided(path: &Path) -> Result<(), String> {
+fn guided(path: &Path) -> Result<(), State> {
     say("This sets Garrison up in five steps. Each step can be repeated.");
     addresses(path)?;
     step(2, "Modules");
     let config = load(path)?;
-    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let text =
+        std::fs::read_to_string(path).map_err(|error| states::wizard_io(path.display(), error))?;
     if chosen(&text) {
         say("The modules are chosen already; `garrison modules` changes them.");
     } else {
@@ -254,7 +245,7 @@ fn guided(path: &Path) -> Result<(), String> {
     };
     // Setup's own message names this command as the run that mends it.
     if setup::run_in_wizard(&config, &command) != 0 {
-        return Err("Connecting Stalwart did not succeed.".to_owned());
+        return Err(states::stalwart_unconnected());
     }
     step(4, "Access");
     if config.broker.policy.exists() {
@@ -266,9 +257,7 @@ fn guided(path: &Path) -> Result<(), String> {
         )?;
     }
     step(5, "Start");
-    crate::install::start_installed().map_err(|error| {
-        format!("Starting Garrison failed: {error}; run `garrison setup` again.")
-    })?;
+    crate::install::start_installed().map_err(|cause| states::start_failed(&cause))?;
     say("\nLast, publish Garrison through nginx:\n");
     nginx::run(&load(path)?, false);
     say("\nThen check everything with: garrison doctor");
@@ -277,24 +266,21 @@ fn guided(path: &Path) -> Result<(), String> {
 
 pub(crate) fn run(path: &Path) -> u8 {
     if !rustix::process::geteuid().is_root() {
-        complain("Run as root.");
+        complain(&states::wizard_not_root().to_string());
         return 2;
     }
     if !crate::at_terminal() {
-        complain(
-            "garrison setup asks questions at a terminal; without one, follow \
-             \"Unattended installation\" in docs/operator/installation.md.",
-        );
+        complain(&states::no_terminal().to_string());
         return 2;
     }
     if !Path::new("/opt/garrison/current").exists() {
-        complain("Install the release first: ./bin/garrison install in the unpacked archive.");
+        complain(&states::wizard_not_installed().to_string());
         return 2;
     }
     match guided(path) {
         Ok(()) => 0,
-        Err(message) => {
-            complain(&message);
+        Err(refusal) => {
+            complain(&refusal.to_string());
             1
         }
     }

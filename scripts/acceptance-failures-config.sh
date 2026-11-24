@@ -12,9 +12,9 @@
 scenario_warnings() {
     step "The installer and doctor say what check-config warns of"
     upgraded
-    says_words "the installer passes check-config's warnings on" \
-        '/root/release/bin/garrison install' \
-        "Warning: deployment.public_origin https://admin.example.test is a placeholder"
+    says "the installer passes check-config's warnings on" '/root/release/bin/garrison install' \
+        check-config-placeholder
+    check "and names the placeholder" 'grep -q -F https://admin.example.test /root/answer'
     inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.warnings &&
         sed -i "s|^schema = 1\$|schema = 1\ncredentials_directory = \"/etc/garrison/elsewhere\"|" \
             /etc/garrison/garrison.toml'
@@ -33,13 +33,15 @@ scenario_unloaded() {
     check "the collector's unit hands it no credential of another name" \
         'systemctl start garrison-collect.service &&
             journalctl -u garrison-collect.service -n 30 --no-pager | grep -q "The collector has no API key for Stalwart"'
-    refused_words "the installer refuses a secret under a name its unit does not load" \
-        '/root/release/bin/garrison install' \
-        "garrison-collect.service loads this secret only as credential:collector-native-key"
+    refused "the installer refuses a secret under a name its unit does not load" \
+        '/root/release/bin/garrison install' check-config-unloaded
+    check "and names the name its unit loads it as" \
+        'grep -q -F credential:collector-native-key /root/answer'
     inside 'sed -i "s|^native_key = \"credential:my-key\"\$|native_key = \"/etc/garrison/credentials/my-key\"|" \
         /etc/garrison/garrison.toml'
-    refused_words "the installer refuses a secret named by its path" '/root/release/bin/garrison install' \
-        "collector.native_key names the file /etc/garrison/credentials/my-key"
+    refused "the installer refuses a secret named by its path" '/root/release/bin/garrison install' \
+        check-config-unloaded
+    check "and names the file" 'grep -q -F /etc/garrison/credentials/my-key /root/answer'
     inside 'cat /root/garrison.toml.unloaded > /etc/garrison/garrison.toml &&
         rm /etc/garrison/credentials/my-key'
     services "after the refused secrets"
@@ -68,8 +70,8 @@ scenario_policy_elsewhere() {
         chmod 755 /srv/policy-folder &&
         sed -i "s|^policy = \"/etc/garrison-policy/access.json\"\$|policy = \"/srv/policy-folder\"|" \
             /etc/garrison/garrison.toml'
-    refused_words "the installer refuses a policy that is a folder" '/root/release/bin/garrison install' \
-        "Access policy not usable"
+    refused "the installer refuses a policy that is a folder" '/root/release/bin/garrison install' \
+        check-config-policy-refused
     check "and leaves that folder as it was" \
         'test "$(stat -c "%U %a" /srv/policy-folder)" = "root 755" && test -s /srv/policy-folder/mail/inbox'
     check "a purge would not remove it" \
@@ -130,8 +132,10 @@ scenario_hidden_policy() {
         printf "\n[broker]\npolicy = \"/home/admin/access-policy.json\"\n" >> /etc/garrison/garrison.toml &&
         cp -p /etc/garrison/garrison.toml /root/garrison.toml.named'
     backups=$(inside 'ls /var/backups/garrison | wc -l')
-    refused_words "the installer refuses a policy the broker's unit hides" '/root/release/bin/garrison install' \
-        "broker.policy is /home/admin/access-policy.json, under /home, which garrison-broker.service hides from the broker (ProtectHome=true): the broker cannot read it there, and nobody can sign in"
+    refused "the installer refuses a policy the broker's unit hides" '/root/release/bin/garrison install' \
+        check-config-policy-refused
+    check "and names it and the unit's setting" \
+        'grep -q -F /home/admin/access-policy.json /root/answer && grep -q -F ProtectHome=true /root/answer'
     # Without cmp, which minimal images lack.
     check "and changes nothing: the release that ran is current, garrison.toml as it was, nothing backed up" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$current' &&
@@ -157,8 +161,10 @@ scenario_hidden_check() {
             >> /etc/garrison/garrison.toml &&
         cp -p /etc/garrison/garrison.toml /root/garrison.toml.named'
     backups=$(inside 'ls /var/backups/garrison | wc -l')
-    refused_words "the installer refuses a check's path the collector's unit hides" '/root/release/bin/garrison install' \
-        "providers[receipt].path is /home/jobs/nightly.json, under /home, which garrison-collect.service hides from the collector (ProtectHome=true): the check cannot read it there"
+    refused "the installer refuses a check's path the collector's unit hides" '/root/release/bin/garrison install' \
+        check-config-hidden-check
+    check "and names it and the unit's setting" \
+        'grep -q -F /home/jobs/nightly.json /root/answer && grep -q -F ProtectHome=true /root/answer'
     # Without cmp, which minimal images lack.
     check "and changes nothing: the release that ran is current, garrison.toml as it was, nothing backed up" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$current' &&

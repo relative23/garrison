@@ -21,6 +21,7 @@ use garrison_collector::backups::{
 use garrison_core::files::atomic_write;
 use garrison_core::time;
 
+use crate::states::backup_check as states;
 use crate::{complain, say};
 use report::{given, kept, last_report, place, turn};
 
@@ -221,25 +222,9 @@ impl Repository {
     }
 }
 
-/// What a run says of its listing.
-fn listing(tool: Tool, snapshots: &Snapshots) -> String {
-    let noun = if tool == Tool::Restic {
-        "snapshot"
-    } else {
-        "archive"
-    };
-    format!(
-        "{}: {} {noun}{}, the newest of {}.",
-        tool.name(),
-        snapshots.count,
-        if snapshots.count == 1 { "" } else { "s" },
-        snapshots.newest.as_deref().unwrap_or("no date")
-    )
-}
-
 pub(crate) fn run_check(asked: &Asked) -> u8 {
     let Some(tool) = Tool::named(&asked.tool) else {
-        complain("The backup tool is restic or borg.");
+        complain(&states::unknown_tool().to_string());
         return 2;
     };
     let path = asked
@@ -249,7 +234,7 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
     let _turn = match turn(&path) {
         Ok(lock) => lock,
         Err(refusal) => {
-            complain(&refusal);
+            complain(&refusal.to_string());
             return 1;
         }
     };
@@ -280,16 +265,17 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
     let mut newest = None;
     match listed {
         Ok(listed) => {
-            say(&listing(tool, &listed.snapshots));
+            let snapshots = &listed.snapshots;
+            say(
+                &states::listed(tool.name(), snapshots.count, snapshots.newest.as_deref())
+                    .to_string(),
+            );
             report.snapshots = Some(listed.snapshots);
             newest = listed.newest;
         }
         Err(problem) => {
             failed = true;
-            complain(&format!(
-                "{} did not list its snapshots: {problem}",
-                tool.name()
-            ));
+            complain(&states::unlisted(tool.name(), &problem).to_string());
             report.problem = Some(problem);
         }
     }
@@ -303,12 +289,11 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
     if asked.verify && report.problem.is_none() {
         let run = repository.verify();
         // A failure's reason goes to standard error, as for every command.
-        let said = if run.ok { say } else { complain };
-        said(&format!(
-            "Integrity check: {} ({})",
-            if run.ok { "passed" } else { "FAILED" },
-            run.detail
-        ));
+        if run.ok {
+            say(&states::verified(&run.detail).to_string());
+        } else {
+            complain(&states::verify_failed(&run.detail).to_string());
+        }
         failed |= !run.ok;
         report.verify = Some(run);
     }
@@ -323,13 +308,10 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
     }
     let text = serde_json::to_vec_pretty(&report).unwrap_or_default();
     if let Err(error) = atomic_write(&path, &text, 0o644) {
-        complain(&format!(
-            "The report could not be written to {}: {error}",
-            path.display()
-        ));
+        complain(&states::unwritten(&path, error).to_string());
         return 1;
     }
-    say(&format!("Report written to {}.", path.display()));
+    say(&states::written(&path).to_string());
     u8::from(failed)
 }
 

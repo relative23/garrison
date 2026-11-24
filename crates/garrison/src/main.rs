@@ -20,6 +20,7 @@ mod ops;
 mod selection;
 mod setup;
 mod state;
+mod states;
 mod unfollowed;
 mod units;
 mod upgrade;
@@ -34,6 +35,7 @@ use clap::{Parser, Subcommand};
 use garrison_core::config::{self, Config};
 use garrison_core::credentials::Credentials;
 use garrison_core::logging;
+use state::State;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -253,10 +255,7 @@ pub(crate) fn placeholder(origin: &str) -> bool {
 fn stalwart_switch(config: &Config) -> u8 {
     let script = static_directory().join(garrison_web::switch::SCRIPT);
     let Ok(data) = std::fs::read(&script) else {
-        complain(&format!(
-            "{} is missing; build the interface first.",
-            script.display()
-        ));
+        complain(&states::config::switch_missing(&script).to_string());
         return 1;
     };
     let text = garrison_web::switch::snippet(&config.deployment.public_origin, &data);
@@ -319,23 +318,21 @@ fn dispatch(task: Task, config: &Config, path: &Path) -> u8 {
     }
 }
 
-fn load(path: &Path) -> Result<Config, String> {
-    config::load(path).map_err(|error| format!("Cannot load {}: {error}", path.display()))
+fn load(path: &Path) -> Result<Config, State> {
+    config::load(path).map_err(|error| states::config::unloadable(path, error))
 }
 
 /// Why a command follows no `--config`: it uses the file the units read, as
-/// the installer and setup do, or it reads no configuration.
-fn unfollowed(command: &Command) -> Option<(&'static str, &'static str)> {
-    let units = "uses /etc/garrison/garrison.toml, the units' configuration";
-    let none = "reads no configuration";
+/// the installer and setup do (`true`), or it reads no configuration.
+fn unfollowed(command: &Command) -> Option<(&'static str, bool)> {
     Some(match command {
-        Command::Install { .. } => ("install", units),
-        Command::Uninstall { .. } => ("uninstall", units),
-        Command::Setup => ("setup", units),
-        Command::Upgrade { .. } => ("upgrade", units),
-        Command::Restore { .. } => ("restore", units),
-        Command::BackupCheck { .. } => ("backup-check", none),
-        Command::Detect { .. } => ("detect", none),
+        Command::Install { .. } => ("install", true),
+        Command::Uninstall { .. } => ("uninstall", true),
+        Command::Setup => ("setup", true),
+        Command::Upgrade { .. } => ("upgrade", true),
+        Command::Restore { .. } => ("restore", true),
+        Command::BackupCheck { .. } => ("backup-check", false),
+        Command::Detect { .. } => ("detect", false),
         Command::Watch | Command::Configured(_) => return None,
     })
 }
@@ -343,12 +340,10 @@ fn unfollowed(command: &Command) -> Option<(&'static str, &'static str)> {
 fn main() -> ExitCode {
     let arguments = Arguments::parse();
     logging::init(arguments.verbose);
-    if let (Some(named), Some((command, why))) = (&arguments.config, unfollowed(&arguments.command))
+    if let (Some(named), Some((command, units))) =
+        (&arguments.config, unfollowed(&arguments.command))
     {
-        complain(&format!(
-            "garrison {command} {why}, so it takes no --config ({}).",
-            named.display()
-        ));
+        complain(&states::config::not_followed(command, units, named).to_string());
         return ExitCode::from(2);
     }
     let path = arguments
@@ -383,8 +378,8 @@ fn main() -> ExitCode {
         Command::Detect { format } => detect::run(format),
         Command::Configured(task) => match load(&path) {
             Ok(config) => dispatch(task, &config, &path),
-            Err(message) => {
-                complain(&message);
+            Err(refusal) => {
+                complain(&refusal.to_string());
                 2
             }
         },

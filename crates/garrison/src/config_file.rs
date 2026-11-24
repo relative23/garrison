@@ -8,17 +8,24 @@ use std::path::{Path, PathBuf};
 
 use garrison_core::files::atomic_write;
 
+use crate::state::State;
+
 /// Write `updated` over `path`, whose text was `current`; returns where the
-/// previous text went.
-pub(crate) fn replace(path: &Path, current: &str, updated: &str) -> Result<PathBuf, String> {
-    let failed = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
+/// previous text went, or what the system said, as `failed` makes it the
+/// caller's state.
+pub(crate) fn replace(
+    path: &Path,
+    current: &str,
+    updated: &str,
+    failed: impl Fn(&dyn std::fmt::Display) -> State,
+) -> Result<PathBuf, State> {
     let metadata = fs::metadata(path).map_err(|error| failed(&error))?;
     let mode = metadata.permissions().mode() & 0o7777;
     let owner = (
         Some(rustix::fs::Uid::from_raw(metadata.uid())),
         Some(rustix::fs::Gid::from_raw(metadata.gid())),
     );
-    let place = |target: &Path, data: &str| -> Result<(), String> {
+    let place = |target: &Path, data: &str| -> Result<(), State> {
         atomic_write(target, data.as_bytes(), mode).map_err(|error| failed(&error))?;
         // A group that may read the file keeps reading it.
         rustix::fs::chown(target, owner.0, owner.1).map_err(|error| failed(&error))
@@ -39,7 +46,9 @@ mod tests {
         let path = directory.path().join("garrison.toml");
         fs::write(&path, "old\n").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-        let previous = replace(&path, "old\n", "new\n").unwrap();
+        let failed =
+            |error: &dyn std::fmt::Display| crate::states::commands::modules_io("x", error);
+        let previous = replace(&path, "old\n", "new\n", failed).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "new\n");
         assert_eq!(fs::read_to_string(previous).unwrap(), "old\n");
         assert_eq!(

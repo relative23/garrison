@@ -7,7 +7,7 @@ use std::path::Path;
 use garrison_testing::http::serve;
 use serde_json::json;
 
-use super::support::{against, names, prepared, respond, run, text};
+use super::support::{against, names, prepared, respond, run, states, text};
 use super::{ADMINISTRATOR_RIGHTS, role};
 
 /// garrison.toml in `directory` with `broker.policy` at `policy`.
@@ -44,7 +44,8 @@ fn init_makes_the_folder_that_garrison_toml_names_for_the_policy() {
         assert_eq!(made.mode() & 0o7777, 0o755, "{folder}");
     }
     assert_eq!(std::fs::metadata(&policy).unwrap().mode() & 0o777, 0o640);
-    assert!(text(&init.stdout).contains(&format!("Saved {}", policy.display())));
+    assert!(states(&init.stdout).contains(&"access-saved".to_owned()));
+    assert!(text(&init.stdout).contains(&policy.display().to_string()));
     server.requests();
 }
 
@@ -59,6 +60,7 @@ fn an_error_of_a_file_beside_the_policy_names_that_file() {
         let output = run(folder, arguments);
         assert_eq!(output.status.code(), Some(1), "{arguments:?}");
         let said = text(&output.stderr);
+        assert_eq!(states(&output.stderr).len(), 1, "{arguments:?}: {said}");
         assert!(said.contains(file), "{arguments:?}: {said}");
         said
     };
@@ -73,6 +75,7 @@ fn an_error_of_a_file_beside_the_policy_names_that_file() {
         mode(0o555);
         let said = named(&["access", "deny", "5"], &lock.display().to_string());
         mode(0o755);
+        // The system's own words for the refusal.
         assert!(said.contains("Permission denied"), "{said}");
         // Nor the backup, where the lock is there.
         std::fs::write(&lock, "").unwrap();
@@ -119,17 +122,10 @@ fn a_lock_another_process_holds_is_said_and_not_waited_for() {
     let before = std::fs::read(&policy).unwrap();
     let denied = run(directory.path(), &["access", "deny", "5"]);
     assert_eq!(
-        (denied.status.code(), text(&denied.stderr)),
-        (
-            Some(1),
-            format!(
-                "{} is held by another process, as another `garrison access` command: try \
-                 again once it has ended. Where none runs, remove the file and run the command \
-                 again.\n",
-                lock.display()
-            )
-        )
+        (denied.status.code(), states(&denied.stderr)),
+        (Some(1), vec!["access-lock-held".to_owned()])
     );
+    assert!(text(&denied.stderr).contains(&lock.display().to_string()));
     assert_eq!(std::fs::read(&policy).unwrap(), before);
     drop(holder);
     let again = run(directory.path(), &["access", "deny", "5"]);

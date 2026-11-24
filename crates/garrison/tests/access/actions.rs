@@ -6,7 +6,7 @@
 use garrison_testing::http::serve;
 use serde_json::{Value, json};
 
-use super::support::{against, names, respond, run, text};
+use super::support::{against, names, respond, run, states, text};
 use super::{ADMINISTRATOR_RIGHTS, policy, role};
 
 /// The actions of each of the three default profiles.
@@ -73,20 +73,20 @@ fn update_gives_the_profiles_the_actions_as_garrison_toml_names_them() {
     // with what takes it out.
     let listed = run(folder, &["access", "list"]);
     assert_eq!(listed.status.code(), Some(1));
-    assert!(
-        text(&listed.stderr).contains(
-            "names run_backup, which garrison.toml no longer has: run `garrison access update`"
-        ),
+    assert_eq!(
+        states(&listed.stderr),
+        ["access-actions-gone"],
         "{}",
         text(&listed.stderr)
     );
+    assert!(text(&listed.stderr).contains("run_backup"));
     // A save that fails says nothing of what it would have changed.
     let pending = folder.join(".policy.json.pending");
     std::fs::create_dir(&pending).unwrap();
     let failed = run(folder, &["access", "update"]);
     assert_eq!(failed.status.code(), Some(1));
     assert!(
-        !text(&failed.stdout).contains("Profile "),
+        !states(&failed.stdout).contains(&"access-profile-changed".to_owned()),
         "{}",
         text(&failed.stdout)
     );
@@ -96,15 +96,28 @@ fn update_gives_the_profiles_the_actions_as_garrison_toml_names_them() {
     let updated = run(folder, &["access", "update"]);
     assert_eq!(updated.status.code(), Some(0), "{}", text(&updated.stderr));
     let said = text(&updated.stdout);
-    for line in [
-        "Profile administrator: install_updates added, run_backup taken out.\n",
-        "Profile operator: install_updates added.\n",
-        "Run the installer again now: it writes the polkit rule for these actions and restarts \
-         the broker and the web service, which read them only when they start; until then an \
-         added action is offered to nobody.\n",
-    ] {
-        assert!(said.contains(line), "{said}");
-    }
+    let changed = states(&updated.stdout);
+    assert_eq!(
+        changed[changed.len() - 3..],
+        [
+            "access-profile-changed",
+            "access-profile-changed",
+            "access-run-installer"
+        ],
+        "{said}"
+    );
+    // Which profile gained and lost which action.
+    let lines: Vec<&str> = said.lines().collect();
+    let profile = |name: &str| *lines.iter().find(|line| line.contains(name)).unwrap();
+    let administrator = profile("Profile administrator");
+    assert!(
+        administrator.find("install_updates") < administrator.find("run_backup"),
+        "{said}"
+    );
+    assert!(
+        !profile("Profile operator").contains("run_backup"),
+        "{said}"
+    );
     assert_eq!(
         actions(folder),
         json!([
@@ -120,10 +133,7 @@ fn update_gives_the_profiles_the_actions_as_garrison_toml_names_them() {
     // Once they follow, a second update changes nothing.
     let again = run(folder, &["access", "update"]);
     assert_eq!(again.status.code(), Some(0), "{}", text(&again.stderr));
-    assert_eq!(
-        text(&again.stdout),
-        "The profiles have the actions garrison.toml names; nothing to change.\n"
-    );
+    assert_eq!(states(&again.stdout), ["access-actions-held"]);
     assert_eq!(backups(folder), kept + 1);
 }
 
@@ -141,6 +151,7 @@ fn the_reason_update_cannot_mend_comes_first() {
     let listed = run(folder, &["access", "list"]);
     let said = text(&listed.stderr);
     assert_eq!(listed.status.code(), Some(1));
+    assert_eq!(states(&listed.stderr), ["access-invalid-policy"], "{said}");
+    // The policy's own words for what keeps it from reading.
     assert!(said.contains("unknown modules"), "{said}");
-    assert!(!said.contains("no longer has"), "{said}");
 }

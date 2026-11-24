@@ -12,7 +12,7 @@ use garrison_core::time::{self, SignedDuration};
 use garrison_testing::http::serve;
 use serde_json::json;
 
-use super::support::{names, prepared, respond, run, text};
+use super::support::{names, prepared, respond, run, states, text};
 use super::{ADMINISTRATOR_RIGHTS, role};
 
 /// A command that writes the policy, the answers of Stalwart's it needs and
@@ -277,13 +277,7 @@ fn the_policy_is_read_no_further_than_a_policy_can_be() {
     });
     let said = text(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{said}");
-    assert!(
-        said.contains(
-            "is larger than the broker reads (64 KiB), so it is no policy: move it away and run \
-             `garrison access init`, or copy back the newest backup beside it"
-        ),
-        "{said}"
-    );
+    assert_eq!(states(&output.stderr), ["access-too-large"], "{said}");
     let policy = directory.path().join("policy.json");
     assert_eq!(std::fs::metadata(&policy).unwrap().len(), size);
     let backups: Vec<String> = std::fs::read_dir(directory.path())

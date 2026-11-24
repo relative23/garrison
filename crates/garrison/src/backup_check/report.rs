@@ -15,6 +15,8 @@ use rustix::io::Errno;
 
 use super::Asked;
 use crate::complain;
+use crate::state::State;
+use crate::states::backup_check as states;
 
 /// The turn of one run of the report at `report`: the lock beside it,
 /// `<report>.lock`, a file of this user's own that nobody else may open. A
@@ -22,45 +24,21 @@ use crate::complain;
 /// it reads what the run before it wrote and never writes back a check or
 /// a restore that a run which ended meanwhile replaced. One that finds it
 /// held says so and waits.
-pub(super) fn turn(report: &Path) -> Result<File, String> {
+pub(super) fn turn(report: &Path) -> Result<File, State> {
     let mut name = report.as_os_str().to_owned();
     name.push(".lock");
     let lock = PathBuf::from(name);
     // Root's rights mend a refusal for want of them, and nothing else.
-    let failed = |what: String, error: std::io::Error| {
-        let root = error.kind() == std::io::ErrorKind::PermissionDenied
-            && !rustix::process::geteuid().is_root();
-        let hint = if root {
-            " Run `garrison backup-check` as root."
-        } else {
-            ""
-        };
-        format!("{what}: {error}.{hint}")
-    };
-    let taken = |error: Errno| {
-        let what = format!("The report's lock {} cannot be taken", lock.display());
-        failed(what, error.into())
-    };
+    let taken = |error: Errno| states::lock_taken(&lock, &error.into());
     if let Some(folder) = lock
         .parent()
         .filter(|folder| !folder.as_os_str().is_empty())
     {
-        fs::create_dir_all(folder).map_err(|error| {
-            failed(
-                format!("The report's folder {} cannot be made", folder.display()),
-                error,
-            )
-        })?;
+        fs::create_dir_all(folder).map_err(|error| states::folder_unmade(folder, &error))?;
     }
     let flags =
         OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
-    let other = || {
-        format!(
-            "{} is no lock of `garrison backup-check`'s, but a link, another user's file or no \
-             file: remove it, then run the command again.",
-            lock.display()
-        )
-    };
+    let other = || states::lock_other(&lock);
     let file = File::from(
         match rustix::fs::open(&lock, flags, Mode::RUSR | Mode::WUSR) {
             Err(Errno::LOOP) => return Err(other()),
@@ -77,10 +55,7 @@ pub(super) fn turn(report: &Path) -> Result<File, String> {
     match rustix::fs::flock(&file, FlockOperation::NonBlockingLockExclusive) {
         Ok(()) => {}
         Err(Errno::WOULDBLOCK) => {
-            complain(&format!(
-                "Another `garrison backup-check` writes {}; this run waits until it has ended.",
-                report.display()
-            ));
+            complain(&states::waits(report).to_string());
             rustix::fs::flock(&file, FlockOperation::LockExclusive).map_err(taken)?;
         }
         Err(error) => return Err(taken(error)),
@@ -100,21 +75,12 @@ pub(super) fn last_report(path: &Path) -> Option<Report> {
         .as_ref()
         .is_some_and(|(_, metadata)| !changed_only_by_trusted(metadata))
     {
-        complain(&format!(
-            "The last report, {}, can be changed by users other than root: its last integrity \
-             check and test restore are not kept.",
-            path.display()
-        ));
+        complain(&states::report_foreign(path).to_string());
         return None;
     }
     let report = read.and_then(|(value, _)| json::object(value).ok());
     if report.is_none() {
-        complain(&format!(
-            "The last report, {}, cannot be read: it must be a file, not a link, of at most {} \
-             KiB of valid JSON. Its last integrity check and test restore are not kept.",
-            path.display(),
-            MAX_REPORT / 1024
-        ));
+        complain(&states::report_unread(path, MAX_REPORT / 1024).to_string());
     }
     report
 }
@@ -223,36 +189,28 @@ pub(super) fn place(
 pub(super) fn kept(path: &Path, before: Report, this: &Report, placed: bool) -> Option<Report> {
     let (tool, id) = (this.tool, this.repository_id.as_deref());
     let name = placed.then_some(this.repository.as_str());
-    let unknown = "is not known to be of this repository, since";
-    let mut fix = "";
-    let why = match (name, id, before.repository_id.as_deref()) {
-        (None, _, _) => format!("{unknown} the command is not told where this one is"),
-        _ if this.problem.is_some() => format!("{unknown} {} could not list it", tool.name()),
-        (_, None, _) => format!("{unknown} {} gave no ID for it", tool.name()),
-        (_, _, None) => "holds no repository ID".to_owned(),
+    let said = match (name, id, before.repository_id.as_deref()) {
+        (None, _, _) => states::report_unplaced(path),
+        _ if this.problem.is_some() => states::report_unlisted(path, tool.name()),
+        (_, None, _) => states::report_unidentified(path, tool.name()),
+        (_, _, None) => states::report_anonymous(path),
         (Some(name), Some(id), Some(theirs)) => {
             if before.tool == tool && before.repository == name && theirs == id {
                 return Some(before);
             }
-            if before.tool == tool && theirs == id {
-                fix = " The same ID at another place is a copy, which needs a --report of its \
-                       own; name one repository alike in every run.";
+            let (theirs, ours) = (
+                (before.tool.name(), before.repository.as_str(), theirs),
+                (tool.name(), name, id),
+            );
+            if before.tool == tool && theirs.2 == id {
+                states::report_copy(path, theirs, ours)
+            } else {
+                states::report_other(path, theirs, ours)
             }
-            format!(
-                "is of the {} repository {} (ID {theirs}), and this run asks the {} repository \
-                 {name} (ID {id})",
-                before.tool.name(),
-                before.repository,
-                tool.name()
-            )
         }
     };
     if before.verify.is_some() || before.restore.is_some() {
-        complain(&format!(
-            "The last report, {}, {why}: its last integrity check and test restore are not \
-             kept.{fix}",
-            path.display()
-        ));
+        complain(&said.to_string());
     }
     None
 }
