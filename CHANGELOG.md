@@ -1282,7 +1282,7 @@ Notable changes for operators and users. The format follows
   channel named since the last notification is Unknown, not in order, until
   one has gone out on it. `garrison notify-test` shows whether a message
   goes out now and does not change the check. What a release before this one
-  kept is read as before, without a time.
+  kept names the channels that did not take it, without a time or its words.
 - **A release list that stops answering is said.** While GitHub gave no
   answer, the release checks kept the last release it had named without a
   word. They now say since when no answer came, and after three days "the
