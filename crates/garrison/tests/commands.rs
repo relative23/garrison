@@ -282,10 +282,13 @@ const GROUPS: [(&str, &str); 2] = [
 
 /// The commands and help lines `garrison <group> --help` lists, help aside.
 fn listed(group: &[&str]) -> Vec<(Vec<String>, String)> {
+    // The help wraps at the width its environment names; a wide one keeps
+    // every command's line whole, wherever the test runs.
     let help = finished(
         Command::new(env!("CARGO_BIN_EXE_garrison"))
             .args(group)
-            .arg("--help"),
+            .arg("--help")
+            .env("COLUMNS", "400"),
     );
     let help = text(&help.stdout);
     let commands = help.split("\nCommands:\n").nth(1).unwrap();
