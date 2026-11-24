@@ -87,7 +87,7 @@ fn the_event_lists_are_disjoint_and_never_forbidden() {
     let mut unique = all.clone();
     unique.dedup();
     assert_eq!(unique.len(), all.len());
-    assert_eq!(all.len(), 114);
+    assert_eq!(all.len(), 126);
     assert!(FORBIDDEN_EVENTS.iter().all(|event| !is_recorded(event)));
     assert!(is_recorded("smtp.ehlo") && !is_recorded("smtp.raw-input"));
     // A name is recorded as a whole: no part of one, nothing longer.
@@ -108,7 +108,7 @@ fn the_event_lists_are_disjoint_and_never_forbidden() {
         assert!(kind.as_str().starts_with(kind.category()));
     }
     let names: std::collections::BTreeSet<&str> = event_types().into_iter().collect();
-    assert_eq!((names.len(), EventType::ALL.len()), (114, 114));
+    assert_eq!((names.len(), EventType::ALL.len()), (126, 126));
     assert_eq!(EventType::QueueRescheduled.as_str(), "queue.rescheduled");
     assert_eq!(EventType::MtaHookActionReject.category(), "mta-hook");
     // The summaries of sessions and deliveries read the events of their group.
@@ -120,7 +120,7 @@ fn the_event_lists_are_disjoint_and_never_forbidden() {
     };
     assert_eq!(
         (of(Group::Session), of(Group::Delivery), of(Group::Other)),
-        (30, 49, 35)
+        (42, 49, 35)
     );
     assert!(
         EventType::ALL

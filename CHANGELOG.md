@@ -132,6 +132,10 @@ Notable changes for operators and users. The format follows
   refuses, before anything stops, until the address is written into
   `garrison.toml` again. See
   [configuration](docs/operator/configuration.md#an-address-that-is-a-secret).
+- **A session on the Sessions page names more of what Stalwart refused in
+  it.** Among them too many invalid recipients, a mail loop, a From of
+  several domains, too many messages and a command out of order or not
+  offered.
 - **Attacks & bans counts a sign-in that Stalwart refused for a missing
   second factor, or from an address its credential does not allow, as a
   failed sign-in.** It counts to its address, and to its account where

@@ -27,6 +27,7 @@ use garrison_testing::smtp::Smtp;
 use serde_json::{Value, json};
 
 mod bans;
+mod refusals;
 
 /// The tests of this binary change Stalwart's settings or count on them:
 /// one at a time.
