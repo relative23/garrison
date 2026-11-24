@@ -558,7 +558,9 @@ A receipt can list results, one row each: `rows = []` where the file itself
 is the list, or `rows = ["results"]` for a list under that key. `columns`
 makes its table and `ok_rows` is what every row must meet. A list needs
 `row_date`, the key of each row's date, the newest of which is the
-receipt's; `fields`, `ok_when` and `date` read an object. Every
+receipt's; `fields`, `ok_when` and `date` read an object. A receipt of the
+other shape, a list where the entry reads an object or the other way round,
+is Unknown, and the card says how to read it. Every
 row is judged, however many; the table shows the last 200, where a job that
 appends a row for each run puts the newest, and the card says how many rows
 the receipt lists where there are more. Where `rows` names no list, as where a

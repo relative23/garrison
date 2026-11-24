@@ -197,11 +197,7 @@ impl Receipt {
     /// where rows are no objects, which are not read.
     fn unread_rows(&self, document: &Value) -> Option<(State, String)> {
         let Some(list) = self.place(document)?.as_array() else {
-            let why = if self.rows.as_ref().is_some_and(Vec::is_empty) {
-                "The receipt is no list of rows."
-            } else {
-                "The receipt holds no list of rows where `rows` names one."
-            };
+            let why = "The receipt holds no list of rows where `rows` names one.";
             return Some((State::Unknown, why.to_owned()));
         };
         let (others, total) = (
@@ -223,6 +219,28 @@ impl Receipt {
             State::Partial
         };
         Some((at_most, finding))
+    }
+
+    /// What the card says of a receipt of the other shape than its entry
+    /// reads, a list for an entry that reads an object or the other way
+    /// round, which it does not judge.
+    fn misshapen(&self, document: &Value) -> Option<String> {
+        let path = self.path.display();
+        match (
+            document.is_array(),
+            self.rows.as_ref().is_some_and(Vec::is_empty),
+        ) {
+            (true, false) => Some(format!(
+                "The receipt at {path} is a list, but its entry reads an object: read a list \
+                 with rows = [] and row_date, as checks.md shows."
+            )),
+            (false, true) => Some(format!(
+                "The receipt at {path} is an object, but rows = [] reads a list: name the key \
+                 of its list in rows, such as rows = [\"results\"], or leave rows out to read \
+                 the object."
+            )),
+            _ => None,
+        }
     }
 
     /// What the card says where its table cannot show every row it read
@@ -337,6 +355,11 @@ impl Provider for Receipt {
                 .with_findings(vec![self.unread(hidden::place(&self.path).as_deref())]);
             return Ok(Report::of(unknown));
         };
+        if let Some(finding) = self.misshapen(&document) {
+            return Ok(Report::of(
+                base(State::Unknown)?.with_findings(vec![finding]),
+            ));
+        }
         // A result that someone else could have written is not evidence.
         let trusted = changed_only_by_trusted(&metadata);
         let items = self.items(&document);

@@ -9,16 +9,24 @@ use crate::testing::{Canned, config, context, table};
 
 /// The card of a receipt that holds `document`, with `settings` added.
 fn card(document: &Value, settings: &str) -> Observation {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("receipt.json");
-    std::fs::write(&path, document.to_string()).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    card_at(
+        &tempfile::tempdir().unwrap().path().join("receipt.json"),
+        document,
+        settings,
+    )
+}
+
+/// [`card`] for a receipt at `path`.
+fn card_at(path: &std::path::Path, document: &Value, settings: &str) -> Observation {
+    std::fs::write(path, document.to_string()).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).unwrap();
     let receipt = Receipt::new(&table(&format!(
         "type = \"receipt\"\nid = \"r\"\ntitle = \"R\"\npath = \"{}\"\n\
          modules = [\"backups\"]\nmax_age_hours = 30\n{settings}",
         path.display()
     )))
     .unwrap();
+    let directory = tempfile::tempdir().unwrap();
     let (config, runner) = (config(directory.path()), Canned(String::new()));
     receipt
         .collect(&context(&config, &runner))
@@ -100,4 +108,49 @@ fn a_long_list_with_rows_that_are_no_objects_gives_one_count() {
     );
     let table = observation.table.unwrap();
     assert_eq!((table.rows.len(), &table.rows[0]), (200, &vec![json!(5)]));
+}
+
+/// A receipt of the other shape than its entry reads is not judged as
+/// one: a list that its entry reads as an object is not Failed by
+/// `ok_when`, and an object that `rows = []` reads as a list is not judged
+/// by its age. The card is Unknown and says how to read the receipt's
+/// shape.
+#[test]
+fn a_receipt_of_the_other_shape_says_how_to_read_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("receipt.json");
+    let list = json!([{"result": "passed", "at": "2026-10-29T11:00:00Z"}]);
+    for settings in [
+        "ok_when = { key = \"result\", equals = [\"passed\"] }",
+        "",
+        "rows = [\"results\"]\nok_rows = { key = \"result\", equals = [\"passed\"] }",
+    ] {
+        let observation = card_at(&path, &list, settings);
+        assert_eq!(
+            (observation.state, observation.findings),
+            (
+                State::Unknown,
+                vec![format!(
+                    "The receipt at {} is a list, but its entry reads an object: read a list \
+                     with rows = [] and row_date, as checks.md shows.",
+                    path.display()
+                )]
+            ),
+            "{settings}"
+        );
+    }
+    let object = json!({"date": "2026-10-20T11:00:00Z", "results": []});
+    let observation = card_at(&path, &object, "rows = []\nrow_date = \"at\"");
+    assert_eq!(
+        (observation.state, observation.findings),
+        (
+            State::Unknown,
+            vec![format!(
+                "The receipt at {} is an object, but rows = [] reads a list: name the key of \
+                 its list in rows, such as rows = [\"results\"], or leave rows out to read the \
+                 object.",
+                path.display()
+            )]
+        )
+    );
 }
