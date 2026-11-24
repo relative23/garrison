@@ -2059,8 +2059,7 @@ Notable changes for operators and users. The format follows
   last completes**; the other's return, or one a page made up, no longer
   ends it.
 - **After the host's clock went back, the Maintenance page lists the job
-  started last first**, a job recorded while it ran ahead leaves the audit
-  with the jobs after it, and a session signed in meanwhile ends.
+  started last first**, and a session signed in meanwhile ends.
 - **The polkit rule's first line names the command that writes it,
   `garrison polkit-rule`**, where it named one that does not exist, and says
   to run the installer again after `[[actions]]` changed.
@@ -2078,6 +2077,9 @@ Notable changes for operators and users. The format follows
 - **A dry run of the Ansible role (`ansible-playbook --check`) checks the
   signature and runs to its end on a host the role set up**, where it stopped
   saying that the signature belonged to another release.
+- **A row numbered with the greatest integer, in a damaged or hand-edited
+  event history or audit, no longer puts every later event or job in random
+  order**, nor keeps `garrison doctor` dating the last event by it.
 
 ## [0.1.2] - 2026-11-13
 

@@ -132,6 +132,14 @@ fn ended_sessions_wait_for_their_tokens_revocation() {
     let (store, _directory) = store();
     let (_, late) = store.create(&new_session(-5)).unwrap();
     let (_, early) = store.create(&new_session(-60)).unwrap();
+    // The rounds take the sessions signed in first first.
+    store
+        .db()
+        .execute(
+            "UPDATE sessions SET created_at = created_at - 60 WHERE id_hash = ?",
+            [&early.id_hash],
+        )
+        .unwrap();
     let (cookie, live) = store.create(&new_session(600)).unwrap();
     let ended = |limit| {
         let ended: Vec<String> = store
@@ -153,9 +161,114 @@ fn ended_sessions_wait_for_their_tokens_revocation() {
     store.end(&live.id_hash).unwrap();
     assert_eq!(store.get(&cookie).unwrap(), None);
     assert_eq!(ended(10).len(), 3);
-    // An end later than the one a session has does not extend it.
+    // Ending one again keeps it ended, and where it was.
     store.end(&early.id_hash).unwrap();
     assert_eq!(ended(1), std::slice::from_ref(&early.id_hash));
+}
+
+/// What the clock stepping by `seconds` does to the sessions: every time a
+/// clock gave moves the other way, and one no clock gives stays.
+fn clock_stepped(store: &WebStore, seconds: i64) {
+    let (first, last) = (
+        time::Timestamp::MIN.as_second(),
+        time::Timestamp::MAX.as_second(),
+    );
+    for column in ["created_at", "expires_at"] {
+        store
+            .db()
+            .execute(
+                &format!(
+                    "UPDATE sessions SET {column} = {column} - ?1 \
+                     WHERE {column} BETWEEN ?2 AND ?3"
+                ),
+                [seconds, first, last],
+            )
+            .unwrap();
+    }
+}
+
+/// A session that has ended stays ended whatever the clock does after it:
+/// one ended here, as at a sign-out whose revocation Stalwart did not
+/// answer, one whose time a lookup found over, and one whose time a round
+/// found over. After the clock stepped back or ahead, no cookie finds any
+/// of them, and the round still finds each until its row goes.
+#[test]
+fn an_ended_session_stays_ended_whatever_the_clock_says() {
+    let day = 86_400;
+    for step in [-365 * day, -day, -600, 600, day, 365 * day] {
+        let (store, _directory) = store();
+        // Signed in twenty minutes ago, so that a step back of ten keeps
+        // each begun, and the two that ended by their time five ago.
+        let begun = |lifetime: i64| {
+            let (cookie, session) = store.create(&new_session(lifetime)).unwrap();
+            store
+                .db()
+                .execute(
+                    "UPDATE sessions SET created_at = created_at - 1200, \
+                     expires_at = expires_at - 1200 WHERE id_hash = ?",
+                    [&session.id_hash],
+                )
+                .unwrap();
+            (cookie, session.id_hash)
+        };
+        let (signed_out, by_hand) = begun(1800);
+        let (looked_up, by_lookup) = begun(900);
+        let (rounded, by_round) = begun(900);
+        store.end(&by_hand).unwrap();
+        assert_eq!(store.get(&looked_up).unwrap(), None);
+        let mut seen: Vec<String> = store
+            .ended(10)
+            .unwrap()
+            .into_iter()
+            .map(|(id_hash, _)| id_hash)
+            .collect();
+        seen.sort();
+        let mut all = vec![by_hand, by_lookup, by_round];
+        all.sort();
+        assert_eq!(seen, all, "before the step");
+        clock_stepped(&store, step);
+        for cookie in [&signed_out, &looked_up, &rounded] {
+            assert_eq!(store.get(cookie).unwrap(), None, "{step} s");
+        }
+        let mut found: Vec<String> = store
+            .ended(10)
+            .unwrap()
+            .into_iter()
+            .map(|(id_hash, _)| id_hash)
+            .collect();
+        found.sort();
+        assert_eq!(found, all, "{step} s");
+    }
+}
+
+/// A session whose start or end is stored as text, as in a damaged or
+/// hand-edited store, has a time that is none: its cookie is signed out,
+/// without an error, and the round takes its token.
+#[test]
+fn a_session_at_no_time_is_signed_out() {
+    let mut found = Vec::new();
+    for column in ["created_at", "expires_at"] {
+        let (store, _directory) = store();
+        let (cookie, session) = store.create(&new_session(600)).unwrap();
+        store
+            .db()
+            .execute(&format!("UPDATE sessions SET {column} = 'no time'"), [])
+            .unwrap();
+        let looked_up = store.get(&cookie).map_err(|error| error.to_string());
+        let ended = store
+            .ended(10)
+            .map(|ended| {
+                ended
+                    .into_iter()
+                    .map(|(id_hash, _)| id_hash)
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|error| error.to_string());
+        if looked_up != Ok(None) || ended != Ok(vec![session.id_hash]) {
+            found.push(format!("{column}: lookup {looked_up:?}, round {ended:?}"));
+        }
+    }
+    assert_eq!(found, Vec::<String>::new());
 }
 
 /// A session signed in while the clock ran ahead, then the clock put

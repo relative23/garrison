@@ -187,8 +187,8 @@ async fn logout(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Resp
         // Logout needs Origin and CSRF like every write, but tolerates a dead grant.
         if let Some(session) = app.gate.session(&visitor)? {
             app.gate.check_write(&visitor, &session)?;
-            // "ok" only for a session that is gone here; its token is
-            // revoked whether or not it is.
+            // "ok" only for a session no cookie finds any more; its token
+            // is revoked now, or by the rounds where Stalwart did not answer.
             app.gate.end(&session, true)?;
         }
         let mut response = Json(LogoutResponse { ok: true }).into_response();

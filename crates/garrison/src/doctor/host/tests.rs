@@ -195,6 +195,39 @@ fn an_event_recorded_ahead_of_the_clock_gives_no_age_below_zero() {
     );
 }
 
+/// An event numbered with the greatest integer, as a damaged or hand-edited
+/// history may hold, has SQLite number later events at random: the event
+/// that arrived last is still the one the receiver stored last.
+#[test]
+fn an_event_of_the_greatest_number_leaves_the_last_arrival_the_newest() {
+    use garrison_ingest::store::{EventStore, Limits};
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    let path = config.database(Database::Events);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let store = EventStore::open(&path, Limits::new(30, 1000, 64 * 1024 * 1024)).unwrap();
+    let now = time::now().as_second();
+    let batch = |index: i64, at: i64| {
+        let created = time::isoformat(time::Timestamp::from_second(at).unwrap());
+        let event = serde_json::json!({"id": index.to_string(), "createdAt": created,
+                                       "type": "auth.failed", "data": {}});
+        store.ingest(&[event], at).unwrap();
+    };
+    batch(0, now - 7200);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute("UPDATE events SET seq = ?1", [i64::MAX])
+        .unwrap();
+    for index in 1..=20 {
+        batch(index, now - 3600 + index);
+    }
+    batch(21, now - 60);
+    let found = events(&config);
+    assert_eq!(
+        (found.level, found.what.as_str()),
+        (Level::Ok, "the last Stalwart event arrived 1 minute ago")
+    );
+}
+
 #[test]
 fn systemd_names_only_a_last_run_that_did_not_succeed() {
     assert!(last_result(Some("success")).is_none());

@@ -74,12 +74,22 @@ const AGAIN: Duration = Duration::from_secs(60);
 /// their end and for as long as the service runs; where Stalwart did not
 /// answer, a minute later again.
 pub async fn end_sessions_on_time(app: Arc<App>) {
-    let mut wait = ROUND;
+    end_sessions_waiting(app, tokio::time::sleep).await;
+}
+
+/// [`end_sessions_on_time`], with `wait` for the pause before each round:
+/// the service waits by tokio's clock, a test by one it moves itself.
+pub async fn end_sessions_waiting<W, F>(app: Arc<App>, mut wait: W)
+where
+    W: FnMut(Duration) -> F,
+    F: Future<Output = ()>,
+{
+    let mut pause = ROUND;
     loop {
-        tokio::time::sleep(wait).await;
+        wait(pause).await;
         let round = Arc::clone(&app);
         let ended = tokio::task::spawn_blocking(move || round.end_ended_sessions()).await;
-        wait = if matches!(ended, Ok(true)) {
+        pause = if matches!(ended, Ok(true)) {
             ROUND
         } else {
             AGAIN

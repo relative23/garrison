@@ -242,6 +242,15 @@ impl EventStore {
         let transaction = state
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // SQLite numbers an event one past the greatest number, but after the
+        // greatest integer, which counting never reaches, at random: an event
+        // that holds it moves to follow the others, so that the numbers keep
+        // the order in which the events arrived.
+        transaction.execute(
+            "UPDATE events SET seq = (SELECT coalesce(max(seq), 0) + 1 FROM events \
+             WHERE seq < ?1) WHERE seq = ?1",
+            [i64::MAX],
+        )?;
         for event in events {
             match insert(&transaction, event, arrival)? {
                 Taken::Stored => outcome.stored += 1,
@@ -411,6 +420,8 @@ fn widen(db: &Connection, limit: &str, first: i64, last: i64) -> Result<(), Sqli
 mod failing_tests;
 #[cfg(test)]
 mod limit_tests;
+#[cfg(test)]
+mod order_tests;
 #[cfg(test)]
 mod sequence_tests;
 #[cfg(test)]
