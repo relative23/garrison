@@ -32,6 +32,7 @@
   delegate_to: localhost
   become: false
   changed_when: false
+  check_mode: false
   register: garrison_signature
   when: not garrison_unsigned
 
@@ -207,7 +208,7 @@
       bind the role of your administrators with garrison access bind-role
       <role-id> --profile administrator, then run the play again.' }}
     quiet: true
-  when: garrison_access is skipped
+  when: garrison_access is skipped and not ansible_check_mode
 
 - name: What the installer last finished with
   ansible.builtin.slurp:

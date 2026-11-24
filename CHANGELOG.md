@@ -2013,6 +2013,9 @@ Notable changes for operators and users. The format follows
   not finish or `garrison.toml` changed since, and finds the access policy
   where `[broker] policy` keeps it**; where the policy binds no role and no
   account, the play stops and says how to bind one.
+- **A dry run of the Ansible role (`ansible-playbook --check`) checks the
+  signature and runs to its end on a host the role set up**, where it stopped
+  saying that the signature belonged to another release.
 
 ## [0.1.2] - 2026-11-13
 
