@@ -192,39 +192,45 @@ impl WebStore {
             return Ok(None);
         }
         let db = self.db();
+        let id_hash = digest(identifier);
+        // A time stored as another kind of value than whole seconds is no
+        // time, and its row no session.
         let found = db
             .query_row(
-                "SELECT id_hash,subject,email,token,csrf,client_ip,expires_at,created_at \
-                 FROM sessions WHERE id_hash=?",
-                [digest(identifier)],
+                "SELECT typeof(created_at) = 'integer' AND typeof(expires_at) = 'integer' \
+                 AND expires_at > ?2 AND created_at <= ?2, expires_at IS ?3, \
+                 id_hash,subject,email,token,csrf,client_ip,expires_at \
+                 FROM sessions WHERE id_hash=?1",
+                params![id_hash, now(), ENDED],
                 |row| {
-                    let session = Session {
-                        id_hash: row.get(0)?,
-                        subject: row.get(1)?,
-                        email: row.get(2)?,
-                        token: row.get(3)?,
-                        csrf: row.get(4)?,
-                        client_ip: row.get(5)?,
-                        expires_at: row.get(6)?,
+                    let session = if row.get::<_, bool>(0)? {
+                        Some(Session {
+                            id_hash: row.get(2)?,
+                            subject: row.get(3)?,
+                            email: row.get(4)?,
+                            token: row.get(5)?,
+                            csrf: row.get(6)?,
+                            client_ip: row.get(7)?,
+                            expires_at: row.get(8)?,
+                        })
+                    } else {
+                        None
                     };
-                    Ok((session, row.get::<_, i64>(7)?))
+                    Ok((session, row.get::<_, bool>(1)?))
                 },
             )
             .optional()?;
-        let Some((session, created_at)) = found else {
-            return Ok(None);
-        };
-        let at = now();
-        if session.expires_at > at && created_at <= at {
-            return Ok(Some(session));
+        match found {
+            Some((Some(session), _)) => Ok(Some(session)),
+            Some((None, false)) => {
+                db.execute(
+                    "UPDATE sessions SET expires_at=? WHERE id_hash=?",
+                    params![ENDED, id_hash],
+                )?;
+                Ok(None)
+            }
+            Some((None, true)) | None => Ok(None),
         }
-        if session.expires_at != ENDED {
-            db.execute(
-                "UPDATE sessions SET expires_at=? WHERE id_hash=?",
-                params![ENDED, session.id_hash],
-            )?;
-        }
-        Ok(None)
     }
 
     /// End a session; its token, to revoke it.
@@ -252,12 +258,14 @@ impl WebStore {
     /// The digest and token of at most `limit` sessions that have ended,
     /// those signed in first first. Every session whose time is over is
     /// ended here for good, and so is one dated ahead of the clock, as one
-    /// signed in while it ran ahead, which began at a time not known.
+    /// signed in while it ran ahead, which began at a time not known, and
+    /// one stored at no time.
     pub fn ended(&self, limit: u16) -> Result<Vec<(String, String)>, StoreError> {
         let db = self.db();
         db.execute(
-            "UPDATE sessions SET expires_at=?1 WHERE expires_at <> ?1 \
-             AND (expires_at <= ?2 OR created_at > ?2)",
+            "UPDATE sessions SET expires_at=?1 WHERE expires_at IS NOT ?1 \
+             AND NOT (typeof(created_at) = 'integer' AND typeof(expires_at) = 'integer' \
+             AND expires_at > ?2 AND created_at <= ?2)",
             params![ENDED, now()],
         )?;
         let mut statement = db.prepare(

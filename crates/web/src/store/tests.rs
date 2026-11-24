@@ -241,6 +241,36 @@ fn an_ended_session_stays_ended_whatever_the_clock_says() {
     }
 }
 
+/// A session whose start or end is stored as text, as in a damaged or
+/// hand-edited store, has a time that is none: its cookie is signed out,
+/// without an error, and the round takes its token.
+#[test]
+fn a_session_at_no_time_is_signed_out() {
+    let mut found = Vec::new();
+    for column in ["created_at", "expires_at"] {
+        let (store, _directory) = store();
+        let (cookie, session) = store.create(&new_session(600)).unwrap();
+        store
+            .db()
+            .execute(&format!("UPDATE sessions SET {column} = 'no time'"), [])
+            .unwrap();
+        let looked_up = store.get(&cookie).map_err(|error| error.to_string());
+        let ended = store
+            .ended(10)
+            .map(|ended| {
+                ended
+                    .into_iter()
+                    .map(|(id_hash, _)| id_hash)
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|error| error.to_string());
+        if looked_up != Ok(None) || ended != Ok(vec![session.id_hash]) {
+            found.push(format!("{column}: lookup {looked_up:?}, round {ended:?}"));
+        }
+    }
+    assert_eq!(found, Vec::<String>::new());
+}
+
 /// A session signed in while the clock ran ahead, then the clock put
 /// right: how long ago it began is not known, so it has ended, and its
 /// token is to be revoked, as when its time is over.
