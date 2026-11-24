@@ -56,9 +56,13 @@ pub(super) fn cases(work: &Path) -> Vec<Case> {
     let fixtures = golden();
     let jmap = std::fs::read_to_string(fixtures.join("jmap.json")).unwrap();
     let (work, golden) = (work.display(), fixtures.display());
-    let domains = answer_json(&json!({"methodResponses": [["x:Domain/get", {"list": [
-        {"id": "b", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 mail.example.test.\n"}
-    ]}, "0"]]}));
+    // The domains' IDs from a query, and those domains.
+    let domains = answer_json(&json!({"methodResponses": [
+        ["x:Domain/query", {"ids": ["b"], "position": 0, "total": 1}, "0"],
+        ["x:Domain/get", {"list": [
+            {"id": "b", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 mail.example.test.\n"}
+        ]}, "1"],
+    ]}));
     vec![
         case(
             "backup-check",

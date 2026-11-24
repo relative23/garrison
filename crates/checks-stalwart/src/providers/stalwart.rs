@@ -84,7 +84,7 @@ impl Answers {
 }
 
 /// Permissions the collector's API key needs (see `garrison stalwart setup`).
-pub const REQUIRED_PERMISSIONS: [&str; 10] = [
+pub const REQUIRED_PERMISSIONS: [&str; 11] = [
     "authenticate",
     "sysSpamSettingsGet",
     "sysSpamClassifierGet",
@@ -93,8 +93,10 @@ pub const REQUIRED_PERMISSIONS: [&str; 10] = [
     "sysQueuedMessageQuery",
     "sysMtaMilterGet",
     "sysAccountGet",
-    // The `dns` provider reads each domain's expected records.
+    // The `dns` provider reads each domain's expected records, those of
+    // the first `max_domains` found by a query.
     "sysDomainGet",
+    "sysDomainQuery",
     // The `tls` provider reads which listeners speak TLS.
     "sysNetworkListenerGet",
 ];

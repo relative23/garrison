@@ -76,10 +76,11 @@ pub(super) fn mail_hosts(
         .native_key
         .as_deref()
         .ok_or_else(|| format!("{NO_KEY}{besides}"))?;
-    let domains = domains(context, key).map_err(|error| not_given(&error, "domains", besides))?;
+    let domains =
+        domains(context, key, most).map_err(|error| not_given(&error, "domains", besides))?;
     let mut hosts: Vec<String> = domains
+        .objects
         .iter()
-        .take(most)
         .flat_map(|domain| {
             mx_hosts(&expected(
                 domain.dns_zone_file.as_deref().unwrap_or_default(),
@@ -88,7 +89,7 @@ pub(super) fn mail_hosts(
         .collect();
     hosts.sort_unstable();
     hosts.dedup();
-    let rest = (domains.len() > most).then(|| left_out(domains.len(), most));
+    let rest = (domains.total > most).then(|| left_out(domains.total, most));
     Ok((hosts, rest))
 }
 
@@ -323,7 +324,7 @@ impl Provider for Dns {
             report.observations.push(self.unknown(context, &finding)?);
             return Ok(report);
         };
-        let domains = match domains(context, key) {
+        let domains = match domains(context, key, self.max_domains) {
             Ok(domains) => domains,
             Err(error) => {
                 let finding = format!("{}.", not_given(&error, "domains", ""));
@@ -337,18 +338,18 @@ impl Provider for Dns {
             return Ok(report);
         };
         let mut silent = None;
-        for domain in domains.iter().take(self.max_domains) {
+        for domain in &domains.objects {
             report
                 .observations
                 .push(self.domain(context, resolver, domain, &mut silent)?);
         }
         // The records of the domains after them are not known.
-        if domains.len() > self.max_domains {
+        if domains.total > self.max_domains {
             report
                 .observations
-                .push(self.unknown(context, &left_out(domains.len(), self.max_domains))?);
+                .push(self.unknown(context, &left_out(domains.total, self.max_domains))?);
         }
-        if domains.is_empty() {
+        if domains.objects.is_empty() {
             report
                 .observations
                 .push(self.unknown(context, "Stalwart has no domain.")?);
@@ -361,6 +362,8 @@ impl Provider for Dns {
 pub(crate) mod domains_tests;
 #[cfg(test)]
 mod limits_tests;
+#[cfg(test)]
+mod many_tests;
 #[cfg(test)]
 mod root_tests;
 #[cfg(test)]

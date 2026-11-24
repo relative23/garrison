@@ -75,10 +75,11 @@ fn said(framed: &str, what: &str, besides: &str) -> Vec<(&'static str, Vec<Strin
              README{besides}"
         )
     };
+    // The domains are asked for with a query first.
     let method = if what == "listeners" {
         "x:NetworkListener/get"
     } else {
-        "x:Domain/get"
+        "x:Domain/query"
     };
     let kinds = [
         unanswered("Stalwart is unavailable"),

@@ -46,6 +46,10 @@ Notable changes for operators and users. The format follows
   `https://hooks.example.org?key=…`, on which nothing ever went out, is
   refused by `check-config`, and with it the upgrade. Write
   `https://hooks.example.org/?key=…`.
+- Run `garrison stalwart setup` again after the upgrade: the collector's key
+  needs `sysDomainQuery` now, to find the domains the checks read. Until
+  then the DNS records, Blocklists, Reverse names and TLS certificates
+  cards say that Stalwart did not give its domains.
 
 ### Added
 
@@ -1018,6 +1022,8 @@ Notable changes for operators and users. The format follows
 - **A long DNS answer no longer stops the DNS and reputation checks where
   the resolver refuses TCP.** That record or host is named with why; let the
   resolver answer over TCP on port 53.
+- **The DNS, reputation and TLS checks take their first `max_domains`
+  domains however many Stalwart has, and count the rest.**
 - **A blocklist that gives no verdict keeps the Blocklists card from being
   OK.** A list that refused this resolver, as Spamhaus refuses public ones,
   answered with an error or did not answer at all, showed only in its row:

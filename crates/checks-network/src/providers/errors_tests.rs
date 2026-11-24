@@ -10,7 +10,6 @@ use std::net::SocketAddr;
 
 use garrison_core::observations::Observation;
 use garrison_testing::http::{json as answer_json, serve};
-use serde_json::json;
 
 use super::dns::stand_in::{Fault, host, resolver_faulty, text};
 use super::{Dns, Reputation};
@@ -123,8 +122,9 @@ fn dns_card() -> Vec<(String, String)> {
             vec![text("v=spf1 mx -all")],
         ),
     ]);
-    let stalwart = answer_json(&json!({"methodResponses": [["x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}));
+    let stalwart = answer_json(&crate::providers::dns::domains_tests::domains_value(
+        &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+    ));
     let mut said = Vec::new();
     for failure in FAILURES {
         let dns = |resolver: SocketAddr| -> Box<dyn Provider> {

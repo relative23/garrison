@@ -12,6 +12,23 @@ use crate::testing::{Canned, config, table};
 pub(crate) const LEFT_OUT: &str =
     "Stalwart has 21 domains; only the first 20 are checked (`max_domains`).";
 
+/// Stalwart's answer to the checks' request for the domains `list`, each
+/// with its `id`: the query's IDs from the first, with their total, and the
+/// get of them. It gives them all, as many as the request asks for or more:
+/// the checks take what they asked for.
+pub(crate) fn domains_value(list: &serde_json::Value) -> serde_json::Value {
+    let ids: Vec<serde_json::Value> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|domain| domain["id"].clone())
+        .collect();
+    json!({"methodResponses": [
+        ["x:Domain/query", {"ids": ids, "position": 0, "total": ids.len()}, "0"],
+        ["x:Domain/get", {"list": list, "notFound": []}, "1"],
+    ]})
+}
+
 /// Stalwart's answer for 21 domains: the first 20 with the mail host
 /// `mail.example.test`, the last with `mx2.example.test`.
 pub(crate) fn twenty_one_domains() -> serde_json::Value {
@@ -23,7 +40,7 @@ pub(crate) fn twenty_one_domains() -> serde_json::Value {
             json!({"id": format!("b{number}"), "name": name, "dnsZoneFile": zone})
         })
         .collect();
-    json!({"methodResponses": [["x:Domain/get", {"list": domains}, "0"]]})
+    domains_value(&serde_json::json!(domains))
 }
 
 /// A context in which Stalwart, at `url`, gives its domains to the key.
@@ -46,9 +63,9 @@ fn domains_beyond_max_domains_are_named_not_left_out() {
             |number| json!({"id": format!("b{number}"), "name": format!("d{number}.example.test")}),
         )
         .collect();
-    let stalwart = serve(vec![answer_json(&json!({
-        "methodResponses": [["x:Domain/get", {"list": domains}, "0"]]
-    }))]);
+    let stalwart = serve(vec![answer_json(&domains_value(&serde_json::json!(
+        domains
+    )))]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&stalwart.url);

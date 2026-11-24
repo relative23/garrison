@@ -412,11 +412,11 @@ fn endpoints_after_the_first_24_are_named_and_keep_the_card_from_being_in_order(
         answer_json(
             &serde_json::json!({"methodResponses": [["x:NetworkListener/get", {"list": listed}, "0"]]}),
         ),
-        answer_json(
-            &serde_json::json!({"methodResponses": [["x:Domain/get", {"list": [
-            {"id": "b0", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 localhost.\n"}
-        ]}, "0"]]}),
-        ),
+        answer_json(&crate::providers::dns::domains_tests::domains_value(
+            &serde_json::json!([
+                {"id": "b0", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 localhost.\n"}
+            ]),
+        )),
     ]);
     let provider = Tls::new(&crate::testing::table("type = \"tls\""))
         .unwrap()

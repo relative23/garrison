@@ -69,10 +69,9 @@ fn domain_at(at: &str) -> Observation {
     let (port, roots) = policy_server();
     let zone_file = "example.test. IN MX 10 mail.example.test.\n\
                      _mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n";
-    let stalwart = serve(vec![answer_json(
-        &json!({"methodResponses": [["x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
-    )]);
+    let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+        &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+    ))]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&stalwart.url);
@@ -136,10 +135,9 @@ fn a_policy_the_runs_time_does_not_reach_is_not_fetched() {
     let policy_server = Silent::new();
     let zone_file = "example.test. IN MX 10 mail.example.test.\n\
                      _mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n";
-    let stalwart = serve(vec![answer_json(
-        &json!({"methodResponses": [["x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
-    )]);
+    let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+        &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+    ))]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&stalwart.url);
@@ -186,10 +184,9 @@ fn a_kept_policy_that_leaves_the_mail_host_out_is_a_warning_beside_records_not_a
     let zone_file = "_mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n\
                      example.test. IN MX 10 mail.example.test.\n\
                      example.test. IN TXT \"v=spf1 mx -all\"\n";
-    let stalwart = serve(vec![answer_json(
-        &json!({"methodResponses": [["x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
-    )]);
+    let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+        &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+    ))]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&stalwart.url);
@@ -366,10 +363,9 @@ fn a_policy_is_fetched_again_once_its_record_changes() {
             "example.test. IN MX 10 mail.example.test.\n\
              _mta-sts.example.test. IN TXT \"{record}\"\n"
         );
-        let stalwart = serve(vec![answer_json(
-            &json!({"methodResponses": [["x:Domain/get",
-            {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
-        )]);
+        let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+            &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+        ))]);
         // Where no policy is due, a server that would never answer.
         let served = policy.map(|policy| serve(vec![garrison_testing::http::answer(200, policy)]));
         let silent = Silent::new();

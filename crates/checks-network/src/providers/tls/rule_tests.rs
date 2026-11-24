@@ -59,9 +59,11 @@ fn listeners(list: &Value) -> String {
 
 /// One domain whose mail host is `localhost`.
 fn localhost() -> String {
-    answer_json(&json!({"methodResponses": [["x:Domain/get", {"list": [
-        {"id": "b", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 localhost.\n"}
-    ]}, "0"]]}))
+    answer_json(&crate::providers::dns::domains_tests::domains_value(
+        &serde_json::json!([
+            {"id": "b", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 localhost.\n"}
+        ]),
+    ))
 }
 
 /// A way of an endpoint to end without a verdict: what it is, the card,

@@ -1,6 +1,7 @@
 //! Helpers for the checks' tests, in this crate and, with the feature
 //! `testing`, in the crates of the checks: a fixed clock, canned command
-//! output and a memory that keeps what it is given.
+//! output, a memory that keeps what it is given, and a stand-in for
+//! Stalwart's objects (`objects`).
 
 // Helpers fail the test by panicking, like the test itself.
 #![allow(
@@ -18,6 +19,8 @@ use garrison_core::time::{self, Timestamp};
 
 use crate::command::{Output, Runner};
 use crate::context::{Context, Deadline, DqsKey, Forgetful, Scrape};
+
+pub mod objects;
 
 /// 2026-10-29T12:00:00Z, the collection time of the tests.
 pub fn now() -> Timestamp {

@@ -78,10 +78,9 @@ fn collect(
     policy: Option<String>,
     deadline: Deadline,
 ) -> Vec<Observation> {
-    let stalwart = serve(vec![answer_json(
-        &json!({"methodResponses": [["x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
-    )]);
+    let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+        &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+    ))]);
     let served = policy.map(|policy| serve(vec![policy]));
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
@@ -297,7 +296,7 @@ fn stand_ins() -> Vec<Way> {
         )
         .collect();
     let domains = |list: serde_json::Value| {
-        answer_json(&json!({"methodResponses": [["x:Domain/get", {"list": list}, "0"]]}))
+        answer_json(&domains_tests::domains_value(&serde_json::json!(list)))
     };
     let directory = tempfile::tempdir().unwrap();
     let resolv_conf = directory.path().join("resolv.conf");
