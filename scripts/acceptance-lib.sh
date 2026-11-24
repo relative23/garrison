@@ -263,7 +263,11 @@ case "$method $path" in
             status="401 Unauthorized"
         fi ;;
     "GET /jmap/session")
-        if [ -e /root/stand-in-refuses ]; then status="401 Unauthorized"; else answer='{}'; fi ;;
+        if [ -e /root/stand-in-refuses ]; then
+            status="401 Unauthorized"
+        else
+            answer='{"primaryAccounts": {"urn:stalwart:jmap": "b"}}'
+        fi ;;
     "POST /jmap/")
         call=$(printf %s "$body" | grep -o 'x:[A-Za-z]*/[a-z]*' | head -n 1)
         case "$body" in
