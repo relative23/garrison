@@ -224,6 +224,27 @@ impl Receipt {
         Some((at_most, finding))
     }
 
+    /// What the card says where its table cannot show every row it read
+    /// (`items`): how many rows the receipt lists, those that are no
+    /// objects among them, and which the table shows.
+    fn cut(&self, document: &Value, items: &[Value]) -> Option<String> {
+        if items.len() <= MAX_ROWS {
+            return None;
+        }
+        let listed = self
+            .place(document)
+            .and_then(Value::as_array)
+            .map_or(items.len(), Vec::len);
+        let read = if listed == items.len() {
+            String::new()
+        } else {
+            format!(" of the {} it read", items.len())
+        };
+        Some(format!(
+            "The receipt lists {listed} rows; the table shows the last {MAX_ROWS}{read}."
+        ))
+    }
+
     fn reported(&self, document: &Value, items: Option<&[Value]>) -> Option<Written> {
         if !document.is_array() {
             return date(&lookup(document, &self.date));
@@ -419,12 +440,11 @@ impl Provider for Receipt {
             }
             findings.push(finding);
         }
-        if let Some(items) = items.as_ref().filter(|items| items.len() > MAX_ROWS) {
-            findings.push(format!(
-                "The receipt lists {} rows; the table shows the last {MAX_ROWS}.",
-                items.len()
-            ));
-        }
+        findings.extend(
+            items
+                .as_deref()
+                .and_then(|items| self.cut(&document, items)),
+        );
         let fields = self.fields(&document, reported, &mut findings);
         let table = items.as_ref().map(|items| {
             let shown = &items[items.len().saturating_sub(MAX_ROWS)..];

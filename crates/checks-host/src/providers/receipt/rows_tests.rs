@@ -74,3 +74,30 @@ fn ok_rows_that_judge_no_row_leave_the_card_unknown() {
         (State::Ok, 0, Some(0))
     );
 }
+
+/// A long list gives one count of its rows: those that are no objects are
+/// among the rows it lists, and the table shows the last of those it read.
+#[test]
+fn a_long_list_with_rows_that_are_no_objects_gives_one_count() {
+    let mut rows: Vec<Value> = (0..205)
+        .map(|run| json!({"run": run, "at": "2026-10-29T11:00:00Z"}))
+        .collect();
+    rows.extend([json!("failed"), json!("failed"), json!("failed")]);
+    let observation = card(
+        &Value::Array(rows),
+        "rows = []\nrow_date = \"at\"\ncolumns = [{ key = \"run\", label = \"Run\" }]",
+    );
+    assert_eq!(
+        (observation.state, observation.findings),
+        (
+            State::Partial,
+            vec![
+                "3 of the receipt's 208 rows are no objects and were not read.".to_owned(),
+                "The receipt lists 208 rows; the table shows the last 200 of the 205 it read."
+                    .to_owned()
+            ]
+        )
+    );
+    let table = observation.table.unwrap();
+    assert_eq!((table.rows.len(), &table.rows[0]), (200, &vec![json!(5)]));
+}
