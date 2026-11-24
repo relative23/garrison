@@ -1993,7 +1993,7 @@ Notable changes for operators and users. The format follows
   unknown until the first upgrade.
 - **`garrison doctor` no longer calls a web page at `/metrics/prometheus`
   Stalwart's public exporter**, as a webmail answers one for any path: only
-  the exporter's own text, or its 401 without a credential, counts.
+  the exporter's own text, or its 401 that names Stalwart, counts.
 - **A session that ends by its time ends its token at Stalwart too**, as a
   sign-out does, and a revocation Stalwart did not answer is asked again, so
   no token outlasts its session for the rest of Stalwart's hour.

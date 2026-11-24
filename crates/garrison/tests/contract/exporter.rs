@@ -1,7 +1,8 @@
 //! Stalwart's metrics exporter as `garrison doctor` reads it from outside
 //! (doctor/public.rs, `metrics`): a scrape without its credential is
-//! refused with 401, and one with it is answered with Prometheus text,
-//! samples and no markup, which tells it from a web page.
+//! refused with 401 and a challenge that names Stalwart, and one with it is
+//! answered with Prometheus text, samples and no markup, which tells it
+//! from a web page.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -25,6 +26,15 @@ fn the_exporter_answers_as_doctor_reads_it() {
         .into();
     let anonymous = agent.get(&url).call().unwrap();
     assert_eq!(anonymous.status(), 401, "{url} without the credential");
+    let challenge = anonymous
+        .headers()
+        .get("www-authenticate")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        challenge.contains("realm=\"Stalwart Server\""),
+        "{url} without the credential: {challenge:?}"
+    );
     let file = std::fs::read(credentials.join("metrics-credential")).unwrap();
     let credential: Value = serde_json::from_slice(&file).unwrap();
     let user = format!(

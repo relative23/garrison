@@ -40,8 +40,7 @@ pub(super) fn tried(
                 "Stalwart refuses the {service}'s API key in {file} from this host's address \
                  (HTTP 403), so {refused}"
             ),
-            "The key may be used only from this host: run Stalwart in the host network, or lift \
-             Stalwart's block of the address (operations.md, \"Sign-in fails\").",
+            "The key may be used only from this host: run Stalwart in the host network.",
         ),
         Ok(status) => Finding::unknown(format!(
             "whether Stalwart takes the {service}'s API key in {file}: it answered HTTP {status} \
@@ -219,6 +218,9 @@ mod tests {
         let refused = tried("broker-native-key", "broker", "nobody can sign in", Ok(403));
         assert_eq!(refused.level, Level::Fail);
         assert!(refused.what.contains("(HTTP 403)"), "{}", refused.what);
+        // An address Stalwart blocked gets no answer at all (measured on
+        // 1.1.0), so a 403 names no block.
+        assert!(!refused.line().contains("block"), "{}", refused.line());
         for answer in [Ok(500), Err("Stalwart did not answer".to_owned())] {
             let unknown = tried("broker-native-key", "broker", "nobody can sign in", answer);
             assert_eq!(unknown.level, Level::Unknown, "{}", unknown.line());

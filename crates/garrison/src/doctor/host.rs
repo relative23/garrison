@@ -248,7 +248,11 @@ const SEMODULE: &str = "/usr/sbin/semodule";
 /// written before the module is loaded, so it names the port of a load that
 /// may have failed.
 fn loaded_module() -> Result<String, String> {
-    let folder = std::env::temp_dir().join(format!("garrison-doctor-{}", std::process::id()));
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random)
+        .map_err(|error| format!("no folder name could be drawn ({error})"))?;
+    let name = garrison_core::hex::encode(&random);
+    let folder = std::env::temp_dir().join(format!("garrison-doctor-{name}"));
     fs::DirBuilder::new()
         .mode(0o700)
         .create(&folder)

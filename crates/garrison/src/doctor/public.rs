@@ -19,7 +19,7 @@ use garrison_stalwart::{Error, SUPPORTED, oidc, sign_in_page};
 use rustls::RootCertStore;
 
 use super::Finding;
-use garrison_collector::fetch::{get, origin, roots};
+use garrison_collector::fetch::{Answer, get, origin, roots};
 
 /// Fewer days than this before the certificate expires earn a warning.
 const WARN_DAYS: i64 = 14;
@@ -164,7 +164,8 @@ fn exported(body: &str) -> bool {
 
 /// The exporter that `stalwart setup` enables must not answer from outside.
 /// Only its own answer counts: its text, or 401 for a scrape without its
-/// credential; a page that answers every path serves no metrics.
+/// credential with a challenge that names Stalwart (measured on 1.1.0); a
+/// page that answers every path serves no metrics.
 pub(super) fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Finding> {
     let mut origins = vec![origin(&config.deployment.issuer)];
     let admin = origin(&config.deployment.admin_url);
@@ -182,7 +183,7 @@ pub(super) fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Findin
                 {
                     Finding::ok(format!("{origin} does not serve Stalwart's metrics"))
                 }
-                Ok(answer) if matches!(answer.status, 200 | 401) => Finding::fail(
+                Ok(answer) if answer.status == 200 || challenged(&answer) => Finding::fail(
                     format!("{url} answers {}: Stalwart's metrics exporter is public", answer.status),
                     "Add `include /etc/nginx/snippets/garrison-stalwart-server*.conf;` to that server block.",
                 ),
@@ -191,6 +192,15 @@ pub(super) fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Findin
             }
         })
         .collect()
+}
+
+/// Whether `answer` is the exporter's refusal of a scrape without its
+/// credential, whose challenge names Stalwart.
+fn challenged(answer: &Answer) -> bool {
+    answer.status == 401
+        && answer
+            .header("www-authenticate")
+            .is_some_and(|challenge| challenge.contains("realm=\"Stalwart Server\""))
 }
 
 /// Whether Stalwart knows Garrison's sign-in client. Stalwart answers 200

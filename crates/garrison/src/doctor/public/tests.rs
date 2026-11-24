@@ -246,20 +246,25 @@ fn a_502_names_the_restart_where_nothing_listens_on_web_port() {
 }
 
 /// Only Stalwart's exporter's own answer is taken for it: Prometheus text,
-/// or its refusal of a scrape without its credential. A web page that a
-/// webmail's server block answers for any path serves no metrics.
+/// or its refusal of a scrape without its credential, which names Stalwart
+/// in its challenge (measured on 1.1.0). A web page that a webmail's server
+/// block answers for any path serves no metrics, and another server's
+/// refusal is none of Stalwart's.
 #[test]
 fn only_the_exporters_own_answer_is_taken_for_it() {
     let page = "<html><body>Welcome to our webmail</body></html>";
     let exported = "# HELP stalwart_up Up.\n# TYPE stalwart_up gauge\nstalwart_up 1\n";
-    for (status, kind, body, public) in [
-        (200, "text/html", page, false),
-        (200, "text/plain; version=0.0.4", exported, true),
-        (401, "text/plain", "", true),
+    let stalwarts = "WWW-Authenticate: Bearer realm=\"Stalwart Server\"\r\n";
+    let others = "WWW-Authenticate: Basic realm=\"webmail\"\r\n";
+    for (status, kind, more, body, public) in [
+        (200, "text/html", "", page, false),
+        (200, "text/plain; version=0.0.4", "", exported, true),
+        (401, "application/problem+json", stalwarts, "", true),
+        (401, "text/plain", others, "", false),
     ] {
         let server = garrison_testing::tls::serve_until(
             vec![format!(
-                "HTTP/1.1 {status} X\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n\
+                "HTTP/1.1 {status} X\r\nContent-Type: {kind}\r\n{more}Content-Length: {}\r\n\
                  Connection: close\r\n\r\n{body}",
                 body.len()
             )],
