@@ -209,8 +209,9 @@ fn key_files_stalwart_no_longer_knows_get_new_keys() {
             "{said}"
         );
     }
+    // The broker's key is new; the signature key is the folder's.
     assert!(
-        said.contains("Restart garrison-ingest and garrison-broker"),
+        said.contains("Restart garrison-broker so it reads the new secret."),
         "{said}"
     );
     assert_together(&lab, &credentials, &setup.gateway, &capture, "restored");

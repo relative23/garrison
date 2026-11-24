@@ -20,6 +20,7 @@
 //! reloaded its settings, which is when it takes them. So the next run
 //! brings both places together wherever a run stopped.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -291,12 +292,12 @@ struct Asked<'a> {
 }
 
 /// What a run has done so far, kept also where it fails on the way: the
-/// keys that new ones replace, and whether it wrote anew a secret that a
+/// keys that new ones replace, and the files it wrote anew whose secret a
 /// running service holds, which Stalwart uses by then.
 #[derive(Default)]
 struct Done {
     replaced: Vec<keys::Replaced>,
-    renewed: bool,
+    renewed: BTreeSet<&'static str>,
 }
 
 fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), String> {
@@ -311,13 +312,17 @@ fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), Stri
     let mut done = Done::default();
     let configured = configure(&admin, config, asked, &networks, &mut done);
     // Before the replaced keys go, also after a failure: the broker would
-    // otherwise be left with a key that is gone.
-    let stale = || configured.is_ok() && restart::stale(&config.credentials_directory);
-    let restarted = (done.renewed || stale()).then(restart::restart);
-    match (&configured, restarted) {
+    // otherwise be left with a key that is gone. Each service whose secret
+    // the run wrote anew, and once it is done each that holds another one
+    // than its file.
+    let directory = &config.credentials_directory;
+    if configured.is_ok() {
+        done.renewed.extend(restart::stale(directory));
+    }
+    match (&configured, restart::restart(directory, &done.renewed)) {
         (Ok(()), None) => say("Settings reloaded."),
         (Ok(()), Some(line)) => say(&format!("Settings reloaded. {line}")),
-        (Err(_), Some(line)) => say(line),
+        (Err(_), Some(line)) => say(&line),
         (Err(_), None) => {}
     }
     // After a failure they go all the same, since keys are replaced
@@ -360,7 +365,9 @@ fn configure(
     let (directory, rotate) = (&config.credentials_directory, asked.rotate);
     let broker = keys::ensure(admin, directory, &BROKER, networks, rotate)?;
     done.replaced.extend(broker.replaced);
-    done.renewed |= broker.made;
+    if broker.made {
+        done.renewed.insert(BROKER.file);
+    }
     let collector = keys::ensure(admin, directory, &COLLECTOR, networks, rotate)?;
     done.replaced.extend(collector.replaced);
     let webhook = ensure_webhook(admin, config, directory, asked.webhook_url, rotate)?;
@@ -382,7 +389,7 @@ fn configure(
     // credential from now on, so their files follow.
     if let Some(key) = &webhook.new_key {
         write_secret(&directory.join(webhook::KEY_FILE), key)?;
-        done.renewed = true;
+        done.renewed.insert(webhook::KEY_FILE);
     }
     if let Some(document) = &credential {
         exporter::keep(directory, document)?;
@@ -410,7 +417,9 @@ fn tried(
     for key in &unknown {
         let made = keys::ensure(admin, directory, key, networks, true)?;
         done.replaced.extend(made.replaced);
-        done.renewed |= key.held;
+        if key.held {
+            done.renewed.insert(key.file);
+        }
         say(&format!(
             "- Stalwart did not know the API key in {}; made a new one",
             directory.join(key.file).display()

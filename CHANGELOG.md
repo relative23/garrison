@@ -1543,6 +1543,9 @@ Notable changes for operators and users. The format follows
 - **A failed `garrison stalwart setup` no longer leaves the broker or the
   receiver with a key that Stalwart no longer takes.** Its message names
   the run that mends it.
+- **A `garrison stalwart setup` that fails no longer takes the receiver
+  down.** It restarts a service only for a secret it wrote anew, and never
+  onto a key file that holds no key.
 - **Setup run as another administrator keeps, or with `--rotate`
   removes, the API keys the one before made.** They stayed valid, also
   after a rotation.
