@@ -47,8 +47,8 @@ impl Admin {
             .send()
             .map_err(|error| match error {
                 Error::Unreadable(why) => unreadable(method, &why),
+                Error::Limited(_) => format!("{method}: {}", limited()),
                 Error::Unavailable(why)
-                | Error::Limited(why)
                 | Error::InvalidToken(why)
                 | Error::Denied(why)
                 | Error::Misconfigured(why) => format!("{method}: {why}"),
@@ -152,6 +152,15 @@ impl Admin {
         let got: Got<T> = self.call(&format!("x:{kind}/get"), &all)?;
         Ok(got.list)
     }
+}
+
+/// What setup says where Stalwart refuses a request for its rate limit
+/// (HTTP 429), as where it sees setup at another address than 127.0.0.1: a
+/// run after the limit's window goes through.
+pub(super) fn limited() -> String {
+    "Stalwart refused the request for its limit of requests (HTTP 429), whose window is a \
+     minute unless it was set otherwise"
+        .to_owned()
 }
 
 /// What setup says of an answer of Stalwart's that this release does not

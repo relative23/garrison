@@ -37,13 +37,18 @@ fn whose(session: String, after: Vec<String>) -> (Result<String, String>, Vec<St
 /// that one valid for good.
 #[test]
 fn a_key_whose_account_is_not_known_stops_the_run_before_a_key_is_made() {
-    for status in [429, 503, 404] {
+    let limited = "Stalwart refused the request for its limit of requests (HTTP 429), whose window \
+                   is a minute unless it was set otherwise";
+    for (status, said) in [
+        (429, limited.to_owned()),
+        (503, "Stalwart answered HTTP 503".to_owned()),
+        (404, "Stalwart answered HTTP 404".to_owned()),
+    ] {
         let (outcome, requests) = whose(answer(status, "{}"), Vec::new());
         assert_eq!(
             outcome,
             Err(format!(
-                "Asking Stalwart whose API key DIR/collector-native-key holds: Stalwart \
-                 answered HTTP {status}"
+                "Asking Stalwart whose API key DIR/collector-native-key holds: {said}"
             ))
         );
         assert_eq!(requests.len(), 2, "{status}");

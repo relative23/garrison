@@ -140,3 +140,22 @@ fn a_reload_without_an_answer_says_what_goes_without_the_new_secrets() {
     );
     server.requests();
 }
+
+/// Stalwart refuses a request for its rate limit with 429, as where it sees
+/// setup at another address than 127.0.0.1: setup says so and that a run
+/// after its window goes through.
+#[test]
+fn a_rate_limit_is_said_as_one() {
+    let server = serve(vec![answer(429, "{}")]);
+    let admin = Admin {
+        url: format!("{}/jmap/", server.url),
+        authorization: "Bearer key".to_owned(),
+    };
+    let said = admin.call::<_, IgnoredAny>("x:ApiKey/get", &json!({}));
+    server.requests();
+    assert_eq!(
+        said.unwrap_err(),
+        "x:ApiKey/get: Stalwart refused the request for its limit of requests (HTTP 429), whose \
+         window is a minute unless it was set otherwise"
+    );
+}

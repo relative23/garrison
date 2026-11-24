@@ -31,7 +31,7 @@ use garrison_core::config::Config;
 
 use crate::say;
 use administrator::Source;
-use api::{Admin, unreadable};
+use api::{Admin, limited, unreadable};
 use client::ensure_oauth_client;
 use exporter::ensure_metrics;
 use folder::{writable, write_secret};

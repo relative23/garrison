@@ -14,7 +14,7 @@ use garrison_stalwart::http::Request;
 use super::objects::{
     Created, Enabled, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, StoredKey,
 };
-use super::{Admin, MAX_ANSWER, unreadable, write_secret};
+use super::{Admin, MAX_ANSWER, limited, unreadable, write_secret};
 
 /// One of the keys: its file, as the broker or the collector reads it, its
 /// description in Stalwart, what it may do, whether a running service
@@ -67,7 +67,10 @@ fn owner(admin: &Admin, target: &Path) -> Result<Option<String>, String> {
         .timeout(Duration::from_secs(30))
         .limit(MAX_ANSWER)
         .send()
-        .map_err(|error| asked(&error))?;
+        .map_err(|error| match error {
+            garrison_stalwart::Error::Limited(_) => asked(&limited()),
+            error => asked(&error),
+        })?;
     match answer.status {
         200 => {}
         401 | 403 => return Ok(None),
