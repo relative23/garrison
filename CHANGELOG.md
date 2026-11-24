@@ -1542,10 +1542,10 @@ Notable changes for operators and users. The format follows
   key a file holds: where Stalwart has more than one key of a description,
   a plain run now makes one anew and removes them all, and where the quota
   leaves the new key no room beside the old ones, these go first.
-- **A failed `garrison stalwart setup` leaves the broker and the receiver
-  keys that Stalwart takes, and names the run that mends it.** Where
+- **A failed `garrison stalwart setup` names the run that mends it.** Where
   Stalwart's limit of five API keys an account made an old key go before
-  the new one could be made, it says what goes without a key until then.
+  the new one could be made, it also says what goes without a key until
+  then.
 - **A `garrison stalwart setup` that fails no longer takes the receiver
   down.** It restarts a service only for a secret it wrote anew, and never
   onto a key file that holds no key.
