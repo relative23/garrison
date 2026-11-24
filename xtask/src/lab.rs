@@ -26,9 +26,9 @@ use serde_json::{Value, json};
 /// of its image. `start` takes the first unless it is given another. The
 /// contract job in `.github/workflows/ci.yml` runs every one of them.
 const IMAGES: [(&str, &str); 1] = [(
-    "1.1.0",
-    "stalwartlabs/stalwart:v1.1.0\
-     @sha256:f772aa6ef8cd8018969fa491640f1436b0270eb14e2c219b5f37f1a77020837e",
+    "1.2.0",
+    "stalwartlabs/stalwart:v1.2.0\
+     @sha256:79ea09d25baad7e074d8df53db474571c5dc62621298e35e09e9cfd764333ed8",
 )];
 /// Stalwart's newest release, pinned by the digest of its image. Renovate
 /// moves it to each new release and to a new image of the same release
@@ -36,7 +36,7 @@ const IMAGES: [(&str, &str); 1] = [(
 /// `.github/workflows/ci.yml` runs it while it is none of [`IMAGES`], so the
 /// pull request shows whether Garrison still fits before the release becomes
 /// a supported one (CONTRIBUTING.md, "Supporting a new Stalwart release").
-const NEWEST: &str = "stalwartlabs/stalwart:v1.1.0@sha256:f772aa6ef8cd8018969fa491640f1436b0270eb14e2c219b5f37f1a77020837e";
+const NEWEST: &str = "stalwartlabs/stalwart:v1.2.0@sha256:79ea09d25baad7e074d8df53db474571c5dc62621298e35e09e9cfd764333ed8";
 const NAME: &str = "garrison-lab-stalwart";
 const PORT: u16 = 18180;
 const RECOVERY: &str = "contract-recovery:Contract-Recovery-2026";
@@ -276,7 +276,7 @@ mod tests {
         }
         assert_eq!(
             image(Some("0.16.0")),
-            Err("no supported Stalwart release \"0.16.0\"; the lab has 1.1.0".to_owned())
+            Err("no supported Stalwart release \"0.16.0\"; the lab has 1.2.0".to_owned())
         );
     }
 

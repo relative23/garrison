@@ -8,6 +8,9 @@ Notable changes for operators and users. The format follows
 
 ### Upgrade notes
 
+- **This release needs Stalwart 1.2.0: update Stalwart first.** Garrison's
+  contract tests run against 1.2.0 alone, so nothing is known of it beside
+  Stalwart 1.1.
 - **`garrison check-config`, and with it the upgrade, refuses an option
   that its check would not use.** Such as `disk_path` without the `disk`
   check, a version `pattern` without a group, or a receipt's `columns`

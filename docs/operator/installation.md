@@ -2,7 +2,7 @@
 
 Requirements: Linux on x86_64 or aarch64 with systemd 247 or newer and polkit
 0.106 or newer (JavaScript rules), nginx (or another TLS reverse proxy), and
-Stalwart 1.1.0 reachable on a loopback address of
+Stalwart 1.2.0 reachable on a loopback address of
 the same host, natively or in a container in the host network. The release is
 one static binary without runtime dependencies on the host. It goes to
 `/opt/garrison`, which may be a link to another disk, but not one under
