@@ -65,9 +65,13 @@ export async function twoTabs(shared, page) {
 }
 
 /** A module taken from the profile and given back while a page is open. */
-export async function rightsChange(shared) {
+export async function rightsChange(shared, page) {
   const { browser, context, origin, DESKTOP, at, expect, watch } = shared;
   at("a change of rights");
+  // The flows' own tab asks for nothing meanwhile. Its session is this
+  // step's, and a refresh of its own just before the one counted here would
+  // have the broker asked then, and not at the one counted.
+  await page.goto("about:blank");
   const control = `${origin}/preview-broker/grant`;
   const broker = async () => (await context.request.get(control)).json();
   const grant = (modules) => context.request.put(control, { data: { modules } });

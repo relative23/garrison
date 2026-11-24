@@ -415,7 +415,7 @@ try {
     await narrow.close();
   }
 
-  await rightsChange(shared);
+  await rightsChange(shared, page);
   // Its last step signs in again in one of the tabs, which the next ones use.
   await twoTabs(shared, page);
   await refusedSession(shared, page);
