@@ -20,10 +20,11 @@ use std::path::{Path, PathBuf};
 
 use garrison_core::config;
 
-use super::files::{Step, announce, switch};
+use super::files::{Step, announce, fresh_folder, switch};
+use super::requirements::{room, state_size};
 use super::system::install_system_files;
 use super::unfinished::{self, Seen, Unfinished, name};
-use super::{BASE, CONFIG, cli, command, start, state, stop_services};
+use super::{BACKUPS, BASE, CONFIG, cli, command, start, state, stop_services};
 
 /// An upgrade an earlier run began, which this run of its release goes on with.
 pub(super) struct Resumed {
@@ -41,20 +42,36 @@ pub(super) struct Resumed {
 /// new release's; any other run first switches back to the release that
 /// ran, as after a failed start. Another unfinished command is to be
 /// finished first. A record that no longer holds is not acted on: the run
-/// goes on from the release that runs.
+/// goes on from the release that runs. Where the new release was started
+/// since and does not run, the state as it is is copied before it goes back.
 pub(super) fn before_install(version: &str) -> Step<Option<Resumed>> {
-    let (from, to, previous, backup) = match unfinished::read()? {
+    let (from, to, previous, backup, failed) = match unfinished::read()? {
         Seen::Holds(Unfinished::Upgrade {
             from,
             to,
             previous,
             backup,
-        }) => (from, to, previous, backup),
-        Seen::Holds(other) => return Err(other.finish_first()),
+        }) => (from, to, previous, backup, false),
+        Seen::Failed(Unfinished::Upgrade {
+            from,
+            to,
+            previous,
+            backup,
+        }) => (from, to, previous, backup, true),
+        Seen::Holds(other) | Seen::Failed(other) => return Err(other.finish_first()),
         Seen::Nothing | Seen::Stale(_) => return Ok(None),
     };
+    if failed {
+        let kept = kept_by(&to)?;
+        announce(&format!(
+            "An earlier run did not finish the upgrade to {}, which was started since and does \
+             not run; the state as it is was copied to {}.",
+            name(&to),
+            kept.display()
+        ));
+    }
     let current = std::fs::canonicalize(Path::new(BASE).join("current")).ok();
-    if current.as_deref() == Some(to.as_path()) && name(&to) == version {
+    if !failed && current.as_deref() == Some(to.as_path()) && name(&to) == version {
         announce(&format!(
             "Going on with the upgrade from {} to {version} that an earlier run did not finish.",
             name(&from)
@@ -79,6 +96,23 @@ pub(super) fn before_install(version: &str) -> Step<Option<Resumed>> {
     })?;
     unfinished::done()?;
     Ok(None)
+}
+
+/// The state as it is, copied by `release`'s own backup into a folder of
+/// its own, before anything changes.
+fn kept_by(release: &Path) -> Step<PathBuf> {
+    room(&[(Path::new(BACKUPS), state_size())])?;
+    let kept = fresh_folder(Path::new(BACKUPS), "pre-switch-back")?;
+    let copied = cli(release, &["backup", "--to", &kept.display().to_string()])?;
+    if !copied.status.success() {
+        let _ = std::fs::remove_dir_all(&kept);
+        return Err(format!(
+            "The state as it is could not be copied before the switch back ({}); nothing was \
+             changed.",
+            String::from_utf8_lossy(&copied.stderr).trim()
+        ));
+    }
+    Ok(kept)
 }
 
 /// Back to `old`, the release that ran, from `attempted`: what the new

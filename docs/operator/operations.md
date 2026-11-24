@@ -183,7 +183,7 @@ changes. After a successful installation it keeps the running,
 the previous and one older release, and the three newest of its own backups
 plus the one a rollback restores; it removes the older ones. Backups you write
 with `garrison backup --to` are left alone; the `pre-restore-*` copies of a
-restore count among the installer's own.
+restore and the `pre-switch-back-*` ones count among the installer's own.
 
 While one installer runs, a second one is refused. An upgrade that was
 interrupted, even killed, is finished by running its installer again, or
@@ -191,7 +191,9 @@ interrupted, even killed, is finished by running its installer again, or
 notes what the installer began until a release runs again. Once a service of
 Garrison's was started after that note, by the interrupted run itself, a
 reboot or by hand, the next run removes it and puts nothing back on its
-word, since the databases may hold what was recorded since. A rollback is
+word, since the databases may hold what was recorded since; only where the
+new release is current and does not run does it still switch back, once it
+has copied the state as it is to `pre-switch-back-*`. A rollback is
 finished by running it again; one that went back to a release from before this
 one is finished by the release it left, as its first line says: `sudo
 /opt/garrison/releases/<release>/bin/garrison install --rollback`.

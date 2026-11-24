@@ -161,6 +161,7 @@ fn installer_backups(backups: &Path) -> Vec<PathBuf> {
                         || name.starts_with("pre-upgrade-")
                         || name.starts_with("pre-reinstall-")
                         || name.starts_with("pre-restore-")
+                        || name.starts_with("pre-switch-back-")
                 })
         })
         .collect();
@@ -305,6 +306,7 @@ mod tests {
             "opt/garrison/releases/0.1.0",
             "var/lib/garrison/web",
             "var/backups/garrison/pre-upgrade-20261030T132151",
+            "var/backups/garrison/pre-switch-back-20261030T132152",
             "var/backups/garrison/latest",
         ] {
             fs::create_dir_all(root.join(folder)).unwrap();
@@ -386,6 +388,7 @@ mod tests {
             "var/lib/garrison",
             "var/backups/garrison/last-pre-upgrade",
             "var/backups/garrison/pre-upgrade-20261030T132151",
+            "var/backups/garrison/pre-switch-back-20261030T132152",
             "etc/sysusers.d/garrison.conf",
         ] {
             assert!(paths.contains(&gone.to_owned()), "{gone}");

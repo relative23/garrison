@@ -70,10 +70,13 @@ fn an_upgrade_is_known_at_every_step_and_forgotten_once_done() {
         let directory = host(&["0.0", "0.1", "0.2"], current, Some(previous));
         let base = directory.path();
         write_in(base, &upgrade(base), Some(written())).unwrap();
-        let seen = read_in(base, Some(&written())).unwrap();
+        let seen = read_in(base, Some(&written()), || true).unwrap();
         assert_eq!(seen, Seen::Holds(upgrade(base)), "{current} {previous}");
         clear_in(base).unwrap();
-        assert_eq!(read_in(base, Some(&written())).unwrap(), Seen::Nothing);
+        assert_eq!(
+            read_in(base, Some(&written()), || true).unwrap(),
+            Seen::Nothing
+        );
         // Clearing what is not there is no error.
         clear_in(base).unwrap();
     }
@@ -86,16 +89,22 @@ fn a_record_the_host_no_longer_fits_is_removed() {
     let directory = host(&["0.0", "0.1", "0.2", "0.3"], "0.3", Some("0.2"));
     let base = directory.path();
     write_in(base, &upgrade(base), Some(written())).unwrap();
-    assert_eq!(read_in(base, Some(&written())).unwrap(), Seen::Nothing);
+    assert_eq!(
+        read_in(base, Some(&written()), || true).unwrap(),
+        Seen::Nothing
+    );
     assert!(!path(base).exists());
     // Without the release it began from there is nothing to return to.
     let directory = host(&["0.0", "0.1", "0.2"], "0.2", Some("0.1"));
     let base = directory.path();
     write_in(base, &upgrade(base), Some(written())).unwrap();
     fs::remove_dir(base.join("releases/0.1")).unwrap();
-    assert_eq!(read_in(base, Some(&written())).unwrap(), Seen::Nothing);
+    assert_eq!(
+        read_in(base, Some(&written()), || true).unwrap(),
+        Seen::Nothing
+    );
     fs::write(path(base), "{}").unwrap();
-    let refused = read_in(base, Some(&written())).unwrap_err();
+    let refused = read_in(base, Some(&written()), || true).unwrap_err();
     assert!(refused.contains("cannot be read"), "{refused}");
     assert!(path(base).exists());
 }
@@ -106,7 +115,7 @@ fn a_rollback_is_known_on_both_sides_of_its_switch() {
         let directory = host(&["0.1", "0.2"], current, Some(previous));
         let base = directory.path();
         write_in(base, &rollback(base), Some(written())).unwrap();
-        let seen = read_in(base, Some(&written())).unwrap();
+        let seen = read_in(base, Some(&written()), || true).unwrap();
         assert_eq!(seen, Seen::Holds(rollback(base)), "{current} {previous}");
     }
 }
@@ -116,11 +125,14 @@ fn a_restore_is_known_while_its_copy_is_there() {
     let directory = host(&["0.1"], "0.1", None);
     let base = directory.path();
     write_in(base, &restore(base), Some(written())).unwrap();
-    let seen = read_in(base, Some(&written())).unwrap();
+    let seen = read_in(base, Some(&written()), || true).unwrap();
     assert_eq!(seen, Seen::Holds(restore(base)));
     fs::remove_file(base.join("backup/web.sqlite")).unwrap();
     fs::remove_dir(base.join("backup")).unwrap();
-    assert_eq!(read_in(base, Some(&written())).unwrap(), Seen::Nothing);
+    assert_eq!(
+        read_in(base, Some(&written()), || true).unwrap(),
+        Seen::Nothing
+    );
     assert!(!path(base).exists());
 }
 
@@ -150,6 +162,8 @@ fn every_kind(base: &Path) -> Vec<(Unfinished, &'static str, &'static str, Optio
 /// The rule over every kind of record: once a service of Garrison's started
 /// after it was written, no record holds, and resolving it changes nothing
 /// but `previous`: no copy goes anywhere, no release and no backup goes.
+/// Only an upgrade whose new release is current and does not run stays, as
+/// failed, for its switch back to copy the state first.
 #[test]
 fn no_record_holds_once_garrison_started_since_it_was_written() {
     let probe = host(&["0.0", "0.1", "0.2"], "0.1", None);
@@ -164,25 +178,29 @@ fn no_record_holds_once_garrison_started_since_it_was_written() {
         // Nothing started since: it holds, also after a reboot.
         write_in(base, &record, Some(written())).unwrap();
         assert_eq!(
-            read_in(base, Some(&written())).unwrap(),
+            read_in(base, Some(&written()), || true).unwrap(),
             Seen::Holds(record.clone()),
             "{case}"
         );
         let rebooted = Stamp::of("another boot", &[(units::WEB, 0), (units::INGEST, 0)]);
         assert_eq!(
-            read_in(base, Some(&rebooted)).unwrap(),
+            read_in(base, Some(&rebooted), || true).unwrap(),
             Seen::Holds(record.clone()),
             "{case}"
         );
         // Started since, in this boot or after a reboot.
         let after_reboot = Stamp::of("another boot", &[(units::WEB, 0), (units::INGEST, 5)]);
-        for now in [started(), after_reboot] {
+        let failed = matches!(record, Unfinished::Upgrade { .. }) && current == "0.2";
+        for (now, running) in [(started(), true), (after_reboot, true), (started(), false)] {
             write_in(base, &record, Some(written())).unwrap();
-            assert_eq!(
-                read_in(base, Some(&now)).unwrap(),
-                Seen::Stale(record.clone()),
-                "{case}"
-            );
+            let seen = read_in(base, Some(&now), || running).unwrap();
+            if failed && !running {
+                assert_eq!(seen, Seen::Failed(record.clone()), "{case}");
+                assert!(path(base).exists(), "{case}");
+                assert_eq!(link(base, "previous").as_deref(), Some(previous), "{case}");
+                continue;
+            }
+            assert_eq!(seen, Seen::Stale(record.clone()), "{case}");
             assert!(!path(base).exists(), "{case}");
             assert_eq!(link(base, "current").as_deref(), Some(current), "{case}");
             assert_eq!(link(base, "previous").as_deref(), left, "{case}");
@@ -195,8 +213,8 @@ fn no_record_holds_once_garrison_started_since_it_was_written() {
     }
 }
 
-/// A record of the format before the stamp is read; as nobody knows when it was written, it holds only while
-/// nothing has started in this boot.
+/// A record of the format before the stamp is read; as nobody knows when
+/// it was written, it holds only while nothing has started in this boot.
 #[test]
 fn a_record_without_a_stamp_holds_only_until_anything_starts() {
     let directory = host(&["0.1", "0.2"], "0.1", Some("0.1"));
@@ -210,11 +228,11 @@ fn a_record_without_a_stamp_holds_only_until_anything_starts() {
     fs::write(path(base), &old).unwrap();
     let nothing = Stamp::of("boot", &[(units::WEB, 0)]);
     assert_eq!(
-        read_in(base, Some(&nothing)).unwrap(),
+        read_in(base, Some(&nothing), || true).unwrap(),
         Seen::Holds(rollback(base))
     );
     assert_eq!(
-        read_in(base, Some(&written())).unwrap(),
+        read_in(base, Some(&written()), || true).unwrap(),
         Seen::Stale(rollback(base))
     );
 }

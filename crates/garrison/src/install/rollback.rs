@@ -124,7 +124,8 @@ fn plan(base: &Path) -> Step<Plan> {
         &base.join("current"),
     )?;
     match unfinished::read()? {
-        Seen::Holds(Unfinished::Upgrade { from, previous, .. }) => Ok(Plan {
+        Seen::Holds(Unfinished::Upgrade { from, previous, .. })
+        | Seen::Failed(Unfinished::Upgrade { from, previous, .. }) => Ok(Plan {
             target: from,
             left: current,
             after: previous,
@@ -136,7 +137,9 @@ fn plan(base: &Path) -> Step<Plan> {
             after: previous,
             started: false,
         }),
-        Seen::Holds(record @ Unfinished::Restore { .. }) => Err(record.finish_first()),
+        Seen::Holds(record @ Unfinished::Restore { .. }) | Seen::Failed(record) => {
+            Err(record.finish_first())
+        }
         Seen::Stale(Unfinished::Rollback { from, to, previous }) if to == current => Ok(Plan {
             target: to,
             left: from,

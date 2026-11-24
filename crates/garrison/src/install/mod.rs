@@ -384,7 +384,7 @@ fn install() -> Step {
 pub(crate) fn start_installed() -> Step {
     preflight()?;
     let _held = lock(Path::new(LOCK))?;
-    if let Seen::Holds(record) = unfinished::read()? {
+    if let Seen::Holds(record) | Seen::Failed(record) = unfinished::read()? {
         return Err(record.finish_first());
     }
     let current = io(

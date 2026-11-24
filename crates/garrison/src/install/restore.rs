@@ -56,7 +56,7 @@ fn restore(from: &Path) -> Step {
     // nothing has written the state since.
     let earlier = match unfinished::read()? {
         Seen::Holds(Unfinished::Restore { kept, .. }) => Some(kept),
-        Seen::Holds(record) => return Err(record.finish_first()),
+        Seen::Holds(record) | Seen::Failed(record) => return Err(record.finish_first()),
         Seen::Stale(_) | Seen::Nothing => None,
     };
     let source = backup_at(from)?;

@@ -7,8 +7,8 @@
 //! back to.
 //!
 //! It says what the state is only until a service of Garrison's starts
-//! again: from then on it is stale, and nothing goes back on its word
-//! (`stale.rs`).
+//! again: from then on it is stale, and nothing goes back on its word, but
+//! for an upgrade whose new release does not run (`stale.rs`).
 
 use std::fs;
 use std::io::ErrorKind;
@@ -63,8 +63,12 @@ pub(super) enum Seen {
     Nothing,
     /// A record that says what the state is: nothing has started since.
     Holds(Unfinished),
-    /// A record that no longer does, which was removed with a line; the
-    /// links are as its run had set them by its last step.
+    /// An upgrade whose new release was started since, is current and does
+    /// not run: acted on as one that holds, once the state as it is has been
+    /// copied, since the new release may have recorded what no copy holds.
+    Failed(Unfinished),
+    /// A record that no longer says what the state is, which was removed
+    /// with a line; the links are as its run had set them by its last step.
     Stale(Unfinished),
 }
 
@@ -74,11 +78,12 @@ fn path(base: &Path) -> PathBuf {
 
 /// The record an earlier run left, and whether it still holds.
 pub(super) fn read() -> Step<Seen> {
-    read_in(Path::new(BASE), Stamp::take().as_ref())
+    read_in(Path::new(BASE), Stamp::take().as_ref(), stale::runs)
 }
 
-/// As `read`, with `now` the writers' starts as they are now.
-fn read_in(base: &Path, now: Option<&Stamp>) -> Step<Seen> {
+/// As `read`, with `now` the writers' starts as they are now and `runs`
+/// whether the release `current` names runs.
+fn read_in(base: &Path, now: Option<&Stamp>, runs: impl Fn() -> bool) -> Step<Seen> {
     let Some(stored) = recorded(base)? else {
         return Ok(Seen::Nothing);
     };
@@ -94,6 +99,12 @@ fn read_in(base: &Path, now: Option<&Stamp>) -> Step<Seen> {
     }
     if !stale::started_since(stored.written.as_ref(), now) {
         return Ok(Seen::Holds(stored.run));
+    }
+    if let Unfinished::Upgrade { to, .. } = &stored.run
+        && fs::canonicalize(base.join("current")).ok().as_ref() == Some(to)
+        && !runs()
+    {
+        return Ok(Seen::Failed(stored.run));
     }
     announce(&stale::resolve(&stored.run, base, &path(base))?);
     clear_in(base)?;
@@ -118,16 +129,18 @@ fn recorded(base: &Path) -> Step<Option<Stored>> {
     })
 }
 
-/// The release an unfinished upgrade began from, where its record holds:
+/// The release an unfinished upgrade began from, where one fits the host:
 /// the release `garrison upgrade` compares an archive with. Nothing is
-/// changed, as that command holds no lock.
+/// changed, as that command holds no lock; the installer it starts judges
+/// the record.
 pub(super) fn upgrading_from() -> Option<PathBuf> {
     let base = Path::new(BASE);
     let stored = recorded(base).ok().flatten()?;
-    let holds = stored.run.fits(base)
-        && !stale::started_since(stored.written.as_ref(), Stamp::take().as_ref());
+    if !stored.run.fits(base) {
+        return None;
+    }
     match stored.run {
-        Unfinished::Upgrade { from, .. } if holds => Some(from),
+        Unfinished::Upgrade { from, .. } => Some(from),
         _ => None,
     }
 }

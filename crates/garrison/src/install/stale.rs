@@ -7,7 +7,9 @@
 //! by hand, may record what no copy the record names holds, so from then on
 //! the record is stale: nothing goes back on its word. Its links are set as
 //! its run had set them by its last step, which changes no data, and it is
-//! removed with a line that says so.
+//! removed with a line that says so. Only an upgrade whose new release is
+//! current and does not run is switched back all the same, once the state
+//! as it is has been copied (`fallback.rs`).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -76,6 +78,36 @@ impl Stamp {
                 .map(|(unit, start)| ((*unit).to_owned(), *start))
                 .collect(),
         }
+    }
+}
+
+/// Whether the release `current` names runs: its web service and its
+/// receiver active. A unit that is starting or stopping is waited for, as
+/// long as a start may take.
+pub(super) fn runs() -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40);
+    loop {
+        let states: Option<Vec<String>> = [units::WEB, units::INGEST]
+            .into_iter()
+            .map(|unit| {
+                let output =
+                    run(SYSTEMCTL, &["show", "-p", "ActiveState", "--value", unit]).ok()?;
+                Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            })
+            .collect();
+        let Some(states) = states else {
+            return false;
+        };
+        if states.iter().all(|state| state == "active") {
+            return true;
+        }
+        let moving = states
+            .iter()
+            .any(|state| matches!(state.as_str(), "activating" | "deactivating" | "reloading"));
+        if !moving || std::time::Instant::now() > deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
 }
 
