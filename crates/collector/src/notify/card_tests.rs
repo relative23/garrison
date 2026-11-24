@@ -161,3 +161,120 @@ fn what_an_earlier_release_kept_counts_for_the_channels_of_its_kinds() {
     };
     assert_eq!(card_of(&topic, &memory, &[]).state, State::Ok);
 }
+
+/// The webhook as a run meets it while its file is written anew, which
+/// leaves it empty for a while: the same channel, whose address cannot be
+/// read then.
+fn unreadable(channels: &Channels) -> Channels {
+    Channels {
+        webhook: Some(Address {
+            unusable: Some("the address in its file cannot be read".to_owned()),
+            ..Address::default()
+        }),
+        ..channels.clone()
+    }
+}
+
+/// Both channels took the last notification; a run meets the webhook's file
+/// while it is written anew. That run's card says why the webhook cannot
+/// send, and once the file reads again the card is as before. A
+/// notification that goes out while the file cannot be read does not reach
+/// the webhook, and the card says so once it reads again.
+#[test]
+fn a_channel_whose_file_cannot_be_read_for_a_run_keeps_its_record() {
+    let topic = serve(vec![answer(200, "{}"), answer(200, "{}")]);
+    let hook = serve(vec![answer(200, "{}")]);
+    let channels = both(&topic.url, &hook.url);
+    let memory = Remembered::default();
+    let failing = [observed("backup", State::Failed, "The last run failed.")];
+    card_of(&channels, &memory, &failing);
+    let told = card_of(&channels, &memory, &failing);
+    assert_eq!((told.state, told.findings.len()), (State::Ok, 0));
+    let during = card_of(&unreadable(&channels), &memory, &failing);
+    assert_eq!(
+        (during.state, during.findings),
+        (
+            State::Failed,
+            vec!["webhook: the address in its file cannot be read.".to_owned()]
+        )
+    );
+    let after = card_of(&channels, &memory, &failing);
+    assert_eq!((after.state, after.findings), (told.state, told.findings));
+    // Its return goes out on the topic alone.
+    let in_order = [observed("backup", State::Ok, "")];
+    card_of(&unreadable(&channels), &memory, &in_order);
+    let again = card_of(&channels, &memory, &in_order);
+    assert_eq!(
+        (again.state, again.findings),
+        (
+            State::Failed,
+            vec![format!(
+                "The notification of {AT} did not go out: webhook: the address in its file \
+                 cannot be read."
+            )]
+        )
+    );
+    topic.requests();
+    hook.requests();
+}
+
+/// A memory whose run ends right after `last` is kept, as where the
+/// collector is killed between two of its writes: what follows is not kept.
+struct EndsAfter<'a> {
+    memory: &'a Remembered,
+    last: &'static str,
+    ended: std::cell::Cell<bool>,
+}
+
+impl Memory for EndsAfter<'_> {
+    fn recall(&self, key: &str) -> Option<String> {
+        self.memory.recall(key)
+    }
+
+    fn keep(&self, key: &str, value: &str) {
+        if !self.ended.get() {
+            self.memory.keep(key, value);
+        }
+        if key == self.last {
+            self.ended.set(true);
+        }
+    }
+}
+
+/// A run that ends once it marked the checks told keeps what its
+/// notification did: the webhook did not take it, and the card says so,
+/// not what the notification before did.
+#[test]
+fn a_run_that_ends_once_the_checks_are_told_keeps_what_its_notification_did() {
+    let topic = serve(vec![answer(200, "{}"), answer(200, "{}")]);
+    let hook = serve(vec![answer(200, "{}"), answer(500, "broken")]);
+    let channels = both(&topic.url, &hook.url);
+    let memory = Remembered::default();
+    let failing = [observed("backup", State::Failed, "The last run failed.")];
+    card_of(&channels, &memory, &failing);
+    assert_eq!(card_of(&channels, &memory, &failing).state, State::Ok);
+    let both_failing = [
+        failing[0].clone(),
+        observed("disk", State::Failed, "The disk is full."),
+    ];
+    card_of(&channels, &memory, &both_failing);
+    let ending = EndsAfter {
+        memory: &memory,
+        last: OPEN,
+        ended: std::cell::Cell::new(false),
+    };
+    after_run(&channels, &both_failing, &ending, now(), Deadline::NONE);
+    assert!(ending.ended.get());
+    let after = card_of(&channels, &memory, &both_failing);
+    assert_eq!(
+        (after.state, after.findings),
+        (
+            State::Failed,
+            vec![format!(
+                "The notification of {AT} did not go out: webhook: it answered 500."
+            )]
+        )
+    );
+    topic.requests();
+    hook.requests();
+}

@@ -2,14 +2,16 @@
 //! notification, and whether its address and secret can be used as their
 //! files stand now.
 //!
-//! What the last notification did is kept for each channel by its name as
-//! the page shows it ("webhook at hooks.example.org"), with the
+//! What the last notification did is kept for each kind of channel with the
+//! name the page showed it by then ("webhook at hooks.example.org") and the
 //! notification's time, and judged against the channels configured now: a
 //! channel taken out of the configuration, or named otherwise now, is no
 //! longer judged by it, and one named since has carried no message yet, so
-//! whether one would arrive is not known. The next notification replaces
-//! it. `garrison notify-test`, which runs as root, does not: only the
-//! collector writes the status database.
+//! whether one would arrive is not known. A channel whose address could not
+//! be read then, or cannot now, as while its file is written anew, is the
+//! one of its kind. The next notification replaces it. `garrison
+//! notify-test`, which runs as root, does not: only the collector writes the
+//! status database.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,6 +21,7 @@ use garrison_core::time;
 use serde::{Deserialize, Serialize};
 
 use super::Channels;
+use super::channels::unread;
 use crate::context::Memory;
 
 /// Where it is kept.
@@ -33,14 +36,23 @@ pub(super) const SENT: &str = "notify.sent";
 /// them.
 type Named = [(&'static str, String)];
 
-/// What the last notification did on each channel, by its name: `None`
-/// where the channel took it, else why not, as `webhook: it answered 500`.
+/// What the last notification did on one channel.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+struct Took {
+    /// The channel's name as the page showed it then.
+    name: String,
+    /// `None` where the channel took it, else why not, as `webhook: it
+    /// answered 500`.
+    failed: Option<String>,
+}
+
+/// What the last notification did on each channel, by its kind.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub(super) struct Last {
     /// When it was sent, a Unix second; none where a release before this
     /// one kept what it did, which it kept without a time.
     at: Option<i64>,
-    channels: BTreeMap<String, Option<String>>,
+    channels: BTreeMap<String, Took>,
 }
 
 impl Last {
@@ -55,8 +67,9 @@ impl Last {
             .iter()
             .filter_map(|(kind, name)| {
                 let (_, outcome) = outcomes.iter().find(|(sent, _)| sent == kind)?;
-                let failed = outcome.as_ref().err();
-                Some((name.clone(), failed.map(|why| format!("{kind}: {why}"))))
+                let failed = outcome.as_ref().err().map(|why| format!("{kind}: {why}"));
+                let name = name.clone();
+                Some(((*kind).to_owned(), Took { name, failed }))
             })
             .collect();
         Last {
@@ -90,11 +103,13 @@ impl Last {
         let channels = named
             .iter()
             .filter_map(|(kind, name)| {
-                if failed.contains(kind) {
-                    Some((name.clone(), Some(format!("{kind}: it did not take it"))))
+                let failed = if failed.contains(kind) {
+                    Some(Some(format!("{kind}: it did not take it")))
                 } else {
-                    taken.then(|| (name.clone(), None))
-                }
+                    taken.then_some(None)
+                };
+                let name = name.clone();
+                failed.map(|failed| ((*kind).to_owned(), Took { name, failed }))
             })
             .collect();
         Some(Last { at: None, channels })
@@ -102,9 +117,17 @@ impl Last {
 
     /// The same, of the channels configured now alone.
     pub(super) fn of(mut self, named: &Named) -> Self {
-        self.channels
-            .retain(|name, _| named.iter().any(|(_, now)| now == name));
+        self.channels.retain(|kind, took| {
+            named
+                .iter()
+                .any(|(now, name)| now == kind && same(kind, &took.name, name))
+        });
         self
+    }
+
+    /// Whether the notification went out on the channel of `kind`.
+    fn carried(&self, kind: &str) -> bool {
+        self.channels.contains_key(kind)
     }
 
     /// Why the channels that did not take it did not, in the order they are
@@ -112,7 +135,7 @@ impl Last {
     fn failures(&self, named: &Named) -> String {
         let failed: Vec<&str> = named
             .iter()
-            .filter_map(|(_, name)| self.channels.get(name)?.as_deref())
+            .filter_map(|(kind, _)| self.channels.get(*kind)?.failed.as_deref())
             .collect();
         failed.join("; ")
     }
@@ -121,7 +144,11 @@ impl Last {
     fn failed(&self, named: &Named) -> Vec<String> {
         named
             .iter()
-            .filter(|(_, name)| matches!(self.channels.get(name), Some(Some(_))))
+            .filter(|(kind, _)| {
+                self.channels
+                    .get(*kind)
+                    .is_some_and(|took| took.failed.is_some())
+            })
             .map(|(_, name)| name.clone())
             .collect()
     }
@@ -138,6 +165,14 @@ impl Last {
             memory.keep(PROBLEM, &failures);
         }
     }
+}
+
+/// Whether the channel of `kind` that was named `then` is the one named
+/// `now`: the same name, or one of them is of an address that could not be
+/// read, so that where it pointed is not known.
+fn same(kind: &str, then: &str, now: &str) -> bool {
+    let unread = unread(kind);
+    then == now || then == unread || now == unread
 }
 
 /// With no channel configured, what the last notification did is forgotten,
@@ -210,7 +245,7 @@ pub(super) fn card(
     }
     let unsent: Vec<&str> = named
         .iter()
-        .filter(|(_, name)| last.is_none_or(|last| !last.channels.contains_key(name)))
+        .filter(|(kind, _)| last.is_none_or(|last| !last.carried(kind)))
         .map(|(_, name)| name.as_str())
         .collect();
     let state = if !findings.is_empty() {

@@ -343,6 +343,9 @@ fn after_run_with(
     let (next, news) = compare(&open, observations);
     let mut last = Last::recalled(memory, &named);
     let kept = if news.is_empty() {
+        if let Some(last) = &last {
+            last.keep(memory, &named);
+        }
         next
     } else {
         let outcomes = channels.send_with(&note(&channels.host, &news), now, roots, deadline);
@@ -350,7 +353,11 @@ fn after_run_with(
         if let Some(failures) = &failures {
             log::warn!("A notification did not go out: {failures}");
         }
-        last = Some(Last::sent(now.as_second(), &named, &outcomes));
+        let sent = Last::sent(now.as_second(), &named, &outcomes);
+        // Kept before the checks count as told: a run that ends between the
+        // two sends this notification again, never judges by the one before.
+        sent.keep(memory, &named);
+        last = Some(sent);
         if any {
             // Told once a channel took it: the others are not sent it again,
             // and the page shows which of them did not take it.
@@ -363,9 +370,6 @@ fn after_run_with(
     };
     if let Ok(text) = serde_json::to_string(&kept) {
         memory.keep(OPEN, &text);
-    }
-    if let Some(last) = &last {
-        last.keep(memory, &named);
     }
     let waiting = kept.values().filter(|entry| entry.state != "ok").count();
     card::card(channels, &named, last.as_ref(), waiting, memory, now)
