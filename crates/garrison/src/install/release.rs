@@ -2,7 +2,7 @@
 //! upgrade or a reinstall.
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use garrison_core::config;
@@ -252,6 +252,14 @@ pub(super) fn install() -> Step {
     check_config(&release, false)
         .map_err(|error| format!("{error}; the running release was not touched"))?;
     let ran = services::runs();
+    // The installer's backups are kept here from the first start on, and
+    // the operator's backup job takes the folder in.
+    if fs::symlink_metadata(BACKUPS).is_err() {
+        let mut private = fs::DirBuilder::new();
+        private.recursive(true).mode(0o700);
+        io(private.create(BACKUPS), Path::new(BACKUPS))?;
+        altered = true;
+    }
     let backup = if copy {
         Some(backup_state(&base.join("current"), changed.is_some())?)
     } else {
@@ -285,12 +293,19 @@ pub(super) fn install() -> Step {
         announce(&line);
         altered = true;
     }
-    // Only where `previous` names another release is there one to return to.
-    // The release before cannot read a database this one migrates: name the
-    // rollback that works now, not only when a plain `--rollback` refuses.
-    let previous = fs::canonicalize(base.join("previous")).ok();
+    last_line(&version, &release, restore, altered);
+    Ok(())
+}
+
+/// The run's last line: `release` runs, and nothing was changed where the run
+/// `altered` nothing. Only where `previous` names another release is there
+/// one to return to; the release before cannot read a database this one
+/// migrates, so the rollback that works is named now, not only when a plain
+/// `--rollback` refuses.
+fn last_line(version: &str, release: &Path, restore: bool, altered: bool) {
+    let previous = fs::canonicalize(Path::new(BASE).join("previous")).ok();
     let back = previous
-        .filter(|previous| *previous != release)
+        .filter(|previous| previous != release)
         .map(|_| {
             format!(
                 " Roll back with: {} install --rollback{}",
@@ -303,7 +318,7 @@ pub(super) fn install() -> Step {
         announce(&format!(
             "Garrison {version} is running as installed; nothing was changed.{back}"
         ));
-        return Ok(());
+        return;
     }
     announce(&format!("Garrison {version} is running.{back}"));
     if restore && !back.is_empty() {
@@ -312,7 +327,6 @@ pub(super) fn install() -> Step {
              from before it, and what was recorded since is lost.",
         );
     }
-    Ok(())
 }
 
 #[cfg(test)]
