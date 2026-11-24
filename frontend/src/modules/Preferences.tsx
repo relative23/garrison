@@ -2,7 +2,7 @@
 // hiding a module from the menu neither revokes access nor stops any service.
 import { useState, type FormEvent, type ReactNode } from "react";
 
-import { ApiError } from "../api/client";
+import { WriteFailure } from "../components/Failure";
 import { Notice } from "../components/Status";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -76,7 +76,8 @@ export function Preferences() {
   }
   const [hidden, setHidden] = useState(new Set(session.preferences.hiddenModules));
   const [showSwitch, setShowSwitch] = useState(session.preferences.showSwitch);
-  const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null);
+  // The settings were saved, or why the last save failed.
+  const [result, setResult] = useState<{ error: Error | null } | null>(null);
   const toggle = (id: string) => {
     const next = new Set(hidden);
     if (next.has(id)) next.delete(id);
@@ -87,14 +88,13 @@ export function Preferences() {
     event.preventDefault();
     // One save at a time, this page's or the header's theme button's.
     if (saving) return;
-    setMessage(null);
+    setResult(null);
     try {
       await updatePreferences({ theme, hiddenModules: [...hidden].sort(), showSwitch });
       applyTheme(theme);
-      setMessage({ tone: "info", text: t("preferences.saved") });
+      setResult({ error: null });
     } catch (reason) {
-      // Without a readable answer the settings may have been saved all the same.
-      setMessage({ tone: "error", text: t(reason instanceof ApiError ? "preferences.notSaved" : "preferences.unanswered") });
+      setResult({ error: reason instanceof Error ? reason : new Error(String(reason)) });
     }
   };
   return (
@@ -124,11 +124,8 @@ export function Preferences() {
           </Choice>
         </CardContent>
       </Card>
-      {message && (
-        <Notice tone={message.tone} live>
-          {message.text}
-        </Notice>
-      )}
+      {result?.error === null && <Notice live>{t("preferences.saved")}</Notice>}
+      {result?.error && <WriteFailure error={result.error} refused={t("preferences.notSaved")} unanswered={t("preferences.unanswered")} />}
       {/* aria-disabled, not disabled: a disabled button would drop the focus. */}
       <Button type="submit" aria-disabled={saving || undefined}>
         {saving ? t("preferences.saving") : t("preferences.save")}

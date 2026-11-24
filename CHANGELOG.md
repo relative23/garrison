@@ -173,6 +173,10 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A request that fails is said in Garrison's words, never the browser's.**
+  A list or summary that could not be refreshed says that it shows what was
+  read last, and a failed save, sign-out, start or theme switch gives its
+  reason and an internal error's reference.
 - **After a computer slept, a page no longer shows its checks as current.**
   A page counted the time it waited with the browser's monotonic clock,
   which stops while a computer sleeps on Linux and macOS (measured in Chrome

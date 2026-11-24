@@ -14,8 +14,9 @@ import {
   useCoverage,
   useCursors,
 } from "../components/Events";
+import { ErrorState, ReadFailure } from "../components/Failure";
 import { Fields } from "../components/ObservationCard";
-import { ErrorState, Loading, Notice } from "../components/Status";
+import { Loading, Notice } from "../components/Status";
 import { Badge, type BadgeTone } from "../components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../components/ui/card";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableHeadRow, TableRow } from "../components/ui/table";
@@ -163,7 +164,7 @@ function List({ page, cursors, search, setSearch }: ListProps) {
           }}
         />
       </Toolbar>
-      {page.error && <ErrorState error={page.error} retry={page.reload} />}
+      <ReadFailure resource={page} kept={t("failure.kept.list")} />
       {!page.data && !page.error && <Loading />}
       {page.data && (
         <Table>

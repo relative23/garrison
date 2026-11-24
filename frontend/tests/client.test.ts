@@ -58,9 +58,18 @@ describe("API client", () => {
     await expect(api.status()).rejects.toMatchObject({ status: 502, reference: null });
   });
 
-  it("keeps the status text when an error is not JSON", async () => {
-    serve({ "GET status": { status: 502, raw: "<html>Bad gateway</html>" } });
-    await expect(api.status()).rejects.toMatchObject({ status: 502, message: "Error" });
+  it("takes an error answer without the service's reason for a proxy's, and keeps none of its words", async () => {
+    serve({ "GET status": { status: 502, statusText: "Bad Gateway", raw: "<html>Bad gateway</html>" } });
+    const error = await api.status().catch((reason: unknown) => reason);
+    expect(error).toMatchObject({ status: 502, own: false });
+    expect((error as Error).message).not.toMatch(/Bad gateway/i);
+    // JSON that is not the service's, or the service's without a reason, is no reason either.
+    for (const body of [{ message: "upstream timed out" }, { detail: "" }]) {
+      serve({ "GET status": { status: 504, body } });
+      await expect(api.status()).rejects.toMatchObject({ status: 504, own: false });
+    }
+    serve({ "GET status": { status: 503, body: { detail: "Busy" } } });
+    await expect(api.status()).rejects.toMatchObject({ status: 503, own: true, message: "Busy" });
   });
 
   it("takes a server error that is not the service's own as no answer to a write, and to nothing else", async () => {

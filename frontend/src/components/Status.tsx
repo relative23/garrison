@@ -3,11 +3,9 @@
 import { CircleAlert, CircleCheck, CircleDashed, CircleHelp, CircleX, Clock, LoaderCircle } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 
-import { ApiError } from "../api/client";
 import { useTranslation } from "../i18n";
 import { Alert } from "./ui/alert";
 import { Badge, type BadgeTone } from "./ui/badge";
-import { Button } from "./ui/button";
 import { Tooltip } from "./ui/tooltip";
 
 const NAMES = ["ok", "warning", "failed", "partial", "unknown"] as const;
@@ -121,41 +119,6 @@ export function Loading({ label }: { label?: string }) {
     <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground" aria-live="polite">
       <LoaderCircle aria-hidden className="h-4 w-4 animate-spin" /> {label ?? t("common.loading")}
     </p>
-  );
-}
-
-/** Why a request failed, with a way to try again. `lead` says what the
- * failure means for what is still on the page; with data still in view the
- * caller makes it a warning. */
-export function ErrorState({
-  error,
-  retry,
-  lead,
-  tone = "error",
-}: {
-  error: Error;
-  retry?: () => void;
-  lead?: string;
-  tone?: "warning" | "error";
-}) {
-  const { t } = useTranslation();
-  // Only an internal error is in the journal under its reference.
-  const reference = error instanceof ApiError && error.status === 500 ? error.reference : null;
-  return (
-    <Notice tone={tone} live>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          {lead && <p>{lead}</p>}
-          <p>{error.message || t("common.requestFailed")}</p>
-          {reference && <p className="mt-1 text-xs opacity-80">{t("common.reference", { reference })}</p>}
-        </div>
-        {retry && (
-          <Button variant="outline" size="sm" onClick={retry}>
-            {t("common.tryAgain")}
-          </Button>
-        )}
-      </div>
-    </Notice>
   );
 }
 

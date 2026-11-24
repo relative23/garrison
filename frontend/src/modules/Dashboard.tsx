@@ -3,8 +3,9 @@
 import { lazy, Suspense, useDeferredValue, useState } from "react";
 
 import { api, type MetricsResponse, type Observation } from "../api/client";
+import { ReadFailure } from "../components/Failure";
 import { ObservationCard } from "../components/ObservationCard";
-import { ErrorState, EvidenceLegend, Loading, Meta, Notice, StateBadge, isStateName, type StateName } from "../components/Status";
+import { EvidenceLegend, Loading, Meta, Notice, StateBadge, isStateName, type StateName } from "../components/Status";
 import { StatusNotice } from "../components/StatusNotice";
 import { CARD } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
@@ -196,7 +197,7 @@ function History() {
           </TabsList>
         </div>
         <TabsContent value={period} className="space-y-3">
-          {history.error && <ErrorState error={history.error} retry={history.reload} />}
+          <ReadFailure resource={history} kept={t("failure.kept.history")} />
           {!data && !history.error && <Loading />}
           {data && (
             <>

@@ -2,27 +2,22 @@
 import { LogOut } from "lucide-react";
 import { useState } from "react";
 
-import { ApiError, type SessionInfo } from "../api/client";
+import type { SessionInfo } from "../api/client";
+import { WriteFailure } from "../components/Failure";
 import { Fields } from "../components/ObservationCard";
-import { Notice } from "../components/Status";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../components/ui/card";
 import { Trans, useTranslation } from "../i18n";
 import { useApp } from "../lib/context";
 import { dateTime } from "../lib/format";
 
-/** Why a sign-out did not end the session here: the server answered with an
- * error, which keeps the session, or no readable answer came, after which
- * the page does not know whether it ended. Only the second is the
- * connection's. */
-type SignOutFailure = "answered" | "unanswered";
-
 export function Account({ onLogout }: { onLogout: () => Promise<void> }) {
   const { session } = useApp();
-  const [failed, setFailed] = useState<SignOutFailure | null>(null);
+  // Why the last sign-out did not end the session here.
+  const [failed, setFailed] = useState<Error | null>(null);
   const signOut = () => {
     setFailed(null);
-    onLogout().catch((reason: unknown) => setFailed(reason instanceof ApiError ? "answered" : "unanswered"));
+    onLogout().catch((reason: unknown) => setFailed(reason instanceof Error ? reason : new Error(String(reason))));
   };
   return <AccountCard session={session} onSignOut={signOut} failed={failed} />;
 }
@@ -37,7 +32,7 @@ export function AccountCard({
 }: {
   session: SessionInfo | null;
   onSignOut?: () => void;
-  failed?: SignOutFailure | null;
+  failed?: Error | null;
 }) {
   const { t } = useTranslation();
   const blank = "\u00a0";
@@ -58,7 +53,8 @@ export function AccountCard({
         <p className="text-sm text-muted-foreground">
           <Trans i18nKey="account.access" components={{ code: <code className="rounded bg-muted px-1 py-0.5" /> }} />
         </p>
-        {failed && <Notice tone="error">{t(failed === "answered" ? "account.signOutFailed" : "account.signOutUnanswered")}</Notice>}
+        {/* An error answer keeps the session; without one it is not known whether it ended. */}
+        {failed && <WriteFailure error={failed} refused={t("account.signOutFailed")} unanswered={t("account.signOutUnanswered")} />}
       </CardContent>
       <CardFooter>
         <Button variant="outline" onClick={onSignOut}>

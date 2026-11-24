@@ -2,10 +2,11 @@
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { api, configure, type Preferences, type SessionInfo, type SessionState } from "./api/client";
+import { ErrorState } from "./components/Failure";
 import { Layout } from "./components/Layout";
 import { Shell, type ShellKind } from "./components/Shell";
 import { Centered, SignIn } from "./components/SignIn";
-import { ErrorState, Loading } from "./components/Status";
+import { Loading } from "./components/Status";
 import { ViewBoundary } from "./components/ViewBoundary";
 import { useTranslation } from "./i18n";
 import { elapsed, Instant, STEP, usePageTime } from "./lib/clock";

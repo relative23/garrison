@@ -1,5 +1,6 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 
+import { ApiError } from "../src/api/client";
 import { Dashboard } from "../src/modules/Dashboard";
 import { metrics, observation, session, status } from "./support/fixtures";
 import { renderView } from "./support/render";
@@ -48,7 +49,7 @@ describe("dashboard", () => {
     const collected = "2026-10-29T12:00:00+00:00";
     renderView(<Dashboard />, {
       status: status(observations, { collectedAt: collected }),
-      refreshError: new Error("The broker is not reachable"),
+      refreshError: new ApiError(503, "The broker is not reachable"),
     });
     const notice = screen.getByText(/The status could not be refreshed/).closest("[role]");
     expect(notice?.textContent).toContain("The broker is not reachable");
@@ -61,7 +62,7 @@ describe("dashboard", () => {
 
   it("shows why there is no status, and that there is none yet", async () => {
     serve({ "GET metrics": { body: metrics() } });
-    const failed = renderView(<Dashboard />, { status: new Error("The status database is not readable") });
+    const failed = renderView(<Dashboard />, { status: new ApiError(503, "The status database is not readable") });
     expect(screen.getByText("The status database is not readable")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Health" })).toBeNull();
     await screen.findByText(/No samples were recorded in this period/);

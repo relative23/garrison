@@ -6,7 +6,8 @@
 import { useTranslation } from "../i18n";
 import { useApp } from "../lib/context";
 import { dateTime } from "../lib/format";
-import { ErrorState, Notice } from "./Status";
+import { ErrorState } from "./Failure";
+import { Notice } from "./Status";
 
 /** `unread` says what could not be read, where the page shows more than
  * the status, such as the summary above the checks of Attacks & bans. */

@@ -1,6 +1,5 @@
 // Typed access to Garrison API. Types come from schema.gen.ts, which is
 // generated from the server's OpenAPI document (`npm run api`).
-import { i18n } from "../i18n";
 import type { components, operations } from "./schema.gen";
 
 type Schemas = components["schemas"];
@@ -34,12 +33,18 @@ export type SubmitResponse = Schemas["SubmitResponse"];
 
 const API = "/api/";
 
+/** An error answer. Garrison's own carries its reason as the message; one
+ * that something between the browser and Garrison gave, such as a proxy's
+ * error page, carries only its status. Any other failure of a request is no
+ * readable answer (src/components/Failure.tsx words each). */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
     /** The answer's reference; the journal names it for an internal error. */
     readonly reference: string | null = null,
+    /** Whether Garrison gave the answer. */
+    readonly own = true,
   ) {
     super(message);
   }
@@ -87,27 +92,19 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
     },
   });
   if (!response.ok) {
-    let detail = response.statusText;
-    let own = false;
+    let detail: string | null = null;
     try {
       // The service's own errors are ErrorDetail; a proxy's need not be.
       const body = (await response.json()) as Partial<Record<keyof Schemas["ErrorDetail"], unknown>>;
-      if (typeof body.detail === "string") {
-        detail = body.detail;
-        own = true;
-      }
+      if (typeof body.detail === "string" && body.detail) detail = body.detail;
     } catch {
-      // A non-JSON error body keeps the status text.
+      // An error body that is no JSON is not the service's.
     }
     // A server error that is not the service's own, such as nginx's 502 while
     // the service restarts, says nothing of what became of a write: it may
     // have been done before the service went away. That is no answer, as a
     // lost connection is none, and no ApiError.
-    if (write && !own && response.status >= 500) throw new Error(`No answer of the service's own: status ${response.status}.`);
-    // HTTP/2 has no status text, and a proxy's own error page no detail: the
-    // status is then all there is to say, and saying nothing would leave an
-    // empty notice.
-    if (!detail) detail = i18n.t("common.answeredStatus", { status: response.status });
+    if (write && detail === null && response.status >= 500) throw new Error(`No answer of the service's own: status ${response.status}.`);
     if (response.status === 401) onUnauthorized();
     // A refusal of the session's own question ended the session: the web
     // service answers it so only where the policy refuses the user, and ends
@@ -118,6 +115,9 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
       if (path === "session") onUnauthorized();
       else onRefused();
     }
+    // A proxy's own page and its status text (none over HTTP/2) are never
+    // shown: they are not Garrison's words, nor in the page's language.
+    if (detail === null) throw new ApiError(response.status, `Status ${response.status} not from the service`, null, false);
     throw new ApiError(response.status, detail, response.headers.get("x-request-id"));
   }
   return (await response.json()) as T;

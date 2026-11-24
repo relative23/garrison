@@ -8,7 +8,8 @@ import { elapsed, usePageTime } from "../lib/clock";
 import { ago, dateTime, milliseconds, number, text } from "../lib/format";
 import { follow, href } from "../lib/router";
 import { useResource, type Resource } from "../lib/useResource";
-import { ErrorState, Notice } from "./Status";
+import { ErrorState } from "./Failure";
+import { Notice } from "./Status";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 

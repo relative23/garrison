@@ -4,7 +4,8 @@ import { useState } from "react";
 
 import { api } from "../api/client";
 import { Correlation, CoverageBanner, Pager, SearchForm, Toolbar, useCoverage, useCursors } from "../components/Events";
-import { ErrorState, Loading } from "../components/Status";
+import { ReadFailure } from "../components/Failure";
+import { Loading } from "../components/Status";
 import { Button } from "../components/ui/button";
 import { Select } from "../components/ui/input";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableHeadRow, TableRow } from "../components/ui/table";
@@ -68,7 +69,7 @@ export function Logs() {
           <RefreshCw aria-hidden />
         </Button>
       </Toolbar>
-      {page.error && <ErrorState error={page.error} retry={page.reload} />}
+      <ReadFailure resource={page} kept={t("failure.kept.list")} />
       {!page.data && !page.error && <Loading />}
       {page.data && (
         <Table>

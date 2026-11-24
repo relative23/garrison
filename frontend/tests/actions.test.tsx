@@ -205,10 +205,9 @@ describe("maintenance actions", () => {
     expect(dialogOpen()).toBe(true);
   });
 
-  it("say what the server answered where it gave no reason", async () => {
-    // Over HTTP/2 an answer has no status text, and a proxy's error no JSON.
+  it("say that a proxy turned the start away, by its status alone", async () => {
     // What a proxy refuses never reached Garrison; its 502 is no answer at
-    // all (tests/writes.test.tsx).
+    // all (tests/failures.test.tsx). Over HTTP/2 an answer has no status text.
     serve({
       "GET actions": { body: catalog() },
       "POST actions": { status: 413, raw: "<html>Request Entity Too Large</html>", statusText: "" },
@@ -216,7 +215,9 @@ describe("maintenance actions", () => {
     renderView(<Actions />);
     await loaded();
     fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
-    expect(await screen.findByText("The server answered with status 413 and gave no reason.")).toBeTruthy();
+    const notice = (await screen.findByText("The job was not started.")).closest("[role]");
+    expect(notice?.textContent).toContain("answered with status 413 instead of Garrison.");
+    expect(notice?.textContent).not.toContain("Request Entity Too Large");
     expect(dialogOpen()).toBe(true);
   });
 

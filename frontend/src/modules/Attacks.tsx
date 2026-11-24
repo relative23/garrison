@@ -4,8 +4,9 @@ import { useState } from "react";
 
 import { api, type Attacks as Summary } from "../api/client";
 import { CoverageBanner, useCoverage } from "../components/Events";
+import { ReadFailure } from "../components/Failure";
 import { ObservationCard } from "../components/ObservationCard";
-import { ErrorState, EvidenceLegend, Loading, Meta, Notice } from "../components/Status";
+import { EvidenceLegend, Loading, Meta, Notice } from "../components/Status";
 import { StatusNotice } from "../components/StatusNotice";
 import { COUNT, Figures, PeriodTabs, Section, type Period } from "../components/Summary";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableHeadRow, TableRow } from "../components/ui/table";
@@ -144,7 +145,7 @@ export function Attacks() {
     <>
       <CoverageBanner coverage={coverage} />
       <PeriodTabs period={period} onChange={setPeriod}>
-        {summary.error && <ErrorState error={summary.error} retry={summary.reload} />}
+        <ReadFailure resource={summary} kept={t("failure.kept.summary")} />
         {!data && !summary.error && <Loading />}
         {data && (
           <>

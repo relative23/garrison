@@ -1,6 +1,6 @@
 import { screen, within } from "@testing-library/react";
 
-import type { Observation } from "../src/api/client";
+import { ApiError, type Observation } from "../src/api/client";
 import { StatusPage } from "../src/modules/StatusPage";
 import { observation, status } from "./support/fixtures";
 import { renderView } from "./support/render";
@@ -121,7 +121,7 @@ describe("status pages", () => {
   it("say that a refresh failed above the status they still have", () => {
     renderView(<StatusPage moduleId="antivirus" detail={null} />, {
       status: status([observation({ title: "Signatures" })]),
-      refreshError: new Error("The broker is not reachable"),
+      refreshError: new ApiError(503, "The broker is not reachable"),
     });
     const notice = screen.getByText(/The status could not be refreshed/).closest("[role]");
     expect(notice?.textContent).toContain("The broker is not reachable");
@@ -129,7 +129,7 @@ describe("status pages", () => {
   });
 
   it("show why the status is missing", () => {
-    renderView(<StatusPage moduleId="antivirus" detail={null} />, { status: new Error("The status database is not readable") });
+    renderView(<StatusPage moduleId="antivirus" detail={null} />, { status: new ApiError(503, "The status database is not readable") });
     expect(screen.getByText("The status database is not readable")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });

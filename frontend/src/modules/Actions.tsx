@@ -2,8 +2,9 @@
 import { Play } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
-import { api, ApiError, type ActionInfo, type Job } from "../api/client";
-import { ErrorState, Loading, Notice } from "../components/Status";
+import { api, type ActionInfo, type Job } from "../api/client";
+import { ErrorState, ReadFailure, WriteFailure } from "../components/Failure";
+import { Loading, Notice } from "../components/Status";
 import { Badge, type BadgeTone } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../components/ui/card";
@@ -32,7 +33,7 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job, re
   const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const [typed, setTyped] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
   // One request ID per dialog: a retried click after a network error replays
   // the same request instead of starting the job twice.
@@ -55,9 +56,7 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job, re
       onDone(result.job, result.replayed);
       dialog.current?.close();
     } catch (reason) {
-      // An answer says why the broker refused. Without a readable one the
-      // request may have reached it all the same and started the job.
-      setError(reason instanceof ApiError ? reason.message : t("actions.unanswered"));
+      setError(reason instanceof Error ? reason : new Error(String(reason)));
     } finally {
       setBusy(false);
     }
@@ -91,7 +90,7 @@ function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job, re
             autoComplete="off"
             spellCheck={false}
           />
-          {error && <Notice tone="error">{error}</Notice>}
+          {error && <WriteFailure error={error} refused={t("actions.notStarted")} unanswered={t("actions.unanswered")} />}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => dialog.current?.close()}>
               {t("actions.cancel")}
@@ -172,7 +171,7 @@ export function Actions() {
   return (
     <>
       {intro}
-      {catalog.error && <ErrorState tone="warning" lead={t("actions.refreshFailed")} error={catalog.error} retry={catalog.reload} />}
+      <ReadFailure resource={catalog} kept={t("actions.refreshFailed")} />
       {watched && (
         <Notice tone={watched.status === "failed" ? "error" : "info"} live>
           <p>{t("actions.job", { id: watched.id.slice(0, 8), status: label(watched.status), message: watched.message })}</p>

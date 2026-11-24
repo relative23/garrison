@@ -4,7 +4,8 @@ import { useState } from "react";
 
 import { api, type Destinations } from "../api/client";
 import { InternalLink } from "../components/Events";
-import { ErrorState, Loading, Meta, Notice } from "../components/Status";
+import { ReadFailure } from "../components/Failure";
+import { Loading, Meta, Notice } from "../components/Status";
 import { COUNT, Figures, PeriodTabs, Section, type Period } from "../components/Summary";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableHeadRow, TableRow } from "../components/ui/table";
 import { useTranslation } from "../i18n";
@@ -118,7 +119,7 @@ export function DeliveryProblems() {
   const data = summary.data;
   return (
     <PeriodTabs period={period} onChange={setPeriod}>
-      {summary.error && <ErrorState error={summary.error} retry={summary.reload} />}
+      <ReadFailure resource={summary} kept={t("failure.kept.summary")} />
       {!data && !summary.error && <Loading />}
       {data && (
         <>
