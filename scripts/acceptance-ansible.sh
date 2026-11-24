@@ -235,6 +235,26 @@ VARS
     inside 'mv /etc/garrison/policy/access.json /etc/garrison/access-policy.json && rmdir /etc/garrison/policy'
 }
 
+# A play that moves the receiver to another port and names a secret by its
+# path, which the release refuses: it stops before setup gives Stalwart's
+# webhook the new port, and the next play brings back what the release takes.
+scenario_refused_config() {
+    step "A configuration the release refuses stops the play before setup changes Stalwart"
+    cat > "$work/refused.yml" <<'VARS'
+acceptance_config: |
+  [ingest]
+  port = 8095
+  [notifications]
+  token = "/etc/garrison/ntfy.token"
+VARS
+    stops "$newer" "Configuration not usable" -e "@$work/refused.yml"
+    check "Stalwart's webhook still names the port the receiver listens on" \
+        'grep -q "127.0.0.1:8094/webhook" /root/stand-in-objects/WebHook'
+    play "$newer"
+    services "after a configuration the release refused"
+    unchanged "a further run changes nothing" "$newer"
+}
+
 # An unpacking cut short after its first files: tar writes SHA256SUMS and
 # VERSION before the programs.
 scenario_unpack_cut() {
@@ -456,7 +476,7 @@ said "Stalwart is set up as asked; nothing was changed."
 check "the role upgraded to $newer" "test \"\$(cat /opt/garrison/current/VERSION)\" = '$newer'"
 services "upgraded by the role"
 
-all="setup_refused policy_elsewhere no_room upgrade_failed hand_changed rebuilt ignored
+all="setup_refused policy_elsewhere refused_config no_room upgrade_failed hand_changed rebuilt ignored
     unbound unpack_cut first_unfinished restart"
 for scenario in ${SCENARIOS:-$all}; do
     "scenario_$scenario"

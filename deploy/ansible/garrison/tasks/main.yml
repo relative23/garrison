@@ -101,6 +101,16 @@
     group: root
     mode: "0644"
 
+# The release being installed checks the configuration before setup follows
+# it in Stalwart; status 1 is the access policy, which a first play makes
+# only after setup.
+- name: The release takes this configuration
+  ansible.builtin.command:
+    argv: ["/root/{{ garrison_name }}/bin/garrison", check-config]
+  register: garrison_checked
+  changed_when: false
+  failed_when: garrison_checked.rc not in [0, 1]
+
 # The release being installed, not the one in /opt/garrison/current: on an
 # upgrade that is still the release being replaced, whose setup may not
 # make a key where a file holds none (0.1.0 to 0.1.2 keep an empty file and

@@ -2074,9 +2074,10 @@ Notable changes for operators and users. The format follows
 - **The Ansible role runs the installer in every play, which changes nothing
   where the release runs as installed**, so that the next play starts Garrison
   where one stopped after the first install or its installer did not finish.
-- **The Ansible role runs `garrison stalwart setup` in every play, and finds
-  the access policy where `[broker] policy` keeps it**; where the policy
-  binds no role and no account, the play stops and says how to bind one.
+- **The Ansible role runs `garrison stalwart setup` in every play, once the
+  release has checked the configuration, and finds the access policy where
+  `[broker] policy` keeps it**; where the policy binds no role and no
+  account, the play stops and says how to bind one.
 - **A dry run of the Ansible role (`ansible-playbook --check`) checks the
   signature and runs to its end on a host the role set up**, where it stopped
   saying that the signature belonged to another release.
