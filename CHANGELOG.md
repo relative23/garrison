@@ -300,6 +300,10 @@ Notable changes for operators and users. The format follows
   1.1.0), and the Test messages card was in order for a day although
   nothing had been scanned. A temporary reply (4xx) is now "not tested",
   Unknown, and that test is tried again after an hour.
+- **The ClamAV cards name the setting for a file they do not find.** A
+  missing configuration file, or a signature directory without the listed
+  files, names its option and `garrison detect --format toml`, which prints
+  where this host keeps it.
 - **A daily signature database dated ahead of the clock is a warning.** The
   Signature databases card called it current however long updates had
   stopped; it now says that one of the two clocks is wrong.

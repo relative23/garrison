@@ -132,8 +132,32 @@ fn signatures_that_were_not_updated_for_two_days_are_a_warning() {
           the updates do not arrive."
         ]
     );
+    // Without any of the files, the card says where it looked and what
+    // names the right place.
+    std::fs::rename(&daily, directory.path().join("daily.old")).unwrap();
+    std::fs::rename(
+        directory.path().join("main.cvd"),
+        directory.path().join("main.old"),
+    )
+    .unwrap();
+    let none = provider.collect(&context).unwrap().observations.remove(1);
+    assert_eq!(
+        (none.state, none.findings),
+        (
+            State::Unknown,
+            vec![format!(
+                "None of the listed signature files is in {}: set `database_directory` to \
+                 clamd's, which `garrison detect --format toml` names.",
+                directory.path().display()
+            )]
+        )
+    );
+    std::fs::rename(
+        directory.path().join("main.old"),
+        directory.path().join("main.cvd"),
+    )
+    .unwrap();
     // Without the daily database nothing says how current the scanner is.
-    std::fs::remove_file(&daily).unwrap();
     let without = provider.collect(&context).unwrap().observations.remove(1);
     assert_eq!(without.state, State::Unknown);
     assert_eq!(
@@ -382,7 +406,11 @@ fn a_milter_file_that_cannot_be_read_is_named_with_why() {
     std::fs::write(path("quote.conf"), "OnInfected Reject\nRejectMsg 'open\n").unwrap();
     std::fs::write(path("scan.conf"), "StreamMaxLength 25M\n").unwrap();
     for (name, why) in [
-        ("missing.conf", "No such file or directory (os error 2)"),
+        (
+            "missing.conf",
+            "No such file or directory (os error 2); set `milter_config` to clamav-milter's \
+             file, which `garrison detect --format toml` names",
+        ),
         ("large.conf", "it is larger than 64 KiB"),
         (
             "quote.conf",

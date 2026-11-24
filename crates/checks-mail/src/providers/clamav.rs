@@ -148,11 +148,32 @@ impl Clamav {
         };
         let infected = action(&ON_INFECTED, self.expect_on_infected);
         let failure = action(&ON_FAIL, self.expect_on_fail);
-        for (path, read) in [(&self.milter_config, &milter), (&self.clamd_config, &clamd)] {
+        let files = [
+            (
+                &self.milter_config,
+                &milter,
+                "milter_config",
+                "clamav-milter's",
+            ),
+            (&self.clamd_config, &clamd, "clamd_config", "clamd's"),
+        ];
+        for (path, read, option, whose) in files {
             if let Err(why) = read {
+                // A file that is not there is elsewhere on this host, or not
+                // installed; a refused look is not that.
+                let elsewhere = matches!(path.try_exists(), Ok(false)).then(|| {
+                    format!(
+                        "; set `{option}` to {whose} file, which `garrison detect --format toml` \
+                         names"
+                    )
+                });
                 findings.push((
                     false,
-                    format!("{} could not be read: {why}.", path.display()),
+                    format!(
+                        "{} could not be read: {why}{}.",
+                        path.display(),
+                        elsewhere.unwrap_or_default()
+                    ),
                 ));
             }
         }
@@ -295,7 +316,8 @@ mod tests {
             (
                 State::Unknown,
                 vec![format!(
-                    "{} could not be read: No such file or directory (os error 2).",
+                    "{} could not be read: No such file or directory (os error 2); set \
+                     `clamd_config` to clamd's file, which `garrison detect --format toml` names.",
                     missing.display()
                 )]
             )

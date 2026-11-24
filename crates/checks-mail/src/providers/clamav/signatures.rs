@@ -65,7 +65,14 @@ impl Clamav {
             format,
         };
         let (state, finding) = if rows.is_empty() {
-            (State::Unknown, None)
+            (
+                State::Unknown,
+                Some(format!(
+                    "None of the listed signature files is in {}: set `database_directory` to \
+                     clamd's, which `garrison detect --format toml` names.",
+                    self.database.display()
+                )),
+            )
         } else {
             current(daily)
         };
