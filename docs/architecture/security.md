@@ -86,8 +86,11 @@ brokers never repeat a job; pending jobs become "uncertain".
   reading the message's structure: it reads the message as it stands, decodes
   the base64 of the whole message (ignoring every byte outside the alphabet,
   RFC 2045 section 6.8, so junk, boundaries and headers around a base64 body
-  fall away), undoes quoted-printable, and reads a uuencode block wherever it
-  stands. A body wrapped again in a transfer encoding (a base64-encoded
+  fall away, and also with `=` taken for the end of a group of four, as a
+  mail program takes padding in the middle), undoes quoted-printable and
+  reads what comes of it in the same ways, and reads a uuencode block
+  wherever it stands, by the characters, line lengths and `begin` lines a
+  mail program takes. A body wrapped again in a transfer encoding (a base64-encoded
   forwarded message with its own base64 attachment) is read as a message in
   turn, three encodings deep as archives are opened three deep. Where a part
   begins or ends, how deeply it is nested and how its headers are written are

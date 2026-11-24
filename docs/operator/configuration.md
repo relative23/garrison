@@ -300,8 +300,11 @@ A file counts as soon as it has a macro project, also an empty one. The
 filter finds the document however the message wraps it, without reading the
 message's structure: it reads the message as it stands, decodes the base64 of
 the whole message (ignoring any byte outside the alphabet, so folding, odd
-line ends, padding or junk a sender put in the base64 fall away), undoes
-quoted-printable, and reads a uuencode `begin`/`end` block wherever it stands.
+line ends, padding or junk a sender put in the base64 fall away, and also
+with padding in the middle taken for the end of a piece, as mail programs
+take it), undoes quoted-printable and reads what comes of it the same ways,
+and reads a uuencode block wherever it stands, by the characters, line
+lengths and `begin` lines a mail program takes.
 A body wrapped again in a transfer encoding (a base64-encoded forwarded
 message with its own base64 attachment) is read in turn, three encodings deep.
 No boundary, nesting depth or header is read to decide this, so none of them

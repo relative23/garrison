@@ -240,10 +240,14 @@ Notable changes for operators and users. The format follows
   base64 of the whole message on each of the four grids a run of symbols can
   sit on (ignoring every byte outside the alphabet, so boundaries, headers
   and junk fall away), and reads a uuencode `begin`/`end` block wherever it
-  stands. No boundary, nesting depth or header is read to decide this, so
-  none of them hides a document. A part that declares a transfer encoding the
-  scan cannot decode, or a uuencode block begun and not ended, is marked
-  unscanned (`on_incomplete`), not passed as clean. yEnc stays a named limit
+  stands. It reads each encoding as the mail programs do that read it most
+  freely: base64 written in padded pieces, quoted-printable around base64,
+  uuencode in the characters and `begin` lines such a program takes, and
+  the base64 inside Word's XML files. No boundary, nesting depth or header
+  is read to decide this, so none of them hides a document. A part that
+  declares a transfer encoding the scan cannot decode, a yEnc or BinHex
+  block, or a uuencode block begun and not ended, is marked unscanned
+  (`on_incomplete`), not passed as clean
   (see [configuration](docs/operator/configuration.md#milter)).
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
