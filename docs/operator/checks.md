@@ -298,7 +298,8 @@ an interrupted run left there, as after a reboot or a stopped unit, is
 removed by the next test restore once it has not changed for an hour and no
 run holds it; the command says so, and names a copy it could not remove.
 The exit code of the command is 1 when something it ran failed, so the unit
-shows it too.
+shows it too. Two runs that write one report take turns: the second waits
+for the first and says so, and keeps what the first wrote.
 
 ## `systemd`: one-shot jobs
 

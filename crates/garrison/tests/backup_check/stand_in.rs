@@ -10,7 +10,9 @@ use serde_json::Value;
 use super::support::finished;
 
 /// restic and borg as far as the command asks them. `BROKEN` names a step
-/// that fails; every call is noted in `CALLS` with borg's time zone.
+/// that fails, `HOLD` one that waits, once it made `$HOLD_UNTIL.held`,
+/// until the file `HOLD_UNTIL` names is there; every call is noted in
+/// `CALLS` with borg's time zone.
 /// `REPO_ID` is the ID the repository has, whatever its name; empty, none.
 /// borg's listing reports the repository's location in borg's own form,
 /// as borg 1.4.5 writes it (measured): a folder here absolute, without
@@ -27,6 +29,11 @@ if [ "${BROKEN-}" = "$verb" ]; then
     echo "progress that is not the last word"
     echo "Fatal: the repository is locked by another process" >&2
     exit 1
+fi
+if [ "${HOLD-}" = "$verb" ]; then
+    : > "$HOLD_UNTIL.held"
+    tries=0
+    while [ ! -e "$HOLD_UNTIL" ] && [ $tries -lt 600 ]; do sleep 0.05; tries=$((tries + 1)); done
 fi
 case $tool-$verb in
     restic-snapshots)

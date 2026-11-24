@@ -3,16 +3,90 @@
 //! and its last check and restore where that report is of the same
 //! repository.
 
-use std::fs;
+use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use garrison_collector::backups::{MAX_REPORT, Report, Tool, named};
 use garrison_core::files::{changed_only_by_trusted, read_json_with_metadata};
 use garrison_core::json;
+use rustix::fs::{FileType, FlockOperation, Mode, OFlags};
+use rustix::io::Errno;
 
 use super::Asked;
 use crate::complain;
+
+/// The turn of one run of the report at `report`: the lock beside it,
+/// `<report>.lock`, a file of this user's own that nobody else may open. A
+/// run holds it from before it lists until its report is written, so that
+/// it reads what the run before it wrote and never writes back a check or
+/// a restore that a run which ended meanwhile replaced. One that finds it
+/// held says so and waits.
+pub(super) fn turn(report: &Path) -> Result<File, String> {
+    let mut name = report.as_os_str().to_owned();
+    name.push(".lock");
+    let lock = PathBuf::from(name);
+    // Root's rights mend a refusal for want of them, and nothing else.
+    let failed = |what: String, error: std::io::Error| {
+        let root = error.kind() == std::io::ErrorKind::PermissionDenied
+            && !rustix::process::geteuid().is_root();
+        let hint = if root {
+            " Run `garrison backup-check` as root."
+        } else {
+            ""
+        };
+        format!("{what}: {error}.{hint}")
+    };
+    let taken = |error: Errno| {
+        let what = format!("The report's lock {} cannot be taken", lock.display());
+        failed(what, error.into())
+    };
+    if let Some(folder) = lock
+        .parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+    {
+        fs::create_dir_all(folder).map_err(|error| {
+            failed(
+                format!("The report's folder {} cannot be made", folder.display()),
+                error,
+            )
+        })?;
+    }
+    let flags =
+        OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let other = || {
+        format!(
+            "{} is no lock of `garrison backup-check`'s, but a link, another user's file or no \
+             file: remove it, then run the command again.",
+            lock.display()
+        )
+    };
+    let file = File::from(
+        match rustix::fs::open(&lock, flags, Mode::RUSR | Mode::WUSR) {
+            Err(Errno::LOOP) => return Err(other()),
+            opened => opened.map_err(taken)?,
+        },
+    );
+    let status = rustix::fs::fstat(&file).map_err(taken)?;
+    // Another user's file there, which they could hold, is no lock of ours.
+    if FileType::from_raw_mode(status.st_mode) != FileType::RegularFile
+        || status.st_uid != rustix::process::geteuid().as_raw()
+    {
+        return Err(other());
+    }
+    match rustix::fs::flock(&file, FlockOperation::NonBlockingLockExclusive) {
+        Ok(()) => {}
+        Err(Errno::WOULDBLOCK) => {
+            complain(&format!(
+                "Another `garrison backup-check` writes {}; this run waits until it has ended.",
+                report.display()
+            ));
+            rustix::fs::flock(&file, FlockOperation::LockExclusive).map_err(taken)?;
+        }
+        Err(error) => return Err(taken(error)),
+    }
+    Ok(file)
+}
 
 /// The report the last run wrote, read as the collector reads it: no link
 /// followed, nothing but a regular file opened, no more than a report's size
@@ -75,7 +149,7 @@ pub(super) fn given(asked: &Asked, tool: Tool) -> Result<String, String> {
     let file = PathBuf::from(file);
     // As restic does, through a link: the file is the backup job's own.
     let mut held = String::new();
-    let read = fs::File::open(&file)
+    let read = File::open(&file)
         .and_then(|opened| opened.take(MAX_PLACE as u64 + 1).read_to_string(&mut held));
     match read {
         Ok(size) if size <= MAX_PLACE && !held.trim().is_empty() => Ok(held.trim().to_owned()),

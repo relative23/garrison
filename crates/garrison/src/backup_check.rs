@@ -9,7 +9,7 @@
 //! restores that path from the newest snapshot into a directory of its own
 //! and removes it again, after what interrupted restores left. The report
 //! keeps the last check and the last restore of the same repository until
-//! the next one.
+//! the next one; runs of one report take turns.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -22,7 +22,7 @@ use garrison_core::files::atomic_write;
 use garrison_core::time;
 
 use crate::{complain, say};
-use report::{given, kept, last_report, place};
+use report::{given, kept, last_report, place, turn};
 
 mod report;
 mod restore;
@@ -246,6 +246,13 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
         .report
         .clone()
         .unwrap_or_else(|| Path::new(REPORTS).join(format!("{}.json", tool.name())));
+    let _turn = match turn(&path) {
+        Ok(lock) => lock,
+        Err(refusal) => {
+            complain(&refusal);
+            return 1;
+        }
+    };
     let repository = Repository {
         tool,
         given: asked.repo.clone(),

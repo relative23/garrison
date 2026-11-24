@@ -662,6 +662,9 @@ Notable changes for operators and users. The format follows
   a card with `verify_days` warns until the next `garrison backup-check` run
   with `--verify`, and one with `restore_days` until the next with
   `--restore`.
+- **Two `garrison backup-check` runs that write one report take turns**, so
+  that one never writes back an older check or restore over the one the
+  other made meanwhile.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year

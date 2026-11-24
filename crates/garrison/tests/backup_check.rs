@@ -17,6 +17,8 @@ mod repositories;
 mod spellings;
 #[path = "backup_check/stand_in.rs"]
 mod stand_in;
+#[path = "backup_check/turns.rs"]
+mod turns;
 
 use std::path::Path;
 use std::process::Command;
@@ -259,10 +261,22 @@ fn another_tool_or_a_place_that_cannot_be_written_ends_the_command() {
         None,
     );
     assert_eq!(nowhere.status.code(), Some(1));
+    assert_eq!(
+        text(&nowhere.stderr),
+        "The report's folder /proc/garrison cannot be made: No such file or directory (os error \
+         2).\n"
+    );
+    assert_eq!(tools.calls(), Vec::<String>::new());
+    // A folder at the report's name takes no report.
+    let folder = tools.report("restic");
+    std::fs::create_dir(&folder).unwrap();
+    let to = folder.to_str().unwrap();
+    let taken = tools.run(&["restic", "--repo", "/srv/repo", "--report", to], None);
+    assert_eq!(taken.status.code(), Some(1));
     assert!(
-        text(&nowhere.stderr).contains("The report could not be written to /proc/garrison/"),
+        text(&taken.stderr).contains(&format!("The report could not be written to {to}: ")),
         "{}",
-        text(&nowhere.stderr)
+        text(&taken.stderr)
     );
 }
 
