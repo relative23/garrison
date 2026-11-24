@@ -1,5 +1,5 @@
-//! `garrison upgrade <archive>`: install a newer release once a key that the
-//! installed release trusts has signed it.
+//! `garrison upgrade <archive>`: install a newer release, or the same one
+//! again, once a key that the installed release trusts has signed it.
 //!
 //! The installed binary is the trust anchor. It reads the archive once, checks
 //! the signature over exactly those bytes and unpacks those same bytes, so the
@@ -51,22 +51,7 @@ fn upgrade(archive: &Path, signature: Option<&Path>) -> Result<u8, String> {
             release.architecture
         ));
     }
-    let running = running_version()?;
-    match garrison_core::version::newer(&release.version, &running) {
-        Some(true) => {}
-        Some(false) => {
-            return Err(format!(
-                "{} is not newer than the running {running}; go back with `garrison install --rollback` instead.",
-                release.version
-            ));
-        }
-        None => {
-            return Err(format!(
-                "{} or {running} is no semantic version.",
-                release.version
-            ));
-        }
-    }
+    admitted(&release.version, &running_version()?)?;
     let keys = trusted()?;
     if keys.is_empty() {
         return Err("This release trusts no signing key yet, so it cannot check an archive. \
@@ -106,6 +91,20 @@ fn upgrade(archive: &Path, signature: Option<&Path>) -> Result<u8, String> {
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .unwrap_or(1))
+}
+
+/// Whether an archive of `version` is installed over the `running` release:
+/// a newer one, and the same one, whose installer finishes what an
+/// installation cut short left or changes nothing where it runs.
+fn admitted(version: &str, running: &str) -> Result<(), String> {
+    match garrison_core::version::newer(running, version) {
+        Some(false) => Ok(()),
+        Some(true) => Err(format!(
+            "{version} is older than the running {running}; go back with `garrison install \
+             --rollback` instead."
+        )),
+        None => Err(format!("{version} or {running} is no semantic version.")),
+    }
 }
 
 /// The version of the installed release that this binary belongs to. Only an
@@ -197,6 +196,32 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+
+    #[test]
+    fn an_archive_is_admitted_unless_it_is_older_than_the_running_release() {
+        for (version, running) in [
+            ("0.2.0", "0.1.2"),
+            ("0.2.0", "0.2.0"),
+            ("0.2.0", "0.2.0-rc.1"),
+        ] {
+            assert_eq!(
+                admitted(version, running),
+                Ok(()),
+                "{version} over {running}"
+            );
+        }
+        let refused = admitted("0.1.2", "0.2.0").unwrap_err();
+        assert!(
+            refused.starts_with("0.1.2 is older than the running 0.2.0;"),
+            "{refused}"
+        );
+        assert!(admitted("0.2.0-rc.1", "0.2.0").is_err());
+        assert!(
+            admitted("latest", "0.2.0")
+                .unwrap_err()
+                .contains("no semantic version")
+        );
+    }
 
     #[test]
     fn the_installed_release_is_found_where_the_base_is_a_link() {
