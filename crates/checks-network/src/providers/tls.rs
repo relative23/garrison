@@ -233,10 +233,12 @@ fn bare(label: &str, result: &str) -> Vec<Value> {
 }
 
 /// Each endpoint probed while the run has time; the ones after that are
-/// named, not probed, and keep the state from being in order.
+/// named, not probed, and keep the state from being in order. The probes
+/// that failed are said first, then the certificates that expire soon: a
+/// notification carries a card's first finding.
 fn probe_each(endpoints: &[Endpoint], roots: &Arc<RootCertStore>, context: &Context<'_>) -> Probes {
-    let (mut rows, mut findings, mut unchecked) = (Vec::new(), Vec::new(), Vec::new());
-    let (mut lowest, mut failures): (Option<i64>, usize) = (None, 0);
+    let (mut rows, mut failed, mut expiring) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut unchecked, mut lowest): (Vec<String>, Option<i64>) = (Vec::new(), None);
     for endpoint in endpoints {
         let label = format!("{}:{}", endpoint.host, endpoint.port);
         if context.deadline.expired() {
@@ -253,14 +255,13 @@ fn probe_each(endpoints: &[Endpoint], roots: &Arc<RootCertStore>, context: &Cont
             context.now,
         ) {
             Err(Failure(kind)) => {
-                failures += 1;
-                findings.push(format!("{label} — TLS check failed ({kind})."));
+                failed.push(format!("{label} — TLS check failed ({kind})."));
                 rows.push(bare(&label, "failed"));
             }
             Ok(found) => {
                 lowest = Some(lowest.map_or(found.days, |known| known.min(found.days)));
                 if found.days < WARN_DAYS {
-                    findings.push(format!(
+                    expiring.push(format!(
                         "{label} — certificate expires in {} days.",
                         found.days
                     ));
@@ -275,13 +276,15 @@ fn probe_each(endpoints: &[Endpoint], roots: &Arc<RootCertStore>, context: &Cont
             }
         }
     }
-    let state = match (failures, findings.is_empty(), unchecked.len()) {
-        (0, true, 0) => State::Ok,
-        (0, true, left) if left == endpoints.len() => State::Unknown,
-        (0, true, _) => State::Partial,
-        (0, false, _) => State::Warning,
-        _ => State::Failed,
+    let state = match (failed.is_empty(), expiring.is_empty(), unchecked.len()) {
+        (true, true, 0) => State::Ok,
+        (true, true, left) if left == endpoints.len() => State::Unknown,
+        (true, true, _) => State::Partial,
+        (true, false, _) => State::Warning,
+        (false, _, _) => State::Failed,
     };
+    let mut findings = failed;
+    findings.extend(expiring);
     if !unchecked.is_empty() {
         findings.push(format!(
             "Not checked in this run, as its time was used up: {}.",
@@ -480,6 +483,6 @@ impl Provider for Tls {
 #[cfg(test)]
 mod rule_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 mod time_tests;

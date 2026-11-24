@@ -167,7 +167,7 @@ fn a_policy_the_runs_time_does_not_reach_is_not_fetched() {
 
 /// A policy fetched within the hour is taken from the status database, also
 /// once the run's time is up: one that leaves the mail host out is a
-/// warning beside the records that time left unasked.
+/// warning beside the records that time left unasked, and is said first.
 #[test]
 fn a_kept_policy_that_leaves_the_mail_host_out_is_a_warning_beside_records_not_asked() {
     // Each answer comes 1.2 s after its question; the run's time for its
@@ -220,10 +220,10 @@ fn a_kept_policy_that_leaves_the_mail_host_out_is_a_warning_beside_records_not_a
         (
             State::Warning,
             vec![
-                "1 of its 3 records was not asked: the collection run's time was used up."
-                    .to_owned(),
                 "The MTA-STS policy of example.test does not name mail.example.test: senders \
                  that honour it do not deliver there."
+                    .to_owned(),
+                "1 of its 3 records was not asked: the collection run's time was used up."
                     .to_owned(),
             ]
         )

@@ -1013,6 +1013,8 @@ Notable changes for operators and users. The format follows
   run's time left unasked, as after a policy taken from within the hour,
   the card stayed Unknown or Partial, which sends no notification. It is a
   warning in either case now.
+- **A notification of the TLS certificates or a domain's DNS records card
+  names what made it a warning or a failure.**
 - **A blocklist that gives no verdict keeps the Blocklists card from being
   OK.** A list that refused this resolver, as Spamhaus refuses public ones,
   answered with an error or did not answer at all, showed only in its row:

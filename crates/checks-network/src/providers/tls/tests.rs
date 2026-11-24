@@ -11,9 +11,9 @@ use crate::testing::{Certificates, certificates, certificates_until, now};
 /// 1024) and nothing on a test host listens on it. A free port that a test
 /// gives back can be bound by another test's server before the connection
 /// is made, which answered a TLS probe with an HTTP test server.
-pub(super) const CLOSED: u16 = 9;
+pub(crate) const CLOSED: u16 = 9;
 
-pub(super) fn roots(certificates: &Certificates) -> RootCertStore {
+pub(crate) fn roots(certificates: &Certificates) -> RootCertStore {
     let mut roots = RootCertStore::empty();
     roots.add(certificates.ca.clone()).unwrap();
     roots
@@ -25,7 +25,7 @@ fn trusted(certificates: &Certificates) -> Arc<RootCertStore> {
 
 /// A TLS listener for `localhost` that serves one connection; with
 /// `smtp`, it first speaks SMTP up to STARTTLS (or refuses it).
-pub(super) fn listener(certificates: &Certificates, smtp: Option<&'static str>) -> u16 {
+pub(crate) fn listener(certificates: &Certificates, smtp: Option<&'static str>) -> u16 {
     listener_with(certificates, smtp, rustls::DEFAULT_VERSIONS)
 }
 
@@ -238,6 +238,39 @@ fn certificates_warn_when_fewer_than_14_days_remain() {
         soon.findings[0].ends_with(" — certificate expires in 13 days."),
         "{:?}",
         soon.findings
+    );
+}
+
+/// A notification carries a card's first finding: the probe that failed,
+/// which makes the card Failed, comes before a certificate that expires
+/// soon, whichever endpoint is named first.
+#[test]
+fn a_failed_probe_is_said_before_a_certificate_that_expires_soon() {
+    let soon = certificates_until(2026, 11, 5);
+    let port = listener(&soon, None);
+    let provider = Tls::new(&crate::testing::table(&format!(
+        "type = \"tls\"\nendpoints = [{{ host = \"localhost\", port = {port} }}, \
+         {{ host = \"localhost\", port = {CLOSED} }}]"
+    )))
+    .unwrap()
+    .with_roots(roots(&soon));
+    let directory = tempfile::tempdir().unwrap();
+    let config = crate::testing::config(directory.path());
+    let runner = crate::testing::Canned(String::new());
+    let card = provider
+        .collect(&crate::testing::context(&config, &runner))
+        .unwrap()
+        .observations
+        .remove(0);
+    assert_eq!(
+        (card.state, card.findings),
+        (
+            State::Failed,
+            vec![
+                format!("localhost:{CLOSED} — TLS check failed (connection refused)."),
+                format!("localhost:{port} — certificate expires in 6 days."),
+            ]
+        )
     );
 }
 

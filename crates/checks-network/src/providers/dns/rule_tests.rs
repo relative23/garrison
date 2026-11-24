@@ -21,15 +21,15 @@ use crate::context::Deadline;
 use crate::dns::Kind;
 use crate::testing::{Canned, config, table};
 
-const NEEDED: &str = "example.test. IN MX 10 mail.example.test.\n\
+pub(crate) const NEEDED: &str = "example.test. IN MX 10 mail.example.test.\n\
                       example.test. IN TXT \"v=spf1 mx -all\"\n";
-const TLSA: &str = "_25._tcp.mail.example.test. IN TLSA 3 1 1 7B26323DAC\n";
-const STS: &str = "_mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n";
+pub(crate) const TLSA: &str = "_25._tcp.mail.example.test. IN TLSA 3 1 1 7B26323DAC\n";
+pub(crate) const STS: &str = "_mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n";
 
-type Zone = BTreeMap<(String, u16), Vec<Vec<u8>>>;
+pub(crate) type Zone = BTreeMap<(String, u16), Vec<Vec<u8>>>;
 
 /// Every record of [`NEEDED`], [`TLSA`] and [`STS`] as published.
-fn published() -> Zone {
+pub(crate) fn published() -> Zone {
     [
         (
             ("example.test", Kind::Mx),
@@ -53,7 +53,7 @@ fn published() -> Zone {
 /// The cards of the check for the domain whose zone file is `zone_file`,
 /// where the resolver answers `answers` with `faults`, a policy is served
 /// with `policy`, and the run has `deadline`.
-fn cards(
+pub(crate) fn cards(
     zone_file: &str,
     answers: Zone,
     faults: &[(&str, Kind, Fault)],

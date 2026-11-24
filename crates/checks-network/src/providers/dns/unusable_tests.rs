@@ -215,7 +215,8 @@ fn an_optional_record_the_resolver_does_not_answer_keeps_the_card_from_being_in_
 
 /// A policy that leaves the mail host out, or that cannot be read, stops
 /// the senders that honour it: it is a warning also beside a record that
-/// could not be read, needed or optional.
+/// could not be read, needed or optional, and its finding comes first, as
+/// a notification carries a card's first finding.
 #[test]
 fn a_policy_that_stops_senders_is_a_warning_beside_what_could_not_be_read() {
     use garrison_testing::http::answer;
@@ -256,8 +257,15 @@ fn a_policy_that_stops_senders_is_a_warning_beside_what_could_not_be_read() {
             Some(policy),
         );
         assert_eq!(
-            (domain.state, domain.findings.last().map(String::as_str)),
+            (domain.state, domain.findings.first().map(String::as_str)),
             (State::Warning, Some(said)),
+            "{name}: {:?}",
+            domain.findings
+        );
+        assert!(
+            domain.findings[1..]
+                .iter()
+                .any(|finding| finding.contains("could not be read: the resolver could not")),
             "{name}: {:?}",
             domain.findings
         );
