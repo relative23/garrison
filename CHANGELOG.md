@@ -1963,6 +1963,17 @@ Notable changes for operators and users. The format follows
 - **The polkit rule's first line names the command that writes it,
   `garrison polkit-rule`**, where it named one that does not exist, and says
   to run the installer again after `[[actions]]` changed.
+- **The Ansible role shows what `garrison stalwart setup` said**, also where
+  it failed; the Stalwart administrator's credential stays out of the output.
+- **The Ansible role unpacks a release again where a play that stopped left
+  it unpacked in part.**
+- **The Ansible role runs the installer again until it has finished with the
+  play's release and configuration**, so that the next play starts Garrison
+  where one stopped after the first install or its installer did not finish.
+- **The Ansible role runs `garrison stalwart setup` again where setup did
+  not finish or `garrison.toml` changed since, and finds the access policy
+  where `[broker] policy` keeps it**; where the policy binds no role and no
+  account, the play stops and says how to bind one.
 
 ## [0.1.2] - 2026-11-13
 

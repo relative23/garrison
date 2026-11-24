@@ -450,4 +450,5 @@ standard input and is used for this one call.
 For Ansible, every release carries the role `garrison` in
 `deploy/ansible/` ([its README](../../deploy/ansible/README.md)): it checks the
 signature on the control node, installs, configures, connects Stalwart and
-upgrades when you change the version.
+upgrades when you change the version, and the next play finishes one that
+stopped on the way.
