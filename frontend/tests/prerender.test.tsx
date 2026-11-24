@@ -1,5 +1,6 @@
 import { screen, waitFor } from "@testing-library/react";
 
+import { PAGES, VIEWS } from "../src/modules/registry";
 import { FIRST, frame, pages, signIn } from "../src/prerender";
 import { attacks, catalog, coverage, metrics, session, status } from "./support/fixtures";
 import { openApp } from "./support/render";
@@ -46,7 +47,7 @@ describe("pages drawn by the build", () => {
   });
 
   it("cover every module and both sections", () => {
-    expect(pages).toEqual(expect.arrayContaining(["dashboard", "services", "attacks", "deliveries", "actions", "preferences", "account"]));
+    expect([...pages].sort()).toEqual([...Object.keys(VIEWS), ...Object.keys(PAGES)].sort());
   });
 
   it("draw a view's frame with its title and intro, and nobody's menu", () => {

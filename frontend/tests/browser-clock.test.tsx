@@ -1,11 +1,13 @@
 // No age, end or staleness on a page comes from the browser's own clock where
 // the server knows it: a browser's clock may run hours ahead of the host's or
 // behind it. So every page reads the same, whatever the browser's clock says.
-// The pages are those the build draws (src/prerender.tsx), every module's and
-// both sections'; eslint.config.js keeps the clocks to src/lib/clock.ts.
+// The pages are the registry's, every module's and both sections', and a
+// request the test does not answer fails it: a page or a request that is new
+// would read the same under every clock otherwise. eslint.config.js keeps the
+// clocks to src/lib/clock.ts.
 import { act, screen } from "@testing-library/react";
 
-import { pages } from "../src/prerender";
+import { PAGES, VIEWS } from "../src/modules/registry";
 import {
   attacks,
   catalog,
@@ -23,6 +25,8 @@ import {
 } from "./support/fixtures";
 import { openApp } from "./support/render";
 import { serve, type FakeServer } from "./support/server";
+
+const EVERY_PAGE = [...Object.keys(VIEWS), ...Object.keys(PAGES)];
 
 const HOUR = 3600_000;
 
@@ -67,17 +71,20 @@ async function settled(server: FakeServer) {
 }
 
 describe("the browser's own clock", () => {
-  it.each(pages)("changes nothing on the %s page, hours ahead of the server's or behind it", async (page) => {
+  it.each(EVERY_PAGE)("changes nothing on the %s page, hours ahead of the server's or behind it", async (page) => {
     const shown: string[] = [];
     for (const skew of [0, 3 * HOUR, -3 * HOUR]) {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(NOW * 1000 + skew);
-      const server = serve(answers());
+      const routes = answers();
+      const server = serve(routes);
       const view = openApp(`/admin/${page}`);
       await settled(server);
       shown.push(document.body.textContent ?? "");
       view.unmount();
       vi.useRealTimers();
+      const unanswered = server.calls.map((call) => `${call.method} ${call.path}`).filter((key) => !Object.hasOwn(routes, key));
+      expect(unanswered).toEqual([]);
     }
     expect(shown[1]).toBe(shown[0]);
     expect(shown[2]).toBe(shown[0]);

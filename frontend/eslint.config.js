@@ -37,21 +37,41 @@ const NO_TRANS_VALUES = {
 // The browser's clocks are read in src/lib/clock.ts alone, which gives only
 // how long the page has waited: a time the server sent is never compared
 // with the browser's own clock, which may run hours ahead of the host's or
-// behind it. tests/browser-clock.test.tsx holds every page to the same.
+// behind it. tests/browser-clock.test.tsx holds every page to the same, and
+// tests/lint-rules.test.ts lists the ways to a clock that these rules name.
 const CLOCK = "Read the time through src/lib/clock.ts; a server's time is never compared with the browser's clock.";
+const CLOCKS = "/^(Date|performance)$/";
 const ONE_CLOCK = [
+  // Date and performance by name, through window, globalThis or self, and in brackets.
   { selector: "MemberExpression[object.name='Date'][property.name='now']", message: CLOCK },
-  { selector: "MemberExpression[object.name='performance'][property.name='now']", message: CLOCK },
+  { selector: "MemberExpression[object.name='Date'][property.value='now']", message: CLOCK },
+  { selector: "MemberExpression[object.property.name='Date'][property.name='now']", message: CLOCK },
+  { selector: "MemberExpression[object.name='performance']", message: CLOCK },
+  { selector: "MemberExpression[object.property.name='performance']", message: CLOCK },
+  { selector: "MemberExpression[property.value=" + CLOCKS + "]", message: CLOCK },
   { selector: "NewExpression[callee.name='Date'][arguments.length=0]", message: CLOCK },
+  { selector: "NewExpression[callee.property.name='Date'][arguments.length=0]", message: CLOCK },
   { selector: "CallExpression[callee.name='Date']", message: CLOCK },
+  { selector: "CallExpression[callee.property.name='Date']", message: CLOCK },
+  // Under another name.
+  { selector: "VariableDeclarator[init.name=" + CLOCKS + "]", message: CLOCK },
+  { selector: "AssignmentExpression[right.name=" + CLOCKS + "]", message: CLOCK },
+  // The other clocks a page has: an event's time, the document's timeline,
+  // a date format without a date, Temporal and the performance entries.
+  { selector: "MemberExpression[property.name=/^(timeStamp|timeline)$/]", message: CLOCK },
+  { selector: "CallExpression[callee.property.name=/^(format|formatToParts)$/][arguments.length=0]", message: CLOCK },
+  { selector: "MemberExpression[object.name='Temporal'][property.name='Now']", message: CLOCK },
+  { selector: "NewExpression[callee.name='PerformanceObserver']", message: CLOCK },
 ];
 
 // Timers are set through src/lib/timers.ts, which sets none for a delay a
-// browser would run at once.
+// browser would run at once. An animation frame and an idle callback are
+// handed a time of the browser's, so they count as timers here.
 const TIMER = "Set timers through src/lib/timers.ts: a delay no timer can wait sets none there.";
+const TIMERS = "/^(setTimeout|setInterval|requestAnimationFrame|requestIdleCallback)$/";
 const ONE_TIMER = [
-  { selector: "CallExpression[callee.name=/^(setTimeout|setInterval)$/]", message: TIMER },
-  { selector: "CallExpression[callee.property.name=/^(setTimeout|setInterval)$/]", message: TIMER },
+  { selector: "CallExpression[callee.name=" + TIMERS + "]", message: TIMER },
+  { selector: "CallExpression[callee.property.name=" + TIMERS + "]", message: TIMER },
 ];
 
 export default tseslint.config(
