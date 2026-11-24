@@ -255,12 +255,14 @@ fn unreadable(method: &str, what: &str) -> String {
     format!("{method}: {what}, which this release of Garrison does not read; {SUPPORTED}")
 }
 
-/// What the operator asked of `stalwart setup` besides the administrator.
+/// What the operator asked of `stalwart setup` besides the administrator,
+/// and the command that a failure names as the run that mends it.
 struct Asked<'a> {
     skip_metrics: bool,
     webhook_url: Option<&'a str>,
     allowed: &'a [String],
     rotate: bool,
+    again: &'a str,
 }
 
 /// What a run has done so far, kept also where it fails on the way: the
@@ -273,13 +275,15 @@ struct Done {
 }
 
 fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), String> {
-    milter::prepare(config)?;
-    let admin = Admin::new(config, source.authorization()?);
+    let again = format!("Run `{}` again once this is mended", asked.again);
+    let mended = |error: String| format!("{}. {again}.", error.trim_end_matches('.'));
+    milter::prepare(config).map_err(mended)?;
+    let admin = Admin::new(config, source.authorization().map_err(mended)?);
     // Keys work only from these networks: loopback, and for test setups such as
     // the contract lab's Docker bridge whatever --allow-network adds.
     let mut networks = Enabled::of(LOOPBACK);
     for text in asked.allowed {
-        networks.insert(keys::network(text)?);
+        networks.insert(keys::network(text).map_err(mended)?);
     }
     let mut done = Done::default();
     let configured = configure(&admin, config, asked, &networks, &mut done);
@@ -300,11 +304,6 @@ fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), Stri
     // After a failure they go all the same, since keys are replaced
     // because someone may have seen them.
     let removed = keys::remove(&admin, &done.replaced);
-    let again = if asked.rotate {
-        "Run `garrison stalwart setup --rotate` again once this is mended"
-    } else {
-        "Run `garrison stalwart setup` again once this is mended"
-    };
     match (configured, removed) {
         (Ok(()), Ok(())) => {
             source.finish();
@@ -318,7 +317,7 @@ fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), Stri
             "{}. {again}, which also removes the API keys that new ones replaced.",
             error.trim_end_matches('.')
         )),
-        (Err(error), _) => Err(format!("{}. {again}.", error.trim_end_matches('.'))),
+        (Err(error), _) => Err(mended(error)),
     }
 }
 
@@ -416,6 +415,16 @@ fn tried(
 }
 
 pub(crate) fn run(config: &Config, command: &Command) -> u8 {
+    run_as(config, command, None)
+}
+
+/// `run` as a step of `garrison setup`, which is then the run that mends a
+/// failure, since it also takes the steps after this one.
+pub(crate) fn run_in_wizard(config: &Config, command: &Command) -> u8 {
+    run_as(config, command, Some("garrison setup"))
+}
+
+fn run_as(config: &Config, command: &Command, again: Option<&str>) -> u8 {
     let Command::Setup {
         admin_credential,
         skip_metrics,
@@ -423,6 +432,11 @@ pub(crate) fn run(config: &Config, command: &Command) -> u8 {
         allow_network,
         rotate,
     } = command;
+    let again = again.unwrap_or(if *rotate {
+        "garrison stalwart setup --rotate"
+    } else {
+        "garrison stalwart setup"
+    });
     let source = match Source::of(admin_credential.as_deref()) {
         Ok(source) => source,
         Err(message) => {
@@ -430,7 +444,7 @@ pub(crate) fn run(config: &Config, command: &Command) -> u8 {
             return 2;
         }
     };
-    if let Err((code, message)) = writable(&config.credentials_directory) {
+    if let Err((code, message)) = writable(&config.credentials_directory, again) {
         crate::complain(&message);
         return code;
     }
@@ -440,6 +454,7 @@ pub(crate) fn run(config: &Config, command: &Command) -> u8 {
         webhook_url: webhook_url.as_deref(),
         allowed: allow_network,
         rotate: *rotate,
+        again,
     };
     match setup(config, &source, &asked) {
         Ok(()) => 0,

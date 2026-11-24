@@ -36,8 +36,9 @@ pub(super) fn sweep(directory: &Path) {
 /// the credentials directory, so it must take new files there, or a key
 /// would be made whose secret is lost. The installer makes it root's and
 /// 0700, so another user may not even look into it. The exit code goes
-/// with the message: 2 for a run without root, which was called wrongly.
-pub(super) fn writable(directory: &Path) -> Result<(), (u8, String)> {
+/// with the message: 2 for a run without root, which was called wrongly;
+/// with root, it names `again` as the run that mends it.
+pub(super) fn writable(directory: &Path, again: &str) -> Result<(), (u8, String)> {
     let checked = std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -63,10 +64,7 @@ pub(super) fn writable(directory: &Path) -> Result<(), (u8, String)> {
     }
     Err((
         1,
-        format!(
-            "{refused} Nothing was changed; run `garrison stalwart setup` again once this is \
-             mended."
-        ),
+        format!("{refused} Nothing was changed; run `{again}` again once this is mended."),
     ))
 }
 

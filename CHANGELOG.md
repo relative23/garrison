@@ -1551,6 +1551,8 @@ Notable changes for operators and users. The format follows
   onto a key file that holds no key.
 - **`garrison stalwart setup` gives a key or credential whose file other
   users may read a new secret, in a file that only its owner reads.**
+- **Where `garrison setup` fails to connect Stalwart, it names itself as
+  the run that mends it,** which takes the steps after that one too.
 - **Setup run as another administrator keeps, or with `--rotate`
   removes, the API keys the one before made.** They stayed valid, also
   after a rotation.

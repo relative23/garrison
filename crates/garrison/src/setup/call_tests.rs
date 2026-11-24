@@ -69,3 +69,46 @@ fn a_refused_administrator_is_said_as_such() {
     );
     server.requests();
 }
+
+/// A failure names the run that mends it: inside `garrison setup` the
+/// wizard, which also takes the steps after this one, and not `garrison
+/// stalwart setup`; so does a failure before Stalwart is asked anything.
+#[test]
+fn a_failure_names_the_run_that_mends_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let server = serve(vec![answer(401, "{}")]);
+    let config = garrison_testing::config(directory.path(), &server.url);
+    let credential = directory.path().join("admin.json");
+    garrison_testing::write_private(&credential, br#"{"apiKey": "an-unknown-key"}"#);
+    let asked = |again| Asked {
+        skip_metrics: true,
+        webhook_url: None,
+        allowed: &[],
+        rotate: false,
+        again,
+    };
+    let refused = setup(&config, &Source::File(credential), &asked("garrison setup"));
+    server.requests();
+    assert_eq!(
+        refused,
+        Err(
+            "Stalwart refused the administrator (HTTP 401): check the user name and the password, \
+             or the API key. Run `garrison setup` again once this is mended."
+                .to_owned()
+        )
+    );
+    let missing = directory.path().join("missing.json");
+    let unread = setup(
+        &config,
+        &Source::File(missing.clone()),
+        &asked("garrison stalwart setup --rotate"),
+    );
+    assert_eq!(
+        unread,
+        Err(format!(
+            "Protected file is unavailable: {}. Run `garrison stalwart setup --rotate` again \
+             once this is mended.",
+            missing.display()
+        ))
+    );
+}
