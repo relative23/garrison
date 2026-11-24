@@ -1771,9 +1771,8 @@ Notable changes for operators and users. The format follows
   copies the state as it finds it first; the copy its first run made keeps
   the state from before it.
 - **The installer changes nothing where its release runs as installed, and
-  says so** with exit status 0: it stops nothing and makes no backup. After a
-  change of `garrison.toml` alone, restart the services, as configuration.md
-  says.
+  says so** with exit status 0: it stops nothing and makes no backup. It
+  starts the services where `garrison.toml` changed since they started.
 - **`garrison upgrade` with the archive of the release that runs hands it to
   its installer**, which finishes an installation cut short or changes
   nothing; an older archive is refused as before.

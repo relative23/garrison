@@ -152,11 +152,10 @@ starts, or keeps restarting, counts as not started; where the macro filter
 runs, it must stay up as well. Run where its release runs as installed, the
 installer changes nothing, stops nothing and says so (`… is running as
 installed; nothing was changed.`, exit status 0); it starts the services
-where a file it writes changed, as after a change of `web.port` or
-`[[actions]]`, while a change of `garrison.toml` alone takes a restart of the
-services ([configuration](configuration.md)). Where it unpacks other files of
-the same version, it backs up to `pre-reinstall-*` first. Neither moves the
-pre-upgrade copy that a rollback restores.
+where a file it writes changed, or `garrison.toml` changed since they
+started. Where it unpacks other files of the same version, it backs up to
+`pre-reinstall-*` first. Neither moves the pre-upgrade copy that a rollback
+restores.
 
 If the new release does not start, or anything fails after the old one
 stopped, the installer switches back by itself to the release that ran when

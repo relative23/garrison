@@ -128,26 +128,57 @@ pub(super) fn runs() -> bool {
     })
 }
 
-/// Whether the services run as `start` leaves them; `milter` whether the
-/// macro filter is to run.
+/// Whether the services run as `start` leaves them, on the configuration as
+/// it is; `milter` whether the macro filter is to run.
 pub(super) fn as_installed(milter: bool) -> bool {
     let shipped: Vec<&str> = ENABLE
         .into_iter()
         .filter(|unit| unit_file(unit).exists())
         .collect();
     let mut asked = vec!["show", "-p", "Id", "-p", "ActiveState", "-p", "NRestarts"];
-    asked.extend(["-p", "UnitFileState"]);
+    asked.extend([
+        "-p",
+        "UnitFileState",
+        "-p",
+        "ExecMainStartTimestampMonotonic",
+    ]);
     asked.extend(&shipped);
     asked.extend([units::BROKER, units::MILTER]);
-    run(SYSTEMCTL, &asked)
-        .is_ok_and(|shown| installed(&String::from_utf8_lossy(&shown.stdout), &shipped, milter))
+    let changed = changed_at(&Path::new(CONFIG).join("garrison.toml"));
+    run(SYSTEMCTL, &asked).is_ok_and(|shown| {
+        installed(
+            &String::from_utf8_lossy(&shown.stdout),
+            &shipped,
+            milter,
+            changed,
+        )
+    })
+}
+
+/// When `file` last changed, in microseconds since boot as systemd times a
+/// start: its age by the wall clock, back from the time since boot. That
+/// time counts a suspend in, so a change seems later than it was, and a
+/// start soon after it may pass for one before it, never the reverse.
+fn changed_at(file: &Path) -> Option<u64> {
+    let modified = fs::metadata(file).ok()?.modified().ok()?;
+    // Dated ahead of the clock: changed now.
+    let age = u64::try_from(modified.elapsed().unwrap_or_default().as_micros()).ok()?;
+    let uptime = fs::read_to_string("/proc/uptime").ok()?;
+    let (seconds, hundredths) = uptime.split_whitespace().next()?.split_once('.')?;
+    let now = seconds
+        .parse::<u64>()
+        .ok()?
+        .checked_mul(1_000_000)?
+        .checked_add(hundredths.parse::<u64>().ok()?.checked_mul(10_000)?)?;
+    Some(now.saturating_sub(age))
 }
 
 /// `shown`, what `systemctl show` says of the units, as `start` leaves them:
 /// every unit in `shipped` enabled and active, the web service, the receiver
-/// and the broker up without a restart, and the macro filter active exactly
-/// where `milter` says.
-fn installed(shown: &str, shipped: &[&str], milter: bool) -> bool {
+/// and the broker up without a restart and started since the configuration
+/// `changed`, which they read as they start, and the macro filter active
+/// exactly where `milter` says.
+fn installed(shown: &str, shipped: &[&str], milter: bool, changed: Option<u64>) -> bool {
     let unit = |id: &str| {
         shown
             .split("\n\n")
@@ -168,9 +199,16 @@ fn installed(shown: &str, shipped: &[&str], milter: bool) -> bool {
     let enabled = shipped.iter().all(|id| {
         value(unit(id), "UnitFileState") == "enabled" && value(unit(id), "ActiveState") == "active"
     });
+    let since = |id: &str| {
+        let started = value(unit(id), "ExecMainStartTimestampMonotonic").parse::<u64>();
+        started
+            .ok()
+            .zip(changed)
+            .is_some_and(|(started, changed)| started >= changed)
+    };
     let steady = [units::WEB, units::INGEST, units::BROKER]
         .into_iter()
-        .all(|id| settle::unsettled(unit(id)).is_none());
+        .all(|id| settle::unsettled(unit(id)).is_none() && since(id));
     let filter = value(unit(units::MILTER), "ActiveState") == "active";
     enabled && steady && filter == milter
 }
@@ -180,7 +218,10 @@ mod tests {
     use super::*;
 
     fn block(id: &str, file: &str, state: &str, restarts: u32) -> String {
-        format!("Id={id}\nUnitFileState={file}\nActiveState={state}\nNRestarts={restarts}\n")
+        format!(
+            "Id={id}\nUnitFileState={file}\nActiveState={state}\nNRestarts={restarts}\n\
+             ExecMainStartTimestampMonotonic=5000000\n"
+        )
     }
 
     /// Every unit enabled and active, the long-running ones without a
@@ -199,7 +240,8 @@ mod tests {
             units.push(block(units::MILTER, "disabled", milter, 0));
             units.join("\n")
         };
-        let installed_as = |text: &str, milter: bool| installed(text, &ENABLE, milter);
+        let installed_as =
+            |text: &str, milter: bool| installed(text, &ENABLE, milter, Some(4_000_000));
         assert!(installed_as(
             &shown(("enabled", "active", 0), "inactive"),
             false
@@ -237,6 +279,37 @@ mod tests {
             "Id=garrison-watch.timer\nUnitFileState=",
         );
         assert!(!installed_as(&text, false));
-        assert!(installed(&text, &without_watch, false));
+        assert!(installed(&text, &without_watch, false, Some(4_000_000)));
+        // The configuration changed after the services started, or nobody
+        // can tell when it changed: they run on what they read before.
+        let steady = shown(("enabled", "active", 0), "inactive");
+        assert!(installed(&steady, &ENABLE, false, Some(5_000_000)));
+        assert!(!installed(&steady, &ENABLE, false, Some(5_000_001)));
+        assert!(!installed(&steady, &ENABLE, false, None));
+    }
+
+    /// A file changed just now is dated by the time since boot as it is;
+    /// one dated ahead of the clock counts as changed now; none, unknown.
+    #[test]
+    fn a_change_is_dated_on_the_clock_of_a_start() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("garrison.toml");
+        assert_eq!(changed_at(&file), None);
+        fs::write(&file, "schema = 1\n").unwrap();
+        let uptime = fs::read_to_string("/proc/uptime").unwrap();
+        let now: f64 = uptime.split_whitespace().next().unwrap().parse().unwrap();
+        let changed = changed_at(&file).unwrap();
+        let now = std::time::Duration::from_secs_f64(now).as_micros();
+        assert!(u128::from(changed) <= now + 1_000_000, "{changed} {now}");
+        assert!(u128::from(changed) + 2_000_000 >= now, "{changed} {now}");
+        let ahead = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(ahead)
+            .unwrap();
+        let now_again = changed_at(&file).unwrap();
+        assert!(now_again >= changed, "{now_again} {changed}");
     }
 }
