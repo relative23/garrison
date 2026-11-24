@@ -442,3 +442,56 @@ fn stalwart_records_what_a_milter_answered() {
         "{types:?}"
     );
 }
+
+/// Two milters on one message, as Garrison's macro filter beside
+/// clamav-milter while clamd is down: Stalwart asks the second after the
+/// first passed the message, defers it for the second, and records both
+/// answers under the message's session, by which the milter card counts
+/// messages. A deferral asked first ends the message.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn two_milters_answer_one_message_in_its_session() {
+    let _one = one_at_a_time();
+    let mut lab = Lab::from_environment();
+    let smtp = std::env::var("GARRISON_LAB_SMTP").expect("GARRISON_LAB_SMTP");
+    let callback = std::env::var("GARRISON_LAB_CALLBACK_HOST").expect("GARRISON_LAB_CALLBACK_HOST");
+    let (hook, events) = webhook(&callback);
+    milter_webhook(&mut lab, &callback, hook);
+    let passing = milter(&callback, always(Answer::Reply(Reply::Accept)));
+    let deferring = milter(&callback, always(Answer::Reply(Reply::TempFail)));
+    for (order, first, second, expected) in [
+        (
+            "passing first",
+            passing,
+            deferring,
+            &["milter.action-accept", "milter.action-temp-fail"][..],
+        ),
+        (
+            "deferring first",
+            deferring,
+            passing,
+            &["milter.action-temp-fail"][..],
+        ),
+    ] {
+        milter_entry(&mut lab, &callback, first);
+        milter_entry(&mut lab, &callback, second);
+        let (said, arrived) = recorded(&smtp, &events, order);
+        let seen = Value::Array(arrived.clone());
+        assert!(said.starts_with("451"), "{order}: {said}; {seen}");
+        let types: Vec<&str> = arrived
+            .iter()
+            .filter_map(|event| event["type"].as_str())
+            .collect();
+        assert_eq!(types, expected, "{order}: {seen}");
+        let spans: std::collections::BTreeSet<String> = arrived
+            .iter()
+            .map(|event| event["data"]["spanId"].to_string())
+            .collect();
+        assert_eq!(spans.len(), 1, "{order}: {seen}");
+        for _ in 0..2 {
+            let (kind, entry) = lab.created.pop().unwrap();
+            lab.call(&format!("x:{kind}/set"), &json!({"destroy": [entry]}));
+        }
+        reload(&lab);
+    }
+}

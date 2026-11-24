@@ -187,11 +187,12 @@ minutes. They count; none of them is a verdict, except where it says so.
 - `milter`: what Stalwart's milters said of the mail they were shown (a
   virus scanner's, Garrison's own macro filter), by day, on the Antivirus
   page. A milter that could not be reached since yesterday is a warning,
-  and so is one that deferred every message it was shown since yesterday
-  and passed or refused none, as a scanner does that cannot scan. A reply
-  of the milter's own, with which Garrison's macro filter refuses a
-  message, is counted apart: Stalwart's event does not say whether it
-  refused or deferred. A host without a milter has no such card.
+  and so is a deferral of every message the milters were shown since
+  yesterday, as a scanner gives that cannot scan, also where another milter
+  passed them first. A reply of the milter's own, with which Garrison's
+  macro filter refuses a message, is counted apart: Stalwart's event does
+  not say whether it refused or deferred, so a milter that defers with one
+  is not warned of. A host without a milter has no such card.
 - `authentication`: how many senders passed SPF, DKIM, DMARC, ARC and the
   check of the reverse name, on the Spam filter page; and the sender domains
   whose mail failed SPF or DMARC, which are forged senders or senders whose

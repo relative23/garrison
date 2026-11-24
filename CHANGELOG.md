@@ -309,9 +309,10 @@ Notable changes for operators and users. The format follows
   own as deferred, though such a reply refuses a message as well: Garrison's
   macro filter refuses with one, so its refusals showed as deferrals.
   Stalwart's event for it names no code (measured with Stalwart 1.1.0), so
-  they now have a column of their own. A milter that deferred every message
-  it was shown since yesterday, as clamav-milter does while clamd is down,
-  left the card in order; it is now a warning.
+  they now have a column of their own. Where every message the milters were
+  shown since yesterday was deferred, as clamav-milter does while clamd is
+  down, the card was in order, also where another milter passed them first;
+  it is now a warning.
 - **A Stalwart that is slow to give its accounts no longer costs the mail
   flow its counts.** The mail flow opened the event history, whose reading
   has two seconds, and then asked Stalwart for its accounts, which may take

@@ -58,6 +58,14 @@ pub(super) const COUNTED: [&str; 27] = [
     "delivery.start-tls-error",
 ];
 
+/// What a milter answered a message, but a deferral, as Stalwart records it.
+const VERDICTS: [&str; 4] = [
+    "milter.action-accept",
+    "milter.action-reject",
+    "milter.action-discard",
+    "milter.action-reply-code",
+];
+
 /// Mail that came in on port 25 in the week, whose first second is `?1`:
 /// the port is a field of the event, and a row whose fields are no JSON is
 /// none of it.
@@ -95,6 +103,10 @@ pub(super) struct Week {
     /// more than it shows.
     #[serde(default)]
     pub(super) listed: BTreeMap<String, usize>,
+    /// Whether a milter deferred every message that the milters answered
+    /// since yesterday (UTC), and there was one.
+    #[serde(default)]
+    pub(super) deferred_all: bool,
 }
 
 impl Week {
@@ -216,6 +228,22 @@ fn counted(db: &Connection, week: &mut Week, since: i64) -> rusqlite::Result<()>
     Ok(())
 }
 
+/// Whether a milter deferred every message that the milters answered since
+/// `since`, and there was one. Stalwart records each milter's answer under
+/// the message's session, and asks none after a deferral (measured with
+/// Stalwart 1.1.0); the history does not name the milter, so a message is
+/// told by its session, and an answer without one is a message of its own.
+fn deferred_all(db: &Connection, since: i64) -> rusqlite::Result<bool> {
+    db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM events WHERE type = 'milter.action-temp-fail' AND \
+         created_at >= ?1) AND NOT EXISTS (SELECT 1 FROM events a WHERE a.type IN \
+         (?2, ?3, ?4, ?5) AND a.created_at >= ?1 AND (a.span_id IS NULL OR NOT EXISTS (SELECT \
+         1 FROM events d WHERE d.span_id = a.span_id AND d.type = 'milter.action-temp-fail')))",
+        (since, VERDICTS[0], VERDICTS[1], VERDICTS[2], VERDICTS[3]),
+        |row| row.get(0),
+    )
+}
+
 /// Mail with and without TLS, coming in and going out.
 fn transit(db: &Connection, week: &mut Week, since: i64, limits: &Limits) -> rusqlite::Result<()> {
     // Both numbers of incoming mail count all of it in one query, so that
@@ -299,6 +327,7 @@ pub(super) fn week(
     };
 
     counted(db, &mut week, since)?;
+    week.deferred_all = deferred_all(db, today - DAY)?;
 
     let mut filed: HashMap<String, (u64, u64)> = HashMap::new();
     for (kind, spam) in [("message-ingest.ham", false), ("message-ingest.spam", true)] {

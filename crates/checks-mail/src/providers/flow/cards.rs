@@ -195,7 +195,7 @@ impl Flow {
     /// The scanner's verdicts by day. A host without a milter has none, and
     /// then no card either. A reply of the milter's own may refuse a message
     /// or defer it, and Stalwart's event does not say which (measured with
-    /// Stalwart 1.1.0), so it is counted apart, as neither.
+    /// Stalwart 1.1.0), so it is counted apart, and as an answer.
     pub(super) fn milter(
         &self,
         context: &Context<'_>,
@@ -226,18 +226,16 @@ impl Flow {
                  setting there."
             ));
         }
-        // A deferral is no verdict: a milter that deferred everything judged
-        // nothing, as a scanner does that cannot scan.
-        let deferred_lately = recent(&deferred);
-        let answered_lately: u64 = [&accepted, &rejected, &discarded, &replied]
-            .iter()
-            .map(|days| recent(days))
-            .sum();
-        if deferred_lately > 0 && answered_lately == 0 {
+        // A deferral is no verdict: where a milter deferred every message,
+        // as a scanner does that cannot scan, nothing was judged, whatever
+        // another milter answered before it. A deferral ends a message, so
+        // their number is that of the messages.
+        if week.deferred_all {
             findings.push(format!(
-                "The milter deferred all {deferred_lately} messages it was shown since yesterday \
-                 and passed or refused none, so their senders were asked to try again later. A \
-                 scanner that cannot scan answers so, as clamav-milter does while clamd is down."
+                "Every message shown to the milters since yesterday was deferred ({} in all), so \
+                 their senders were asked to try again later. A scanner that cannot scan answers \
+                 so, as clamav-milter does while clamd is down.",
+                recent(&deferred)
             ));
         }
         let state = if findings.is_empty() {

@@ -343,9 +343,9 @@ fn a_milter_that_deferred_everything_since_yesterday_is_a_warning_and_own_replie
         (
             State::Warning,
             vec![
-                "The milter deferred all 3 messages it was shown since yesterday and passed or \
-                 refused none, so their senders were asked to try again later. A scanner that \
-                 cannot scan answers so, as clamav-milter does while clamd is down."
+                "Every message shown to the milters since yesterday was deferred (3 in all), so \
+                 their senders were asked to try again later. A scanner that cannot scan answers \
+                 so, as clamav-milter does while clamd is down."
                     .to_owned()
             ]
         )
@@ -367,6 +367,42 @@ fn a_milter_that_deferred_everything_since_yesterday_is_a_warning_and_own_replie
         .map(|second| event("milter.action-temp-fail", 3 * DAY + second, json!({})))
         .collect();
     assert_eq!(milter(&older).state, State::Ok);
+}
+
+#[test]
+fn every_message_one_of_two_milters_deferred_is_a_warning() {
+    // Garrison's macro filter passes each message and clamav-milter, its
+    // clamd down, defers it: Stalwart records both answers in the message's
+    // session (measured with Stalwart 1.1.0), and every message was deferred.
+    let mut events: Vec<Event> = Vec::new();
+    for (ago, span) in [(60, "1"), (61, "2"), (62, "3")] {
+        events.push(("milter.action-accept", ago, Some(span), json!({})));
+        events.push(("milter.action-temp-fail", ago, Some(span), json!({})));
+    }
+    let milter = |events: &[Event]| {
+        of(
+            &observed(events, None, &Remembered::default(), 0),
+            "flow.milter",
+        )
+        .clone()
+    };
+    let card = milter(&events);
+    assert_eq!(
+        (card.state, card.findings),
+        (
+            State::Warning,
+            vec![
+                "Every message shown to the milters since yesterday was deferred (3 in all), so \
+                 their senders were asked to try again later. A scanner that cannot scan answers \
+                 so, as clamav-milter does while clamd is down."
+                    .to_owned()
+            ]
+        )
+    );
+    // One message that both passed is a verdict.
+    events.push(("milter.action-accept", 120, Some("4"), json!({})));
+    events.push(("milter.action-accept", 120, Some("4"), json!({})));
+    assert_eq!(milter(&events).state, State::Ok);
 }
 
 #[test]
