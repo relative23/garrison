@@ -26,6 +26,8 @@ function isStatus(status: string): status is (typeof STATUS)[number] {
   return (STATUS as readonly string[]).includes(status);
 }
 const TONES: Record<string, BadgeTone> = { succeeded: "ok", failed: "failed", uncertain: "warning" };
+/** The followed job's notice, in its row's tone: a result that is not known is no success. */
+const NOTICE_TONES: Record<string, "warning" | "error"> = { failed: "error", uncertain: "warning" };
 
 function Confirm({ action, onDone }: { action: ActionInfo; onDone: (job: Job, replayed: boolean) => void }) {
   // The native <dialog> traps focus and closes on Escape without injecting
@@ -173,7 +175,7 @@ export function Actions() {
       {intro}
       <ReadFailure resource={catalog} kept={t("actions.refreshFailed")} />
       {watched && (
-        <Notice tone={watched.status === "failed" ? "error" : "info"} live>
+        <Notice tone={NOTICE_TONES[watched.status] ?? "info"} live>
           <p>{t("actions.job", { id: watched.id.slice(0, 8), status: label(watched.status), message: watched.message })}</p>
           {replayed === watched.id && <p>{t("actions.replayed")}</p>}
         </Notice>

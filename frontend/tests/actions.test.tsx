@@ -156,6 +156,30 @@ describe("maintenance actions", () => {
     expect(server.requests(`GET ${JOB}`)).toHaveLength(2);
   });
 
+  it.each([
+    ["succeeded", "Succeeded — Done.", "bg-card"],
+    ["uncertain", "Result uncertain — The result could not be confirmed. Consult the host journal.", "bg-warning-background"],
+    ["failed", "Failed — Unit failed", "bg-failed-background"],
+  ] as const)("announce a job that ended %s in the tone of its result", async (result, said, tone) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const message = said.split(" — ")[1] ?? "";
+    serve({
+      "GET actions": { body: catalog() },
+      "POST actions": { status: 202, body: { job: job(), replayed: false } },
+      [`GET ${JOB}`]: { body: job({ status: result, message }) },
+    });
+    renderView(<Actions />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText("Job 01234567: Queued — Waiting to start")).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    const notice = screen.getByText(`Job 01234567: ${said}`).closest("[role]");
+    // A result that is not known is no success: it is a warning, as its row says.
+    expect(notice?.getAttribute("role")).toBe(result === "failed" ? "alert" : "status");
+    expect(notice?.className).toContain(tone);
+  });
+
   it("keep following a job whose status could not be read once, and say so meanwhile", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const server = serve({

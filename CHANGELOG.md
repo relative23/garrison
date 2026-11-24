@@ -173,6 +173,9 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A job whose result is uncertain is announced as a warning.** The
+  Maintenance page showed it in the same calm tile as a success, though its
+  row in Recent jobs says it is not known.
 - **Saving the settings no longer undoes what another tab saved.** A
   setting not changed on the open Settings page follows a save made
   meanwhile in another tab or with the header's theme button.
