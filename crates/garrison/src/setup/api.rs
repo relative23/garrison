@@ -116,15 +116,14 @@ impl Admin {
         json::object(payload).map_err(|_| states::unreadable(method, "unexpected answer").into())
     }
 
-    /// A `/set` method whose answer says nothing setup needs.
+    /// A `/set` method on the administrator's own objects whose answer says
+    /// nothing setup needs.
     pub(super) fn set<T: Serialize>(
         &self,
         method: &str,
         arguments: &Set<'_, T>,
     ) -> Result<(), State> {
-        self.call::<_, IgnoredAny>(method, arguments)
-            .map(drop)
-            .map_err(State::from)
+        self.set_in(method, None, arguments)
     }
 
     /// Every object of a kind in `account`, or in the administrator's own
