@@ -139,7 +139,8 @@ fn policies_that_break_a_rule_fail_closed_with_a_reason() {
                     .unwrap()
                     .push(json!("format_disk"));
             },
-            "unknown actions",
+            "profile administrator names format_disk, which garrison.toml does not have: run \
+             `garrison access update`, which takes it out of the profiles",
         ),
         (
             |d| {
@@ -177,6 +178,27 @@ fn policies_that_break_a_rule_fail_closed_with_a_reason() {
     for (mutate, reason) in cases {
         assert_eq!(refused(mutate), reason);
     }
+}
+
+/// A profile that names actions garrison.toml does not have, as after one
+/// was taken out of it: the words name them and the command that takes them
+/// out of the profiles, which `check-config` and the installer pass on.
+#[test]
+fn actions_garrison_toml_does_not_have_are_named_with_what_mends_them() {
+    let mut value = document();
+    value["profiles"]["administrator"]["actions"] =
+        json!(["run_backup", "gone", "run_monitor", "older"]);
+    assert_eq!(
+        parse_policy(&value, &actions()).unwrap_err().to_string(),
+        "Garrison access policy: profile administrator names gone, older, which garrison.toml \
+         does not have: run `garrison access update`, which takes them out of the profiles"
+    );
+    value["profiles"]["administrator"]["actions"] = json!(["gone"]);
+    assert_eq!(
+        parse_policy(&value, &actions()).unwrap_err().to_string(),
+        "Garrison access policy: profile administrator names gone, which garrison.toml does not \
+         have: run `garrison access update`, which takes it out of the profiles"
+    );
 }
 
 #[test]

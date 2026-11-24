@@ -616,7 +616,7 @@ Notable changes for operators and users. The format follows
   file is kept. A policy that names an action `garrison.toml` no longer has
   is said so, with `update` as the way out. The broker reads `[[actions]]`
   only when it starts: after `update`, run the installer again or restart
-  the broker, as [access](docs/operator/access.md#when-the-actions-change)
+  the broker and the web service, as [access](docs/operator/access.md#when-the-actions-change)
   says, which also says what `init --force` drops and how the policy file
   is written.
 - **A backup's card shows that repository's check and restore alone.**
@@ -1857,6 +1857,11 @@ Notable changes for operators and users. The format follows
 - **A session that ends by its time ends its token at Stalwart too**, as a
   sign-out does, and a revocation Stalwart did not answer is asked again, so
   no token outlasts its session for the rest of Stalwart's hour.
+- **A policy that names an action added to garrison.toml since the broker
+  started no longer keeps everyone out**; the broker offers the action once
+  the installer runs again. A policy that names one garrison.toml does not
+  have is refused by `check-config` and the installer with its name and
+  `garrison access update`.
 
 ## [0.1.2] - 2026-11-13
 

@@ -162,7 +162,21 @@ fn profile(
         format!("profile {name} requiredNativePermissions must list authenticate and sys* rights"),
     )?;
     let required: BTreeSet<String> = required.into_iter().collect();
-    names(&actions, |id| action_ids.contains(id), "actions")?;
+    names(&actions, |_| true, "actions")?;
+    let unknown: Vec<&str> = actions
+        .iter()
+        .map(String::as_str)
+        .filter(|id| !action_ids.contains(id))
+        .collect();
+    require(
+        unknown.is_empty(),
+        format!(
+            "profile {name} names {}, which garrison.toml does not have: run `garrison access \
+             update`, which takes {} out of the profiles",
+            unknown.join(", "),
+            if unknown.len() == 1 { "it" } else { "them" }
+        ),
+    )?;
     require(
         actions.is_empty()
             || ACTION_PERMISSIONS
@@ -181,6 +195,17 @@ fn profile(
         actions: actions.into_iter().collect(),
         required,
     })
+}
+
+/// The actions the profiles of a policy document name, as it is written;
+/// none of a profile that does not read so far.
+pub fn named_actions(raw: &Value) -> BTreeSet<&str> {
+    let profiles = raw["profiles"].as_object().into_iter().flatten();
+    profiles
+        .filter_map(|(_, profile)| profile["actions"].as_array())
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect()
 }
 
 /// Validate a policy document against the configured action IDs.

@@ -373,13 +373,13 @@ back.
 
 After changing actions, give the profiles of the access policy the actions
 as they are now, then run the installer again, or write the polkit rule and
-restart the broker, which reads `[[actions]]` only when it starts
-([access](access.md#when-the-actions-change)):
+restart the broker and the web service, which read `[[actions]]` only when
+they start ([access](access.md#when-the-actions-change)):
 
 ```sh
 sudo garrison access update
 sudo sh -c 'garrison polkit-rule > /etc/polkit-1/rules.d/50-garrison.rules'
-sudo systemctl restart garrison-broker
+sudo systemctl restart garrison-broker garrison-web
 ```
 
 The polkit rule is what allows the broker to run exactly these units.

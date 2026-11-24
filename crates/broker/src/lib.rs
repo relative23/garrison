@@ -54,12 +54,14 @@ fn peer_ids(names: &[String]) -> Result<BTreeSet<u32>, Error> {
         .collect()
 }
 
-/// Serve on the systemd socket (or the configured path) until stopped.
-pub fn run(config: &Config, credentials: Credentials) -> Result<(), Error> {
+/// Serve on the systemd socket (or the configured path) until stopped, with
+/// `config` read from `path`, where the policy's actions are looked up that
+/// the broker was not started with.
+pub fn run(config: &Config, path: &Path, credentials: Credentials) -> Result<(), Error> {
     let broker = &config.broker;
     // Take over systemd's socket first, before any thread exists.
     let listener = server::listener(&broker.socket)?;
-    let authority = Authority::new(config, credentials);
+    let authority = Authority::new(config, credentials).reading_actions_from(path);
     // Fail at start, not at the first request, if the policy is unusable.
     authority.policy().map_err(Error::Policy)?;
     let allowed = peer_ids(&broker.allowed_peers)?;

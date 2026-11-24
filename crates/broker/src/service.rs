@@ -474,6 +474,8 @@ impl Broker {
 }
 
 #[cfg(test)]
+mod actions_tests;
+#[cfg(test)]
 mod concurrency_tests;
 #[cfg(test)]
 mod failure_tests;

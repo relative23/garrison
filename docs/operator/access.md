@@ -99,8 +99,9 @@ The profiles hold the actions as a list. `init` gives `administrator` every
 action of `[[actions]]` and `operator` those marked `operator = true`, as
 `garrison.toml` has them then: an action added later is in no profile, so
 nobody is offered it, and one taken out that a profile still names makes the
-policy invalid, so that nobody can use Garrison and the other commands say
-so. After adding, changing or removing an action:
+policy invalid: the other commands and the installer refuse it, and a broker
+that starts with it lets nobody use Garrison. After adding, changing or
+removing an action:
 
 ```sh
 sudo garrison access update
@@ -111,10 +112,9 @@ now, where the profile holds the Maintenance module and requires
 `sysActionCreate`, and takes from every profile the actions `garrison.toml`
 no longer has; role bindings, accounts and denials stay, and the previous
 file is kept. Then run the installer again, or write the polkit rule and
-restart the broker ([configuration](configuration.md#actions)): the broker
-reads `[[actions]]` only when it starts, and until it has, it lets nobody use
-Garrison where the policy names an action it does not know. Run the two
-one after the other.
+restart the broker and the web service ([configuration](configuration.md#actions)):
+both read `[[actions]]` only when they start, so until then an added action
+is offered to nobody, while everything else works as before.
 
 ## The policy file
 

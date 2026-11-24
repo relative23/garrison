@@ -363,7 +363,10 @@ fn dispatch(task: Task, config: &Config, path: &Path) -> u8 {
                 collected => service("collector", collected.map(drop)),
             }
         }
-        Task::Broker => service("broker", garrison_broker::run(config, credentials(config))),
+        Task::Broker => service(
+            "broker",
+            garrison_broker::run(config, path, credentials(config)),
+        ),
         Task::Milter => service("milter", garrison_milter::run(config)),
         Task::CheckConfig => check_config(config, path),
         Task::Modules { set, yes, adopt } => {
