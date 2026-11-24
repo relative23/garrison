@@ -50,27 +50,32 @@
     owner: root
     group: root
     mode: "0600"
-  register: garrison_archive
 
-- name: The unpacked release
-  ansible.builtin.stat:
-    path: "/root/{{ garrison_name }}/VERSION"
+# Whole and from this archive: the archive's SHA256SUMS, and every file it
+# lists as it lists it. Anything else, such as a copy cut short or one of an
+# earlier archive, is unpacked afresh.
+- name: Whether the release is unpacked whole
+  ansible.builtin.shell: >-
+    cd /root/{{ garrison_name | quote }} &&
+    sums=$(tar -xzOf ../{{ garrison_name | quote }}.tar.gz {{ garrison_name | quote }}/SHA256SUMS) &&
+    test "$sums" = "$(cat SHA256SUMS)" &&
+    printf '%s\n' "$sums" | sha256sum --check --quiet --strict
   register: garrison_unpacked
+  changed_when: false
+  failed_when: false
 
-# Unpacked afresh whenever the checked archive changed, so that nothing left
-# from an earlier copy is installed.
 - name: An earlier unpacked copy is removed
   ansible.builtin.file:
     path: "/root/{{ garrison_name }}"
     state: absent
-  when: garrison_archive is changed or not garrison_unpacked.stat.exists
+  when: garrison_unpacked.rc != 0
 
 - name: The release is unpacked
   ansible.builtin.unarchive:
     src: "/root/{{ garrison_name }}.tar.gz"
     dest: /root
     remote_src: true
-  when: garrison_archive is changed or not garrison_unpacked.stat.exists
+  when: garrison_unpacked.rc != 0
 
 - name: The running release
   ansible.builtin.slurp:

@@ -181,6 +181,16 @@ nothing_secret() {
     echo "ok    the play shows no secret"
 }
 
+# A host without Garrison, as before its first play: purged, and without
+# what the role and the scenarios left in /root.
+fresh() {
+    if ! inside '/opt/garrison/current/bin/garrison uninstall --purge >/dev/null &&
+        rm -rf /root/garrison-* /root/stand-in-keys'; then
+        echo "FAIL  Garrison is taken off the host for the next scenario"
+        exit 1
+    fi
+}
+
 # Setup fails at its last step, after it wrote every key file: the stand-in
 # refuses the keys' sessions, as Stalwart refuses a key it does not take.
 scenario_setup_refused() {
@@ -192,6 +202,19 @@ scenario_setup_refused() {
     inside 'rm /root/stand-in-refuses'
     play "$newer"
     services "after a setup that failed"
+}
+
+# An unpacking cut short after its first files: tar writes SHA256SUMS and
+# VERSION before the programs.
+scenario_unpack_cut() {
+    step "An unpacking cut short is done again"
+    fresh
+    name=garrison-$older-$arch
+    copy_in "$previous" "/root/$name.tar.gz"
+    inside "cd /root && chmod 600 $name.tar.gz && tar -xzf $name.tar.gz $name/SHA256SUMS $name/VERSION"
+    play "$older"
+    services "after an unpacking cut short"
+    unchanged "a further run changes nothing" "$older"
 }
 
 step "The play and the role are valid"
@@ -215,7 +238,7 @@ play "$newer"
 check "the role upgraded to $newer" "test \"\$(cat /opt/garrison/current/VERSION)\" = '$newer'"
 services "upgraded by the role"
 
-for scenario in ${SCENARIOS:-setup_refused}; do
+for scenario in ${SCENARIOS:-setup_refused unpack_cut}; do
     "scenario_$scenario"
 done
 

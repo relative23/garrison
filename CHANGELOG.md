@@ -1856,6 +1856,8 @@ Notable changes for operators and users. The format follows
   SELinux module instead of the include itself.
 - **The Ansible role shows what `garrison stalwart setup` said**, also where
   it failed; the Stalwart administrator's credential stays out of the output.
+- **The Ansible role unpacks a release again where a play that stopped left
+  it unpacked in part.**
 
 ## [0.1.2] - 2026-11-13
 
