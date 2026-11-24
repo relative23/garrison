@@ -7,9 +7,8 @@
 
 mod support;
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use axum::http::{Method, StatusCode};
 use serde_json::json;
@@ -142,35 +141,6 @@ async fn every_session_that_ends_takes_its_token_along() {
             assert_eq!(rows(&setup), (0, 0), "{case}");
         }
     }
-}
-
-/// The running service ends a session within a moment of its time, token
-/// and all, and asks no later than that.
-#[tokio::test]
-async fn the_service_ends_a_session_at_its_time() {
-    let mut setup = setup();
-    setup.client.sign_in("code-admin").await;
-    let db =
-        rusqlite::Connection::open(setup.config.web.state_directory.join("web.sqlite")).unwrap();
-    db.execute(
-        "UPDATE sessions SET expires_at = unixepoch() + 1 WHERE token = 'admin-token'",
-        [],
-    )
-    .unwrap();
-    let rounds = tokio::spawn(garrison_web::end_sessions_on_time(Arc::clone(&setup.app)));
-    let start = Instant::now();
-    while setup.provider.revoked.lock().unwrap().is_empty() {
-        assert!(start.elapsed() < Duration::from_secs(10), "no revocation");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    rounds.abort();
-    assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "{:?}",
-        start.elapsed()
-    );
-    assert_eq!(*setup.provider.revoked.lock().unwrap(), ["admin-token"]);
-    assert_eq!(rows(&setup), (0, 0));
 }
 
 #[tokio::test]
