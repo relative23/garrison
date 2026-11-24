@@ -60,6 +60,14 @@ struct Asked {
     blocked: Vec<String>,
 }
 
+/// What the status database keeps of the free space: the readings, with the
+/// path whose file system they measured.
+#[derive(Debug, Deserialize, Serialize)]
+struct Readings {
+    path: PathBuf,
+    samples: Vec<Sample>,
+}
+
 type Made = Result<Observation, ProviderError>;
 
 /// A list option: not set, distinct names that are accepted, or anything else.
@@ -281,11 +289,16 @@ impl HostCare {
                 .with_findings(vec!["The file system could not be read.".to_owned()]));
         };
         let free = filesystem.f_bavail.saturating_mul(filesystem.f_frsize);
-        let kept: Vec<Sample> = context
-            .memory
-            .recall(DISK)
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default();
+        // The readings of another file system say nothing of this one. The
+        // releases before kept the readings alone, of the same `disk_path`
+        // unless it changed with the upgrade.
+        let kept: Vec<Sample> = context.memory.recall(DISK).map_or_else(Vec::new, |text| {
+            match serde_json::from_str::<Readings>(&text) {
+                Ok(readings) if readings.path == self.disk_path => readings.samples,
+                Ok(_) => Vec::new(),
+                Err(_) => serde_json::from_str(&text).unwrap_or_default(),
+            }
+        });
         let samples = reading::recorded(
             kept.clone(),
             Sample {
@@ -295,11 +308,16 @@ impl HostCare {
         );
         // Also where one reading goes as another comes, so that their number
         // stays the same: the one that came is kept, and the other is gone.
-        if samples != kept
-            && let Ok(text) = serde_json::to_string(&samples)
+        let readings = Readings {
+            path: self.disk_path.clone(),
+            samples,
+        };
+        if readings.samples != kept
+            && let Ok(text) = serde_json::to_string(&readings)
         {
             context.memory.keep(DISK, &text);
         }
+        let samples = readings.samples;
         let trend = reading::trend(&samples);
         let days = trend
             .filter(|change| *change < 0.0)

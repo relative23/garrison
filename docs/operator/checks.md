@@ -98,7 +98,8 @@ changes nothing; one that cannot be made is Unknown.
   says.
 - `disk`: the free space of `disk_path` (default `/`), read hourly and carried
   forward in a straight line. A disk that would be full within 14 days is a
-  warning. The forecast needs a day of readings first.
+  warning. The forecast needs a day of readings first, and again after
+  `disk_path` changes.
 - `firewall`: whether one of the services firewalld, nftables and ufw is
   active; none is a warning. Where a unit of the host's own loads the rules,
   for example one that runs `nft -f`, name it:

@@ -89,6 +89,7 @@ fn field<'a>(observation: &'a Observation, label: &str) -> &'a serde_json::Value
         .value
 }
 
+mod disk;
 mod updates;
 
 #[test]
@@ -448,7 +449,8 @@ fn a_disk_reading_at_no_time_is_left_out_of_the_forecast() {
         memory.keep(DISK, &serde_json::to_string(&kept).unwrap());
         let found = checked(&provider, &nothing, &memory, 0);
         assert_eq!(found.state, State::Ok, "{when}: {:?}", found.findings);
-        let left: Vec<Sample> = serde_json::from_str(&memory.recall(DISK).unwrap()).unwrap();
+        let kept: Readings = serde_json::from_str(&memory.recall(DISK).unwrap()).unwrap();
+        let left = kept.samples;
         assert_eq!(left.len(), 49, "{when}");
         assert!(left.iter().all(|sample| sample.at != when), "{when}");
     }

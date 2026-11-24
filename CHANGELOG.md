@@ -1328,6 +1328,8 @@ Notable changes for operators and users. The format follows
 - **A list receipt read by an entry for an object is Unknown and says how
   to read it, instead of Failed.** A list is read with `rows = []` and
   `row_date`.
+- **The disk forecast begins anew where `disk_path` changes, instead of
+  mixing the readings of two file systems.**
 - **A receipt's time is the same instant for every viewer.** A field or
   column of a receipt with `format = "datetime"` went out as the job wrote
   it, and a time written without its offset, such as `2026-11-17T03:00:00`,
