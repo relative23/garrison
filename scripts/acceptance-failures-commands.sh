@@ -217,7 +217,7 @@ scenario_policy_for_the_broker() {
     says "check-config takes a policy the broker owns, with a warning" \
         '/opt/garrison/current/bin/garrison check-config' check-config-policy-warned
     check "doctor fails nothing of it" \
-        "! /opt/garrison/current/bin/garrison doctor 2>&1 | grep -q 'FAIL  the access policy'"
+        "! /opt/garrison/current/bin/garrison doctor 2>&1 | grep '^FAIL' | grep -q 'doctor-policy-'"
     inside 'chown root:garrison-broker /etc/garrison/access-policy.json &&
         chmod 640 /etc/garrison/access-policy.json'
     running "after the policy and its folder are as the installer makes them" "$new"

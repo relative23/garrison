@@ -20,7 +20,7 @@ scenario_warnings() {
             /etc/garrison/garrison.toml'
     says_words "doctor warns of a setting the units do not follow" \
         '/opt/garrison/current/bin/garrison doctor || true' \
-        "warn  credentials_directory is /etc/garrison/elsewhere, but the units load every credential"
+        "[doctor-setting-unfollowed]"
     inside 'cat /root/garrison.toml.warnings > /etc/garrison/garrison.toml'
     running "after the warnings" "$new"
 }
@@ -63,7 +63,7 @@ scenario_policy_elsewhere() {
     check "the broker grants by that policy" "$catalog | grep -q run_check"
     check "doctor finds that the broker may read that policy, and only root change it" \
         '/opt/garrison/current/bin/garrison doctor |
-            grep -q -F "ok    the broker may read the access policy, which only root may change (root:garrison-broker, mode 640)"'
+            grep -F "[doctor-policy-readable]" | grep -q -F "(root:garrison-broker, mode 640)"'
     # A folder named as the policy is none: the installer leaves it as it is
     # and refuses, and a purge would not take it.
     inside 'mkdir -p /srv/policy-folder/mail && echo kept > /srv/policy-folder/mail/inbox &&
@@ -142,7 +142,7 @@ scenario_hidden_policy() {
             test \"\$(cat /etc/garrison/garrison.toml)\" = \"\$(cat /root/garrison.toml.named)\" &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
     says_words "doctor names the policy the broker cannot read" '/opt/garrison/current/bin/garrison doctor || true' \
-        "FAIL  broker.policy is /home/admin/access-policy.json, under /home, which garrison-broker.service hides"
+        "[doctor-policy-hidden]"
     inside 'cat /root/garrison.toml.hidden > /etc/garrison/garrison.toml && rm -r /home/admin'
     running "after the policy under /home" "$current"
 }
@@ -171,7 +171,7 @@ scenario_hidden_check() {
             test \"\$(cat /etc/garrison/garrison.toml)\" = \"\$(cat /root/garrison.toml.named)\" &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
     says_words "doctor names the check's path the collector cannot see" '/opt/garrison/current/bin/garrison doctor || true' \
-        "FAIL  providers[receipt].path is /home/jobs/nightly.json, under /home, which garrison-collect.service hides"
+        "[doctor-path-hidden]"
     inside 'mkdir -p /srv/garrison/jobs /etc/systemd/system/garrison-collect.service.d &&
         printf "[Service]\nBindReadOnlyPaths=/home/jobs:/srv/garrison/jobs\n" \
             > /etc/systemd/system/garrison-collect.service.d/jobs.conf && systemctl daemon-reload &&

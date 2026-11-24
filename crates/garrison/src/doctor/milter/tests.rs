@@ -18,13 +18,6 @@ fn row(id: &str, port: u16, defer: bool) -> Value {
         "tempFailOnError": defer})
 }
 
-fn said(findings: &[Finding]) -> Vec<(Level, &str)> {
-    findings
-        .iter()
-        .map(|finding| (finding.level, finding.what.as_str()))
-        .collect()
-}
-
 /// Where a milter answers: at the ports of `ports`.
 fn at(ports: &[u16]) -> impl Fn(&Entry) -> bool + '_ {
     |entry| entry.port().is_some_and(|port| ports.contains(&port))
@@ -32,14 +25,10 @@ fn at(ports: &[u16]) -> impl Fn(&Entry) -> bool + '_ {
 
 #[test]
 fn a_filter_that_does_not_answer_fails_with_where_to_look() {
-    assert_eq!(answering(8096, Ok(())).level, Level::Ok);
-    let silent = answering(8096, Err("Connection refused".to_owned()));
+    assert_eq!(answering(8096, Ok(())), Finding::ok(states::answers(8096)));
     assert_eq!(
-        (silent.level, silent.what.as_str()),
-        (
-            Level::Fail,
-            "the macro milter does not answer on 127.0.0.1:8096: Connection refused"
-        )
+        answering(8096, Err("Connection refused".to_owned())),
+        Finding::fail(states::silent(8096, "Connection refused"))
     );
 }
 
@@ -61,55 +50,35 @@ fn configured_as(
 fn stalwart_is_held_to_the_entry_the_configuration_makes() {
     let entered = read(&json!([row("m", 8096, true)]));
     assert_eq!(
-        said(&configured_as((8096, true), &entered, &[], &at(&[8096]))),
-        [(
-            Level::Ok,
-            "Stalwart asks the macro milter on 127.0.0.1:8096 about every message and defers \
-             mail while it does not answer"
-        )]
+        configured_as((8096, true), &entered, &[], &at(&[8096])),
+        [Finding::ok(states::asked(&entered[0], 8096))]
     );
     // The port changed without setup while the filter runs at the old one:
     // Stalwart asks it there, until it moves.
-    let moved = configured_as((8097, true), &entered, &[8096], &at(&[8096]));
     assert_eq!(
-        said(&moved),
-        [(
-            Level::Fail,
-            "Stalwart asks the macro milter at 127.0.0.1:8096, but the configuration has it on \
-             127.0.0.1:8097"
-        )]
+        configured_as((8097, true), &entered, &[8096], &at(&[8096])),
+        [Finding::fail(states::moved(&entered[0], 8097, false))]
     );
-    assert_eq!(moved[0].fix.as_deref(), Some(SETUP));
     // The filter down: Stalwart asks it where nothing answers.
-    let down = configured_as((8096, true), &entered, &[], &at(&[]));
     assert_eq!(
-        said(&down),
-        [(
-            Level::Fail,
-            "Stalwart asks the macro milter at 127.0.0.1:8096, where nothing answers: Stalwart \
-             defers all incoming mail"
-        )]
+        configured_as((8096, true), &entered, &[], &at(&[])),
+        [Finding::fail(states::unanswered(&entered[0], None, false))]
     );
     // when_unreachable changed without setup.
-    let accepting = configured_as((8096, false), &entered, &[], &at(&[8096]));
     assert_eq!(
-        said(&accepting),
-        [(
-            Level::Warn,
-            "Stalwart defers mail while the macro milter does not answer, though \
-             when_unreachable is \"accept\""
-        )]
+        configured_as((8096, false), &entered, &[], &at(&[8096])),
+        [Finding::warn(states::when_unreachable(
+            &entered[0],
+            false,
+            false
+        ))]
     );
     // No entry at the filter's port, beside another program's milter that
     // answers.
     for list in [json!([]), json!([row("x", 9000, true)])] {
-        let none = configured_as((8096, true), &read(&list), &[], &at(&[9000]));
-        assert_eq!(none.len(), 1, "{:?}", said(&none));
-        assert_eq!(none[0].level, Level::Warn);
-        assert!(
-            none[0].what.starts_with("Stalwart has no entry"),
-            "{}",
-            none[0].what
+        assert_eq!(
+            configured_as((8096, true), &read(&list), &[], &at(&[9000])),
+            [Finding::warn(states::no_entry(8096, false))]
         );
     }
 }
@@ -122,31 +91,20 @@ fn an_entry_switched_off_asked_too_early_or_twice_is_named() {
     early["stages"] = json!({"rcpt": true});
     let mut conditional = row("m", 8096, true);
     conditional["enable"] = json!({"match": {"0": {"if": "x", "then": "true"}}, "else": "false"});
-    for (entry, words) in [
-        (off, "is switched off"),
-        (
-            conditional,
-            "is switched on only under conditions of its own",
-        ),
-        (
-            early,
-            "does not ask the macro milter on 127.0.0.1:8096 once a message's data",
-        ),
+    for (entry, state) in [
+        (off, states::off(8096, false)),
+        (conditional, states::conditional(8096, false)),
+        (early, states::before_data(8096, false)),
     ] {
-        let found = configured_as((8096, true), &read(&json!([entry])), &[], &at(&[8096]));
-        assert_eq!(found.len(), 1, "{:?}", said(&found));
-        assert_eq!(found[0].level, Level::Warn);
-        assert!(found[0].what.contains(words), "{}", found[0].what);
-        assert_eq!(found[0].fix.as_deref(), Some(SETUP));
+        assert_eq!(
+            configured_as((8096, true), &read(&json!([entry])), &[], &at(&[8096])),
+            [Finding::warn(state)]
+        );
     }
     let twice = read(&json!([row("m", 8096, true), row("n", 8096, true)]));
-    let found = configured_as((8096, true), &twice, &[], &at(&[8096]));
     assert_eq!(
-        said(&found),
-        [(
-            Level::Warn,
-            "Stalwart has 2 entries for the macro milter on 127.0.0.1:8096"
-        )]
+        configured_as((8096, true), &twice, &[], &at(&[8096])),
+        [Finding::warn(states::several(2, 8096, false))]
     );
 }
 
@@ -156,34 +114,19 @@ fn an_entry_switched_off_asked_too_early_or_twice_is_named() {
 #[test]
 fn a_filter_the_configuration_dropped_is_judged_by_what_stalwart_holds() {
     let entered = read(&json!([row("m", 8096, true)]));
-    let still = judged(None, &entered, &[8096], &at(&[8096]));
     assert_eq!(
-        said(&still),
-        [(
-            Level::Fail,
-            "Stalwart still asks the macro milter at 127.0.0.1:8096, which the configuration no \
-             longer has"
-        )]
+        judged(None, &entered, &[8096], &at(&[8096])),
+        [Finding::fail(states::dropped(&entered[0], false, false))]
     );
-    assert!(still[0].fix.as_deref().unwrap().starts_with(SETUP));
     // The filter stopped: nothing tells the entry for the filter's, and
     // Stalwart asks it in vain, which setup refuses to leave so.
-    let stopped = judged(None, &entered, &[], &at(&[]));
-    assert_eq!(stopped.len(), 1, "{:?}", said(&stopped));
-    assert!(
-        stopped[0]
-            .what
-            .ends_with(", where nothing answers: Stalwart defers all incoming mail"),
-        "{}",
-        stopped[0].what
+    assert_eq!(
+        judged(None, &entered, &[], &at(&[])),
+        [Finding::fail(states::stranded(&entered[0]))]
     );
-    assert_eq!(stopped[0].fix.as_deref(), Some(entries::REMOVE));
-    let unasked = unasked(None, "Stalwart did not answer");
-    assert_eq!(unasked.level, Level::Unknown);
-    assert!(
-        unasked.what.ends_with(": Stalwart did not answer"),
-        "{}",
-        unasked.what
+    assert_eq!(
+        unasked(None, "Stalwart did not answer"),
+        Finding::unknown(states::stranded_unknown("Stalwart did not answer"))
     );
 }
 
@@ -196,29 +139,17 @@ fn a_filter_the_configuration_dropped_is_judged_by_what_stalwart_holds() {
 #[test]
 fn an_entry_the_running_filter_answers_is_the_filters() {
     let entered = read(&json!([row("g", 8096, true)]));
-    let moving = judged(Some((8097, true)), &entered, &[8096], &at(&[8096]));
-    assert_eq!(moving.len(), 1, "{:?}", said(&moving));
-    assert!(
-        moving[0]
-            .what
-            .starts_with("Stalwart asks the macro milter at 127.0.0.1:8096, but"),
-        "{}",
-        moving[0].what
+    assert_eq!(
+        judged(Some((8097, true)), &entered, &[8096], &at(&[8096])),
+        [Finding::fail(states::moved(&entered[0], 8097, false))]
     );
-    assert_eq!(moving[0].fix.as_deref(), Some(SETUP));
     let beside = read(&json!([row("g", 8096, true), row("o", 9000, true)]));
-    let found = judged(None, &beside, &[8096], &at(&[8096]));
-    assert_eq!(found.len(), 2, "{:?}", said(&found));
-    assert!(
-        found[0].what.contains("127.0.0.1:9000 (entry o)"),
-        "{}",
-        found[0].what
-    );
-    assert_eq!(found[0].fix.as_deref(), Some(entries::REMOVE));
-    assert!(
-        found[1].fix.as_deref().unwrap().starts_with(AFTER),
-        "{}",
-        found[1].line()
+    assert_eq!(
+        judged(None, &beside, &[8096], &at(&[8096])),
+        [
+            Finding::fail(states::stranded(&beside[1])),
+            Finding::fail(states::dropped(&beside[0], false, true)),
+        ]
     );
 }
 
@@ -277,17 +208,20 @@ fn doctor_on(port: Option<u16>, entries: &Value) -> Vec<Finding> {
 #[test]
 fn stalwart_is_asked_with_the_collectors_key() {
     let port = answering_milter();
-    let found = doctor_on(Some(port), &json!([row("m", port, true)]));
-    assert_eq!(said(&found)[0].0, Level::Ok, "{:?}", said(&found));
-    assert_eq!(found[1].level, Level::Ok, "{:?}", said(&found));
-    let refused = doctor_with(None, garrison_testing::http::answer(401, ""));
+    let entered = json!([row("m", port, true)]);
     assert_eq!(
-        said(&refused),
-        [(
-            Level::Unknown,
-            "whether Stalwart asks a milter where nothing answers: Stalwart refused the \
-             collector's API key"
-        )]
+        doctor_on(Some(port), &entered),
+        [
+            Finding::ok(states::answers(port)),
+            Finding::ok(states::asked(&read(&entered)[0], port)),
+        ]
+    );
+    let refused = garrison_stalwart::Error::InvalidToken(String::new());
+    assert_eq!(
+        doctor_with(None, garrison_testing::http::answer(401, "")),
+        [Finding::unknown(states::stranded_unknown(
+            &states::unasked("", refused)
+        ))]
     );
 }
 
@@ -305,9 +239,11 @@ fn reached(host: &str, port: u16, milters: &[u16]) -> bool {
 
 /// Whatever garrison.toml has, under whatever name of this host Stalwart's
 /// entries ask, doctor names every entry Stalwart asks in vain: switched
-/// on, where no milter answers. Its fix is `garrison stalwart setup` where
-/// setup takes it for the filter's, as it asks this host at the configured
-/// port, and the Stalwart WebUI where it is another program's.
+/// on, where no milter answers. Its state is the filter's entry that
+/// nothing answers, which `garrison stalwart setup` mends, where setup
+/// takes it for the filter's, as it asks this host at the configured port,
+/// and an entry stranded there, which the Stalwart WebUI mends, where it is
+/// another program's.
 #[test]
 fn no_entry_stalwart_asks_in_vain_goes_unsaid() {
     let filter = answering_milter();
@@ -357,26 +293,22 @@ fn no_entry_stalwart_asks_in_vain_goes_unsaid() {
                 }
                 let resolves = format!("{host}:{port}").to_socket_addrs().is_ok();
                 let garrisons = configured == Some(port) && resolves;
-                let address = format!("{host}:{port}");
-                let line = found.iter().find(|finding| finding.what.contains(&address));
-                let fault = match line {
-                    None => Some("no line names it"),
-                    Some(finding) if finding.level == Level::Ok => Some("its line says ok"),
-                    Some(finding) => {
-                        let fix = finding.fix.as_deref().unwrap_or_default();
-                        if garrisons && !fix.contains("garrison stalwart setup") {
-                            Some("setup mends it, and its fix does not name setup")
-                        } else if !garrisons && !fix.contains("Stalwart WebUI") {
-                            Some("it is another program's, and the fix is setup")
-                        } else {
-                            None
-                        }
-                    }
+                let asked: Entry = serde_json::from_value(entry.clone()).unwrap();
+                // Setup mends the filter's; another program's, the WebUI.
+                let due = if garrisons {
+                    [false, true]
+                        .map(|others| Finding::fail(states::unanswered(&asked, None, others)))
+                } else {
+                    [
+                        Finding::fail(states::stranded(&asked)),
+                        Finding::warn(states::stranded_unscanned(&asked)),
+                    ]
                 };
-                if let Some(fault) = fault {
+                if !due.iter().any(|said| found.contains(said)) {
                     faults.push(format!(
-                        "[milter] {configured:?}, entries {listed:?}: the entry at {address}, \
-                         where nothing answers: {fault}:\n{}",
+                        "[milter] {configured:?}, entries {listed:?}: the entry at \
+                         {host}:{port}, where nothing answers, is not said as {}:\n{}",
+                        due[0].state.name,
                         shown.join("\n")
                     ));
                 }
@@ -386,31 +318,28 @@ fn no_entry_stalwart_asks_in_vain_goes_unsaid() {
     assert_eq!(faults, Vec::<String>::new(), "{}", faults.join("\n\n"));
 }
 
-/// The quick start looks in doctor's output for the filter's line and its
-/// entry's line as an empty `[milter]` makes them, after setup entered the
-/// entry: each must be a line doctor says, as a script cannot tell a line
-/// doctor no longer prints from a fault.
+/// The quick start looks in doctor's output for the filter's state and its
+/// entry's, as an empty `[milter]` makes them after setup entered the
+/// entry: each must be a state doctor says there, in order, as a script
+/// cannot tell a state doctor no longer says from a fault.
 #[test]
-fn the_quick_start_looks_for_lines_doctor_says() {
+fn the_quick_start_looks_for_states_doctor_says() {
     const SCRIPT: &str = include_str!("../../../../../scripts/acceptance-quickstart.sh");
     let entered = read(&json!([row("m", 8096, true)]));
-    let mut lines = vec![answering(8096, Ok(())).line()];
-    lines.extend(
-        configured_as((8096, true), &entered, &[], &at(&[8096]))
-            .iter()
-            .map(Finding::line),
-    );
-    let looked_for: Vec<&str> = SCRIPT
-        .split("grep -q \"^")
+    let mut said = vec![answering(8096, Ok(()))];
+    said.extend(configured_as((8096, true), &entered, &[], &at(&[8096])));
+    let looked_for: Vec<String> = SCRIPT
+        .split("[doctor-milter-")
         .skip(1)
-        .filter_map(|rest| rest.split('"').next())
-        .filter(|line| line.contains("macro milter"))
+        .filter_map(|rest| rest.split(']').next())
+        .map(|name| format!("doctor-milter-{name}"))
         .collect();
     assert_eq!(looked_for.len(), 2, "{looked_for:?}");
-    for line in looked_for {
+    for name in looked_for {
         assert!(
-            lines.iter().any(|said| said.starts_with(line)),
-            "{line:?} is no line of {lines:?}"
+            said.iter()
+                .any(|finding| finding.level == Level::Ok && finding.state.name == name),
+            "{name} is no state of {said:?}"
         );
     }
 }

@@ -7,6 +7,7 @@ use garrison_core::time;
 use garrison_testing::http::{json, serve};
 use garrison_testing::tls::serve_until;
 
+use super::super::Level;
 use super::super::{keys, public};
 use super::Broken;
 
@@ -34,8 +35,7 @@ pub(super) fn origin_with_a_port() -> Broken {
     Broken {
         host: "public_origin with a port, its certificate ending in five days",
         found,
-        said: "expires in".into(),
-        fix: Some("renewal".into()),
+        said: (Level::Warn, "doctor-certificate-expiring"),
     }
 }
 
@@ -63,8 +63,7 @@ pub(super) fn issuer_answers_with_a_web_page() -> Broken {
     Broken {
         host: "an issuer whose answer about the sign-in client is a web page",
         found,
-        said: "sign-in client".into(),
-        fix: Some("/api/auth/client".into()),
+        said: (Level::Fail, "doctor-client-not-stalwart"),
     }
 }
 
@@ -81,8 +80,7 @@ pub(super) fn issuer_states_another_name() -> Broken {
     Broken {
         host: "Stalwart naming itself another issuer than garrison.toml",
         found,
-        said: "names itself https://other.example.test".into(),
-        fix: Some("issuer = \"https://other.example.test\"".into()),
+        said: (Level::Fail, "doctor-issuer-other"),
     }
 }
 
@@ -113,8 +111,7 @@ pub(super) fn nginx_answers_502() -> Broken {
     Broken {
         host: "nginx answering 502 for Garrison",
         found,
-        said: "nginx does not reach Garrison's web service".into(),
-        fix: Some("systemctl status garrison-web.service".into()),
+        said: (Level::Fail, "doctor-interface-web-down"),
     }
 }
 
@@ -146,8 +143,7 @@ pub(super) fn no_hsts() -> Broken {
     Broken {
         host: "Garrison answering without Strict-Transport-Security",
         found,
-        said: "no Strict-Transport-Security header".into(),
-        fix: Some("garrison.conf".into()),
+        said: (Level::Warn, "doctor-hsts-missing"),
     }
 }
 
@@ -164,8 +160,7 @@ pub(super) fn metrics_public() -> Broken {
     Broken {
         host: "Stalwart's metrics exporter served under the issuer's name",
         found,
-        said: "Stalwart's metrics exporter is public".into(),
-        fix: Some("garrison-stalwart-server".into()),
+        said: (Level::Fail, "doctor-metrics-public"),
     }
 }
 
@@ -181,8 +176,7 @@ pub(super) fn sign_in_page_answers_404() -> Broken {
     Broken {
         host: "an issuer's name that answers 404 for Stalwart's sign-in page",
         found,
-        said: "answers 404".into(),
-        fix: Some("proxy rules".into()),
+        said: (Level::Fail, "doctor-sign-in-page-failed"),
     }
 }
 
@@ -206,7 +200,6 @@ pub(super) fn stalwart_does_not_know_the_brokers_key() -> Broken {
     Broken {
         host: "a broker's API key Stalwart no longer knows",
         found,
-        said: "does not know the broker's API key".into(),
-        fix: Some("garrison stalwart setup".into()),
+        said: (Level::Fail, "doctor-key-not-known"),
     }
 }

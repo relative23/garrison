@@ -164,6 +164,9 @@ Notable changes for operators and users. The format follows
   and the outcomes scripts act on, end with a name in brackets, such as
   `[install-no-room]`.** A script looks for that name, which stays, not for the
   words.
+- **Every line of `garrison doctor` ends with the name of its state in
+  brackets,** such as `[doctor-clock-synchronized]`, which stays the same
+  across releases: a script that reads the report looks for the name.
 - **`garrison stalwart setup` changes nothing where it finds Stalwart set up
   as asked,** and says "Stalwart is set up as asked; nothing was changed."
   It still has Stalwart reload its settings, since no read shows whether

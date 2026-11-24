@@ -7,9 +7,7 @@ use garrison_core::config::{Config, Endpoint};
 use garrison_core::credentials::Credentials;
 
 use super::Finding;
-
-const FIX: &str = "Correct the file it names (configuration.md, Notifications), then send a \
-                   test message: garrison notify-test";
+use super::states::notify::{self as states, Open};
 
 pub(super) fn checks(config: &Config, credentials: &Credentials) -> Vec<Finding> {
     let notifications = &config.notifications;
@@ -21,7 +19,7 @@ pub(super) fn checks(config: &Config, credentials: &Credentials) -> Vec<Finding>
     let mut findings: Vec<Finding> = channels
         .unusable()
         .into_iter()
-        .map(|why| Finding::fail(format!("notifications: {why}"), FIX))
+        .map(|why| Finding::fail(states::unusable(&why)))
         .collect();
     // An address that is written here and goes with no token is all that
     // protects the channel.
@@ -29,39 +27,24 @@ pub(super) fn checks(config: &Config, credentials: &Credentials) -> Vec<Finding>
         (
             &notifications.ntfy_url,
             channels.ntfy.as_ref().map(|ntfy| &ntfy.token),
-            ("the ntfy topic", "read and send messages on it"),
-            ("ntfy_url", "ntfy-url"),
+            Open::Ntfy,
         ),
         (
             &notifications.webhook_url,
             channels.webhook.as_ref().map(|hook| &hook.token),
-            (
-                "the webhook",
-                "post to it where its key is part of the address",
-            ),
-            ("webhook_url", "notify-webhook-url"),
+            Open::Webhook,
         ),
     ];
-    for (endpoint, token, (channel, can), (setting, file)) in open {
+    for (endpoint, token, channel) in open {
         if let (Some(Endpoint::Written(_)), Some(Secret::Empty)) = (endpoint, token) {
-            findings.push(Finding::warn(
-                format!(
-                    "{channel} takes no token, and garrison.toml, which every user of this \
-                     host may read, holds its address: whoever reads it can {can}"
-                ),
-                format!(
-                    "Write the address into {}/{file} (root, mode 0600) and set {setting} = \
-                     \"credential:{file}\", or give it a token (configuration.md, Notifications).",
-                    credentials.directory().display()
-                ),
-            ));
+            findings.push(Finding::warn(states::open(
+                channel,
+                credentials.directory(),
+            )));
         }
     }
     if findings.is_empty() {
-        findings.push(Finding::ok(format!(
-            "notifications: {}",
-            channels.names().join(", ")
-        )));
+        findings.push(Finding::ok(states::channels(&channels.names())));
     }
     findings
 }
@@ -97,17 +80,31 @@ mod tests {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
     }
 
-    fn levels(findings: &[Finding]) -> Vec<(Level, &str)> {
+    /// The channels as the collector meets them, in whose words doctor
+    /// names them.
+    fn met(config: &Config, credentials: &Credentials) -> Channels {
+        Channels::of(config, Secrets::read(credentials, &config.notifications)).located(credentials)
+    }
+
+    /// The levels and names of `findings`.
+    fn named(findings: &[Finding]) -> Vec<(Level, &str)> {
         findings
             .iter()
-            .map(|finding| (finding.level, finding.what.as_str()))
+            .map(|finding| (finding.level, finding.state.name))
             .collect()
+    }
+
+    /// What doctor says where every channel can send.
+    fn sending(config: &Config, credentials: &Credentials) -> Vec<Finding> {
+        vec![Finding::ok(states::channels(
+            &met(config, credentials).names(),
+        ))]
     }
 
     #[test]
     fn no_channel_needs_no_check() {
         let (_directory, config, credentials) = host();
-        assert_eq!(levels(&checks(&config, &credentials)), []);
+        assert_eq!(checks(&config, &credentials), []);
     }
 
     #[test]
@@ -115,18 +112,14 @@ mod tests {
         let (_directory, mut config, credentials) = host();
         config.notifications.ntfy_url = Some(Endpoint::Written(TOPIC.to_owned()));
         let found = checks(&config, &credentials);
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].level, Level::Warn);
-        assert!(
-            found[0]
-                .what
-                .starts_with("the ntfy topic takes no token, and garrison.toml"),
-            "{}",
-            found[0].what
+        assert_eq!(
+            found,
+            [Finding::warn(states::open(
+                Open::Ntfy,
+                credentials.directory()
+            ))]
         );
-        let fix = found[0].fix.as_deref().unwrap();
-        assert!(fix.contains("ntfy-url (root, mode 0600)"), "{fix}");
-        assert!(fix.contains("ntfy_url = \"credential:ntfy-url\""), "{fix}");
+        // The topic, which only its address protects, is in no line.
         assert!(!found[0].line().contains("nobody-guesses"));
         // With a token, the address alone opens nothing.
         write(
@@ -134,10 +127,9 @@ mod tests {
             "ntfy-token",
             "tk_abcdefghijklmnopqrstuvwxyz123",
         );
-        assert_eq!(
-            levels(&checks(&config, &credentials)),
-            [(Level::Ok, "notifications: ntfy at ntfy.example.org")]
-        );
+        let sent = checks(&config, &credentials);
+        assert_eq!(sent, sending(&config, &credentials));
+        assert_eq!(named(&sent), [(Level::Ok, "doctor-notify-channels")]);
     }
 
     #[test]
@@ -146,12 +138,12 @@ mod tests {
         config.notifications.webhook_url = Some(Endpoint::Written(
             "https://hooks.example.org/T/B/key".to_owned(),
         ));
-        let found = checks(&config, &credentials);
-        assert_eq!(found[0].level, Level::Warn);
-        assert!(
-            found[0].what.contains("post to it where its key"),
-            "{}",
-            found[0].what
+        assert_eq!(
+            checks(&config, &credentials),
+            [Finding::warn(states::open(
+                Open::Webhook,
+                credentials.directory()
+            ))]
         );
         config.notifications.webhook_url = Some(Endpoint::File(SecretSource::Credential(
             "notify-webhook-url".into(),
@@ -162,8 +154,8 @@ mod tests {
             "https://hooks.example.org/T/B/key\n",
         );
         assert_eq!(
-            levels(&checks(&config, &credentials)),
-            [(Level::Ok, "notifications: webhook at hooks.example.org")]
+            checks(&config, &credentials),
+            sending(&config, &credentials)
         );
     }
 
@@ -172,25 +164,16 @@ mod tests {
         let (_directory, mut config, credentials) = host();
         config.notifications.ntfy_url =
             Some(Endpoint::File(SecretSource::Credential("ntfy-url".into())));
-        let found = checks(&config, &credentials);
-        assert_eq!(found.len(), 1, "{:?}", levels(&found));
-        assert_eq!(found[0].level, Level::Fail);
-        assert!(
-            found[0]
-                .what
-                .starts_with("notifications: ntfy: notifications.ntfy_url cannot be used: "),
-            "{}",
-            found[0].what
-        );
-        assert!(
-            found[0]
-                .what
-                .ends_with("ntfy-url is empty; write the address into it")
+        let unusable = met(&config, &credentials).unusable();
+        assert_eq!(unusable.len(), 1);
+        assert_eq!(
+            checks(&config, &credentials),
+            [Finding::fail(states::unusable(&unusable[0]))]
         );
         write(&credentials, "ntfy-url", TOPIC);
         assert_eq!(
-            levels(&checks(&config, &credentials)),
-            [(Level::Ok, "notifications: ntfy at ntfy.example.org")]
+            checks(&config, &credentials),
+            sending(&config, &credentials)
         );
     }
 }

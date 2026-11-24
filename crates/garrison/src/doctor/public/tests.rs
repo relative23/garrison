@@ -1,5 +1,13 @@
-use super::super::Level;
 use super::*;
+use crate::state::State;
+
+/// What an answer about the sign-in client is said as, of the client and
+/// the issuer's host.
+type ClientSaid = fn(&str, &str) -> Finding;
+/// What a 502 is said as, of the URL, the status and `web.port`.
+type GatewaySaid = fn(&str, u16, u16) -> State;
+/// What an answer at the exporter's path is said as, of its origin and URL.
+type ExporterSaid = fn(&str, &str) -> Finding;
 
 #[test]
 fn a_visitor_is_told_there_is_no_session() {
@@ -43,12 +51,10 @@ fn the_answer_about_the_sign_in_client_is_read_as_stalwart_gives_it() {
         )
     };
     let json = "application/json";
-    for (response, level, said, fix) in [
+    let cases: [(String, ClientSaid); 6] = [
         (
             answer(200, json, r#"{"name":"Garrison","verified":true}"#),
-            Level::Ok,
-            "Stalwart knows Garrison's sign-in client as registered",
-            None,
+            |_, _| Finding::ok(states::registered()),
         ),
         (
             answer(
@@ -56,35 +62,27 @@ fn the_answer_about_the_sign_in_client_is_read_as_stalwart_gives_it() {
                 json,
                 r#"{"error":"invalid_client","description":"Client metadata documents are disabled"}"#,
             ),
-            Level::Fail,
-            "Client metadata documents are disabled",
-            Some("garrison stalwart setup"),
+            |client, _| {
+                let reason = Some("Client metadata documents are disabled");
+                Finding::fail(states::client_refused(client, reason))
+            },
         ),
-        (
-            answer(200, json, r#"{"status":"ok"}"#),
-            Level::Fail,
-            "not Stalwart's JSON",
-            Some("/api/auth/client"),
-        ),
+        (answer(200, json, r#"{"status":"ok"}"#), |_, host| {
+            Finding::fail(states::not_stalwart(host, 200, Some("application/json")))
+        }),
         (
             answer(404, "text/html", "<html>Not found</html>"),
-            Level::Fail,
-            "answers 404 (text/html)",
-            Some("/api/auth/client"),
+            |_, host| Finding::fail(states::not_stalwart(host, 404, Some("text/html"))),
         ),
         (
             answer(502, "text/html", "<html>Bad gateway</html>"),
-            Level::Fail,
-            "its proxy does not reach Stalwart",
-            Some("See that Stalwart runs"),
+            |_, host| Finding::fail(states::client_unreached(host, 502)),
         ),
-        (
-            answer(429, json, "{}"),
-            Level::Unknown,
-            "ask again in a minute",
-            None,
-        ),
-    ] {
+        (answer(429, json, "{}"), |_, host| {
+            Finding::unknown(states::client_limited(host))
+        }),
+    ];
+    for (response, said) in cases {
         let server = garrison_testing::tls::serve_until(vec![response], 2036, 1, 1);
         let roots = Arc::new(server.roots.clone());
         let directory = tempfile::tempdir().unwrap();
@@ -92,16 +90,9 @@ fn the_answer_about_the_sign_in_client_is_read_as_stalwart_gives_it() {
         config.deployment.issuer.clone_from(&server.url);
         let found = sign_in(&config, &roots);
         server.finish();
-        assert_eq!(found.level, level, "{}", found.line());
-        assert!(found.what.contains(said), "{}", found.line());
-        match fix {
-            Some(fix) => assert!(
-                found.fix.as_deref().is_some_and(|text| text.contains(fix)),
-                "{}",
-                found.line()
-            ),
-            None => assert_eq!(found.fix, None),
-        }
+        let client = oidc::client_id(&config.deployment.public_origin);
+        let host = origin(&config.deployment.issuer);
+        assert_eq!(found, said(&client, host));
     }
 }
 
@@ -111,77 +102,59 @@ fn the_answer_about_the_sign_in_client_is_read_as_stalwart_gives_it() {
 #[test]
 fn the_issuer_stalwart_names_itself_is_the_one_garrison_takes() {
     use garrison_testing::http::{answer, json, serve};
+    let discovery = |stalwart: &str| format!("{stalwart}/.well-known/openid-configuration");
     let issuer_of = |response: String| {
         let stalwart = serve(vec![response]);
         let directory = tempfile::tempdir().unwrap();
         let config = garrison_testing::config(directory.path(), &stalwart.url);
         let found = issuer(&config);
+        let url = discovery(&stalwart.url);
         stalwart.requests();
-        found
+        (found, url)
     };
-    let same = issuer_of(json(
-        &serde_json::json!({"issuer": "https://mail.example.test"}),
-    ));
+    let configured = "https://mail.example.test";
+    let named = |stated: &str| issuer_of(json(&serde_json::json!({ "issuer": stated }))).0;
     assert_eq!(
-        (same.level, same.what.as_str()),
-        (
-            Level::Ok,
-            "Stalwart names itself https://mail.example.test, as deployment.issuer does"
-        )
-    );
-    let other = issuer_of(json(
-        &serde_json::json!({"issuer": "https://other.example.test"}),
-    ));
-    assert_eq!(
-        (other.level, other.what.as_str()),
-        (
-            Level::Fail,
-            "Stalwart names itself https://other.example.test, but deployment.issuer is \
-             https://mail.example.test, so every sign-in fails at Garrison's callback"
-        )
+        named(configured),
+        Finding::ok(states::same_issuer(configured))
     );
     assert_eq!(
-        other.fix.as_deref(),
-        Some(
-            "Set issuer = \"https://other.example.test\" under [deployment] and restart \
-             garrison-web, or make mail.example.test Stalwart's Default Hostname and reload its \
-             settings."
-        )
+        named("https://other.example.test"),
+        Finding::fail(states::other_issuer(
+            "https://other.example.test",
+            configured
+        ))
     );
     // A name garrison.toml would not keep as written: only Stalwart's side mends it.
-    let slashed = issuer_of(json(
-        &serde_json::json!({"issuer": "https://other.example.test/"}),
-    ));
     assert_eq!(
-        slashed.fix.as_deref(),
-        Some("Make mail.example.test Stalwart's Default Hostname and reload its settings.")
+        named("https://other.example.test/"),
+        Finding::fail(states::other_issuer_hostname(
+            "https://other.example.test/",
+            configured
+        ))
     );
-    for (response, why) in [
-        (answer(404, "{}"), "answered 404 without an issuer"),
-        (
-            json(&serde_json::json!({"issuers": []})),
-            "answered 200 without an issuer",
-        ),
-        (
-            answer(200, "<html></html>"),
-            "answered 200 without an issuer",
-        ),
+    for (response, status) in [
+        (answer(404, "{}"), 404),
+        (json(&serde_json::json!({"issuers": []})), 200),
+        (answer(200, "<html></html>"), 200),
     ] {
-        let unread = issuer_of(response);
-        assert_eq!(unread.level, Level::Unknown, "{}", unread.line());
-        assert!(unread.what.contains(why), "{}", unread.what);
-        assert!(unread.what.ends_with(SUPPORTED), "{}", unread.what);
+        let (unread, url) = issuer_of(response);
+        assert_eq!(
+            unread,
+            Finding::unknown(states::issuer_unknown(&states::no_issuer(&url, status)))
+        );
     }
     let directory = tempfile::tempdir().unwrap();
-    let away = issuer(&garrison_testing::config(
-        directory.path(),
-        "http://127.0.0.1:9",
-    ));
-    assert_eq!(away.level, Level::Unknown);
-    assert!(
-        away.what.contains("Stalwart did not answer at"),
-        "{}",
-        away.what
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    let url = discovery(&config.deployment.stalwart_url);
+    let away = issuer(&config);
+    let refused = Request::get(&url).limit(DISCOVERY_LIMIT).send();
+    let Err(error @ garrison_stalwart::Error::Unavailable(_)) = refused else {
+        panic!("{url}: {refused:?}");
+    };
+    assert_eq!(
+        away,
+        Finding::unknown(states::issuer_unknown(&states::undiscovered(&url, error)))
     );
 }
 
@@ -215,30 +188,21 @@ fn a_502_names_the_restart_where_nothing_listens_on_web_port() {
     // Held, so that no stand-in started below is given it.
     let (_held, silent) = super::super::silent_port();
     let listening = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    for (port, fix) in [
-        (silent, "systemctl restart garrison-web.service"),
-        (
-            listening.local_addr().unwrap().port(),
-            "the lines above name an include or an SELinux module",
-        ),
-    ] {
+    let cases: [(u16, GatewaySaid); 2] = [
+        (silent, states::web_down),
+        (listening.local_addr().unwrap().port(), states::unreached),
+    ];
+    for (port, said) in cases {
         let server = garrison_testing::tls::serve_until(vec![answer.clone()], 2036, 1, 1);
         let roots = Arc::new(server.roots.clone());
         let directory = tempfile::tempdir().unwrap();
         let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
         config.deployment.public_origin.clone_from(&server.url);
         config.web.port = port;
+        let url = format!("{}/api/session", server.url);
         let found = interface(&config, &roots);
         server.finish();
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert!(
-            found[0]
-                .fix
-                .as_deref()
-                .is_some_and(|text| text.contains(fix)),
-            "{}",
-            found[0].line()
-        );
+        assert_eq!(found, [Finding::fail(said(&url, 502, port))]);
     }
 }
 
@@ -253,12 +217,21 @@ fn only_the_exporters_own_answer_is_taken_for_it() {
     let exported = "# HELP stalwart_up Up.\n# TYPE stalwart_up gauge\nstalwart_up 1\n";
     let stalwarts = "WWW-Authenticate: Bearer realm=\"Stalwart Server\"\r\n";
     let others = "WWW-Authenticate: Basic realm=\"webmail\"\r\n";
-    for (status, kind, more, body, public) in [
-        (200, "text/html", "", page, false),
-        (200, "text/plain; version=0.0.4", "", exported, true),
-        (401, "application/problem+json", stalwarts, "", true),
-        (401, "text/plain", others, "", false),
-    ] {
+    let cases: [(u16, &str, &str, &str, ExporterSaid); 4] = [
+        (200, "text/html", "", page, |origin, _| {
+            Finding::ok(states::metrics_private(origin))
+        }),
+        (200, "text/plain; version=0.0.4", "", exported, |_, url| {
+            Finding::fail(states::metrics_public(url, 200))
+        }),
+        (401, "application/problem+json", stalwarts, "", |_, url| {
+            Finding::fail(states::metrics_public(url, 401))
+        }),
+        (401, "text/plain", others, "", |_, url| {
+            Finding::unknown(states::metrics_unread(url, 401))
+        }),
+    ];
+    for (status, kind, more, body, said) in cases {
         let server = garrison_testing::tls::serve_until(
             vec![format!(
                 "HTTP/1.1 {status} X\r\nContent-Type: {kind}\r\n{more}Content-Length: {}\r\n\
@@ -276,19 +249,22 @@ fn only_the_exporters_own_answer_is_taken_for_it() {
         config.deployment.admin_url = format!("{}/admin/", server.url);
         let found = metrics(&config, &roots);
         server.finish();
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert_eq!(
-            found[0].level == Level::Fail,
-            public,
-            "{status} {kind}: {}",
-            found[0].line()
-        );
+        let origin = origin(&config.deployment.issuer);
+        let url = format!("{origin}/metrics/prometheus");
+        assert_eq!(found, [said(origin, &url)], "{status} {kind}");
     }
 }
 
 /// An IPv6 origin is named as a URL names it, in brackets, before its port.
 #[test]
 fn an_ipv6_origin_is_named_in_brackets() {
-    let found = certificate("https://[::1]:1", &roots());
-    assert!(found.what.starts_with("TLS to [::1]:1: "), "{}", found.what);
+    let roots = roots();
+    let found = certificate("https://[::1]:1", &roots);
+    let Err(failure) = probe("::1", 1, "::1", false, &roots, time::now()) else {
+        panic!("TLS to [::1]:1");
+    };
+    assert_eq!(
+        found,
+        Finding::fail(states::tls_failed("[::1]:1", failure.0))
+    );
 }

@@ -19,15 +19,17 @@ use garrison_core::files::{ProtectedFileError, open_regular_file};
 use garrison_core::json::{self, JsonError};
 use serde_json::Value;
 
-use super::{Finding, Level, counted};
+use super::states::policy as states;
+use super::{Finding, Level};
+use crate::state::State;
 use crate::units;
 
 /// The user, and the group, the broker's unit runs it as.
-const BROKER: &str = "garrison-broker";
+pub(super) const BROKER: &str = "garrison-broker";
 /// As much of the policy as the broker reads.
 const LIMIT: usize = 64 * 1024;
 /// Where the installer and `garrison access init` keep the policy.
-const DEFAULT: &str = "/etc/garrison/access-policy.json";
+pub(super) const DEFAULT: &str = "/etc/garrison/access-policy.json";
 
 /// Who the broker is on this host: its user and the groups systemd gives it.
 #[derive(Clone, Debug)]
@@ -136,15 +138,15 @@ fn may(seen: Seen, reader: &Reader, bits: u32) -> bool {
 fn refusals(file: Seen, reader: Option<&Reader>) -> Vec<&'static str> {
     let mut why = Vec::new();
     if reader.is_some_and(|reader| file.uid != 0 && file.uid != reader.uid) {
-        why.push("a user other than root and the broker owns it");
+        why.push(states::FOREIGN);
     }
     if file.mode & 0o020 != 0 {
-        why.push("its group may change it");
+        why.push(states::GROUP_WRITES);
     }
     match file.mode & 0o006 {
         0 => {}
-        0o004 => why.push("others may read it"),
-        _ => why.push("others may change it"),
+        0o004 => why.push(states::OTHERS_READ),
+        _ => why.push(states::OTHERS_WRITE),
     }
     why
 }
@@ -154,14 +156,15 @@ fn taken(file: Seen, broker: Option<&Reader>) -> bool {
     refusals(file, broker).is_empty() && (file.uid == 0 || broker.is_some())
 }
 
-/// What mends a folder above the policy that the broker may not enter: the
-/// mode the installer gives `/etc/garrison` where it lies on the way there,
-/// and the default place elsewhere.
-fn entered(folder: &Path) -> String {
+/// A folder above the policy that the broker may not enter, seen so: mended
+/// by the mode the installer gives `/etc/garrison` where it lies on the way
+/// to the default place, and by the default place elsewhere.
+fn closed(folder: &Path, seen: Seen, names: &Names) -> State {
+    let owner = names.of(seen);
     if Path::new(DEFAULT).starts_with(folder) {
-        format!("chmod 755 {}", folder.display())
+        states::folder_closed(folder, &owner, seen.mode)
     } else {
-        format!("Move the policy to {DEFAULT} and set broker.policy to it.")
+        states::folder_closed_elsewhere(folder, &owner, seen.mode)
     }
 }
 
@@ -175,65 +178,28 @@ pub(super) fn readable(
     broker: Option<&Reader>,
     names: &Names,
 ) -> Finding {
-    let shown = format!("{}, mode {:o}", names.of(file), file.mode);
-    let fix = format!("chown root:{BROKER} {0} && chmod 640 {0}", path.display());
-    let refused = |why: &[&str]| {
-        Finding::fail(
-            format!(
-                "the broker does not take the access policy ({shown}): {}, so nobody can sign \
-                 in: {}",
-                why.join(", and "),
-                path.display()
-            ),
-            fix.clone(),
-        )
-    };
+    let owner = names.of(file);
     let Some(broker) = broker else {
         let why = refusals(file, None);
         if !why.is_empty() {
-            return refused(&why);
+            return Finding::fail(states::refused(&owner, file.mode, &why, path));
         }
-        return Finding::unknown(format!(
-            "whether the broker can read the access policy: this host has no user {BROKER}"
-        ));
+        return Finding::unknown(states::no_broker());
     };
     if let Some((folder, seen)) = folders.iter().find(|(_, seen)| !may(*seen, broker, 0o1)) {
-        return Finding::fail(
-            format!(
-                "{BROKER} may not enter {} ({}, mode {:o}), so it cannot read the access policy \
-                 and nobody can sign in",
-                folder.display(),
-                names.of(*seen),
-                seen.mode
-            ),
-            entered(folder),
-        );
+        return Finding::fail(closed(folder, *seen, names));
     }
     if !may(file, broker, 0o4) {
-        return Finding::fail(
-            format!(
-                "{BROKER} may not read the access policy ({shown}), so nobody can sign in: {}",
-                path.display()
-            ),
-            fix,
-        );
+        return Finding::fail(states::unreadable(&owner, file.mode, path));
     }
     let why = refusals(file, Some(broker));
     if !why.is_empty() {
-        return refused(&why);
+        return Finding::fail(states::refused(&owner, file.mode, &why, path));
     }
     if file.uid == broker.uid && broker.uid != 0 {
-        return Finding::warn(
-            format!(
-                "{BROKER} owns the access policy ({shown}), which the installer keeps root's, so \
-                 that only root may change what it grants"
-            ),
-            fix,
-        );
+        return Finding::warn(states::broker_owner(&owner, file.mode, path));
     }
-    Finding::ok(format!(
-        "the broker may read the access policy, which only root may change ({shown})"
-    ))
+    Finding::ok(states::readable(&owner, file.mode))
 }
 
 /// The actions the policy's profiles name that garrison.toml does not have,
@@ -273,9 +239,17 @@ fn beyond(config: &Config) -> Vec<String> {
 /// does, but `read_protected` as root would refuse a policy the broker owns,
 /// which the broker takes.
 pub(crate) fn granted(config: &Config) -> Result<Policy, Unread> {
+    grants(config).map_err(|unread| match unread {
+        Unread::Other(why) => Unread::Other(format!("Garrison access policy: {why}")),
+        Unread::TooLarge => Unread::TooLarge,
+    })
+}
+
+/// [`granted`], with why the policy does not read in the broker's words
+/// after the name of the policy, which they begin with.
+fn grants(config: &Config) -> Result<Policy, Unread> {
     let path = &config.broker.policy;
-    let unread =
-        |error: ProtectedFileError| Unread::Other(format!("Garrison access policy: {error}"));
+    let unread = |error: ProtectedFileError| Unread::Other(error.to_string());
     let mut data = Vec::new();
     open_regular_file(path)
         .and_then(|file| file.take(LIMIT as u64 + 1).read_to_end(&mut data))
@@ -290,7 +264,7 @@ pub(crate) fn granted(config: &Config) -> Result<Policy, Unread> {
         .iter()
         .map(|action| action.id.as_str())
         .collect();
-    parse_policy(&raw, &actions).map_err(|error| Unread::Other(error.to_string()))
+    parse_policy(&raw, &actions).map_err(|error| Unread::Other(error.0))
 }
 
 /// Why what a policy grants does not read.
@@ -304,52 +278,25 @@ pub(crate) enum Unread {
 
 /// What the policy grants, read and checked as the broker reads it.
 pub(super) fn content(config: &Config) -> Finding {
-    let policy = match granted(config) {
+    let policy = match grants(config) {
         Ok(policy) => policy,
         Err(Unread::TooLarge) => {
-            let path = &config.broker.policy;
-            let mut fix = crate::access::way_out(path);
-            fix.replace_range(..1, &fix[..1].to_uppercase());
-            return Finding::fail(
-                format!(
-                    "the access policy is larger than the broker reads ({} KiB), so nobody can \
-                     sign in: {}",
-                    LIMIT / 1024,
-                    path.display()
-                ),
-                format!("{fix}."),
-            );
+            return Finding::fail(states::too_large(&config.broker.policy, LIMIT / 1024));
         }
-        Err(Unread::Other(error)) => {
+        Err(Unread::Other(why)) => {
             let beyond = beyond(config);
             if !beyond.is_empty() {
-                return Finding::fail(
-                    format!(
-                        "the access policy names actions garrison.toml does not have ({}), so \
-                         nobody can sign in",
-                        beyond.join(", ")
-                    ),
-                    "Run `garrison access update`, which mends it.",
-                );
+                return Finding::fail(states::actions_dropped(&beyond));
             }
-            let why = error.trim_start_matches("Garrison access policy: ");
-            return Finding::fail(
-                format!("the access policy does not read ({why}), so nobody can sign in"),
-                "Correct it as docs/operator/access.md shows.",
-            );
+            return Finding::fail(states::invalid(&why));
         }
     };
     if policy.role_bindings.is_empty() && policy.subjects.is_empty() {
-        return Finding::fail(
-            "the access policy binds no role and no account, so nobody can sign in",
-            "Bind the role of your administrators: garrison access bind-role <role-id> \
-             --profile administrator",
-        );
+        return Finding::fail(states::unbound());
     }
-    Finding::ok(format!(
-        "the access policy binds {} and {}",
-        counted(policy.role_bindings.len(), "role", "roles"),
-        counted(policy.subjects.len(), "account", "accounts")
+    Finding::ok(states::bound(
+        policy.role_bindings.len(),
+        policy.subjects.len(),
     ))
 }
 
@@ -384,18 +331,9 @@ fn folders(path: &Path) -> Vec<(PathBuf, Seen)> {
 /// for this host's broker, and whether the broker takes the file.
 fn met(path: &Path) -> Result<(Finding, bool), Finding> {
     match fs::symlink_metadata(path) {
-        Err(_) => Err(Finding::fail(
-            format!("the access policy is missing: {}", path.display()),
-            "Run `garrison access init`, which makes it.",
-        )),
+        Err(_) => Err(Finding::fail(states::missing(path))),
         // Neither the installer nor the broker follows a link here.
-        Ok(metadata) if !metadata.is_file() => Err(Finding::fail(
-            format!(
-                "the access policy is a link or a folder, not a file: {}",
-                path.display()
-            ),
-            "Remove it; then `garrison access init` makes the file itself there.",
-        )),
+        Ok(metadata) if !metadata.is_file() => Err(Finding::fail(states::not_a_file(path))),
         Ok(metadata) => {
             let read = |file: &str| fs::read_to_string(file).unwrap_or_default();
             let (names, broker) = accounts(&read("/etc/passwd"), &read("/etc/group"));
@@ -420,7 +358,7 @@ pub(crate) enum Met {
 /// [`met`] for check-config, with each finding as one sentence and its fix.
 pub(crate) fn as_the_broker(path: &Path) -> Met {
     match met(path) {
-        Err(missing) => Met::Missing(said(&missing)),
+        Err(missing) => Met::Missing(said(&missing.state)),
         Ok((found, _)) => verdict(&found),
     }
 }
@@ -429,18 +367,17 @@ pub(crate) fn as_the_broker(path: &Path) -> Met {
 fn verdict(found: &Finding) -> Met {
     match found.level {
         Level::Ok => Met::Taken(None),
-        Level::Warn => Met::Taken(Some(said(found))),
-        Level::Unknown => Met::Taken(Some(format!("it is not known {}.", found.what))),
-        Level::Fail => Met::Refused(said(found)),
+        Level::Warn => Met::Taken(Some(said(&found.state))),
+        Level::Unknown => Met::Taken(Some(format!("it is not known {}.", found.state.text))),
+        Level::Fail => Met::Refused(said(&found.state)),
     }
 }
 
-/// A finding and its fix as one line: a fix that is a command is to be run.
-fn said(found: &Finding) -> String {
-    match &found.fix {
-        Some(fix) if fix.ends_with('.') => format!("{}. {fix}", found.what),
-        Some(fix) => format!("{}. Run `{fix}`.", found.what),
-        None => format!("{}.", found.what),
+/// A state and its fix as one line.
+fn said(state: &State) -> String {
+    match &state.fix {
+        Some(fix) => format!("{}. {fix}", state.text),
+        None => format!("{}.", state.text),
     }
 }
 
@@ -459,8 +396,8 @@ pub(super) fn checks(config: &Config) -> Vec<Finding> {
         }
     }
     // Root may read a policy that the broker's unit hides from it.
-    if let Some((what, fix)) = units::hidden_policy(path) {
-        findings.push(Finding::fail(what, format!("{fix}.")));
+    if let Some(said) = units::hidden_policy(path) {
+        findings.push(Finding::fail(states::hidden(said)));
     }
     findings
 }

@@ -4,6 +4,7 @@ use garrison_collector::snapshot::{SCHEMA, Snapshot};
 use garrison_collector::store::StatusStore;
 
 use super::super::Level;
+use super::super::states::selinux as said;
 use super::*;
 
 const NOW: i64 = 1_794_000_000;
@@ -12,46 +13,42 @@ fn judged(last: Result<Option<i64>, String>) -> Finding {
     finished(last, time::Timestamp::from_second(NOW).unwrap())
 }
 
+/// The level and the name of a finding.
+fn named(finding: &Finding) -> (Level, &str) {
+    (finding.level, finding.state.name)
+}
+
 #[test]
 fn the_collector_is_judged_by_its_newest_snapshot_as_the_watch_judges_it() {
-    let fresh = judged(Ok(Some(NOW - 90)));
     assert_eq!(
-        (fresh.level, fresh.what.as_str()),
-        (Level::Ok, "the last collection run finished 1 minute ago")
+        judged(Ok(Some(NOW - 90))),
+        Finding::ok(states::collection_recent(90))
     );
-    assert_eq!(judged(Ok(Some(NOW - watch::LIMIT))).level, Level::Ok);
+    assert_eq!(
+        named(&judged(Ok(Some(NOW - watch::LIMIT)))),
+        (Level::Ok, "doctor-collection-recent")
+    );
     // A run that never was is not a success, and not yet a failure.
-    let never = judged(Ok(None));
-    assert_eq!(
-        (never.level, never.what.as_str()),
-        (Level::Warn, "no collection run has finished yet")
-    );
+    assert_eq!(judged(Ok(None)), Finding::warn(states::no_collection()));
     // Stopped, failed and unknown stay three answers.
-    let stopped = judged(Ok(Some(NOW - watch::LIMIT - 1)));
-    assert_eq!(stopped.level, Level::Fail);
+    let last = NOW - watch::LIMIT - 1;
     assert_eq!(
-        stopped.what,
-        "no collection run has finished since 2026-11-06T21:09:59+00:00, 10 minutes ago"
+        judged(Ok(Some(last))),
+        Finding::fail(states::collection_stopped(last, NOW - last))
     );
-    assert!(
-        stopped.line().contains(
-            "`systemctl status garrison-collect.service garrison-collect.timer` and \
-             `garrison check-config` say why."
-        ),
-        "{}",
-        stopped.line()
+    assert_eq!(
+        judged(Err("file is not a database".to_owned())),
+        Finding::unknown(states::collection_unreadable("file is not a database"))
     );
-    let unreadable = judged(Err("file is not a database".to_owned()));
-    assert_eq!(unreadable.level, Level::Unknown);
-    assert!(unreadable.what.ends_with("(file is not a database)"));
     // A date from the future gives no age; a few minutes are the clock's
-    // own small corrections.
-    let ahead = judged(Ok(Some(NOW + 3600)));
-    assert_eq!(ahead.level, Level::Warn);
-    assert!(ahead.what.contains("60 minutes ahead"), "{}", ahead.what);
+    // own small corrections, and no age below zero.
     assert_eq!(
-        judged(Ok(Some(NOW + 120))).what,
-        "the last collection run finished 0 minutes ago"
+        judged(Ok(Some(NOW + 3600))),
+        Finding::warn(states::snapshot_ahead(3600))
+    );
+    assert_eq!(
+        judged(Ok(Some(NOW + 120))),
+        Finding::ok(states::collection_recent(0))
     );
 }
 
@@ -60,16 +57,9 @@ fn the_collector_is_judged_by_its_newest_snapshot_as_the_watch_judges_it() {
 #[test]
 fn a_snapshot_dated_at_no_time_gives_no_age() {
     for when in [i64::MIN, i64::MAX] {
-        let found = judged(Ok(Some(when)));
         assert_eq!(
-            (found.level, found.what),
-            (
-                Level::Unknown,
-                format!(
-                    "when the collector last finished a run: the newest status snapshot \
-                     is dated {when}, which is no time"
-                )
-            )
+            judged(Ok(Some(when))),
+            Finding::unknown(states::collection_undated(when))
         );
     }
 }
@@ -82,27 +72,18 @@ fn an_events_database_that_cannot_be_read_is_unknown_with_the_reason() {
     let directory = tempfile::tempdir().unwrap();
     let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
     let path = config.database(Database::Events);
-    let none = events(&config);
-    assert_eq!(
-        (none.level, none.what.as_str()),
-        (Level::Warn, "no Stalwart event recorded yet")
-    );
+    assert_eq!(events(&config), Finding::warn(states::no_event()));
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch("CREATE TABLE events(received_at INTEGER NOT NULL)")
         .unwrap();
     drop(db);
-    assert_eq!(events(&config).what, "no Stalwart event recorded yet");
+    assert_eq!(events(&config), Finding::warn(states::no_event()));
     fs::write(&path, "no database").unwrap();
-    let unread = events(&config);
-    assert_eq!(unread.level, Level::Unknown, "{}", unread.line());
-    assert!(
-        unread.what.starts_with(&format!(
-            "when the last Stalwart event arrived: the events database {} cannot be read (",
-            path.display()
-        )),
-        "{}",
-        unread.what
+    let why = newest_event(&path).unwrap_err();
+    assert_eq!(
+        events(&config),
+        Finding::unknown(states::events_unreadable(&path, &why))
     );
 }
 
@@ -120,18 +101,11 @@ fn an_event_recorded_at_no_time_gives_no_age() {
             .unwrap();
         db.execute("INSERT INTO events VALUES(?)", [when]).unwrap();
         drop(db);
-        let found = events(&config);
-        (found.level, found.what)
+        events(&config)
     });
     assert_eq!(
         found,
-        [i64::MIN, i64::MAX].map(|when| (
-            Level::Unknown,
-            format!(
-                "when the last Stalwart event arrived: the newest event is recorded at \
-                 {when}, which is no time"
-            )
-        ))
+        [i64::MIN, i64::MAX].map(|when| Finding::unknown(states::event_undated(when)))
     );
 }
 
@@ -159,39 +133,18 @@ fn an_event_recorded_ahead_of_the_clock_gives_no_age_below_zero() {
         events(&config)
     };
     let now = time::now().as_second();
-    let ahead = line(&[now + 3630]);
     assert_eq!(
-        (ahead.level, ahead.what.as_str()),
-        (
-            Level::Warn,
-            "the last Stalwart event is recorded 60 minutes ahead of this host's clock, so \
-             when it arrived is not known"
-        )
+        line(&[now + 3630]),
+        Finding::warn(states::event_ahead(3630))
     );
-    assert!(
-        ahead
-            .line()
-            .contains("The clock went back after it arrived"),
-        "{}",
-        ahead.line()
-    );
-    for (received, said) in [
-        (
-            vec![now + 120],
-            "the last Stalwart event arrived 0 minutes ago",
-        ),
-        (
-            vec![now + 3630, now - 615],
-            "the last Stalwart event arrived 10 minutes ago",
-        ),
-    ] {
-        let found = line(&received);
-        assert_eq!((found.level, found.what.as_str()), (Level::Ok, said));
-    }
-    let quiet = line(&[now - 30 * 3600]);
+    assert_eq!(line(&[now + 120]), Finding::ok(states::event_recent(0)));
     assert_eq!(
-        (quiet.level, quiet.what.as_str()),
-        (Level::Warn, "no Stalwart event for 30 hours")
+        line(&[now + 3630, now - 615]),
+        Finding::ok(states::event_recent(615))
+    );
+    assert_eq!(
+        line(&[now - 30 * 3600]),
+        Finding::warn(states::quiet(30 * 3600))
     );
 }
 
@@ -221,23 +174,21 @@ fn an_event_of_the_greatest_number_leaves_the_last_arrival_the_newest() {
         batch(index, now - 3600 + index);
     }
     batch(21, now - 60);
-    let found = events(&config);
-    assert_eq!(
-        (found.level, found.what.as_str()),
-        (Level::Ok, "the last Stalwart event arrived 1 minute ago")
-    );
+    assert_eq!(events(&config), Finding::ok(states::event_recent(60)));
 }
 
 #[test]
 fn systemd_names_only_a_last_run_that_did_not_succeed() {
     assert!(last_result(Some("success")).is_none());
-    let failed = last_result(Some("exit-code")).unwrap();
     assert_eq!(
-        (failed.level, failed.what.as_str()),
-        (Level::Warn, "the last collection run ended with exit-code")
+        last_result(Some("exit-code")),
+        Some(Finding::warn(states::run_failed("exit-code")))
     );
     for silent in [None, Some("")] {
-        assert_eq!(last_result(silent).unwrap().level, Level::Unknown);
+        assert_eq!(
+            last_result(silent),
+            Some(Finding::unknown(states::run_unknown()))
+        );
     }
 }
 
@@ -246,8 +197,8 @@ fn the_newest_snapshot_is_read_from_the_status_database() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("status.sqlite");
     assert_eq!(
-        finished(watch::last_run(&database), time::now()).level,
-        Level::Warn
+        finished(watch::last_run(&database), time::now()),
+        Finding::warn(states::no_collection())
     );
     let mut store = StatusStore::open(&database, 90).unwrap();
     let snapshot = Snapshot {
@@ -262,13 +213,13 @@ fn the_newest_snapshot_is_read_from_the_status_database() {
         .unwrap();
     drop(store);
     let fresh = finished(watch::last_run(&database), time::now());
-    assert_eq!(fresh.level, Level::Ok, "{}", fresh.line());
+    assert_eq!(named(&fresh), (Level::Ok, "doctor-collection-recent"));
     // Doctor reads as root and follows no link to a database.
     let linked = directory.path().join("linked.sqlite");
     std::os::unix::fs::symlink(&database, &linked).unwrap();
     assert_eq!(
-        finished(watch::last_run(&linked), time::now()).level,
-        Level::Unknown
+        named(&finished(watch::last_run(&linked), time::now())),
+        (Level::Unknown, "doctor-collection-unreadable")
     );
 }
 
@@ -300,7 +251,7 @@ fn selinux_host(enforce: &str, everywhere: &str, written: Option<u16>) -> tempfi
 /// module, `None` where it has not loaded it.
 fn on(
     host: &tempfile::TempDir,
-    loaded: Option<Result<String, String>>,
+    loaded: Option<Result<String, Unread>>,
     port: u16,
 ) -> Option<Finding> {
     let path = |name: &str| host.path().join(name).display().to_string();
@@ -325,59 +276,63 @@ fn on(
 #[test]
 fn the_selinux_module_is_judged_by_the_port_it_lets_nginx_reach() {
     let enforcing = selinux_host("1", "0 0", Some(8091));
-    let kept = on(&enforcing, Some(Ok(cil(8091))), 8091).unwrap();
     assert_eq!(
-        (kept.level, kept.what.as_str()),
-        (
-            Level::Ok,
-            "the SELinux module garrison is loaded and lets nginx reach the web service on port \
-             8091"
-        )
-    );
-    let moved = on(&enforcing, Some(Ok(cil(8091))), 9443).unwrap();
-    assert_eq!(moved.level, Level::Fail, "{}", moved.line());
-    assert_eq!(
-        moved.what,
-        "the SELinux module garrison lets nginx reach port 8091, not 9443 (web.port), so nginx \
-         answers 502"
+        on(&enforcing, Some(Ok(cil(8091))), 8091),
+        Some(Finding::ok(said::port_reached(8091)))
     );
     assert_eq!(
-        moved.fix.as_deref(),
-        Some("Run the installer again; it loads the module for web.port.")
+        on(&enforcing, Some(Ok(cil(8091))), 9443),
+        Some(Finding::fail(said::other_port(8091, 9443)))
     );
     // The installer wrote the file for web.port, and loading it failed.
     let written = selinux_host("1", "0 0", Some(9443));
-    let failed = on(&written, Some(Ok(cil(8091))), 9443).unwrap();
-    assert_eq!(failed.level, Level::Fail, "{}", failed.line());
-    assert!(
-        failed
-            .what
-            .starts_with("the SELinux module garrison lets nginx reach port 8091, not 9443"),
-        "{}",
-        failed.what
+    let module = written.path().join("garrison.cil").display().to_string();
+    assert_eq!(
+        on(&written, Some(Ok(cil(8091))), 9443),
+        Some(Finding::fail(said::load_failed(8091, 9443, &module)))
     );
-    let load = format!(
-        "Load the module the installer wrote for web.port: semodule -i {}",
-        written.path().join("garrison.cil").display()
-    );
-    assert_eq!(failed.fix.as_deref(), Some(load.as_str()));
     let permissive = selinux_host("0", "0 0", Some(8091));
     assert_eq!(
-        on(&permissive, Some(Ok(cil(8091))), 9443).unwrap().level,
-        Level::Warn
+        on(&permissive, Some(Ok(cil(8091))), 9443),
+        Some(Finding::warn(said::other_port_permissive(8091, 9443)))
     );
-    let unlisted = on(&enforcing, None, 8091).unwrap();
-    assert_eq!(unlisted.level, Level::Fail, "{}", unlisted.line());
+    let written_permissive = selinux_host("0", "0 0", Some(9443));
+    let module = written_permissive
+        .path()
+        .join("garrison.cil")
+        .display()
+        .to_string();
+    assert_eq!(
+        on(&written_permissive, Some(Ok(cil(8091))), 9443),
+        Some(Finding::warn(said::load_failed_permissive(
+            8091, 9443, &module
+        )))
+    );
+    assert_eq!(
+        on(&enforcing, None, 8091),
+        Some(Finding::fail(said::unloaded()))
+    );
+    assert_eq!(
+        on(&permissive, None, 8091),
+        Some(Finding::warn(said::unloaded_permissive()))
+    );
     let anywhere = selinux_host("1", "1 1", Some(8091));
     assert_eq!(
-        on(&anywhere, Some(Ok(cil(8091))), 9443).unwrap().level,
-        Level::Ok
+        on(&anywhere, Some(Ok(cil(8091))), 9443),
+        Some(Finding::ok(said::everywhere()))
     );
-    let unknown = on(&enforcing, Some(Err("no module".to_owned())), 8091).unwrap();
-    assert_eq!(unknown.level, Level::Unknown, "{}", unknown.line());
+    for (loaded, why) in [
+        (Err(Unread::NoPort), Unread::NoPort),
+        (Ok("(type garrison_port_t)\n".to_owned()), Unread::NoPort),
+    ] {
+        assert_eq!(
+            on(&enforcing, Some(loaded), 8091),
+            Some(Finding::unknown(said::port_unknown(&why)))
+        );
+    }
     // No SELinux, no line.
     let none = tempfile::tempdir().unwrap();
-    assert!(on(&none, Some(Ok(cil(8091))), 8091).is_none());
+    assert_eq!(on(&none, Some(Ok(cil(8091))), 8091), None);
 }
 
 /// A folder not made yet, as /var/backups before the first backup on a
@@ -386,24 +341,22 @@ fn the_selinux_module_is_judged_by_the_port_it_lets_nginx_reach() {
 /// disk cannot be asked, the line says why.
 #[test]
 fn free_space_is_judged_where_a_folder_will_be_made() {
-    let missing = room("/var/garrison-test-folder-that-is-not-there/backups");
-    assert_ne!(missing.level, Level::Unknown, "{}", missing.line());
+    let path = "/var/garrison-test-folder-that-is-not-there/backups";
+    assert_eq!(nearest(path).unwrap().0, Path::new("/var"));
+    let missing = room(path);
     assert!(
-        missing.what.starts_with(
-            "/var/garrison-test-folder-that-is-not-there/backups does not exist yet; /var, \
-             where it will be made, has "
+        matches!(
+            named(&missing),
+            (Level::Ok, "doctor-space-enough") | (Level::Warn, "doctor-space-low")
         ),
         "{}",
-        missing.what
+        missing.line()
     );
-    let found = room("/proc/self/status/garrison");
-    assert_eq!(found.level, Level::Unknown, "{}", found.line());
-    assert!(
-        found
-            .what
-            .starts_with("free space of /proc/self/status/garrison: "),
-        "{}",
-        found.what
+    let unasked = "/proc/self/status/garrison";
+    let error = nearest(unasked).unwrap_err();
+    assert_eq!(
+        room(unasked),
+        Finding::unknown(states::space_unknown(unasked, error))
     );
     assert_ne!(room("/").level, Level::Unknown);
 }
@@ -417,6 +370,8 @@ fn the_extraction_folder_cannot_be_taken_first() {
     fs::create_dir_all(&guessed).unwrap();
     let read = loaded_module();
     fs::remove_dir_all(&guessed).unwrap();
-    let error = read.unwrap_err();
-    assert!(!error.contains("File exists"), "{error}");
+    assert!(
+        !matches!(&read, Err(Unread::Folder(_, error)) if error.kind() == std::io::ErrorKind::AlreadyExists),
+        "{read:?}"
+    );
 }

@@ -140,15 +140,16 @@ check "the collector reads an empty metrics credential as none" \
 # doctor names a missing file with a command that makes it.
 inside "rm -f $credentials/metrics-credential"
 check "doctor names the missing metrics credential" \
-    "garrison doctor > /root/doctor.log 2>&1; grep -q 'FAIL  metrics-credential is missing' /root/doctor.log"
-inside "sed -n '/FAIL  metrics-credential is missing/{n;s/^.*: //;p;}' /root/doctor.log > /root/doctor-fix.sh &&
+    "garrison doctor > /root/doctor.log 2>&1;
+     grep -F '[doctor-credential-missing-empty]' /root/doctor.log | grep -q '^FAIL  metrics-credential '"
+inside "sed -n '/^FAIL  metrics-credential /{n;s/^.*: //;p;}' /root/doctor.log > /root/doctor-fix.sh &&
     grep -q /etc/garrison/credentials/metrics-credential /root/doctor-fix.sh && sh -e /root/doctor-fix.sh"
 check "the file doctor's command makes lets a collection run start" 'systemctl start garrison-collect.service'
 check "doctor finds both empty files in order where nothing reads them" "
     garrison doctor > /root/doctor.log 2>&1;
     ! grep -E -q 'FAIL  .*(metrics-credential|spamhaus-dqs-key)' /root/doctor.log &&
-        grep -q 'ok    metrics-credential is empty' /root/doctor.log &&
-        grep -q 'ok    spamhaus-dqs-key is empty' /root/doctor.log"
+        grep -F '[doctor-credential-empty]' /root/doctor.log | grep -q '^ok    metrics-credential ' &&
+        grep -F '[doctor-credential-empty]' /root/doctor.log | grep -q '^ok    spamhaus-dqs-key '"
 
 step "Key files that are there but empty"
 # An empty key file is no key, as a missing one is not, but systemd starts
@@ -167,7 +168,8 @@ check "the collector's journal says once that its key file is empty, and what ma
 check "doctor fails each empty key file with the setup that makes it" "
     garrison doctor > /root/doctor.log 2>&1;
     for key in $keys; do
-        grep -A 1 \"FAIL  \$key is empty, so \" /root/doctor.log | grep -q 'Run .garrison stalwart setup., which makes it' || exit 1
+        grep -A 1 -F '[doctor-credential-no-key]' /root/doctor.log |
+            grep -A 1 \"^FAIL  \$key \" | grep -q 'garrison stalwart setup' || exit 1
     done"
 check "the receiver does not start with an empty signature key, and says why" "
     ! systemctl restart garrison-ingest.service 2>/dev/null &&
@@ -188,7 +190,9 @@ check "with the keys back the collector's journal says once that it has its key 
             grep -c 'The collector has an API key for Stalwart again')\" = 1"
 check "doctor finds the key files in order again" "
     garrison doctor > /root/doctor.log 2>&1;
-    for key in $keys; do grep -q \"ok    \$key is private\" /root/doctor.log || exit 1; done"
+    for key in $keys; do
+        grep -F '[doctor-credential-private]' /root/doctor.log | grep -q \"^ok    \$key \" || exit 1
+    done"
 services "with the key files back"
 # The step started the broker and the receiver on purpose more often than
 # systemd allows in ten seconds, which would count against the steps after it.

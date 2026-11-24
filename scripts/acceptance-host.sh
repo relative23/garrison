@@ -123,16 +123,18 @@ through_nginx installed
 step "garrison doctor"
 inside '/opt/garrison/current/bin/garrison doctor > /root/doctor.log 2>&1 || true'
 inside 'sed "s/^/      | /" /root/doctor.log'
-for expected in "ok    garrison-web.service is active" "ok    the last collection run finished" \
-    "ok    the broker may read the access policy" "ok    webhook-signature-key is private" \
-    "presents a trusted certificate" "ok    Garrison answers at https://admin.example.test" \
-    "ok    nginx sends Strict-Transport-Security" "does not serve Stalwart's metrics" \
-    "shows Stalwart's sign-in page" "ok    the last Stalwart event arrived"; do
-    check "doctor: $expected" "grep -qF \"$expected\" /root/doctor.log"
+# Doctor's lines by the names of their states, which stay as they are.
+for expected in "[doctor-service-active]" "[doctor-collection-recent]" "[doctor-policy-readable]" \
+    "[doctor-credential-private]" "[doctor-certificate-valid]" "[doctor-interface-answers]" \
+    "[doctor-hsts-sent]" "[doctor-metrics-private]" "[doctor-sign-in-page-shown]" \
+    "[doctor-events-recent]"; do
+    check "doctor: $expected" "grep -qF '$expected' /root/doctor.log"
 done
-# The test names are reserved (.test) and the stand-in issuer knows no clients.
+check "doctor: every unit of Garrison's is active" \
+    '! grep -qF -e "[doctor-service-inactive]" -e "[doctor-service-unknown]" /root/doctor.log'
+# The test names are reserved (.test), and the stand-in issuer answers no JSON for the sign-in client.
 check "doctor: no other problem" \
-    '! grep "^FAIL" /root/doctor.log | grep -v -e "placeholder" -e "sign-in client" -e "registered client" | grep -q .'
+    '! grep "^FAIL" /root/doctor.log | grep -vF -e "[doctor-origin-placeholder]" -e "[doctor-client-not-stalwart]" | grep -q .'
 
 step "After a reboot"
 vm_reboot
