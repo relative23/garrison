@@ -47,7 +47,10 @@ a profile whose rights it holds: give the role what it lacks in the native
 administration (Roles), then bind it with
 `garrison access bind-role <role-id> --profile administrator`, or bind it to
 a profile it meets. `bind-role` says so where it binds a role that lacks a
-right its profile requires. Where a policy that reads is there already,
+right its profile requires, and why where the role's rights cannot be
+evaluated, as for a tenant's role. Both judge a role by the roles it
+inherits from alone, however many roles Stalwart holds. Where a policy that
+reads is there already,
 `init --force` keeps it then, since a new one would bind nobody and sign
 everyone out.
 

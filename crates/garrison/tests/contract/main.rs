@@ -24,6 +24,7 @@ use keys::{refused_without_the_gateway, rotate};
 use serde_json::json;
 
 // The parts of this test, in files beside this one.
+mod access;
 mod clients;
 mod keys;
 mod milter;
@@ -239,6 +240,7 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
         "{}",
         text(&init)
     );
+    access::bind_role(&lab, directory.path());
     let check = run(directory.path(), &["check-config"]);
     assert!(
         text(&check).contains("Access policy valid"),

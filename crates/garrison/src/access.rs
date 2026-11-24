@@ -24,7 +24,7 @@ use crate::{complain, credentials, say};
 mod defaults;
 mod folder;
 
-use defaults::{Roles, administrator_roles, default_profiles};
+use defaults::{administrator_roles, default_profiles};
 use folder::{Current, Folder, MAX_POLICY};
 
 const POLICY_GROUP: &str = "garrison-broker";
@@ -380,17 +380,17 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
                 return Ok(1);
             }
             // The role must exist; what it lacks for the profile is said.
-            let roles = Roles::read(config)?;
-            if !roles.exists(role) {
+            let client = native(config)?;
+            let authentication = defaults::authentication(&client)?;
+            let Some(judged) = defaults::judged(&client, &authentication, role)? else {
                 return Err(format!(
                     "Stalwart has no role {role}: bind one of the roles the native \
                      administration shows (Roles)."
                 ));
-            }
-            let rights = roles.rights(role)?;
+            };
             policy.role_bindings.insert(role.clone(), profile.clone());
             save(config, folder, &policy)?;
-            if let Some(note) = defaults::fit(&policy, profile, role, rights.as_ref()) {
+            if let Some(note) = defaults::fit(&policy, profile, role, judged.rights.as_ref()) {
                 say(&note);
             }
             Ok(0)

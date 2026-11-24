@@ -92,11 +92,14 @@ fn a_role_that_lacks_a_right_its_profile_requires_is_said_so() {
 #[test]
 fn a_role_that_meets_its_profile_is_bound_without_a_note() {
     let (authentication, roles) = lacking();
+    // Stalwart names an ID it has no object of as not found.
+    let none =
+        json!({"methodResponses": [["x:Role/get", {"list": [], "notFound": ["nobody"]}, "0"]]});
     let server = serve(vec![
         respond("x:Authentication/get", &json!([authentication])),
         respond("x:Role/get", &roles),
         respond("x:Authentication/get", &json!([authentication])),
-        respond("x:Role/get", &roles),
+        garrison_testing::http::json(&none),
     ]);
     let directory = prepared();
     let settings = directory.path().join("garrison.toml");

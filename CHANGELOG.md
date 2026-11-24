@@ -603,6 +603,8 @@ Notable changes for operators and users. The format follows
   would get nothing of it. Where a policy that reads is there, `init
   --force` keeps it in that case, since a new one would bind nobody and sign
   everyone out.
+- **`garrison access init` and `bind-role` work on a Stalwart with more than
+  64 roles, and `bind-role` names why a role's rights cannot be evaluated.**
 - **An action added after `garrison access init` reaches its users.**
   `init` gives the `administrator` profile every action of `[[actions]]`
   and the `operator` profile those marked `operator = true`, as

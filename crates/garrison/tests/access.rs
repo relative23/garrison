@@ -11,6 +11,8 @@ mod support;
 mod actions;
 #[path = "access/folder.rs"]
 mod folder;
+#[path = "access/graph.rs"]
+mod graph;
 #[path = "access/links.rs"]
 mod links;
 #[path = "access/roles.rs"]
@@ -44,14 +46,18 @@ fn init_binds_only_roles_with_every_administrator_right() {
     let all = ADMINISTRATOR_RIGHTS;
     let authentication = json!({"id": "singleton", "defaultAdminRoleIds": names(&["admin", "partial"]),
                                 "defaultUserRoleIds": names(&["user"])});
-    let roles = json!([
-        role("admin", &all, "Administrators"),
-        role("partial", &all[..4], "Almost administrators"),
-        role("user", &["authenticate"], "Users"),
-    ]);
+    // Each of the default administrator roles that is not also the users'
+    // is read by its ID.
     let server = serve(vec![
         respond("x:Authentication/get", &json!([authentication])),
-        respond("x:Role/get", &roles),
+        respond(
+            "x:Role/get",
+            &json!([role("admin", &all, "Administrators")]),
+        ),
+        respond(
+            "x:Role/get",
+            &json!([role("partial", &all[..4], "Almost administrators")]),
+        ),
     ]);
     let directory = against(&server.url);
     let init = run(directory.path(), &["access", "init"]);
@@ -107,15 +113,21 @@ fn init_binds_only_roles_with_every_administrator_right() {
 fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
     let authentication = json!({"id": "singleton", "defaultAdminRoleIds": names(&["weak"]),
                                 "defaultUserRoleIds": {}});
-    let roles = json!([
-        role("weak", &["authenticate"], "Weak"),
-        role("admins", &ADMINISTRATOR_RIGHTS, "Administrators of our own")
-    ]);
     let server = serve(vec![
         respond("x:Authentication/get", &json!([authentication])),
-        respond("x:Role/get", &roles),
+        respond(
+            "x:Role/get",
+            &json!([role("weak", &["authenticate"], "Weak")]),
+        ),
         respond("x:Authentication/get", &json!([authentication])),
-        respond("x:Role/get", &roles),
+        respond(
+            "x:Role/get",
+            &json!([role(
+                "admins",
+                &ADMINISTRATOR_RIGHTS,
+                "Administrators of our own"
+            )]),
+        ),
     ]);
     let directory = against(&server.url);
     let init = run(directory.path(), &["access", "init"]);
