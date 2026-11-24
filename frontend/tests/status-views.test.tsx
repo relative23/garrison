@@ -51,22 +51,28 @@ beforeAll(async () => {
   await Promise.all(MODULES.map((id) => VIEWS[id]?.chunk.preload()));
 });
 
+/** The views in which the status changes what is shown. A view outside this
+ * list that comes to show checks fails the first test until it is held here. */
+const SHOWING = ["dashboard", "services", "antivirus", "spam", "attacks", "backups", "alerts", "dns_tls"];
+
+// One test for each view: together they wait longer than one test may take.
 describe("a view that shows the collector's checks", () => {
-  it("says when the status cannot be read, was not refreshed, or is not there yet", async () => {
-    const showing = [];
-    for (const id of MODULES) {
-      if ((await shown(id, { status: EVERY })) !== (await shown(id, { status: status([]) }))) showing.push(id);
-    }
-    // The views found; that list may grow, and each view in it is held below.
-    expect(showing).toEqual(["dashboard", "services", "antivirus", "spam", "attacks", "backups", "alerts", "dns_tls"]);
-    for (const id of showing) {
-      const unread = await shown(id, { status: new Error("The status database is not readable") });
-      expect(unread, `${id}, without a status`).toContain("The status database is not readable");
-      const kept = await shown(id, { status: EVERY, refreshError: new Error("The broker is not reachable") });
-      expect(kept, `${id}, after a refresh that failed`).toContain("The status could not be refreshed.");
-      expect(kept, `${id}, after a refresh that failed`).toContain("The broker is not reachable");
-      const none = await shown(id, { status: status([], { available: false }) });
-      expect(none, `${id}, before the first collection`).toContain("The collector has not produced a status snapshot yet.");
-    }
+  it("is one of the registry's", () => {
+    expect(MODULES).toEqual(expect.arrayContaining(SHOWING));
+  });
+
+  it.each(MODULES)("is known as one, or as none: %s", async (id) => {
+    const shows = (await shown(id, { status: EVERY })) !== (await shown(id, { status: status([]) }));
+    expect(shows).toBe(SHOWING.includes(id));
+  });
+
+  it.each(SHOWING)("says when the status cannot be read, was not refreshed, or is not there yet: %s", async (id) => {
+    const unread = await shown(id, { status: new Error("The status database is not readable") });
+    expect(unread).toContain("The status database is not readable");
+    const kept = await shown(id, { status: EVERY, refreshError: new Error("The broker is not reachable") });
+    expect(kept).toContain("The status could not be refreshed.");
+    expect(kept).toContain("The broker is not reachable");
+    const none = await shown(id, { status: status([], { available: false }) });
+    expect(none).toContain("The collector has not produced a status snapshot yet.");
   });
 });
