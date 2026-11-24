@@ -307,8 +307,11 @@ fn remove_afterwards(lab: &mut Lab) {
                     .is_some_and(|text| text.ends_with("/oauth-client.json")),
                 _ => item["httpHeaders"]["X-Garrison"] == "events",
             };
+            // Stalwart numbers each kind of object on its own: an API key and
+            // an OAuth client can have the same ID.
             let id = item["id"].as_str().unwrap().to_owned();
-            if ours && !lab.created.iter().any(|(_, known)| *known == id) {
+            let known = |(other, known): &(String, String)| other == kind && *known == id;
+            if ours && !lab.created.iter().any(known) {
                 lab.created.push((kind.into(), id));
             }
         }
