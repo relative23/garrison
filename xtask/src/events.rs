@@ -2,10 +2,9 @@
 //!
 //! `cargo xtask event-types SCHEMA.json`, where SCHEMA.json is the body of
 //! `GET /api/schema` from the supported Stalwart release, writes the native
-//! label and explanation of every recorded event type to
-//! `crates/ingest/event_types.json`. It fails if the policy names an event the
-//! server does not know, which also catches typos: Stalwart rejects unknown
-//! webhook event keys.
+//! label of every recorded event type to `crates/ingest/event_types.json`.
+//! It fails if the policy names an event the server does not know, which also
+//! catches typos: Stalwart rejects unknown webhook event keys.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -20,7 +19,6 @@ const OUTPUT: &str = "crates/ingest/event_types.json";
 #[derive(Serialize)]
 struct Labels<'a> {
     label: &'a Value,
-    explanation: &'a Value,
 }
 
 pub(crate) fn event_types(root: &Path, schema: Option<&str>) -> Result<(), String> {
@@ -43,14 +41,11 @@ pub(crate) fn event_types(root: &Path, schema: Option<&str>) -> Result<(), Strin
     if !missing.is_empty() {
         return Err(format!("Unknown event types: {}", missing.join(", ")));
     }
-    let empty = Value::String(String::new());
     let document: BTreeMap<&str, Labels> = recorded
         .iter()
         .map(|name| {
-            let item = known[name];
             let labels = Labels {
-                label: &item["label"],
-                explanation: item.get("explanation").unwrap_or(&empty),
+                label: &known[name]["label"],
             };
             (*name, labels)
         })
