@@ -263,3 +263,29 @@ fn a_state_written_by_a_newer_release_does_not_suit_an_older_one() {
     fs::remove_file(backup.join("backup.json")).unwrap();
     assert_eq!(unsuited(&backup, "0.1.1"), None);
 }
+
+/// A release's self-check names each database it cannot read, with why; a
+/// report in another form is passed on in its own words.
+#[test]
+fn what_a_self_check_cannot_read_is_named() {
+    let report = serde_json::json!({
+        "result": "failed",
+        "databases": {
+            "web": {"ok": true, "integrity": "ok", "schemaVersion": 3, "rows": {}},
+            "collector": {"ok": false, "integrity": "ok", "schemaVersion": 2, "rows": {}},
+            "ingest": {"ok": false, "integrity": "unreadable (file is not a database)",
+                "schemaVersion": null, "rows": {}},
+            "broker": {"ok": null, "absent": true}
+        },
+        "message": "Problems in: collector, ingest"
+    });
+    assert_eq!(
+        unreadable(report.to_string().as_bytes()),
+        "collector (schema 2, integrity ok), ingest (schema unknown, integrity unreadable (file is \
+         not a database))"
+    );
+    assert_eq!(
+        unreadable(b"  Cannot load the configuration\n"),
+        "Cannot load the configuration"
+    );
+}

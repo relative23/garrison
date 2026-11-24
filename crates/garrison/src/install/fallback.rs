@@ -216,8 +216,9 @@ fn switched_back(
     let checked = cli(old, &["self-check"]).map_err(Failure::Before)?;
     if !checked.status.success() {
         return Err(Failure::Before(format!(
-            "{} cannot read the current state",
-            name(old)
+            "{} cannot read the current state, as its self-check says of {}",
+            name(old),
+            state::unreadable(&checked.stdout)
         )));
     }
     start(old).map_err(Failure::Start)?;

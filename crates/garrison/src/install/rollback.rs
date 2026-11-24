@@ -223,11 +223,15 @@ pub(super) fn rollback(with_state: bool) -> Step {
     }
     // After a schema change only the pre-upgrade copies suit the previous
     // release, and only its own self-check knows which schemas it reads.
-    if !with_state && !cli(&target, &["self-check"])?.status.success() {
-        return Err(format!(
-            "{name} cannot read the current data, probably because a database schema changed. \
-             Roll back with --restore-state to return to the data from before the upgrade."
-        ));
+    if !with_state {
+        let checked = cli(&target, &["self-check"])?;
+        if !checked.status.success() {
+            return Err(format!(
+                "{name} cannot read the current data, as its self-check says of {}. Roll back \
+                 with --restore-state to return to the data from before the upgrade.",
+                state::unreadable(&checked.stdout)
+            ));
+        }
     }
     let source = match source {
         Some(source) => Some((source.clone(), state_fits(&target, &source, comes_back)?)),

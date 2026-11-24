@@ -62,6 +62,34 @@ pub(super) fn unsuited(source: &Path, target: &str) -> Option<String> {
         })
 }
 
+/// The databases a release's `self-check` report in `report` calls
+/// unreadable, each with its schema version and its integrity as the release
+/// gives them; its own words where the report cannot be read.
+pub(super) fn unreadable(report: &[u8]) -> String {
+    let parsed: Option<Value> = serde_json::from_slice(report).ok();
+    let named: Option<Vec<String>> = parsed
+        .as_ref()
+        .and_then(|report| report["databases"].as_object())
+        .map(|databases| {
+            databases
+                .iter()
+                .filter(|(_, result)| result["ok"] == false)
+                .map(|(name, result)| {
+                    let version = match &result["schemaVersion"] {
+                        Value::Null => "unknown".to_owned(),
+                        version => version.to_string(),
+                    };
+                    let integrity = result["integrity"].as_str().unwrap_or("unknown");
+                    format!("{name} (schema {version}, integrity {integrity})")
+                })
+                .collect()
+        });
+    match named {
+        Some(named) if !named.is_empty() => named.join(", "),
+        _ => String::from_utf8_lossy(report).trim().to_owned(),
+    }
+}
+
 /// Remove the files SQLite keeps beside `database`: a WAL or journal of a
 /// file that is replaced or removed must not survive it.
 fn without_journals(folder: &Path, database: Database) {

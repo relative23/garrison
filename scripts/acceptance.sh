@@ -358,6 +358,12 @@ else
         exit 1
     fi
     echo "ok    a rollback across a schema change is refused"
+    if ! grep -q "as its self-check says of collector (schema " "$answer"; then
+        cat "$answer"
+        echo "FAIL  a refused rollback names the database its release cannot read"
+        exit 1
+    fi
+    echo "ok    a refused rollback names the database its release cannot read"
     refused=1
     names "current is still the release under test" current "$new"
     names "previous is still the release before it" previous "$old"
