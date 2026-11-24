@@ -74,7 +74,7 @@ fn state_fits(target: &Path, source: &Path, comes_back: bool) -> Step<(Uid, Gid)
             ));
         }
     }
-    precheck::copies_fit(source, &config, &[])?;
+    precheck::copies_fit(source, &config, &[], "the rollback")?;
     Ok(owner)
 }
 

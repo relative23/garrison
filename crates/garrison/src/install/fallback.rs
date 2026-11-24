@@ -100,7 +100,10 @@ pub(super) fn before_install(version: &str) -> Step<Option<Resumed>> {
 /// The state as it is, copied by `release`'s own backup into a folder of
 /// its own, before anything changes.
 fn kept_by(release: &Path) -> Step<PathBuf> {
-    room(&[(Path::new(BACKUPS), state_size())])?;
+    room(
+        &[(Path::new(BACKUPS), state_size())],
+        "the copy of the state as it is",
+    )?;
     let kept = fresh_folder(Path::new(BACKUPS), "pre-switch-back")?;
     let copied = cli(release, &["backup", "--to", &kept.display().to_string()])?;
     if !copied.status.success() {

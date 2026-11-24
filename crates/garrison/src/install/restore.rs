@@ -105,7 +105,7 @@ fn restore(from: &Path) -> Step {
     // where this run copies it.
     let copy_room = [(Path::new(BACKUPS), state_size())];
     let besides: &[(&Path, u64)] = if earlier.is_some() { &[] } else { &copy_room };
-    precheck::copies_fit(&source, &config, besides)?;
+    precheck::copies_fit(&source, &config, besides, "the restore")?;
     let kept = match earlier {
         Some(kept) => {
             announce(&format!(

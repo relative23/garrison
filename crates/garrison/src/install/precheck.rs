@@ -147,8 +147,14 @@ fn check_in(
 }
 
 /// Room for every copy in `source` beside the database it replaces, which
-/// goes only once the copy is whole, and for what `besides` names.
-pub(super) fn copies_fit(source: &Path, config: &Config, besides: &[(&Path, u64)]) -> Step {
+/// goes only once the copy is whole, and for what `besides` names, for
+/// `what`: the restore or the rollback.
+pub(super) fn copies_fit(
+    source: &Path,
+    config: &Config,
+    besides: &[(&Path, u64)],
+    what: &str,
+) -> Step {
     let folders: Vec<(PathBuf, u64)> = Database::ALL
         .into_iter()
         .filter_map(|database| {
@@ -162,7 +168,7 @@ pub(super) fn copies_fit(source: &Path, config: &Config, besides: &[(&Path, u64)
         .map(|(folder, bytes)| (folder.as_path(), *bytes))
         .collect();
     needs.extend_from_slice(besides);
-    room(&needs)
+    room(&needs, what)
 }
 
 #[cfg(test)]
@@ -287,10 +293,14 @@ mod tests {
         fs::create_dir_all(source.join("ingest")).unwrap();
         let copy = fs::File::create(source.join("ingest/events.sqlite")).unwrap();
         copy.set_len(4096).unwrap();
-        copies_fit(&source, &config, &[]).unwrap();
+        copies_fit(&source, &config, &[], "the restore").unwrap();
         let stat = rustix::fs::statvfs(directory.path()).unwrap();
         copy.set_len(stat.f_bavail * stat.f_frsize).unwrap();
-        let refused = copies_fit(&source, &config, &[]).unwrap_err();
+        let refused = copies_fit(&source, &config, &[], "the rollback").unwrap_err();
+        assert!(
+            refused.contains(" MiB free and the rollback needs "),
+            "{refused}"
+        );
         assert!(refused.ends_with("; nothing was changed."), "{refused}");
     }
 }

@@ -121,11 +121,12 @@ fn existing(path: &Path) -> &Path {
 }
 
 /// Every `(directory, bytes)` must fit on its filesystem, with a tenth more and
-/// some space to spare; needs on one filesystem add up.
-pub(super) fn room(needs: &[(&Path, u64)]) -> Step {
+/// some space to spare; needs on one filesystem add up. `what` names what
+/// needs the room, such as "the installation".
+pub(super) fn room(needs: &[(&Path, u64)], what: &str) -> Step {
     match lacking(needs, true)? {
         Some((directory, free, wanted)) => Err(format!(
-            "{} has {} MiB free and the installation needs {} MiB; nothing was changed.",
+            "{} has {} MiB free and {what} needs {} MiB; nothing was changed.",
             directory.display(),
             free >> 20,
             wanted >> 20
@@ -227,12 +228,16 @@ mod tests {
     fn room_is_measured_on_the_filesystem_that_takes_the_files() {
         let directory = tempfile::tempdir().unwrap();
         let missing = directory.path().join("not/yet/created");
-        room(&[(&missing, 1)]).unwrap();
-        let refused = room(&[(&missing, u64::MAX / 4)]).unwrap_err();
+        room(&[(&missing, 1)], "the installation").unwrap();
+        let refused = room(&[(&missing, u64::MAX / 4)], "the installation").unwrap_err();
         assert!(refused.ends_with("; nothing was changed."), "{refused}");
+        assert!(
+            refused.contains(" MiB free and the installation needs "),
+            "{refused}"
+        );
         // Two needs on one filesystem add up.
         let stat = rustix::fs::statvfs(directory.path()).unwrap();
         let half = stat.f_bavail * stat.f_frsize / 2;
-        assert!(room(&[(directory.path(), half), (&missing, half)]).is_err());
+        assert!(room(&[(directory.path(), half), (&missing, half)], "the restore").is_err());
     }
 }

@@ -287,7 +287,7 @@ fn install() -> Step {
     if old.is_some() && configured && resumed.is_none() {
         needs.push((Path::new(BACKUPS), state_size()));
     }
-    room(&needs)?;
+    room(&needs, "the installation")?;
     let release = install_release(&here, &version)?;
     // As `old` is: where /opt is a link, the path under BASE and the one the
     // links resolve to differ, and a reinstall would pass for an upgrade.
