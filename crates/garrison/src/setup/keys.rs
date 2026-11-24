@@ -114,7 +114,7 @@ pub(super) struct Ensured {
 /// `Admin::call` words a refusal: JMAP's error type `overQuota` (RFC 8620),
 /// which Stalwart gives where an account holds as many API keys as it may,
 /// five (measured on Stalwart 1.1.0).
-fn over_quota(error: &str) -> bool {
+pub(super) fn over_quota(error: &str) -> bool {
     error.contains(r#""type":"overQuota""#)
 }
 

@@ -21,7 +21,7 @@
 //! brings both places together wherever a run stopped.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::Engine;
@@ -341,12 +341,19 @@ fn configure(
     // Where its old key had to go first, the broker checks no rights until
     // it starts again with the new one, so it does at once.
     if broker.gone_first {
-        if let Some(line) = restart::restart(directory, &done.renewed) {
-            say(&line);
-        }
-        done.renewed.remove(BROKER.file);
+        restart_broker(directory, done);
     }
-    let collector = keys::ensure(admin, directory, &COLLECTOR, networks, rotate)?;
+    let collector = match keys::ensure(admin, directory, &COLLECTOR, networks, rotate) {
+        // No room beside the keys the broker's new one replaced: they go
+        // first, once the broker holds the new one.
+        Err(error) if keys::over_quota(&error) && !done.replaced.is_empty() => {
+            restart_broker(directory, done);
+            keys::remove(admin, &done.replaced)?;
+            done.replaced.clear();
+            keys::ensure(admin, directory, &COLLECTOR, networks, rotate)?
+        }
+        collector => collector?,
+    };
     done.replaced.extend(collector.replaced);
     let webhook = ensure_webhook(admin, config, directory, asked.webhook_url, rotate)?;
     let mut steps = vec![
@@ -379,6 +386,16 @@ fn configure(
         say(&format!("- {step}"));
     }
     tried(admin, config, networks, done)
+}
+
+/// The broker started again at once with the new key this run made, so that
+/// the keys it replaces may go before the run ends.
+fn restart_broker(directory: &Path, done: &mut Done) {
+    if done.renewed.remove(BROKER.file)
+        && let Some(line) = restart::restart(directory, &BTreeSet::from([BROKER.file]))
+    {
+        say(&line);
+    }
 }
 
 /// Both keys tried from this host, as the services will use them. A key
