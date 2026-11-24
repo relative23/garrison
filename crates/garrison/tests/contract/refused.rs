@@ -11,7 +11,7 @@ use garrison_testing::{config_text, write_private};
 use serde_json::json;
 
 use super::together::{Capture, assert_keys_held, assert_together};
-use super::{Setup, forget, lab, text};
+use super::{Setup, forget, lab, names_the_restart, support, text};
 
 /// The keys in the lab described as Garrison's.
 fn garrisons_keys(lab: &Lab) -> usize {
@@ -93,18 +93,13 @@ fn a_refused_administrator_is_said_as_such() {
     lab.call("x:ApiKey/set", &json!({"destroy": [key["id"]]}));
     for (status, code, said, keys) in said {
         let expected = match status {
-            401 => {
-                "Stalwart refused the administrator (HTTP 401): check the user name and the \
-                 password, or the API key."
-            }
-            403 => "Stalwart refused the administrator from this host's address (HTTP 403)",
-            _ => {
-                "Stalwart does not let the administrator read its milter entries: run setup as an \
-                 administrator who holds the keys' permissions"
-            }
+            401 => "setup-administrator-refused",
+            403 => "setup-administrator-refused-here",
+            _ => "setup-milters-unreadable",
         };
+        let named = support::states(said.as_bytes());
         assert!(
-            code == Some(1) && said.contains(expected) && keys == 0,
+            code == Some(1) && named.last().map(String::as_str) == Some(expected) && keys == 0,
             "{status}: exit {code:?}, {keys} keys of Garrison's: {said}"
         );
     }
@@ -142,9 +137,16 @@ fn a_user_without_rights_is_told_so_where_setup_ran_before() {
     let output = setup.run(&[]);
     write_private(Path::new(&setup.credential), &administrator);
     let said = text(&output);
+    // Stalwart shows the user neither the milters nor the account of the
+    // files' keys: each says to run setup as an administrator.
+    let named = support::states(&output.stderr);
+    let told = named.last().map(String::as_str);
     assert!(
         output.status.code() == Some(1)
-            && said.contains("run setup as an administrator who holds the keys' permissions"),
+            && matches!(
+                told,
+                Some("setup-milters-unreadable" | "setup-account-unseen")
+            ),
         "exit {:?}: {said}",
         output.status.code()
     );
@@ -196,10 +198,9 @@ fn setup_refuses_a_credentials_folder_it_cannot_write_before_stalwart_changes() 
     let wrong: Vec<String> = outcomes
         .into_iter()
         .filter(|(folder, code, said, keys)| {
-            let named = format!("Setup cannot write the credentials folder {folder}");
             *code != Some(2)
-                || !said.contains(&named)
-                || !said.contains("Run it as root, as `sudo garrison stalwart setup`")
+                || support::states(said.as_bytes()) != ["setup-not-root"]
+                || !said.contains(folder.as_str())
                 || *keys != 0
         })
         .map(|(folder, code, said, keys)| {
@@ -253,7 +254,7 @@ fn key_files_stalwart_no_longer_knows_get_new_keys() {
     }
     // The broker's key is new; the signature key is the folder's.
     assert!(
-        said.contains("Restart garrison-broker so it reads the new secret."),
+        names_the_restart(&said, "garrison-broker") && !names_the_restart(&said, "garrison-ingest"),
         "{said}"
     );
     assert_together(&lab, &credentials, &setup.gateway, &capture, "restored");

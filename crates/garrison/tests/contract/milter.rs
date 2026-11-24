@@ -3,7 +3,7 @@
 use garrison_testing::lab::Lab;
 use serde_json::json;
 
-use super::{run, text};
+use super::{run, support, text};
 
 /// The macro filter's entry in Stalwart follows the configuration: none while
 /// the filter does not answer, one while the `[milter]` section is there,
@@ -39,15 +39,17 @@ pub(super) fn macro_filter(
 
     // Nothing listens on the filter's port: setup changes nothing at all.
     // The port is held meanwhile, and then the filter listens on that socket.
-    let (held, port) = super::support::silent_port();
+    let (held, port) = support::silent_port();
     let with_filter = format!("{plain}\n[milter]\nport = {port}\nwhen_unreachable = \"accept\"\n");
     std::fs::write(&path, &with_filter).unwrap();
     let (code, output) = setup();
     assert_eq!(code, Some(1), "{output}");
     assert!(
-        output.contains(&format!(
-            "The macro milter does not answer on 127.0.0.1:{port}"
-        )),
+        support::states(output.as_bytes())
+            .last()
+            .map(String::as_str)
+            == Some("setup-milter-silent")
+            && output.contains(&format!("127.0.0.1:{port}")),
         "{output}"
     );
     assert!(!output.contains("- updated"), "{output}");

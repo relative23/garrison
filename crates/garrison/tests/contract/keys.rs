@@ -10,7 +10,7 @@ use garrison_testing::{config_text, write_private};
 use serde_json::json;
 
 use super::together::{Capture, assert_exporter_held, assert_keys_held_in, assert_webhook_held};
-use super::{Setup, forget, lab, remove_afterwards, run, text};
+use super::{Setup, forget, lab, names_the_restart, remove_afterwards, run, support, text};
 
 /// Without the gateway the keys are allowed from loopback only, which this
 /// host is not for the lab's Stalwart, just as for a Stalwart in a bridge
@@ -32,20 +32,26 @@ pub(super) fn refused_without_the_gateway(
         let output = run(directory, &[&base[..], &rest, more].concat());
         (output.status.code(), text(&output))
     };
+    // The broker's key, the first one tried, refused with the run that
+    // mends it: the run as it was asked for.
+    let refused = |output: &str, again: &str| {
+        support::states(output.as_bytes())
+            .last()
+            .map(String::as_str)
+            == Some("setup-key-refused-here")
+            && output.contains("broker-native-key")
+            && output.contains(&format!("`{again}`"))
+    };
     let (code, output) = setup(&[]);
     assert_eq!(code, Some(1), "{output}");
-    let refused = "Stalwart refuses the API key in broker-native-key from this host";
-    assert!(output.contains(refused), "{output}");
+    assert!(refused(&output, "garrison stalwart setup"), "{output}");
     lab.created.retain(|(kind, _)| kind != "ApiKey");
     let (code, output) = setup(&["--rotate"]);
     remove_afterwards(lab);
     assert_eq!(code, Some(1), "{output}");
-    assert!(output.contains(refused), "{output}");
     assert!(
-        !output.contains("Restart garrison-broker")
-            && output.contains(
-                "with Compose). Run `garrison stalwart setup --rotate` again once this is mended."
-            ),
+        refused(&output, "garrison stalwart setup --rotate")
+            && !names_the_restart(&output, "garrison-broker"),
         "{output}"
     );
     let keys = lab.call("x:ApiKey/get", &json!({"ids": null}));

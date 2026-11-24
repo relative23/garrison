@@ -4,10 +4,11 @@ use garrison_core::config::Config;
 
 use super::Admin;
 use super::objects::{Enabled, OAuthClient, Set, Stored};
+use crate::state::State;
 
 /// Garrison's OAuth client, where Stalwart has one: the one with Garrison's
 /// client ID.
-pub(super) fn find(admin: &Admin, config: &Config) -> Result<Option<Stored>, String> {
+pub(super) fn find(admin: &Admin, config: &Config) -> Result<Option<Stored>, State> {
     let client_id = garrison_web::app::client_id(&config.deployment.public_origin);
     let listed = admin.list::<Stored>("OAuthClient")?;
     Ok(listed
@@ -28,7 +29,7 @@ pub(super) fn ensure(
     admin: &Admin,
     config: &Config,
     existing: Option<Stored>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, State> {
     let origin = &config.deployment.public_origin;
     let client_id = garrison_web::app::client_id(origin);
     let mut wanted = OAuthClient {

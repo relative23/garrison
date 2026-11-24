@@ -11,8 +11,8 @@ use std::path::Path;
 
 use garrison_testing::lab::Lab;
 
-use super::Setup;
 use super::entries::{LOOPBACK, Ports, State, arrange, changes, milters, note, plain, through};
+use super::{Setup, support};
 
 /// The files of the credentials folder, with what each holds.
 fn files(credentials: &Path) -> BTreeMap<String, Vec<u8>> {
@@ -32,9 +32,11 @@ pub(super) fn every_refusal(lab: &Lab, setup: &Setup, ports: &Ports, found: &mut
     let credentials = setup.directory.join("credentials");
     let vain = [("g", LOOPBACK, ports.filter), ("o", LOOPBACK, ports.gone)];
     let alone = [("g", LOOPBACK, ports.filter)];
+    // Another program's entry asked in vain, and a filter at a port where
+    // another program answers, which no milter is.
     let refusals = [
-        (&vain[..], ports.filter, ports.gone),
-        (&alone[..], ports.taken, ports.taken),
+        (&vain[..], ports.filter, ports.gone, "setup-milter-stranded"),
+        (&alone[..], ports.taken, ports.taken, "setup-milter-silent"),
     ];
     let sets: [&[&str]; 4] = [
         &[],
@@ -42,7 +44,7 @@ pub(super) fn every_refusal(lab: &Lab, setup: &Setup, ports: &Ports, found: &mut
         &["--skip-metrics"],
         &["--rotate", "--skip-metrics"],
     ];
-    for (entries, port, named) in refusals {
+    for (entries, port, named, refusal) in refusals {
         for flags in sets {
             let state = State {
                 milter: true,
@@ -57,6 +59,9 @@ pub(super) fn every_refusal(lab: &Lab, setup: &Setup, ports: &Ports, found: &mut
             }
             if !said.contains(&format!("{LOOPBACK}:{named}")) {
                 wrong.push(format!("the refusal does not name {LOOPBACK}:{named}"));
+            }
+            if support::states(said.as_bytes()).last().map(String::as_str) != Some(refusal) {
+                wrong.push(format!("the refusal is not {refusal}"));
             }
             let changed = changes(&asked);
             if !changed.is_empty() {

@@ -13,7 +13,8 @@ use garrison_stalwart::http::Request;
 use garrison_stalwart::jmap::{Get, Got};
 
 use super::objects::{Exporter, Metrics, Secret, Set, Stored};
-use super::{Admin, random};
+use super::{Admin, random, states};
+use crate::state::State;
 
 /// The credential's file, as the collector reads it.
 pub(super) const FILE: &str = "metrics-credential";
@@ -43,7 +44,7 @@ pub(super) fn read(path: &Path) -> Option<ScrapeCredential> {
         .and_then(|data| ScrapeCredential::read(&data))
 }
 
-pub(super) fn find(admin: &Admin) -> Result<Found, String> {
+pub(super) fn find(admin: &Admin) -> Result<Found, State> {
     let singleton = Get {
         ids: Some(&["singleton"]),
         properties: None,
@@ -68,7 +69,7 @@ pub(super) fn credential(
     directory: &Path,
     found: &Found,
     rotate: bool,
-) -> Result<Option<Scrape>, String> {
+) -> Result<Option<Scrape>, State> {
     if found.enabled && !found.ours {
         return Ok(None);
     }
@@ -84,9 +85,10 @@ pub(super) fn credential(
         username: "garrison".to_owned(),
         secret: random(36)?,
     };
-    let document = serde_json::to_string(&credential).map_err(|error| error.to_string())?;
+    let document =
+        serde_json::to_string(&credential).map_err(|error| states::unwritten(&target, error))?;
     atomic_write(&target, document.as_bytes(), 0o600)
-        .map_err(|error| format!("Could not write {}: {error}", target.display()))?;
+        .map_err(|error| states::unwritten(&target, error))?;
     Ok(Some(Scrape {
         secret: credential.secret,
         new: true,
@@ -103,7 +105,7 @@ pub(super) fn ensure(
     config: &Config,
     found: &Found,
     scrape: &Scrape,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, State> {
     let target = config.credentials_directory.join(FILE);
     let exporter = Exporter::Enabled {
         auth_username: "garrison",
@@ -194,7 +196,7 @@ mod tests {
         mode: u32,
         rotate: bool,
         answers: Vec<String>,
-    ) -> (Result<Option<String>, String>, Option<String>, Value, usize) {
+    ) -> (Result<Option<String>, State>, Option<String>, Value, usize) {
         let directory = tempfile::tempdir().unwrap();
         let stored = json(&json!({"methodResponses": [["x:Metrics/get", {"list": [{
             "id": "singleton", "prometheus": {"@type": "Enabled", "authUsername": "garrison",
@@ -224,10 +226,14 @@ mod tests {
             secret["authSecret"]["secret"].as_str().unwrap().to_owned()
         });
         let shown = |text: String| text.replace(&directory.path().display().to_string(), "DIR");
+        let shown_state = |state: State| State {
+            text: shown(state.text),
+            ..state
+        };
         let held: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
-        let done = done.map(|step| step.map(shown)).map_err(shown);
+        let done = done.map(|step| step.map(shown)).map_err(shown_state);
         (done, secret, held, requests.len())
     }
 

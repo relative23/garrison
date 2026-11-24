@@ -13,7 +13,8 @@ use sha2::{Digest, Sha256};
 
 use super::keys::holds_key;
 use super::objects::{self, Enabled, EventsPolicy, HttpAuth, Level, Secret, Set, Stored, WebHook};
-use super::{Admin, random, write_secret};
+use super::{Admin, random, states, write_secret};
+use crate::state::State;
 
 /// `WebHook` objects have no description; this header marks Garrison's own webhook.
 const MARKER: (&str, &str) = ("X-Garrison", "events");
@@ -37,11 +38,11 @@ pub(super) struct Signing {
 /// holds the old one until it starts again. A file that holds no key gets
 /// one, as a missing file does: Stalwart takes no empty key, and the
 /// receiver does not start with one.
-pub(super) fn key(directory: &Path, rotate: bool) -> Result<Signing, String> {
+pub(super) fn key(directory: &Path, rotate: bool) -> Result<Signing, State> {
     let path = directory.join(KEY_FILE);
     if !rotate && holds_key(&path) {
         // As the receiver reads it, so that Stalwart signs with what it checks.
-        let key = read_secret(&path, Privacy::Owned).map_err(|error| error.to_string())?;
+        let key = read_secret(&path, Privacy::Owned).map_err(states::file_unread)?;
         return Ok(Signing { key, new: false });
     }
     let key = random(48)?;
@@ -50,7 +51,7 @@ pub(super) fn key(directory: &Path, rotate: bool) -> Result<Signing, String> {
 }
 
 /// Garrison's webhook, where Stalwart has one.
-pub(super) fn find(admin: &Admin) -> Result<Option<Stored>, String> {
+pub(super) fn find(admin: &Admin) -> Result<Option<Stored>, State> {
     let marked = |item: &Stored| {
         let headers = item.fields.get("httpHeaders");
         headers.and_then(|headers| headers.get(MARKER.0)?.as_str()) == Some(MARKER.1)
@@ -68,7 +69,7 @@ pub(super) fn ensure(
     url: Option<&str>,
     existing: Option<&Stored>,
     signing: &Signing,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, State> {
     let types = objects::webhook_events(event_types(), &FORBIDDEN_EVENTS)?;
     let named = URL_SAFE_NO_PAD.encode(&Sha256::digest(signing.key.as_bytes())[..12]);
     let url = url.map_or_else(

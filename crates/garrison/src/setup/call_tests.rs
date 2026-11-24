@@ -25,20 +25,16 @@ fn an_answer_this_release_does_not_read_is_said_as_one() {
         admin
             .call::<_, IgnoredAny>("x:WebHook/get", &json!({}))
             .unwrap_err()
+            .state
     };
-    let pointer = ", which this release of Garrison does not read; see the supported Stalwart \
-                   releases in the README";
-    let no_json = said();
-    assert!(
-        no_json.starts_with("x:WebHook/get: invalid JSON") && no_json.ends_with(pointer),
-        "{no_json}"
-    );
+    let no_json = garrison_core::json::parse(b"<html>Welcome</html>", MAX_ANSWER).unwrap_err();
+    assert_eq!(said(), states::unreadable("x:WebHook/get", no_json));
     for what in [
         "malformed answer",
         "malformed answer",
         "Stalwart response exceeds its size limit",
     ] {
-        assert_eq!(said(), format!("x:WebHook/get: {what}{pointer}"));
+        assert_eq!(said(), states::unreadable("x:WebHook/get", what));
     }
     server.requests();
 }
@@ -59,16 +55,10 @@ fn a_refused_administrator_is_said_as_such() {
         admin
             .call::<_, IgnoredAny>("x:ApiKey/get", &json!({}))
             .unwrap_err()
+            .state
     };
-    assert_eq!(
-        said(),
-        "Stalwart refused the administrator (HTTP 401): check the user name and the password, \
-         or the API key."
-    );
-    assert!(
-        said()
-            .starts_with("Stalwart refused the administrator from this host's address (HTTP 403)"),
-    );
+    assert_eq!(said(), states::administrator_refused());
+    assert_eq!(said(), states::administrator_refused_here());
     server.requests();
 }
 
@@ -93,11 +83,10 @@ fn a_failure_names_the_run_that_mends_it() {
     server.requests();
     assert_eq!(
         refused,
-        Err(
-            "Stalwart refused the administrator (HTTP 401): check the user name and the password, \
-             or the API key. Run `garrison setup` again once this is mended."
-                .to_owned()
-        )
+        Err(states::again(
+            states::administrator_refused(),
+            "garrison setup"
+        ))
     );
     let missing = directory.path().join("missing.json");
     let unread = setup(
@@ -111,24 +100,27 @@ fn a_failure_names_the_run_that_mends_it() {
         Err(states::again(
             states::file_unread(unavailable),
             "garrison stalwart setup --rotate"
-        )
-        .to_string())
+        ))
     );
 }
 
 /// Where a run fails once a new signature key or scrape credential is in
 /// its file and before Stalwart has surely reloaded its settings, setup says
-/// what may go without it until it runs again.
+/// what may go without it until it runs again, inside the failure's state.
 #[test]
 fn a_failure_after_a_new_secret_says_what_may_go_without_it() {
-    let error = || "x:Action/set: Stalwart answered HTTP 503".to_owned();
-    assert_eq!(until(error(), false, false), error());
-    assert_eq!(
-        until(error(), true, true),
-        "x:Action/set: Stalwart answered HTTP 503; the receiver may refuse Stalwart's batches \
-         until setup runs again, and Stalwart sends them again for an hour; the exporter may \
-         refuse the collector's scrape until setup runs again"
-    );
+    let error = || states::call_failed("x:Action/set", "Stalwart answered HTTP 503");
+    assert_eq!(states::until(error(), false, false), error());
+    let signature = states::signature_pending().to_string();
+    let scrape = states::scrape_pending().to_string();
+    for (key, credential) in [(true, false), (false, true), (true, true)] {
+        let said = states::until(error(), key, credential);
+        assert_eq!(said.name, error().name);
+        assert_eq!(
+            (said.text.contains(&signature), said.text.contains(&scrape)),
+            (key, credential)
+        );
+    }
 }
 
 /// Stalwart refuses a request for its rate limit with 429, as where it sees
@@ -143,9 +135,5 @@ fn a_rate_limit_is_said_as_one() {
     };
     let said = admin.call::<_, IgnoredAny>("x:ApiKey/get", &json!({}));
     server.requests();
-    assert_eq!(
-        said.unwrap_err(),
-        "x:ApiKey/get: Stalwart refused the request for its limit of requests (HTTP 429), whose \
-         window is a minute unless it was set otherwise"
-    );
+    assert_eq!(said.unwrap_err().state, states::limited("x:ApiKey/get"));
 }

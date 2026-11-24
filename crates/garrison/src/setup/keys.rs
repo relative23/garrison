@@ -13,10 +13,11 @@ use garrison_core::files::{self, Form, Holds, Privacy};
 use garrison_core::json;
 use garrison_stalwart::http::Request;
 
+use super::api::Failed;
 use super::objects::{
     Created, Enabled, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, Stored,
 };
-use super::{Admin, MAX_ANSWER, limited, restart, say, states, unreadable, write_secret};
+use super::{Admin, MAX_ANSWER, restart, say, states, write_secret};
 use crate::state::State;
 
 /// One of the keys: its file, as the broker or the collector reads it, its
@@ -63,16 +64,11 @@ enum Session {
 /// account is not known, and the run stops before it changes anything:
 /// taken for the administrator's own, it would leave another
 /// administrator's key valid.
-fn owner(admin: &Admin, target: &Path) -> Result<Option<Session>, String> {
+fn owner(admin: &Admin, target: &Path) -> Result<Option<Session>, State> {
     if !files::holds(target, Form::Token).is_ok_and(|held| held == Holds::Secret) {
         return Ok(None);
     }
-    let asked = |why: &dyn std::fmt::Display| {
-        format!(
-            "Asking Stalwart whose API key {} holds: {why}",
-            target.display()
-        )
-    };
+    let asked = |why: &dyn std::fmt::Display| states::owner_unknown(target, why);
     let data = files::read_bounded(target, 16384).map_err(|error| asked(&error))?;
     let secret = String::from_utf8_lossy(&data);
     let answer = Request::get(&admin.session_url())
@@ -81,20 +77,20 @@ fn owner(admin: &Admin, target: &Path) -> Result<Option<Session>, String> {
         .limit(MAX_ANSWER)
         .send()
         .map_err(|error| match error {
-            garrison_stalwart::Error::Limited(_) => asked(&limited()),
+            garrison_stalwart::Error::Limited(_) => asked(&states::LIMITED),
             error => asked(&error),
         })?;
     match answer.status {
         200 => {}
         401 => return Ok(Some(Session::Unknown)),
         403 => return Ok(Some(Session::Refused)),
-        status => return Err(asked(&format!("Stalwart answered HTTP {status}"))),
+        status => return Err(asked(&format_args!("Stalwart answered HTTP {status}"))),
     }
     let method = "GET /jmap/session";
-    let session = json::parse(&answer.body, MAX_ANSWER)
-        .map_err(|error| unreadable(method, &error.to_string()))?;
+    let session =
+        json::parse(&answer.body, MAX_ANSWER).map_err(|error| states::unreadable(method, error))?;
     let account = session["primaryAccounts"]["urn:stalwart:jmap"].as_str();
-    let account = account.ok_or_else(|| unreadable(method, "no account named"))?;
+    let account = account.ok_or_else(|| states::unreadable(method, "no account named"))?;
     Ok(Some(Session::Of(account.to_owned())))
 }
 
@@ -102,16 +98,11 @@ fn owner(admin: &Admin, target: &Path) -> Result<Option<Session>, String> {
 /// account that a file's key belongs to: JMAP's `accountNotFound`, as
 /// Stalwart answers a user without its administrator rights who asks for
 /// that account's keys (measured on Stalwart 1.1.0).
-fn unseen(error: String, target: &Path) -> String {
-    if !error.contains(": accountNotFound") {
-        return error;
+fn unseen(failed: Failed, target: &Path) -> State {
+    if failed.is("accountNotFound") {
+        return states::account_unseen(target, &failed.state);
     }
-    format!(
-        "Stalwart does not show the administrator the account that the API key in {} belongs \
-         to: run setup as an administrator who holds the keys' permissions, as one with \
-         Stalwart's administrator role ({error})",
-        target.display()
-    )
+    failed.state
 }
 
 /// What Stalwart and its file hold of one key, read before anything
@@ -123,7 +114,7 @@ pub(super) struct Found {
     existing: Vec<AccountKey>,
     keep: Option<(AccountKey, Stored)>,
     made: String,
-    full: String,
+    full: State,
 }
 
 /// The keys of `keys` as Stalwart and the files hold them: the
@@ -138,7 +129,7 @@ pub(super) fn find(
     directory: &Path,
     keys: &[&Key],
     rotate: bool,
-) -> Result<Vec<Found>, String> {
+) -> Result<Vec<Found>, State> {
     let Listed { account_id, list } = admin.list_in::<Stored>("ApiKey", None)?;
     let named: Vec<String> = list
         .iter()
@@ -204,13 +195,7 @@ pub(super) fn find(
             }
             (_, true) => format!("replaced API key '{description}' -> {path}"),
         };
-        let full = format!(
-            "Stalwart takes no more API keys in the administrator's account, which holds {}: \
-             setup makes a new key before it removes the one it replaces. Remove a key the \
-             account no longer needs in the Stalwart WebUI; setup made no new key \
-             '{description}' and removed none",
-            named.join(", ")
-        );
+        let full = states::account_full(&named.join(", "), description);
         found.push(Found {
             existing,
             keep,
@@ -221,30 +206,24 @@ pub(super) fn find(
     Ok(found)
 }
 
-/// Whether Stalwart refused a new object for its account's quota, as
-/// `Admin::call` words a refusal: JMAP's error type `overQuota` (RFC 8620),
-/// which Stalwart gives where an account holds as many API keys as it may,
-/// five (measured on Stalwart 1.1.0 and 1.2.0).
-fn over_quota(error: &str) -> bool {
-    error.contains(r#""type":"overQuota""#)
-}
-
 /// One key as it was asked for: the file's kept with the rights setup
 /// gives it, or a new one made, written to its file, tried from this host
 /// and taken up by its service, and only then the keys it replaces
 /// removed, so that a service always holds a key Stalwart takes. Where
-/// Stalwart's quota leaves the new key no room, nothing of this key
-/// changes. `take_up` has the service that holds the key read a new one.
-/// Whether anything changed: a kept key whose rights are as setup gives
-/// them is left as it is.
+/// Stalwart's quota leaves the new key no room (JMAP's error type
+/// `overQuota`, RFC 8620, where an account holds as many API keys as
+/// Stalwart takes, five: measured on Stalwart 1.1.0 and 1.2.0), nothing of
+/// this key changes. `take_up` has the service that holds the key read a
+/// new one. Whether anything changed: a kept key whose rights are as setup
+/// gives them is left as it is.
 pub(super) fn settle(
     admin: &Admin,
     config: &Config,
     key: &Key,
     found: Found,
     networks: &Enabled,
-    take_up: &dyn Fn(&Key) -> Result<(), String>,
-) -> Result<bool, String> {
+    take_up: &dyn Fn(&Key) -> Result<(), State>,
+) -> Result<bool, State> {
     let directory = &config.credentials_directory;
     let (target, description) = (directory.join(key.file), key.description);
     let rights = || KeyRights {
@@ -271,11 +250,11 @@ pub(super) fn settle(
         }
         return Ok(changed);
     }
-    if let Err(error) = make(admin, &target, description, rights()) {
-        return Err(if over_quota(&error) {
+    if let Err(failed) = make(admin, &target, description, rights()) {
+        return Err(if failed.is("overQuota") {
             found.full
         } else {
-            error
+            failed.state
         });
     }
     tried(config, key)?;
@@ -285,9 +264,7 @@ pub(super) fn settle(
         let destroy = Set::<()>::Destroy([old.id.as_str()]);
         admin
             .set_in("x:ApiKey/set", old.account.as_deref(), &destroy)
-            .map_err(|error| {
-                format!("{error}; the API key '{description}' that the new one replaced stays")
-            })?;
+            .map_err(|error| states::replaced_stays(error, description))?;
     }
     Ok(true)
 }
@@ -310,7 +287,7 @@ fn make(
     target: &Path,
     description: &str,
     rights: KeyRights<'_>,
-) -> Result<(), String> {
+) -> Result<(), Failed> {
     let new_key = NewKey {
         description,
         rights,
@@ -318,56 +295,49 @@ fn make(
     };
     let created: Created<NewSecret> = admin
         .call("x:ApiKey/set", &Set::create(new_key))
-        .map_err(|error| refused(&error, description))?;
+        .map_err(|failed| refused(failed, description))?;
     let new = created.created.get(NEW);
-    let new = new.ok_or("Stalwart did not return the new API key secret")?;
+    let new = new.ok_or_else(states::secret_missing)?;
     let Err(error) = write_secret(target, &new.secret) else {
         return Ok(());
     };
     let undone = admin.set("x:ApiKey/set", &Set::<()>::Destroy([new.id.as_str()]));
     Err(match undone {
-        Ok(()) => format!("{error}; the new API key was taken out of Stalwart again"),
-        Err(_) => format!(
-            "{error}; the new API key stays in Stalwart without its secret, and the next run \
-             replaces it"
-        ),
-    })
+        Ok(()) => states::taken_out(error),
+        Err(_) => states::left_in(error),
+    }
+    .into())
 }
 
 /// The service that holds `key` reads its new one: the broker starts again,
 /// the collector reads it at its next run. Where root's restart fails, the
 /// broker may still hold the key the new one replaces, which then stays.
-pub(super) fn take_up(key: &Key) -> Result<(), String> {
+pub(super) fn take_up(key: &Key) -> Result<(), State> {
     if !key.held {
         return Ok(());
     }
     match restart::restart(&BTreeSet::from([key.file])) {
         Ok(said) => {
-            if let Some(line) = said {
-                say(&line);
+            if let Some(state) = said {
+                say(&state.to_string());
             }
             Ok(())
         }
-        Err(asked) => Err(format!(
-            "{asked} Until then it holds the API key the new one replaces, which stays in \
-             Stalwart"
-        )),
+        Err(asked) => Err(states::old_key_kept(&asked)),
     }
 }
 
 /// What setup says where Stalwart made no new key. A user without
 /// administrator rights reads the list of keys, its own, but may not grant
 /// a key the permissions it lacks: JMAP's `forbidden`, as Stalwart answers
-/// it (measured on Stalwart 1.1.0).
-fn refused(error: &str, description: &str) -> String {
-    if error.contains(r#""type":"forbidden""#) {
-        return format!(
-            "Stalwart refused the administrator the API key '{description}', since it may not \
-             grant the key's permissions: run setup as an administrator who holds them, as one \
-             with Stalwart's administrator role ({error})"
-        );
-    }
-    format!("{error} (Stalwart did not return the new API key secret)")
+/// it (measured on Stalwart 1.1.0). JMAP's error type stays with it.
+fn refused(failed: Failed, description: &str) -> Failed {
+    let state = if failed.is("forbidden") {
+        states::key_not_granted(description, &failed.state)
+    } else {
+        states::unreturned(failed.state)
+    };
+    Failed { state, ..failed }
 }
 
 /// The key in its file opens a JMAP session from this host, as its service
@@ -376,31 +346,24 @@ fn refused(error: &str, description: &str) -> String {
 /// container's bridge network Stalwart sees this host as the bridge's
 /// gateway, not as 127.0.0.1, and then every key is refused. That is said
 /// here, at setup, rather than found later in the collector's results.
-fn tried(config: &Config, key: &Key) -> Result<(), String> {
+fn tried(config: &Config, key: &Key) -> Result<(), State> {
     let url = format!("{}/jmap/session", config.deployment.stalwart_url);
     let name = key.file;
     // As the services read it, so that what is tried is what they use.
     let path = config.credentials_directory.join(name);
-    let secret =
-        files::read_secret(&path, Privacy::Owned).map_err(|error| format!("{name}: {error}"))?;
+    let secret = files::read_secret(&path, Privacy::Owned).map_err(states::file_unread)?;
     let status = Request::get(&url)
         .header("Authorization", &format!("Bearer {secret}"))
         .timeout(Duration::from_secs(30))
         .status()
-        .map_err(|error| format!("Trying {name}: {error}"))?;
+        .map_err(|error| states::key_untried(name, error))?;
     match status {
         200 => Ok(()),
-        401 => Err(format!(
-            "Stalwart does not take the API key in {name} (HTTP 401)"
-        )),
-        403 => Err(format!(
-            "Stalwart refuses the API key in {name} from this host (HTTP 403): it sees this host \
-             at an address the key does not allow. That happens when Stalwart runs in a Docker \
-             or Podman bridge network; run it in the host network instead (docker run --network \
-             host, or network_mode: host with Compose)"
-        )),
-        other => Err(format!(
-            "Trying {name}: Stalwart answered HTTP {other} for its JMAP session"
+        401 => Err(states::key_untaken(name)),
+        403 => Err(states::key_refused_here(name)),
+        other => Err(states::key_untried(
+            name,
+            format_args!("Stalwart answered HTTP {other} for its JMAP session"),
         )),
     }
 }

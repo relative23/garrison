@@ -11,9 +11,9 @@ use rustix::fs::Access;
 use super::states;
 use crate::state::State;
 
-pub(super) fn write_secret(path: &Path, value: &str) -> Result<(), String> {
+pub(super) fn write_secret(path: &Path, value: &str) -> Result<(), State> {
     atomic_write(path, format!("{value}\n").as_bytes(), 0o600)
-        .map_err(|error| format!("Could not write {}: {error}", path.display()))
+        .map_err(|error| states::unwritten(path, error))
 }
 
 /// What a write that did not end left in `directory`: `atomic_write`

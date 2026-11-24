@@ -7,6 +7,8 @@ use std::path::Path;
 
 use garrison_core::systemd::SYSTEMCTL;
 
+use super::states;
+use crate::state::State;
 use crate::units;
 
 /// Where systemd keeps the credentials it loaded for a unit while it runs.
@@ -44,7 +46,7 @@ fn stale_in(directory: &Path, loaded: &Path) -> BTreeSet<&'static str> {
 /// start, as on a first setup before Garrison runs. Where root's restart
 /// fails, what is said is an error: the service may still hold its old
 /// secret.
-pub(super) fn restart(files: &BTreeSet<&str>) -> Result<Option<String>, String> {
+pub(super) fn restart(files: &BTreeSet<&str>) -> Result<Option<State>, State> {
     let units: Vec<&str> = HELD
         .iter()
         .filter(|(_, name)| files.contains(name))
@@ -67,22 +69,13 @@ pub(super) fn restart(files: &BTreeSet<&str>) -> Result<Option<String>, String> 
             .status()
             .is_ok_and(|status| status.success())
     };
-    let asked = if one {
-        format!("Restart {named} so it reads the new secret.")
-    } else {
-        format!("Restart {named} so they read the new secrets.")
-    };
+    let asked = states::restart_asked(&named, one);
     Ok(Some(if !rustix::process::geteuid().is_root() {
         asked
     } else if !systemctl(&["is-active", "--quiet"]) {
-        if one {
-            format!("{named} reads the new secret when it starts.")
-        } else {
-            "The services read the new secrets when they start.".to_owned()
-        }
+        states::read_at_start(&named, one)
     } else if systemctl(&["try-restart"]) {
-        let secrets = if one { "secret" } else { "secrets" };
-        format!("{named} restarted with the new {secrets}.")
+        states::restarted(&named, one)
     } else {
         return Err(asked);
     }))
@@ -130,16 +123,14 @@ mod tests {
         let both = BTreeSet::from(["broker-native-key", "webhook-signature-key"]);
         assert_eq!(
             restart(&both),
-            Ok(Some(
-                "Restart garrison-ingest and garrison-broker so they read the new secrets."
-                    .to_owned()
-            ))
+            Ok(Some(states::restart_asked(
+                "garrison-ingest and garrison-broker",
+                false
+            )))
         );
         assert_eq!(
             restart(&BTreeSet::from(["broker-native-key"])),
-            Ok(Some(
-                "Restart garrison-broker so it reads the new secret.".to_owned()
-            ))
+            Ok(Some(states::restart_asked("garrison-broker", true)))
         );
         for none in [BTreeSet::new(), BTreeSet::from(["collector-native-key"])] {
             assert_eq!(restart(&none), Ok(None));

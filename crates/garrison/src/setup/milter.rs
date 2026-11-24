@@ -17,9 +17,11 @@ use garrison_core::config::{Config, DEFAULT_PATH};
 use garrison_core::systemd::SYSTEMCTL;
 use serde::Serialize;
 
+use super::api::Failed;
 use super::objects::{Set, Stored};
-use super::{Admin, unreadable};
-use crate::doctor::milter::{WITHIN, entries};
+use super::{Admin, states};
+use crate::doctor::milter::{WITHIN, entries, stray};
+use crate::state::State;
 use crate::units;
 use entries::Entry;
 
@@ -90,13 +92,9 @@ fn managed() -> bool {
 /// The ports the filter listens on where setup manages it and it runs; an
 /// error where it runs and they cannot be seen, since setup would not know
 /// which entries ask it.
-fn listening() -> Result<Vec<u16>, String> {
+fn listening() -> Result<Vec<u16>, State> {
     match entries::listening().filter(|_| managed()) {
-        Some(ports) if ports.is_empty() => Err(format!(
-            "{} runs, but setup cannot see where it listens, so it cannot tell which of \
-             Stalwart's entries ask it",
-            units::MILTER
-        )),
+        Some(ports) if ports.is_empty() => Err(states::milter_unseen()),
         ports => Ok(ports.unwrap_or_default()),
     }
 }
@@ -108,20 +106,17 @@ fn moving(listening: &[u16], port: u16) -> bool {
 
 /// Whether the filter could have `port` once it moves: another program may
 /// hold it, and the filter would leave the port Stalwart asks for nothing.
-fn free(port: u16) -> Result<(), String> {
+fn free(port: u16) -> Result<(), State> {
     match TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
         Ok(_) => Ok(()),
-        Err(error) => Err(format!(
-            "The macro milter cannot move to 127.0.0.1:{port} ({error}). Nothing was changed: \
-             free that port, or give the filter another"
-        )),
+        Err(error) => Err(states::milter_port_taken(port, error)),
     }
 }
 
 /// Root starts the filter anew where it does not run, or runs with an older
 /// configuration than there is now, or is to move (`force`); then it must
 /// answer on `port`. Whether it was started anew.
-fn started(port: u16, force: bool) -> Result<bool, String> {
+fn started(port: u16, force: bool) -> Result<bool, State> {
     let mut restarted = false;
     if managed() {
         systemctl(&["enable", "--quiet"]);
@@ -137,11 +132,7 @@ fn started(port: u16, force: bool) -> Result<bool, String> {
         }
         std::thread::sleep(Duration::from_millis(500));
     }
-    Err(format!(
-        "The macro milter does not answer on 127.0.0.1:{port} ({problem}): while Stalwart asks it \
-         there, it defers all incoming mail. `journalctl -u {} -n 20` shows why it does not run.",
-        units::MILTER
-    ))
+    Err(states::milter_silent(port, &problem))
 }
 
 /// Whether the running filter started after `garrison.toml`, which its unit
@@ -168,50 +159,32 @@ fn current() -> bool {
     matches!((started, changed), (Some(started), Some(changed)) if started > changed.as_secs())
 }
 
-/// Why setup leaves Stalwart's milters as they are: it asks `stranded` in
-/// vain, and they are not the filter's.
-fn refused(stranded: &[&Entry]) -> String {
-    let asked: Vec<String> = stranded
-        .iter()
-        .map(|entry| {
-            let (address, id) = (entry.address(), &entry.id);
-            let meanwhile = entry.meanwhile("all incoming mail");
-            format!("{address} (entry {id}), where nothing answers, so it {meanwhile}")
-        })
-        .collect();
-    let (asked, remove) = (asked.join(", and at "), entries::REMOVE);
-    format!("Stalwart asks a milter at {asked}. {remove} Setup changed nothing")
-}
-
 /// Why setup stops where Stalwart does not let the administrator read its
 /// milter entries, as a user without its administrator role: it could not
 /// tell whether Stalwart asks one in vain.
-fn unread(error: String) -> String {
-    if !error.contains(": forbidden") {
-        return error;
+fn unread(failed: Failed) -> State {
+    if failed.is("forbidden") {
+        return states::milters_unreadable(&failed.state);
     }
-    format!(
-        "Stalwart does not let the administrator read its milter entries: run setup as an \
-         administrator who holds the keys' permissions, as one with Stalwart's administrator \
-         role ({error})"
-    )
+    failed.state
 }
 
 /// Before setup changes anything: Stalwart asks no entry in vain that is
 /// not the filter's, and where the configuration has the filter, it
 /// answers, or can move to its port. What was done, where the filter was
 /// started anew.
-pub(super) fn prepare(admin: &Admin, config: &Config) -> Result<Option<String>, String> {
+pub(super) fn prepare(admin: &Admin, config: &Config) -> Result<Option<String>, State> {
     let stored = admin.list::<Entry>("MtaMilter").map_err(unread)?;
     let port = config.milter.as_ref().map(|milter| milter.port);
-    let listening = listening().map_err(|error| format!("{error}. Nothing was changed"))?;
+    let listening = listening().map_err(states::unchanged)?;
     let ours = entries::ours(&stored, port, &listening);
     let theirs = stored
         .iter()
         .filter(|entry| !ours.iter().any(|our| our.id == entry.id));
     let stranded = entries::vain(theirs, &|entry| entry.answers(WITHIN));
     if !stranded.is_empty() {
-        return Err(refused(&stranded));
+        let lines: Vec<State> = stranded.into_iter().map(stray).collect();
+        return Err(states::milter_stranded(&lines));
     }
     match port {
         None => Ok(None),
@@ -225,10 +198,10 @@ pub(super) fn prepare(admin: &Admin, config: &Config) -> Result<Option<String>, 
 /// Enter, update or take out the filter's entries, as the configuration
 /// says, and leave one, as Stalwart shows it where that is as asked; what was
 /// done, if anything.
-pub(super) fn ensure(admin: &Admin, config: &Config) -> Result<Option<String>, String> {
+pub(super) fn ensure(admin: &Admin, config: &Config) -> Result<Option<String>, State> {
     let shown = admin.list::<Stored>("MtaMilter")?;
     let read = serde_json::to_value(&shown).and_then(serde_json::from_value::<Vec<Entry>>);
-    let stored = read.map_err(|error| unreadable("x:MtaMilter/get", &error.to_string()))?;
+    let stored = read.map_err(|error| states::unreadable("x:MtaMilter/get", error))?;
     let port = config.milter.as_ref().map(|milter| milter.port);
     let ours = entries::ours(&stored, port, &listening()?);
     // One stays where the configuration has the filter: more would have
@@ -284,7 +257,7 @@ pub(super) fn ensure(admin: &Admin, config: &Config) -> Result<Option<String>, S
 /// configuration no longer has stops, now that Stalwart has forgotten it.
 /// The note an earlier release kept of the filter's entry goes, as nothing
 /// reads it. What was done.
-pub(super) fn retire(config: &Config) -> Result<Vec<String>, String> {
+pub(super) fn retire(config: &Config) -> Result<Vec<String>, State> {
     let mut done = Vec::new();
     let note = config.credentials_directory.join(units::MILTER_ENTRY);
     if fs::remove_file(&note).is_ok() {
@@ -332,7 +305,7 @@ mod tests {
     fn the_filter_moves_only_to_a_port_it_can_have() {
         let held = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = held.local_addr().unwrap().port();
-        assert!(free(port).is_err_and(|refusal| refusal.contains("Nothing was changed")));
+        assert!(free(port).is_err_and(|refusal| refusal.name == "setup-milter-port-taken"));
         drop(held);
         assert_eq!(free(port), Ok(()));
     }

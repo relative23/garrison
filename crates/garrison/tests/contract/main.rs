@@ -159,6 +159,27 @@ fn states(output: &Output) -> Vec<String> {
     said
 }
 
+/// Whether a run that failed and said `said` ends with a state of setup's
+/// and names the run that mends it: `garrison stalwart setup`, with the
+/// flags it was given, which that state carries.
+fn names_its_mend(said: &str) -> bool {
+    let named = support::states(said.as_bytes());
+    named.last().is_some_and(|name| name.starts_with("setup-"))
+        && said.contains("`garrison stalwart setup")
+}
+
+/// Whether a line of what a run said restarts `unit` or asks for its
+/// restart.
+fn names_the_restart(said: &str, unit: &str) -> bool {
+    said.lines().any(|line| {
+        let named = support::states(line.as_bytes());
+        named
+            .iter()
+            .any(|name| name == "setup-restart-asked" || name == "setup-restarted")
+            && line.contains(unit)
+    })
+}
+
 /// What a write that was interrupted leaves beside the files, which the
 /// next run removes.
 const PENDING: &str = ".pending-of-an-interrupted-write";
@@ -276,8 +297,11 @@ fn unchanged(lab: &Lab, directory: &std::path::Path, credential: &str, gateway: 
         .filter(|asked| asked.contains("/set") && *asked != "x:Action/set create")
         .collect();
     assert_eq!(written, Vec::<&String>::new(), "{said}");
+    let restarts = ["setup-restart-asked", "setup-restarted"];
     assert!(
-        !said.contains("Restart ") && !said.contains(" restarted"),
+        !states(&again)
+            .iter()
+            .any(|name| restarts.contains(&name.as_str())),
         "{said}"
     );
     let stdout = String::from_utf8_lossy(&again.stdout);
