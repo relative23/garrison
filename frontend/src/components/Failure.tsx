@@ -6,6 +6,8 @@
 // else, a request that got no answer or one that could not be read, is said
 // to be so. Never the browser's or a proxy's own words, which are neither
 // Garrison's nor in the page's language.
+import { useEffect, useRef } from "react";
+
 import { ApiError } from "../api/client";
 import { i18n, useTranslation } from "../i18n";
 import type { Resource } from "../lib/useResource";
@@ -32,7 +34,9 @@ function Reason({ error }: { error: Error }) {
 
 /** Why a request failed, with a way to try again. `lead` says what the
  * failure means for what is still on the page; with data still in view the
- * caller makes it a warning. */
+ * caller makes it a warning. A retry that is answered takes the notice away
+ * with its button: the focus that the button held goes to the page's content,
+ * which the notice gave way to. */
 export function ErrorState({
   error,
   retry,
@@ -45,6 +49,16 @@ export function ErrorState({
   tone?: "warning" | "error";
 }) {
   const { t } = useTranslation();
+  const pressed = useRef(false);
+  useEffect(
+    () => () => {
+      // Gone with the notice, the button left the focus to the page.
+      if (pressed.current && (document.activeElement === null || document.activeElement === document.body)) {
+        document.getElementById("content")?.focus();
+      }
+    },
+    [],
+  );
   return (
     <Notice tone={tone} live>
       <div className="flex items-center justify-between gap-4">
@@ -53,7 +67,14 @@ export function ErrorState({
           <Reason error={error} />
         </div>
         {retry && (
-          <Button variant="outline" size="sm" onClick={retry}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(event) => {
+              pressed.current = document.activeElement === event.currentTarget;
+              retry();
+            }}
+          >
             {t("common.tryAgain")}
           </Button>
         )}

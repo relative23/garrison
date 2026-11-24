@@ -1,9 +1,9 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 import { ApiError } from "../src/api/client";
 import { Dashboard } from "../src/modules/Dashboard";
 import { metrics, observation, session, status } from "./support/fixtures";
-import { renderView } from "./support/render";
+import { openApp, renderView } from "./support/render";
 import { serve } from "./support/server";
 
 const observations = [
@@ -132,6 +132,22 @@ describe("dashboard", () => {
     server.answer("GET metrics", { body: metrics() });
     fireEvent.click(retry);
     expect(await screen.findByText("Queued messages")).toBeTruthy();
+  });
+
+  it("gives the focus that Try again held to the page's content once the retry answers", async () => {
+    const server = serve({
+      "GET session": { body: { session: session() } },
+      "GET status": { body: status([]) },
+      "GET metrics": { status: 503, body: { detail: "The status database is not readable" } },
+    });
+    openApp("/admin/dashboard");
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    retry.focus();
+    server.answer("GET metrics", { body: metrics() });
+    fireEvent.click(retry);
+    await screen.findByText("Queued messages");
+    // The notice went with the button: the keyboard is in the content it gave way to, not on the page.
+    await waitFor(() => expect(document.activeElement?.id).toBe("content"));
   });
 
   it("names the reference of an internal error and of no other", async () => {

@@ -24,6 +24,7 @@ import { chromium } from "playwright";
 
 import { skewed, slept, untimed } from "./clocks.mjs";
 import { failingRequests } from "./failures.mjs";
+import { vanishing } from "./focus.mjs";
 import { uncertainResult } from "./jobs.mjs";
 import { paging } from "./paging.mjs";
 import { refusedSession, rightsChange, twoTabs } from "./tabs.mjs";
@@ -214,6 +215,7 @@ try {
   expect((await searched).status() === 200, "the event history answers a search");
 
   await paging(shared, page);
+  await vanishing(shared, page);
 
   step = "menu on a phone";
   await page.setViewportSize(PHONE);
@@ -451,5 +453,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `Passed: sign-in, ${PAGES.length} pages, menu, search, paging, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, an uncertain job, failures, HTTP/2, a clock ahead and behind, a session without a time left, a computer that slept, a viewer, a change of rights, two tabs, a refused session and sign-out.`,
+  `Passed: sign-in, ${PAGES.length} pages, menu, search, paging, buttons that go, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, an uncertain job, failures, HTTP/2, a clock ahead and behind, a session without a time left, a computer that slept, a viewer, a change of rights, two tabs, a refused session and sign-out.`,
 );

@@ -173,6 +173,8 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A button that goes once pressed leaves the keyboard in the content.**
+  "Show all rows" and "Try again" dropped the focus to the page.
 - **Following a started job costs Stalwart about 30 checks of rights a
   minute, not 50.** The Maintenance page no longer reads its list again with
   every look at the job; the list takes the result when the job ends.

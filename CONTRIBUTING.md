@@ -236,7 +236,9 @@ grants everything, or the dashboard alone to a sign-in asked for with
 `e2e/` drives it in a real Chrome. `npm run flows` does what a user does: it
 signs in, opens every page, moves through the menu, also at a phone's width
 and from the keyboard, searches the event history and pages through it from
-the keyboard, goes Back from a page the
+the keyboard, presses Show all rows and Try again from the keyboard, which
+go once pressed and must leave the focus in the content, goes Back from a
+page the
 interface led to, opens the page search with Ctrl+K on a phone, saves
 settings, runs a maintenance action from the keyboard, follows one whose
 result is uncertain, which must be a warning to axe and the accessibility
