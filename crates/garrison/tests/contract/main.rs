@@ -27,6 +27,8 @@ use serde_json::json;
 mod access;
 mod clients;
 mod entries;
+mod entry_refusals;
+mod entry_stalwart;
 mod entry_stops;
 mod exporter;
 mod keys;

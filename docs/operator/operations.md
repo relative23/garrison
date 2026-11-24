@@ -44,8 +44,8 @@ public hosts do not serve its metrics, that Stalwart knows Garrison's
 sign-in client and names itself the `issuer` garrison.toml names (asked of
 Stalwart's own listener), that it takes the broker's and the collector's API
 keys from this host, where the macro filter is switched on that it answers and
-that Stalwart's entry asks it there, that Stalwart asks no milter on this host
-where nothing answers (both read with the collector's API key), and that the issuer's name shows Stalwart's own
+that Stalwart's entry asks it there, that Stalwart asks no milter where
+nothing answers (both read with the collector's API key), and that the issuer's name shows Stalwart's own
 sign-in page with the scripts and style sheets it loads. For that it holds the page behind
 the public name against the page Stalwart serves itself, so the check is the
 same whatever else shares that name: a webmail that answers with a sign-in
@@ -327,7 +327,7 @@ Stalwart WebUI if you no longer need them.
 | A notification says the collector has stopped | No collection run has finished for ten minutes, so nothing is checked. `systemctl status garrison-collect.service garrison-collect.timer` shows whether it fails or was stopped; `garrison check-config` names a configuration it no longer loads. A second message follows when it runs again. |
 | No notification arrives | `garrison notify-test` says how each channel took the message. For ntfy and a webhook, 401 or 403 means the token in `/etc/garrison/credentials`; for mail, "did not sign in" means the account or its password, and "the certificate is not valid for this name" means that `mail_host` is not a name the server's certificate carries, which the message names ([configuration](configuration.md#notifications)). The Alerts page names the last notification a channel did not take, with its time, until the next one goes out; a channel taken out of the configuration is no longer named there. |
 | Incoming mail is deferred since the macro filter was switched on | Stalwart cannot reach the filter where its entry asks it: `garrison doctor` says whether it answers and where Stalwart asks it, `systemctl status garrison-milter` why it does not answer. A Stalwart in a container network of its own cannot reach this host's loopback; run it in the host network. To stop asking the filter at once, remove the `[milter]` section and run `garrison stalwart setup`. |
-| `stalwart setup` says Stalwart asks a milter where nothing answers | An entry in Stalwart asks this host at a port where no milter answers, such as the macro filter's from before its `port` changed and setup's note of it was lost, and Stalwart defers all incoming mail. Setup cannot tell whose it is and changed no entry: unless something is to answer there, remove the entry in the Stalwart WebUI (Settings ▸ MTA ▸ Milters), reload its settings and run setup again. |
+| `stalwart setup` says Stalwart asks a milter where nothing answers | An entry in Stalwart asks a milter where none answers, such as the macro filter's at an old `port` once the filter left it, and Stalwart defers all incoming mail. Setup changed nothing: unless something is to answer there, remove the entry in the Stalwart WebUI (Settings ▸ MTA ▸ Milters), reload its settings and run setup again. |
 | A sender is told "an attached Office document contains macros" | The macro filter refused the message ([configuration](configuration.md#milter)). `journalctl -u garrison-milter` shows when and what kind of document, never whose. With `on_macro = "tag"` such mail is taken and marked instead. |
 | An action says "not installed or loaded" | The configured unit does not exist on this host. |
 | An action is denied by systemd | The polkit rule is older than the configuration; run the installer again or write the rule (see [configuration](configuration.md#actions)). |

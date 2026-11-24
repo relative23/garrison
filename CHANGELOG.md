@@ -1953,8 +1953,8 @@ Notable changes for operators and users. The format follows
   `web.port`**, with which nginx answers 502, and names the installer, which
   loads it for the port.
 - **`garrison stalwart setup` leaves one entry for the macro filter in
-  Stalwart**, also where its note of the entry is lost, and switches that
-  entry on again where it was switched off.
+  Stalwart**, which it finds by the address it asks, and switches that entry
+  on again where it was switched off.
 - **`garrison doctor` fails a macro filter entry in Stalwart that asks another
   port than `[milter]` names**, as after a change of `port` without setup, with
   which Stalwart defers all incoming mail.
@@ -1962,9 +1962,17 @@ Notable changes for operators and users. The format follows
   answers 502 for Garrison**, and names the service, the include's port and the
   SELinux module instead of the include itself.
 - **`garrison stalwart setup` no longer ends in success while Stalwart asks a
-  milter on this host where nothing answers, and `garrison doctor` names every
-  such entry**, also without setup's note of the macro filter's. Remove one
-  that setup cannot tell for the filter's in the Stalwart WebUI.
+  milter where nothing answers, and `garrison doctor` names every such entry,
+  whatever host it names.** Setup refuses before it changes anything; remove
+  such an entry that is not the filter's in the Stalwart WebUI.
+- **Setup keeps no note of the macro filter's entry any more: setup, the
+  installer and doctor find it by the address it asks, under any name of this
+  host.** The next setup run removes the note an earlier release left in
+  `/etc/garrison/credentials`.
+- **`garrison stalwart setup` no longer moves the macro filter to a port
+  another program holds**, which left Stalwart deferring all incoming mail: it
+  refuses before anything changes, and moves the filter only once Stalwart
+  asks it at the new port.
 - **`garrison doctor` judges the access policy exactly as the broker's own
   reading takes it**: one the broker owns is a warning, no longer a failure,
   one it does not take is named with why, and a closed `/etc/garrison` with

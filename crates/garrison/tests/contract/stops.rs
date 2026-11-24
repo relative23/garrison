@@ -201,8 +201,8 @@ fn agree(
     let credentials = setup.directory.join("credentials");
     let accounts = scene.accounts(kind);
     let milter = || {
-        if kind.about_the_milter() {
-            assert_milter_held(lab, &credentials, scene.port, kind.milter(), context);
+        if kind.milter() {
+            assert_milter_held(lab, scene.port, context);
         }
     };
     // Each check on its own, so that every fault of a stop is named.
@@ -344,19 +344,19 @@ fn said_by(panic: &(dyn Any + Send)) -> String {
 }
 
 /// The first request to stop a run of `kind` at: for the macro filter's
-/// kinds the first that asks about the filter's entry, since those before
-/// it are the requests of runs that the other kinds stop.
+/// kind the last read of the filter's entries, before setup changes them,
+/// since those before it are the requests of runs that the other kinds stop.
 fn first_stop(scene: &Scene, setup: &Setup, lab: &Lab, kind: Kind) -> usize {
-    if !kind.about_the_milter() {
+    if !kind.milter() {
         return 1;
     }
     scene.start(kind, setup, lab).unwrap();
     let (_, output, asked) = stopped(scene, setup, lab, kind, usize::MAX, Stop::Lost);
     assert_eq!(output.status.code(), Some(0), "{}", text(&output));
-    let first = asked
+    let last = asked
         .iter()
-        .position(|asked| asked.starts_with("x:MtaMilter"));
-    first.unwrap() + 1
+        .rposition(|asked| asked.starts_with("x:MtaMilter/get"));
+    last.unwrap() + 1
 }
 
 /// The lab's limits of requests and of failed sign-ins, raised: Stalwart

@@ -128,7 +128,6 @@ struct Done {
 fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), String> {
     let again = format!("Run `{}` again once this is mended", asked.again);
     let mended = |error: String| format!("{}. {again}.", error.trim_end_matches('.'));
-    milter::prepare(config).map_err(mended)?;
     let admin = Admin::new(config, source.authorization().map_err(mended)?);
     // Keys work only from these networks: loopback, and for test setups such as
     // the contract lab's Docker bridge whatever --allow-network adds.
@@ -185,6 +184,8 @@ fn configure(
     done: &mut Done,
 ) -> Result<(), String> {
     let (directory, rotate) = (&config.credentials_directory, asked.rotate);
+    // What setup refuses for, it refuses before it changes anything.
+    milter::prepare(admin, config)?;
     let broker = keys::ensure(admin, directory, &BROKER, networks, rotate)?;
     done.replaced.extend(broker.replaced);
     if broker.made {
@@ -220,7 +221,7 @@ fn configure(
         steps.push(exported.step);
         credential = exported.new_credential;
     }
-    steps.extend(milter::ensure(admin, config, directory)?);
+    steps.extend(milter::ensure(admin, config)?);
     reload(admin, webhook.new_key.is_some(), credential.is_some())?;
     // Stalwart signs with the webhook's new key and takes the new scrape
     // credential from now on, so their files follow.
@@ -234,7 +235,7 @@ fn configure(
     for step in &steps {
         say(&format!("- {step}"));
     }
-    if let Some(step) = milter::retire(config) {
+    for step in milter::retire(config)? {
         say(&format!("- {step}"));
     }
     tried(admin, config, networks, done)

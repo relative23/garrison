@@ -1,10 +1,10 @@
 //! The macro milter: where the configuration has it, the filter answers as
 //! a milter and Stalwart asks it as the configuration has it; where it does
 //! not, Stalwart no longer asks it. And whatever the configuration has,
-//! every entry Stalwart asks on this host where nothing answers, which makes
-//! Stalwart defer mail. doctor asks Stalwart with the collector's API key,
-//! as the collector reads Stalwart's milters, and tells the filter's entries
-//! from others by the rules setup acts by (`entries`).
+//! every entry Stalwart asks where no milter answers, which makes Stalwart
+//! defer mail. doctor asks Stalwart with the collector's API key, as the
+//! collector reads Stalwart's milters, and tells the filter's entries from
+//! others by the rules setup acts by (`entries`).
 
 use std::time::Duration;
 
@@ -15,13 +15,13 @@ use garrison_stalwart::{Error, SUPPORTED};
 
 use super::Finding;
 use crate::units;
-use entries::{Entry, Note};
+use entries::Entry;
 
 pub(crate) mod entries;
 
 const SETUP: &str = "Run `garrison stalwart setup`.";
 /// The fix of a line setup mends where Stalwart also asks in vain an entry
-/// setup cannot tell for the filter's, which setup refuses to leave so.
+/// that is not the filter's, which setup refuses to leave so.
 const AFTER: &str =
     "Run `garrison stalwart setup` once the milters named above are out of Stalwart.";
 /// How long a milter has to answer the opening doctor sends.
@@ -54,10 +54,10 @@ fn asked(config: &Config, credentials: &Credentials) -> Result<Vec<Entry>, Strin
             Error::Limited(why) => {
                 format!("Stalwart refused the question for its rate limit ({why}); ask again in a minute")
             }
+            // A key it does not know and one without the permission alike:
+            // the line on the key says which.
             Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
-                "Stalwart refused the collector's API key; `garrison stalwart setup` gives it the \
-                 permissions it needs"
-                    .to_owned()
+                "Stalwart refused the collector's API key".to_owned()
             }
             Error::Unreadable(why) => format!(
                 "Stalwart answered in a form this release of Garrison does not read ({why}); \
@@ -66,20 +66,26 @@ fn asked(config: &Config, credentials: &Credentials) -> Result<Vec<Entry>, Strin
         })
 }
 
-/// Where Stalwart asks `entry` in vain, what follows: nothing answers there
-/// on this host, so Stalwart does with all incoming mail what the entry says.
-fn unanswered(entry: &Entry, answers: &dyn Fn(u16) -> bool) -> String {
-    match entry.port() {
-        Some(port) if entry.here() && !answers(port) => format!(
+/// Whether `entry` is one of `entries`.
+fn among(entry: &Entry, entries: &[&Entry]) -> bool {
+    entries.iter().any(|other| other.id == entry.id)
+}
+
+/// What follows where Stalwart asks `entry`, one of `vain`, in vain: it does
+/// with all incoming mail what the entry says.
+fn unanswered(entry: &Entry, vain: &[&Entry]) -> String {
+    if among(entry, vain) {
+        format!(
             ", where nothing answers: Stalwart {}",
             entry.meanwhile("all incoming mail")
-        ),
-        _ => String::new(),
+        )
+    } else {
+        String::new()
     }
 }
 
-/// An entry Stalwart asks in vain that setup cannot tell for the filter's:
-/// setup leaves it, and refuses to run while it is there.
+/// An entry Stalwart asks in vain that is not the filter's: setup leaves
+/// it, and refuses to run while it is there.
 fn stranded(entry: &Entry) -> Finding {
     let what = format!(
         "Stalwart asks a milter at {} (entry {}), where nothing answers: Stalwart {}",
@@ -96,27 +102,38 @@ fn stranded(entry: &Entry) -> Finding {
 
 /// Stalwart's side of a filter the configuration has on `port`, deferring
 /// mail while it does not answer where `defer` says so: one of the filter's
-/// entries asks it there about every message, switched on, as the
-/// configuration has it. `fix` is what mends it.
+/// entries asks it there, where it answers, about every message, switched
+/// on, as the configuration has it. `vain`: the entries Stalwart asks in
+/// vain; `fix` is what mends it.
 fn configured(
     (port, defer): (u16, bool),
     ours: &[&Entry],
+    vain: &[&Entry],
     fix: &str,
-    answers: &dyn Fn(u16) -> bool,
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for stale in ours.iter().filter(|entry| !entry.asks(port)) {
+    for stale in ours
+        .iter()
+        .filter(|entry| !entry.asks(port) || among(entry, vain))
+    {
+        let elsewhere = if stale.asks(port) {
+            String::new()
+        } else {
+            format!(", but the configuration has it on 127.0.0.1:{port}")
+        };
         findings.push(Finding::fail(
             format!(
-                "Stalwart asks the macro milter at {}, but the configuration has it on \
-                 127.0.0.1:{port}{}",
+                "Stalwart asks the macro milter at {}{elsewhere}{}",
                 stale.address(),
-                unanswered(stale, answers)
+                unanswered(stale, vain)
             ),
             fix,
         ));
     }
-    let at: Vec<&&Entry> = ours.iter().filter(|entry| entry.asks(port)).collect();
+    let at: Vec<&&Entry> = ours
+        .iter()
+        .filter(|entry| entry.asks(port) && !among(entry, vain))
+        .collect();
     if at.is_empty() && findings.is_empty() {
         findings.push(Finding::warn(
             format!(
@@ -180,104 +197,63 @@ fn configured(
 }
 
 /// Stalwart's side where the configuration no longer has the filter: none
-/// of the filter's entries is left, and no note keeps the filter running.
-fn dropped(note: &Note, ours: &[&Entry], fix: &str, answers: &dyn Fn(u16) -> bool) -> Vec<Finding> {
-    let mut findings: Vec<Finding> = ours
-        .iter()
+/// of the filter's entries is left.
+fn dropped(ours: &[&Entry], vain: &[&Entry], fix: &str) -> Vec<Finding> {
+    ours.iter()
         .map(|entry| {
             Finding::fail(
                 format!(
                     "Stalwart still asks the macro milter at {}, which the configuration no \
                      longer has{}",
                     entry.address(),
-                    unanswered(entry, answers)
+                    unanswered(entry, vain)
                 ),
                 format!(
                     "{fix} It takes the filter out of Stalwart; until then mail may be deferred."
                 ),
             )
         })
-        .collect();
-    let named = match note {
-        _ if !findings.is_empty() => None,
-        Note::Named(_) => Some("names a macro milter entry that Stalwart no longer has"),
-        Note::Empty => Some("names no macro milter entry"),
-        Note::Missing | Note::Pending(_) => None,
-    };
-    if let Some(named) = named {
-        findings.push(Finding::warn(
-            format!(
-                "setup's note {named}, so the installer keeps the filter running and uninstall \
-                 refuses"
-            ),
-            if fix == SETUP {
-                "Run `garrison stalwart setup`, which removes the note."
-            } else {
-                AFTER
-            },
-        ));
-    }
-    findings
+        .collect()
 }
 
 /// What doctor says of Stalwart's `entries`, where garrison.toml has the
 /// filter on a port and defers mail while it does not answer (`filter`) or
-/// does not have it, setup's note says `note`, the running filter listens
-/// on `listening` and a milter answers on each port `answers` takes.
+/// does not have it, the running filter listens on `listening` and a milter
+/// answers where `answers` says so.
 fn judged(
     filter: Option<(u16, bool)>,
-    note: &Note,
     entries: &[Entry],
     listening: &[u16],
-    answers: &dyn Fn(u16) -> bool,
+    answers: &dyn Fn(&Entry) -> bool,
 ) -> Vec<Finding> {
-    let ours = entries::ours(entries, note.id(), filter.map(|(port, _)| port), listening);
-    let theirs = entries
+    let ours = entries::ours(entries, filter.map(|(port, _)| port), listening);
+    let vain = entries::vain(entries, answers);
+    let mut findings: Vec<Finding> = vain
         .iter()
-        .filter(|entry| !ours.iter().any(|our| our.id == entry.id));
-    let mut findings: Vec<Finding> = entries::vain(theirs, answers)
-        .into_iter()
-        .map(stranded)
+        .filter(|entry| !among(entry, &ours))
+        .map(|entry| stranded(entry))
         .collect();
     let fix = if findings.is_empty() { SETUP } else { AFTER };
-    if matches!(note, Note::Pending(_)) {
-        findings.push(Finding::fail(
-            "setup's last run changed Stalwart's entry for the macro milter and stopped before \
-             Stalwart read its settings again, so Stalwart may still ask the filter as before",
-            fix,
-        ));
-        return findings;
-    }
     match filter {
-        Some(filter) => findings.extend(configured(filter, &ours, fix, answers)),
-        None => findings.extend(dropped(note, &ours, fix, answers)),
+        Some(filter) => findings.extend(configured(filter, &ours, &vain, fix)),
+        None => findings.extend(dropped(&ours, &vain, fix)),
     }
     findings
 }
 
 /// What doctor says where Stalwart's milters could not be asked (`why`).
-fn unasked(port: Option<u16>, note: &Note, why: &str) -> Finding {
-    match (port, note) {
-        (Some(port), _) => Finding::unknown(format!(
+fn unasked(port: Option<u16>, why: &str) -> Finding {
+    match port {
+        Some(port) => Finding::unknown(format!(
             "whether Stalwart asks the macro milter on 127.0.0.1:{port}: {why}"
         )),
-        (None, Note::Missing) => Finding::unknown(format!(
-            "whether Stalwart asks a milter on this host where nothing answers: {why}"
+        None => Finding::unknown(format!(
+            "whether Stalwart asks a milter where nothing answers: {why}"
         )),
-        (None, _) => Finding::fail(
-            format!(
-                "setup's note says Stalwart may ask the macro milter, which the configuration no \
-                 longer has; Stalwart could not be asked: {why}"
-            ),
-            format!(
-                "{SETUP} It takes the filter out of Stalwart; until then mail may be deferred."
-            ),
-        ),
     }
 }
 
 pub(super) fn checks(config: &Config, credentials: &Credentials) -> Vec<Finding> {
-    let note = Note::read(&config.credentials_directory.join(units::MILTER_ENTRY));
     let mut findings = Vec::new();
     if let Some(milter) = &config.milter {
         findings.push(answering(
@@ -289,16 +265,13 @@ pub(super) fn checks(config: &Config, credentials: &Credentials) -> Vec<Finding>
         .milter
         .as_ref()
         .map(|milter| (milter.port, milter.defer_when_unreachable));
-    let answers = |port| garrison_milter::answers(port, WITHIN).is_ok();
     match asked(config, credentials) {
-        Ok(entries) => findings.extend(judged(
-            filter,
-            &note,
-            &entries,
-            &entries::listening(),
-            &answers,
-        )),
-        Err(why) => findings.push(unasked(filter.map(|(port, _)| port), &note, &why)),
+        Ok(entries) => {
+            let listening = entries::listening().unwrap_or_default();
+            let answers = |entry: &Entry| entry.answers(WITHIN);
+            findings.extend(judged(filter, &entries, &listening, &answers));
+        }
+        Err(why) => findings.push(unasked(filter.map(|(port, _)| port), &why)),
     }
     findings
 }

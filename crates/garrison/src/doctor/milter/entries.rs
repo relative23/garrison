@@ -1,20 +1,21 @@
 //! Stalwart's milter entries, and which of them are the macro filter's: the
-//! rules `garrison stalwart setup` acts by and `garrison doctor` judges by,
-//! so that what doctor names setup mends.
+//! rules `garrison stalwart setup` acts by, the installer keeps the filter
+//! by and `garrison doctor` judges by, so that what doctor names setup
+//! mends. Each run reads the entries as Stalwart holds them then.
 //!
-//! A milter has no name in Stalwart, so setup keeps the ID of the entry it
-//! made in a note beside the credentials. An entry is the filter's where the
-//! note names it, or where it asks this host at the filter's port: the one
-//! the configuration gives it (setup made sure the filter answers there
-//! before it told Stalwart), the noted entry's, or one the running filter
-//! listens on. Stalwart asks its entries as it read them last, so setup marks
-//! the note while a run has changed them and Stalwart has not read its
-//! settings since; the installer and uninstall take any note as one that may
-//! name an entry Stalwart asks.
+//! A milter has no name in Stalwart (1.1.0's entry has no field for one), so
+//! an entry is the filter's where it asks this host, under any name the
+//! resolver gives a loopback or the unspecified address, at the filter's
+//! port: the one the configuration gives it, or one the running filter
+//! listens on. Stalwart asks an entry in vain where no milter answers at the
+//! addresses its host and port resolve to, whatever the host, and then does
+//! with all incoming mail what the entry says.
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::Path;
+use std::time::Duration;
 
 use garrison_collector::providers::stalwart::answers::{Fixed, Stages, Tolerant, Written};
 use garrison_core::systemd::SYSTEMCTL;
@@ -23,11 +24,7 @@ use serde_json::Value;
 
 use crate::units;
 
-/// What a note starts with while Stalwart has not read what the run changed.
-const PENDING: char = '!';
-
-/// What mends an entry Stalwart asks in vain that setup cannot tell for the
-/// filter's.
+/// What mends an entry Stalwart asks in vain that is not the filter's.
 pub(crate) const REMOVE: &str = "If nothing is to answer there, remove that entry in the Stalwart \
                                  WebUI (Settings ▸ MTA ▸ Milters) and reload its settings.";
 
@@ -60,22 +57,45 @@ impl Entry {
         }
     }
 
-    /// Whether it asks this host, where the filter listens.
+    /// The addresses Stalwart asks it at: its host and port as this host's
+    /// resolver gives them, as Stalwart looks a milter's host up (it fails
+    /// to read its settings with the resolver's words for a name that does
+    /// not resolve, measured on 1.1.0).
+    fn addresses(&self) -> Vec<SocketAddr> {
+        let host = self.host.0.as_ref().and_then(Value::as_str);
+        match (host, self.port()) {
+            (Some(host), Some(port)) => format!("{host}:{port}")
+                .to_socket_addrs()
+                .map(Iterator::collect)
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Whether it asks this host, at a loopback or the unspecified address.
     pub(crate) fn here(&self) -> bool {
-        matches!(
-            self.host.0.as_ref().and_then(Value::as_str),
-            Some("127.0.0.1" | "localhost")
-        )
+        self.addresses().iter().any(|address| {
+            let ip = address.ip().to_canonical();
+            ip.is_loopback() || ip.is_unspecified()
+        })
     }
 
     /// Whether it asks this host at `port`.
     pub(crate) fn asks(&self, port: u16) -> bool {
-        self.here() && self.port() == Some(port)
+        self.port() == Some(port) && self.here()
     }
 
     /// Whether Stalwart asks it: switched on, also under conditions.
     pub(crate) fn asked(&self) -> bool {
         self.enable.0 != Some(false)
+    }
+
+    /// Whether a milter answers where Stalwart asks it, at any of its
+    /// addresses, as Stalwart tries each.
+    pub(crate) fn answers(&self, within: Duration) -> bool {
+        self.addresses()
+            .into_iter()
+            .any(|address| garrison_milter::answers_at(address, within).is_ok())
     }
 
     /// Where it asks, as Stalwart holds it.
@@ -93,92 +113,35 @@ impl Entry {
     }
 }
 
-/// What setup's note says.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Note {
-    /// No note: setup has not told Stalwart of the filter, or has taken it
-    /// out and Stalwart read its settings since.
-    Missing,
-    /// Stalwart was told of this entry and has read its settings since.
-    Named(String),
-    /// A note that names no entry.
-    Empty,
-    /// A run changed Stalwart's entries and stopped before Stalwart read its
-    /// settings again; the entry it made or kept, where it knew it.
-    Pending(Option<String>),
-}
-
-impl Note {
-    /// The note at `path`.
-    pub(crate) fn read(path: &Path) -> Note {
-        let Ok(text) = fs::read_to_string(path) else {
-            // One that is there but cannot be read names nothing it can tell.
-            return if fs::symlink_metadata(path).is_ok() {
-                Note::Empty
-            } else {
-                Note::Missing
-            };
-        };
-        let text = text.trim();
-        let id = |text: &str| (!text.is_empty()).then(|| text.to_owned());
-        match text.strip_prefix(PENDING) {
-            Some(rest) => Note::Pending(id(rest.trim())),
-            None => id(text).map_or(Note::Empty, Note::Named),
-        }
-    }
-
-    /// The entry it names, if any.
-    pub(crate) fn id(&self) -> Option<&str> {
-        match self {
-            Note::Named(id) | Note::Pending(Some(id)) => Some(id),
-            Note::Missing | Note::Empty | Note::Pending(None) => None,
-        }
-    }
-}
-
-/// A note of a run that changes Stalwart's entries, written before it
-/// changes any: `id` the entry it makes or keeps, where it knows it.
-pub(crate) fn pending(id: Option<&str>) -> String {
-    format!("{PENDING}{}", id.unwrap_or_default())
-}
-
-/// The filter's entries among `entries`: the one the note names first, then
-/// every other that asks this host at the filter's port: `port`, the
-/// configuration's, the noted entry's, or one the running filter listens on.
+/// The filter's entries among `entries`: those that ask this host at its
+/// port, the configuration's `port` or one the running filter listens on.
 pub(crate) fn ours<'a>(
     entries: &'a [Entry],
-    noted: Option<&str>,
     port: Option<u16>,
     listening: &[u16],
 ) -> Vec<&'a Entry> {
-    let first = noted.and_then(|id| entries.iter().find(|entry| entry.id == id));
-    let ports: Vec<u16> = port
-        .into_iter()
-        .chain(first.and_then(Entry::port))
-        .chain(listening.iter().copied())
-        .collect();
-    let others = entries.iter().filter(|entry| {
-        first.is_none_or(|first| first.id != entry.id) && ports.iter().any(|port| entry.asks(*port))
-    });
-    first.into_iter().chain(others).collect()
-}
-
-/// The entries of `entries` that Stalwart asks in vain: switched on, asking
-/// this host where no milter answers.
-pub(crate) fn vain<'a>(
-    entries: impl IntoIterator<Item = &'a Entry>,
-    answers: &dyn Fn(u16) -> bool,
-) -> Vec<&'a Entry> {
+    let ports: Vec<u16> = port.into_iter().chain(listening.iter().copied()).collect();
     entries
-        .into_iter()
-        .filter(|entry| entry.asked() && entry.here())
-        .filter(|entry| entry.port().is_some_and(|port| !answers(port)))
+        .iter()
+        .filter(|entry| ports.iter().any(|port| entry.asks(*port)))
         .collect()
 }
 
-/// The ports the macro filter listens on while it runs, as root sees its
-/// sockets; none where it does not run or they cannot be seen.
-pub(crate) fn listening() -> Vec<u16> {
+/// The entries of `entries` that Stalwart asks in vain: switched on, where
+/// no milter answers, as `answers` finds it.
+pub(crate) fn vain<'a>(
+    entries: impl IntoIterator<Item = &'a Entry>,
+    answers: &dyn Fn(&Entry) -> bool,
+) -> Vec<&'a Entry> {
+    entries
+        .into_iter()
+        .filter(|entry| entry.asked() && entry.port().is_some() && !answers(entry))
+        .collect()
+}
+
+/// The ports the macro filter listens on, as root sees its sockets, where
+/// it runs: none where they cannot be seen.
+pub(crate) fn listening() -> Option<Vec<u16>> {
     let pid = std::process::Command::new(SYSTEMCTL)
         .args(["show", "--property", "MainPID", "--value", units::MILTER])
         .output()
@@ -190,9 +153,7 @@ pub(crate) fn listening() -> Vec<u16> {
                 .ok()
         })
         .filter(|pid| *pid != 0);
-    pid.map_or_else(Vec::new, |pid| {
-        listening_in(&Path::new("/proc").join(pid.to_string()))
-    })
+    pid.map(|pid| listening_in(&Path::new("/proc").join(pid.to_string())))
 }
 
 /// The ports the process whose `/proc` folder is `process` listens on.
@@ -250,78 +211,95 @@ mod tests {
         found.iter().map(|entry| entry.id.clone()).collect()
     }
 
-    /// The filter's entries are the one the note names and every other
-    /// that asks this host at the filter's port: the configuration's, the
-    /// noted entry's, or one the running filter listens on. Another
-    /// milter's, or one asking another host, is none of them.
+    /// The filter's entries are those that ask this host at the filter's
+    /// port: the configuration's, or one the running filter listens on.
+    /// Another milter's, or one asking another host, is none of them.
     #[test]
-    fn the_filters_entries_are_the_noted_one_and_those_at_its_port() {
+    fn the_filters_entries_ask_this_host_at_its_port() {
         let stored = read(&json!([
             {"id": "a", "host": "127.0.0.1", "port": 8096},
             {"id": "b", "host": "127.0.0.1", "port": 8097},
             {"id": "c", "host": "127.0.0.1", "port": "8097"},
-            {"id": "d", "host": "10.0.0.5", "port": 8097},
+            {"id": "d", "host": "192.0.2.1", "port": 8097},
             {"id": "e", "host": "127.0.0.1", "port": 11332},
             {"id": "f", "host": null, "port": null},
             {"id": "g", "host": "localhost", "port": 8098},
         ]));
-        assert_eq!(
-            ids(&ours(&stored, Some("a"), Some(8097), &[])),
-            ["a", "b", "c"]
-        );
-        assert_eq!(ids(&ours(&stored, None, Some(8097), &[])), ["b", "c"]);
-        assert_eq!(ids(&ours(&stored, Some("gone"), Some(8096), &[])), ["a"]);
-        // The section gone: the noted entry, and the others at its address.
-        assert_eq!(ids(&ours(&stored, Some("b"), None, &[])), ["b", "c"]);
-        assert_eq!(ids(&ours(&stored, None, None, &[])), Vec::<String>::new());
-        // Where the running filter listens, with or without the section.
-        assert_eq!(ids(&ours(&stored, None, None, &[8096])), ["a"]);
-        assert_eq!(
-            ids(&ours(&stored, None, Some(8097), &[8098])),
-            ["b", "c", "g"]
-        );
+        assert_eq!(ids(&ours(&stored, Some(8097), &[])), ["b", "c"]);
+        assert_eq!(ids(&ours(&stored, None, &[])), Vec::<String>::new());
+        assert_eq!(ids(&ours(&stored, None, &[8096])), ["a"]);
+        assert_eq!(ids(&ours(&stored, Some(8097), &[8098])), ["b", "c", "g"]);
     }
 
-    /// Stalwart asks in vain an entry switched on that asks this host where
-    /// nothing answers; one switched off, one of another host and one
-    /// without a port it does not.
+    /// Every name this host's resolver gives a loopback or the unspecified
+    /// address counts as this host: an entry at the filter's port under it
+    /// is the filter's, and one where nothing answers is asked in vain. An
+    /// entry of another host is not the filter's, and asked in vain where
+    /// nothing answers there.
     #[test]
-    fn an_entry_is_asked_in_vain_where_nothing_answers_on_this_host() {
-        let stored = read(&json!([
-            {"id": "a", "host": "127.0.0.1", "port": 8096, "enable": {"match": {}, "else": "true"}},
-            {"id": "b", "host": "localhost", "port": 8096},
-            {"id": "c", "host": "127.0.0.1", "port": 8096, "enable": {"match": {}, "else": "false"}},
-            {"id": "d", "host": "10.0.0.5", "port": 8096},
-            {"id": "e", "host": "127.0.0.1", "port": null},
-            {"id": "f", "host": "127.0.0.1", "port": 8097},
-        ]));
-        let answers = |port| port == 8097;
-        assert_eq!(ids(&vain(&stored, &answers)), ["a", "b"]);
-    }
-
-    /// The note: missing, a plain ID, empty, and the mark of a run that
-    /// stopped before Stalwart read its settings again, with or without the
-    /// ID; one that cannot be read names nothing it can tell.
-    #[test]
-    fn the_note_says_which_entry_and_whether_stalwart_read_it() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("stalwart-milter-id");
-        assert_eq!(Note::read(&path), Note::Missing);
-        for (held, note) in [
-            ("m\n", Note::Named("m".into())),
-            ("", Note::Empty),
-            (" \n", Note::Empty),
-            ("!m\n", Note::Pending(Some("m".into()))),
-            ("!", Note::Pending(None)),
+    fn every_name_of_this_host_counts_and_every_host_is_judged() {
+        for name in [
+            "127.0.0.1",
+            "localhost",
+            "::1",
+            "[::1]",
+            "127.0.0.2",
+            "127.1",
+            "0.0.0.0",
+            "LOCALHOST",
+            "localhost.",
         ] {
-            fs::write(&path, held).unwrap();
-            assert_eq!(Note::read(&path), note, "{held:?}");
+            if format!("{name}:1").to_socket_addrs().is_err() {
+                continue;
+            }
+            let stored = read(&json!([{"id": "g", "host": name, "port": 8096}]));
+            assert_eq!(ids(&ours(&stored, Some(8096), &[])), ["g"], "{name}");
+            assert_eq!(ids(&vain(&stored, &|_| false)), ["g"], "{name}");
         }
-        assert_eq!(pending(Some("m")), "!m");
-        assert_eq!(pending(None), "!");
-        fs::remove_file(&path).unwrap();
-        fs::create_dir(&path).unwrap();
-        assert_eq!(Note::read(&path), Note::Empty);
+        let remote = read(&json!([{"id": "r", "host": "192.0.2.1", "port": 8096}]));
+        assert_eq!(ids(&ours(&remote, Some(8096), &[])), Vec::<String>::new());
+        assert_eq!(ids(&vain(&remote, &|_| false)), ["r"]);
+    }
+
+    /// Stalwart asks in vain an entry switched on where no milter answers
+    /// at its addresses: a milter on `127.0.0.1` answers it under
+    /// `127.0.0.1`, `0.0.0.0`, `127.1` and `localhost`, which resolves to
+    /// both, and not under `::1` or `127.0.0.2`, nor at a port where nothing
+    /// listens or a name that does not resolve. One switched off, and one
+    /// without a port, is not.
+    #[test]
+    fn an_entry_is_asked_in_vain_where_no_milter_answers_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let milter = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            garrison_milter::server::serve(
+                &listener,
+                garrison_milter::Settings {
+                    max_bytes: 1024,
+                    ..Default::default()
+                },
+            );
+        });
+        let silent = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let stored = read(&json!([
+            {"id": "a", "host": "127.0.0.1", "port": milter},
+            {"id": "b", "host": "0.0.0.0", "port": milter},
+            {"id": "c", "host": "127.1", "port": milter},
+            {"id": "d", "host": "localhost", "port": milter},
+            {"id": "e", "host": "::1", "port": milter},
+            {"id": "f", "host": "127.0.0.2", "port": milter},
+            {"id": "g", "host": "127.0.0.1", "port": silent},
+            {"id": "h", "host": "garrison-test.invalid", "port": milter},
+            {"id": "i", "host": "127.0.0.1", "port": silent,
+                "enable": {"match": {}, "else": "false"}},
+            {"id": "j", "host": "127.0.0.1", "port": null},
+        ]));
+        let found = vain(&stored, &|entry| entry.answers(Duration::from_secs(3)));
+        assert_eq!(ids(&found), ["e", "f", "g", "h"]);
     }
 
     /// The ports a process listens on, as its sockets in /proc show them:

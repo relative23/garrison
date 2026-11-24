@@ -31,19 +31,15 @@ pub(super) enum Kind {
     Second,
     /// The first setup with `[milter]`, while the filter answers at its port.
     Milter,
-    /// A plain run after `[milter]` was taken out, where the filter's entry
-    /// and setup's note of it are there.
-    MilterGone,
 }
 
-pub(super) const KINDS: [Kind; 7] = [
+pub(super) const KINDS: [Kind; 6] = [
     Kind::First,
     Kind::Rotation,
     Kind::Emptied,
     Kind::Full,
     Kind::Second,
     Kind::Milter,
-    Kind::MilterGone,
 ];
 
 impl Kind {
@@ -60,11 +56,6 @@ impl Kind {
     /// has `[milter]`.
     pub(super) fn milter(self) -> bool {
         self == Kind::Milter
-    }
-
-    /// Whether the macro filter's entry is looked at after the runs.
-    pub(super) fn about_the_milter(self) -> bool {
-        matches!(self, Kind::Milter | Kind::MilterGone)
     }
 }
 
@@ -175,7 +166,7 @@ impl Scene {
         if kind == Kind::Second {
             self.forget(lab, &credentials);
         }
-        self.configure(setup, &lab.url, kind == Kind::MilterGone);
+        self.configure(setup, &lab.url, false);
         let ready = setup.run(&[]);
         if ready.status.code() != Some(0) {
             return Err(format!("the run before the stop failed: {}", text(&ready)));
@@ -188,7 +179,6 @@ impl Scene {
                 }
             }
             Kind::Second => self.act_as(setup, true),
-            Kind::MilterGone => self.configure(setup, &lab.url, false),
             _ => {}
         }
         Ok(Some(held))

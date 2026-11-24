@@ -1,25 +1,41 @@
-//! The macro filter's entry in every state setup meets: whatever setup's
-//! note holds, whether garrison.toml has `[milter]`, whichever entries
-//! Stalwart holds, and wherever a run stops. No run that ends in success
-//! leaves Stalwart asking 127.0.0.1 where nothing answers, a run that
-//! refuses changes no entry and names each one asked in vain, and no run
-//! changes another program's entry. Stalwart asks the entries as it read
-//! them last (measured here with mail), so a run that changed them and
-//! stopped before Stalwart read its settings again leaves setup's note
-//! saying so, for doctor and the installer to see.
+//! The macro filter's entries in every state setup meets: whether
+//! garrison.toml has `[milter]`, which entries Stalwart holds and under which
+//! name of this host they ask, and wherever a run stops. No run that ends in
+//! success leaves Stalwart asking where no milter answers, a run that
+//! refuses sends Stalwart no change and names each entry asked in vain, and
+//! no run changes another program's entry. Stalwart keeps each name of this
+//! host as it is written and asks it (measured here with mail), and it asks
+//! its entries as it read them last. Setup runs here as a user, which cannot
+//! see where a running filter listens: the states are those it tells by
+//! garrison.toml and by what answers.
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::net::TcpListener;
+use std::io::Write;
+use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use garrison_testing::config_text;
-use garrison_testing::lab::{Lab, random_hex};
-use garrison_testing::smtp::Smtp;
+use garrison_testing::lab::Lab;
 use serde_json::{Value, json};
 
 use super::stopper::{Stop, Stopper};
 use super::{Setup, forget, lab, text};
+
+/// The name setup writes.
+pub(super) const LOOPBACK: &str = "127.0.0.1";
+/// Other names of this host that Stalwart's form takes.
+pub(super) const NAMES: [&str; 8] = [
+    "localhost",
+    "::1",
+    "[::1]",
+    "127.0.0.2",
+    "127.1",
+    "0.0.0.0",
+    "LOCALHOST",
+    "localhost.",
+];
 
 /// A port of this host where a milter answers, for as long as the test runs.
 fn filter() -> u16 {
@@ -46,9 +62,21 @@ fn silent() -> u16 {
         .port()
 }
 
-/// An entry as setup writes it, for the filter on `port`.
-fn written(port: u16) -> Value {
-    json!({"host": "127.0.0.1", "port": port, "enable": {"match": {}, "else": "true"},
+/// A port of this host that another program holds, which is no milter.
+fn held() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for mut client in listener.incoming().flatten() {
+            let _ = client.write_all(b"220 no milter here\r\n");
+        }
+    });
+    port
+}
+
+/// An entry as setup writes it, asking `host` at `port`.
+pub(super) fn written(host: &str, port: u16) -> Value {
+    json!({"host": host, "port": port, "enable": {"match": {}, "else": "true"},
         "stages": {"data": true}, "tempFailOnError": true})
 }
 
@@ -62,31 +90,43 @@ pub(super) struct Ports {
     pub(super) old: u16,
     /// Where another program's milter answered once.
     pub(super) gone: u16,
+    /// Where another program answers that is no milter.
+    pub(super) taken: u16,
 }
 
 impl Ports {
-    fn all(&self) -> [u16; 4] {
-        [self.filter, self.other, self.old, self.gone]
+    fn all(&self) -> [u16; 5] {
+        [self.filter, self.other, self.old, self.gone, self.taken]
     }
 
-    /// Whether nothing answers at `port`.
-    fn silent(&self, port: u64) -> bool {
-        port == u64::from(self.old) || port == u64::from(self.gone)
+    /// Whether a milter answers at `host` and `port` from this host: the
+    /// test's own milters are what listens at its ports, but at `taken`.
+    fn answers(&self, host: &str, port: u64) -> bool {
+        let Ok(port) = u16::try_from(port) else {
+            return false;
+        };
+        port != self.taken
+            && format!("{host}:{port}")
+                .to_socket_addrs()
+                .is_ok_and(|mut all| {
+                    all.any(|address| {
+                        TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok()
+                    })
+                })
     }
 }
 
-/// Stalwart's entries that ask this test's ports, by ID.
+/// Stalwart's entries that ask this test's ports, under any name, by ID.
 pub(super) fn milters(lab: &Lab, ports: &Ports) -> BTreeMap<String, Value> {
     lab.call("x:MtaMilter/get", &json!({"ids": null}))["list"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|entry| {
-            entry["host"] == "127.0.0.1"
-                && ports
-                    .all()
-                    .iter()
-                    .any(|port| entry["port"] == u64::from(*port))
+            ports
+                .all()
+                .iter()
+                .any(|port| entry["port"] == u64::from(*port))
         })
         .map(|entry| (entry["id"].as_str().unwrap().to_owned(), entry.clone()))
         .collect()
@@ -100,110 +140,65 @@ fn clear(lab: &Lab, ports: &Ports) {
     }
 }
 
-fn reload(lab: &Lab) {
+pub(super) fn reload(lab: &Lab) {
     lab.call(
         "x:Action/set",
         &json!({"create": {"r": {"@type": "ReloadSettings"}}}),
     );
 }
 
-/// The entries of `held` that ask in vain: switched on, at 127.0.0.1 where
-/// nothing answers.
-pub(super) fn in_vain(held: &BTreeMap<String, Value>, ports: &Ports) -> Vec<String> {
-    held.values()
-        .filter(|entry| {
+/// Where an entry asks, as Stalwart holds it and setup names it.
+fn address(entry: &Value) -> String {
+    format!(
+        "{}:{}",
+        entry["host"].as_str().unwrap_or("?"),
+        entry["port"]
+    )
+}
+
+/// The IDs of the entries of `held` that Stalwart asks in vain: switched
+/// on, where no milter answers.
+fn vain_ids<'a>(held: &'a BTreeMap<String, Value>, ports: &Ports) -> Vec<&'a String> {
+    held.iter()
+        .filter(|(_, entry)| {
             entry["enable"]["else"] != "false"
-                && entry["port"]
-                    .as_u64()
-                    .is_some_and(|port| ports.silent(port))
+                && !ports.answers(
+                    entry["host"].as_str().unwrap_or_default(),
+                    entry["port"].as_u64().unwrap_or_default(),
+                )
         })
-        .map(|entry| format!("127.0.0.1:{}", entry["port"]))
+        .map(|(id, _)| id)
         .collect()
 }
 
-/// What Stalwart answers at the end of a message's data.
-fn handed_in(smtp: &str) -> String {
-    let mut session = Smtp::connect(smtp);
-    for command in [
-        "EHLO contract.example.net",
-        "MAIL FROM:<sender@contract.example.net>",
-        "RCPT TO:<admin@example.test>",
-        "DATA",
-    ] {
-        session.command(command);
-    }
-    let message = format!(
-        "From: <sender@contract.example.net>\r\nTo: <admin@example.test>\r\nSubject: entry\r\n\
-         Message-ID: <{}@contract.example.net>\r\n\r\nNothing attached.\r\n.",
-        random_hex(8)
-    );
-    let answer = session.command(&message);
-    session.command("QUIT");
-    answer
+/// Where the entries of `held` ask that Stalwart asks in vain.
+pub(super) fn in_vain(held: &BTreeMap<String, Value>, ports: &Ports) -> Vec<String> {
+    vain_ids(held, ports)
+        .into_iter()
+        .map(|id| address(&held[id]))
+        .collect()
 }
 
-/// Stalwart's own behaviour, on which the rest stands: an entry it asks in
-/// vain defers every message, and it asks its entries as it read them last,
-/// so an entry made or taken out counts only once it reads its settings.
-fn stalwart_asks_what_it_read_last(lab: &Lab, ports: &Ports) {
-    let smtp = std::env::var("GARRISON_LAB_SMTP").unwrap();
-    let wait = || std::thread::sleep(std::time::Duration::from_secs(2));
-    reload(lab);
-    wait();
-    let taken = handed_in(&smtp);
-    assert!(taken.starts_with("250"), "before: {taken}");
-    let made = lab.call(
-        "x:MtaMilter/set",
-        &json!({"create": {"n": written(ports.old)}}),
-    );
-    let id = made["created"]["n"]["id"].as_str().unwrap().to_owned();
-    let unread = handed_in(&smtp);
-    reload(lab);
-    wait();
-    let read = handed_in(&smtp);
-    lab.call("x:MtaMilter/set", &json!({ "destroy": [id] }));
-    let removed = handed_in(&smtp);
-    reload(lab);
-    wait();
-    let again = handed_in(&smtp);
-    for (when, answer, code) in [
-        ("made, not read", &unread, "250"),
-        ("made and read", &read, "451"),
-        ("taken out, not read", &removed, "451"),
-        ("taken out and read", &again, "250"),
-    ] {
-        assert!(answer.starts_with(code), "{when}: {answer}");
-    }
-}
-
-/// What setup's note holds in a state.
-#[derive(Clone, Copy, Debug)]
-pub(super) enum Note {
-    Missing,
-    Empty,
-    /// The ID of the entry `g`.
-    Garrisons,
-    /// An ID Stalwart has no entry of.
-    Lost,
-}
-
-/// One state: garrison.toml with or without the filter, setup's note, and
-/// Stalwart's entries by name and port: `g` Garrison's, `d` a second one
-/// for the filter, `o` another program's.
+/// One state: garrison.toml with the filter or without, and Stalwart's
+/// entries by name, the name of the host they ask and their port: `g`
+/// Garrison's, `d` a second one for the filter, `o` another program's.
 pub(super) struct State<'a> {
     pub(super) milter: bool,
-    pub(super) note: Note,
-    pub(super) entries: &'a [(&'a str, u16)],
+    pub(super) entries: &'a [(&'a str, &'a str, u16)],
 }
 
-/// The configuration of a state, with Stalwart at `url`.
-fn settings(setup: &Setup, url: &str, milter: bool, ports: &Ports) -> String {
+/// The configuration with Stalwart at `url` and the filter at `port`, if any.
+fn settings(setup: &Setup, url: &str, port: Option<u16>) -> String {
     let base = config_text(&setup.directory, url);
-    if milter {
-        format!("{base}\n[milter]\nport = {}\n", ports.filter)
-    } else {
-        base
+    match port {
+        Some(port) => format!("{base}\n[milter]\nport = {port}\n"),
+        None => base,
     }
+}
+
+/// Where an earlier release kept its note of the filter's entry.
+pub(super) fn note(setup: &Setup) -> std::path::PathBuf {
+    setup.directory.join("credentials/stalwart-milter-id")
 }
 
 /// Bring Stalwart and the folder to `state`, as Stalwart reads them; the
@@ -216,51 +211,45 @@ pub(super) fn arrange(
 ) -> BTreeMap<String, String> {
     clear(lab, ports);
     let mut ids = BTreeMap::new();
-    for (name, port) in state.entries {
-        let made = lab.call("x:MtaMilter/set", &json!({"create": {"n": written(*port)}}));
+    for (name, host, port) in state.entries {
+        let made = lab.call(
+            "x:MtaMilter/set",
+            &json!({"create": {"n": written(host, *port)}}),
+        );
         ids.insert(
             (*name).to_owned(),
             made["created"]["n"]["id"].as_str().unwrap().to_owned(),
         );
     }
     reload(lab);
-    let note = setup.directory.join("credentials/stalwart-milter-id");
-    let _ = fs::remove_file(&note);
-    let held = match state.note {
-        Note::Missing => None,
-        Note::Empty => Some(String::new()),
-        Note::Garrisons => Some(ids.get("g").cloned().unwrap_or_else(|| "lost".to_owned())),
-        Note::Lost => Some("lost".to_owned()),
-    };
-    if let Some(held) = held {
-        garrison_testing::write_private(&note, format!("{held}\n").as_bytes());
-    }
+    let _ = fs::remove_file(note(setup));
+    let port = state.milter.then_some(ports.filter);
     fs::write(
         setup.directory.join("garrison.toml"),
-        settings(setup, &lab.url, state.milter, ports),
+        settings(setup, &lab.url, port),
     )
     .unwrap();
     ids
 }
 
-/// A setup run, through a relay that stops it at request `at` as `stop`
-/// says, or that stops it nowhere: its exit code, what it said and the
-/// requests it sent.
+/// A setup run with the filter at `port`, if any, and `flags`, through a
+/// relay that stops it at request `at` as `stop` says, or nowhere: its exit
+/// code, what it said and the requests it sent.
 pub(super) fn through(
     lab: &Lab,
     setup: &Setup,
-    ports: &Ports,
-    milter: bool,
+    port: Option<u16>,
     at: Option<(usize, Stop)>,
+    flags: &[&str],
 ) -> (Option<i32>, String, Vec<String>) {
     let (number, stop) = at.unwrap_or((usize::MAX, Stop::Lost));
     let relay = Stopper::new(&lab.url, number, stop);
     let path = setup.directory.join("garrison.toml");
-    fs::write(&path, settings(setup, &relay.url, milter, ports)).unwrap();
+    fs::write(&path, settings(setup, &relay.url, port)).unwrap();
     let child = Command::new(env!("CARGO_BIN_EXE_garrison"))
         .arg("--config")
         .arg(&path)
-        .args(setup.arguments(&["--skip-metrics"]))
+        .args(setup.arguments(flags))
         .env_remove("CREDENTIALS_DIRECTORY")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -269,25 +258,37 @@ pub(super) fn through(
         .unwrap();
     relay.watch(child.id());
     let output = child.wait_with_output().unwrap();
-    fs::write(&path, settings(setup, &lab.url, milter, ports)).unwrap();
+    fs::write(&path, settings(setup, &lab.url, port)).unwrap();
     (output.status.code(), text(&output), relay.asked())
 }
 
-/// What setup's note holds, if it is there.
-pub(super) fn noted(setup: &Setup) -> Option<String> {
-    fs::read_to_string(setup.directory.join("credentials/stalwart-milter-id"))
-        .ok()
-        .map(|held| held.trim().to_owned())
+/// A plain run of `state`, without metrics.
+pub(super) fn plain(
+    lab: &Lab,
+    setup: &Setup,
+    ports: &Ports,
+    state: &State<'_>,
+    at: Option<(usize, Stop)>,
+) -> (Option<i32>, String, Vec<String>) {
+    let port = state.milter.then_some(ports.filter);
+    through(lab, setup, port, at, &["--skip-metrics"])
 }
 
-/// What is wrong after a run that ended with `code` and said `said`, from
-/// `before` to `after`.
+/// The changes among the requests of a run.
+pub(super) fn changes(asked: &[String]) -> Vec<&String> {
+    asked
+        .iter()
+        .filter(|request| request.contains("/set"))
+        .collect()
+}
+
+/// What is wrong after a run of `state` that ended with `code`, said `said`
+/// and sent `asked`, from `before` to `after`.
 pub(super) fn faults(
     state: &State<'_>,
     ports: &Ports,
-    (code, said): (Option<i32>, &str),
+    (code, said, asked): (Option<i32>, &str, &[String]),
     (before, after): (&BTreeMap<String, Value>, &BTreeMap<String, Value>),
-    note: Option<&str>,
 ) -> Vec<String> {
     let mut faults = Vec::new();
     if code == Some(0) {
@@ -295,18 +296,22 @@ pub(super) fn faults(
         if !vain.is_empty() {
             faults.push(format!("success, and Stalwart asks {vain:?} in vain"));
         }
-        let at: Vec<&String> = after
-            .iter()
-            .filter(|(_, entry)| entry["port"] == u64::from(ports.filter))
-            .map(|(id, _)| id)
+        let asking: Vec<String> = after
+            .values()
+            .filter(|entry| {
+                entry["port"] == u64::from(ports.filter)
+                    && entry["enable"]["else"] != "false"
+                    && ports.answers(
+                        entry["host"].as_str().unwrap_or_default(),
+                        u64::from(ports.filter),
+                    )
+            })
+            .map(address)
             .collect();
-        match (state.milter, note) {
-            (true, Some(id)) if at == [id] => {}
-            (false, None) => {}
-            (milter, note) => faults.push(format!(
-                "success, with [milter] {milter}, the entries at the filter's port {at:?} and \
-                 the note {note:?}"
-            )),
+        if state.milter && asking.len() != 1 {
+            faults.push(format!(
+                "success with [milter], and Stalwart asks the filter at {asking:?}"
+            ));
         }
     } else {
         for address in in_vain(before, ports) {
@@ -319,6 +324,12 @@ pub(super) fn faults(
         }
         if before != after {
             faults.push("a run that refused changed Stalwart's entries".to_owned());
+        }
+        let changed = changes(asked);
+        if !changed.is_empty() {
+            faults.push(format!(
+                "a run that refused sent Stalwart {changed:?} first"
+            ));
         }
     }
     for (id, entry) in before {
@@ -343,13 +354,15 @@ fn no_run_of_setup_leaves_stalwart_asking_a_filter_in_vain() {
         other: filter(),
         old: silent(),
         gone: silent(),
+        taken: held(),
     };
     clear(&lab, &ports);
-    stalwart_asks_what_it_read_last(&lab, &ports);
+    super::entry_stalwart::stalwart_asks_what_it_read_last(&lab, &ports);
+    let mut found = super::entry_stalwart::every_name_is_kept_and_asked(&lab, &ports);
     let first = setup.run(&["--skip-metrics"]);
     assert_eq!(first.status.code(), Some(0), "{}", text(&first));
-    let mut found = Vec::new();
     every_state(&lab, &setup, &ports, &mut found);
+    super::entry_refusals::every_refusal(&lab, &setup, &ports, &mut found);
     super::entry_stops::every_stop(&lab, &setup, &ports, &mut found);
     clear(&lab, &ports);
     reload(&lab);
@@ -361,67 +374,47 @@ fn no_run_of_setup_leaves_stalwart_asking_a_filter_in_vain() {
 /// entries it named were taken out, as the Stalwart WebUI takes them out.
 fn every_state(lab: &Lab, setup: &Setup, ports: &Ports, found: &mut Vec<String>) {
     let (filter, other, old, gone) = (ports.filter, ports.other, ports.old, ports.gone);
-    let sets: [&[(&str, u16)]; 8] = [
-        &[],
-        &[("g", filter)],
-        &[("g", filter), ("d", filter)],
-        &[("g", old)],
-        &[("g", filter), ("o", other)],
-        &[("g", filter), ("o", gone)],
-        &[("o", gone)],
-        &[("g", old), ("o", other)],
+    let mut sets: Vec<Vec<(&str, &str, u16)>> = vec![
+        vec![],
+        vec![("g", LOOPBACK, filter)],
+        vec![("g", LOOPBACK, filter), ("d", LOOPBACK, filter)],
+        vec![("g", LOOPBACK, old)],
+        vec![("g", LOOPBACK, filter), ("o", LOOPBACK, other)],
+        vec![("g", LOOPBACK, filter), ("o", LOOPBACK, gone)],
+        vec![("o", LOOPBACK, gone)],
+        vec![("g", LOOPBACK, old), ("o", LOOPBACK, other)],
     ];
+    for name in NAMES {
+        // The filter's entry under another name of this host, and another
+        // program's under it where nothing answers.
+        sets.push(vec![("g", name, filter)]);
+        sets.push(vec![("g", LOOPBACK, filter), ("o", name, gone)]);
+    }
     for milter in [true, false] {
-        for note in [Note::Missing, Note::Empty, Note::Garrisons, Note::Lost] {
-            for entries in sets {
-                let state = State {
-                    milter,
-                    note,
-                    entries,
-                };
-                let described = format!("[milter] {milter}, note {note:?}, entries {entries:?}");
-                arrange(lab, setup, ports, &state);
-                let before = milters(lab, ports);
-                let (code, said, _) = through(lab, setup, ports, milter, None);
-                let after = milters(lab, ports);
-                let mut wrong = faults(
-                    &state,
-                    ports,
-                    (code, &said),
-                    (&before, &after),
-                    noted(setup).as_deref(),
-                );
-                if code != Some(0) && wrong.is_empty() {
-                    // The operator takes out what the refusal named.
-                    let named: Vec<&String> = after
-                        .iter()
-                        .filter(|(_, entry)| {
-                            entry["port"]
-                                .as_u64()
-                                .is_some_and(|port| ports.silent(port))
-                        })
-                        .map(|(id, _)| id)
-                        .collect();
-                    lab.call("x:MtaMilter/set", &json!({ "destroy": named }));
-                    reload(lab);
-                    let mended = milters(lab, ports);
-                    let (code, again, _) = through(lab, setup, ports, milter, None);
-                    let last = milters(lab, ports);
-                    wrong.extend(
-                        faults(
-                            &state,
-                            ports,
-                            (code, &again),
-                            (&mended, &last),
-                            noted(setup).as_deref(),
-                        )
+        for entries in &sets {
+            let state = State { milter, entries };
+            let described = format!("[milter] {milter}, entries {entries:?}");
+            arrange(lab, setup, ports, &state);
+            let before = milters(lab, ports);
+            let (code, said, asked) = plain(lab, setup, ports, &state, None);
+            let after = milters(lab, ports);
+            let mut wrong = faults(&state, ports, (code, &said, &asked), (&before, &after));
+            if code != Some(0) && wrong.is_empty() {
+                // The operator takes out what the refusal named.
+                let named = vain_ids(&after, ports);
+                lab.call("x:MtaMilter/set", &json!({ "destroy": named }));
+                reload(lab);
+                let mended = milters(lab, ports);
+                let (code, again, asked) = plain(lab, setup, ports, &state, None);
+                let last = milters(lab, ports);
+                wrong.extend(
+                    faults(&state, ports, (code, &again, &asked), (&mended, &last))
                         .into_iter()
                         .map(|fault| format!("after the named entries went: {fault}: {again}")),
-                    );
-                }
-                if !wrong.is_empty() {
-                    found.push(format!("{described}: {}\n{said}", wrong.join("; ")));
-                }
+                );
+            }
+            if !wrong.is_empty() {
+                found.push(format!("{described}: {}\n{said}", wrong.join("; ")));
             }
         }
     }
