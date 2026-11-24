@@ -84,7 +84,8 @@ fn every_card_that_names_a_missing_file_or_credential_says_what_makes_it() {
             "clamav.signatures".to_owned(),
             vec![format!(
                 "None of the listed signature files is in {GONE}/database_directory: set \
-                 `database_directory` to clamd's, which `garrison detect --format toml` names."
+                 `database_directory` to clamd's, which `garrison detect --format toml` names, \
+                 or `signatures` to the files it holds."
             )],
         ),
         (

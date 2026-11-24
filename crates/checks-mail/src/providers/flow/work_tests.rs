@@ -24,7 +24,9 @@ const LARGE: i64 = 10_000;
 
 /// A week of `sessions` sessions as the receiver keeps them: each hands in
 /// mail on port 25, every other said STARTTLS first, and each message was
-/// filed and passed by a milter.
+/// filed, passed by a milter and deferred by another, as while a scanner
+/// cannot scan: then the look for a deferral in each message's session
+/// runs over every message since yesterday.
 fn week(directory: &Path, sessions: i64) -> Connection {
     let path = directory.join("events.sqlite");
     EventStore::open(&path, Kept::new(30, 10_000_000, 4 << 30)).unwrap();
@@ -53,6 +55,7 @@ fn week(directory: &Path, sessions: i64) -> Connection {
             ),
             (true, filed, json!({"accountId": session % 7})),
             (true, "milter.action-accept", json!({})),
+            (true, "milter.action-temp-fail", json!({})),
             (true, "smtp.dkim-pass", json!({})),
         ];
         for (index, (happened, kind, fields)) in events.into_iter().enumerate() {

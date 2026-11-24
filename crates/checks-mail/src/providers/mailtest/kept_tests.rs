@@ -1,6 +1,7 @@
 //! What is kept between runs: a test is sent again once it is due, one
 //! that did not happen within the hour, and results kept by an earlier
-//! release are used with their one time.
+//! release are used with their one time, but a refusal, which is sent again
+//! in a round of its own.
 
 use super::tests::{collected, provider, results, server};
 use super::*;
@@ -33,6 +34,8 @@ fn a_test_is_repeated_only_after_its_hours_and_no_session_is_no_result() {
         "at RCPT: 451 4.7.1 not now",
         "550 no",
         "550 no",
+        "550 no",
+        "550 no",
         "250 2.0.0 Message queued with id c.",
     ]);
     let provider = provider(port);
@@ -49,10 +52,12 @@ fn a_test_is_repeated_only_after_its_hours_and_no_session_is_no_result() {
     assert_dated(&tested, AGAIN, 86_400);
     // Tests that happened are repeated only after their hours: a session
     // before that would find nobody listening and change the result.
-    assert_eq!(handle.join().unwrap().len(), 5);
+    assert_eq!(handle.join().unwrap().len(), 7);
     let kept = collected(&provider, &memory, AGAIN + 86_399, &[]);
     assert_eq!(results(&kept), results(&tested));
     let (port, handle) = server([
+        "550 again",
+        "550 again",
         "550 again",
         "550 again",
         "250 2.0.0 Message queued with id d.",
@@ -63,40 +68,54 @@ fn a_test_is_repeated_only_after_its_hours_and_no_session_is_no_result() {
 }
 
 #[test]
-fn results_kept_by_an_earlier_release_are_used_with_their_one_time() {
+fn refusals_kept_by_an_earlier_release_are_sent_again_in_a_round_of_their_own() {
     // As 0.1.2 kept them: one time for the round, none for each test, and no
-    // harmless message beside the refusals.
+    // harmless message beside the refusal; the spam text filed as spam.
     let memory = Remembered::default();
-    let refused =
-        |reply: &str| json!({"reply": reply, "code": 550, "queue": null, "at_data": true});
     let kept = json!({
         "at": now().as_second(),
-        "eicar": refused("550 virus"),
-        "gtube": refused("550 spam"),
+        "eicar": {"reply": "550 virus", "code": 550, "queue": null, "at_data": true},
+        "gtube": {"reply": "250 2.0.0 Message queued with id b.", "code": 250, "queue": "11",
+                  "at_data": true},
         "macros": null,
     });
     memory.keep(MEMORY, &kept.to_string());
-    // The next run sends the harmless message alone; the tests stay.
-    let (port, handle) = server(["250 2.0.0 Message queued with id c."]);
-    let used = collected(&provider(port), &memory, 60, &[]);
+    // The next run sends the refused test file again, twice, with a harmless
+    // message after it; the spam text stays, with the round's one time.
+    let (port, handle) = server([
+        "550 virus",
+        "550 virus",
+        "250 2.0.0 Message queued with id c.",
+    ]);
+    let used = collected(
+        &provider(port),
+        &memory,
+        60,
+        &[("11", "message-ingest.spam")],
+    );
     assert_eq!(
         results(&used),
-        ["refused: 550 virus", "refused: 550 spam", "accepted"]
+        [
+            "refused: 550 virus",
+            "accepted and filed as spam",
+            "accepted"
+        ]
     );
     assert_eq!(
         sent(&used),
         [
-            "2026-10-29T12:00:00+00:00",
+            "2026-10-29T12:01:00+00:00",
             "2026-10-29T12:00:00+00:00",
             "2026-10-29T12:01:00+00:00"
         ]
     );
     assert_dated(&used, 60, 86_400 - 60);
     let sessions = handle.join().unwrap();
+    assert!(sessions[0].contains("EICAR"), "{}", sessions[0]);
     assert!(
-        sessions[0].contains("Harmless message (control)"),
+        sessions[2].contains("Harmless message (control)"),
         "{}",
-        sessions[0]
+        sessions[2]
     );
 }
 
@@ -106,7 +125,8 @@ fn results_for_another_listener_recipient_or_sender_are_not_kept() {
     // change of where they go or come from sends them anew in the next run.
     let taken = "250 2.0.0 Message queued with id c.";
     let (port, handle) = server([
-        "550 a", "550 a", taken, "550 b", "550 b", taken, "550 c", "550 c", taken,
+        "550 a", "550 a", "550 a", "550 a", taken, "550 b", "550 b", "550 b", "550 b", taken,
+        "550 c", "550 c", "550 c", "550 c", taken,
     ]);
     let made = |port: u16, options: &str| {
         MailTest::new(&table(&format!(
@@ -131,14 +151,14 @@ fn results_for_another_listener_recipient_or_sender_are_not_kept() {
     }
     let sessions = handle.join().unwrap();
     assert!(
-        sessions[3].contains("RCPT TO:<other-test@example.test>"),
+        sessions[5].contains("RCPT TO:<other-test@example.test>"),
         "{}",
-        sessions[3]
+        sessions[5]
     );
     assert!(
-        sessions[6].contains("MAIL FROM:<garrison@example.test>"),
+        sessions[10].contains("MAIL FROM:<garrison@example.test>"),
         "{}",
-        sessions[6]
+        sessions[10]
     );
     // Another host, where nothing listens on that port: a session is
     // tried, and the results of the last are not shown.
@@ -152,7 +172,7 @@ fn results_for_another_listener_recipient_or_sender_are_not_kept() {
         results(&tried)
     );
     // And another port.
-    let (moved, handle) = server(["550 d", "550 d", taken]);
+    let (moved, handle) = server(["550 d", "550 d", "550 d", "550 d", taken]);
     let card = collected(&made(moved, &sender), &memory, 240, &[]);
     assert_eq!(
         results(&card),
@@ -167,8 +187,10 @@ fn only_the_test_that_did_not_happen_is_tried_again() {
     // is turned away before its message.
     let (port, handle) = server([
         "550 virus",
+        "550 virus",
         "at RCPT: 451 4.7.1 try later",
         "250 2.0.0 Message queued with id c.",
+        "550 5.7.1 spam",
         "550 5.7.1 spam",
         "250 2.0.0 Message queued with id d.",
     ]);
@@ -185,21 +207,28 @@ fn only_the_test_that_did_not_happen_is_tried_again() {
     );
     assert_dated(&first, 0, AGAIN);
     // An hour later the spam text alone, with a harmless message after its
-    // refusal, and the test file's result stays the one of its own session.
+    // refusal, and the test file's result stays the one of its own round,
+    // with that round's harmless message.
     let again = collected(&provider(port), &memory, AGAIN, &[]);
     let sessions = handle.join().unwrap();
-    assert_eq!(sessions.len(), 5);
-    assert!(sessions[3].contains("GTUBE"), "{}", sessions[3]);
+    assert_eq!(sessions.len(), 7);
+    assert!(sessions[4].contains("GTUBE"), "{}", sessions[4]);
     assert_eq!(again.state, State::Ok);
     assert_eq!(
         results(&again),
-        ["refused: 550 virus", "refused: 550 5.7.1 spam", "accepted"]
+        [
+            "refused: 550 virus",
+            "refused: 550 5.7.1 spam",
+            "accepted",
+            "accepted"
+        ]
     );
     assert_eq!(
         sent(&again),
         [
             "2026-10-29T12:00:00+00:00",
             "2026-10-29T13:00:00+00:00",
+            "2026-10-29T12:00:00+00:00",
             "2026-10-29T13:00:00+00:00"
         ]
     );

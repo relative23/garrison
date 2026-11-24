@@ -8,8 +8,8 @@
 //! for `when_unreachable = "defer"`: Stalwart defers each test message at its
 //! end, and the card says "not tested", Unknown. A milter that refuses every
 //! message, as a scanner that fails closed does, refuses the harmless
-//! message beside the tests too, and no test is judged; one that refuses
-//! only the tests lets their refusals count. Beside it, the events Stalwart
+//! message beside the tests too: no test is judged, and the card is a
+//! warning; one that refuses only the tests lets their refusals count. Beside it, the events Stalwart
 //! records of what a milter answered, by which the mail flow's milter card
 //! counts.
 //! Needs `GARRISON_LAB_SMTP` and `GARRISON_LAB_CALLBACK_HOST` besides the
@@ -205,7 +205,7 @@ fn a_refusal_counts_only_where_stalwart_takes_the_harmless_message() {
         let card = tested(&smtp);
         let rows = results(&card);
         eprintln!("a milter that refuses every message: {rows:?}");
-        assert_eq!((card.state, rows.len()), (State::Unknown, 3), "{card:?}");
+        assert_eq!((card.state, rows.len()), (State::Warning, 3), "{card:?}");
         for row in &rows[..2] {
             assert!(
                 row.starts_with("not tested: refused like a harmless message: 5"),

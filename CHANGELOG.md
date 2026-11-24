@@ -56,6 +56,8 @@ Notable changes for operators and users. The format follows
   `garrison_stalwart_admin` is set, `garrison stalwart setup`, also on a host
   that an earlier release's role set up.** Stalwart must answer then, and that
   administrator must still work.
+  domains, the Management API card that it refused `x:Account/query`, and
+  the Spam and ham by domain card that it did not give its accounts.
 
 ### Added
 
@@ -292,14 +294,19 @@ Notable changes for operators and users. The format follows
   of a domain, which already stopped asking, said that the resolver gave no
   answer for the records left; they now say "not asked" too, and a domain's
   MTA-STS policy, which was still fetched then, is fetched in the next run.
+- **One overlong value in a database another user writes no longer takes
+  the collector or the web service past its memory.** A reader takes no
+  value longer than 16 MiB; the card says that the database could not be
+  read.
 - **A named pipe in place of a file a check reads no longer holds the
   collection run.** The user that writes the event history or Fangfrisch's
   database could put a named pipe in its place, and root with ClamAV's
   files: opening it waited for a writer, so the run never reached its
   snapshot and systemd ended it, run after run. A reader of a database that
   another user writes, the web service's history queries and root's
-  commands among them, now refuses one that is no regular file before
-  SQLite opens it, and the checks say "not a regular file" on their cards.
+  commands among them, now refuses one that is no regular file, and waits
+  five seconds at the most for one put in place of the database or its
+  journal while SQLite opens it; the checks say so on their cards.
   The Signature databases card also says when Fangfrisch's database cannot
   be read, and is Partial then; it reads Fangfrisch's whole refresh log,
   where it read its first 512 rows.
@@ -320,7 +327,8 @@ Notable changes for operators and users. The format follows
 - **The ClamAV cards name the setting for a file they do not find.** A
   missing configuration file, or a signature directory without the listed
   files, names its option and `garrison detect --format toml`, which prints
-  where this host keeps it.
+  where this host keeps it; a directory the collector may not search is
+  named as such.
 - **A daily signature database dated ahead of the clock is a warning.** The
   Signature databases card called it current however long updates had
   stopped; it now says that one of the two clocks is wrong.
@@ -328,10 +336,10 @@ Notable changes for operators and users. The format follows
   sending addresses.** Its time or fields of another type made all their
   cards Unknown; such an event is now left out, and the cards say how many
   were.
-- **The Test messages card is no longer in order where the server refuses
-  every message.** A refusal counts only where the server takes a harmless
-  message sent after it, which lands in the test mailbox once a day by
-  default.
+- **The Test messages card is in order only where the server refused each
+  test twice and then took a harmless message, and is a warning where it
+  refuses that too.** A harmless message lands in the test mailbox once a
+  day by default.
 - **The milter verdicts card counts a milter's own replies apart, and
   warns where a milter judged nothing.** It counted a reply of the milter's
   own as deferred, though such a reply refuses a message as well: Garrison's
@@ -1083,6 +1091,8 @@ Notable changes for operators and users. The format follows
   domains however many Stalwart has, and count the rest.**
 - **The mailbox storage card reads Stalwart's accounts up to `max_accounts`
   and says how many it leaves.** Raise `max_accounts` where it names some.
+- **Spam and ham by domain names the domains of Stalwart's first 20 000
+  accounts, not of the first 500 alone, and says how many it leaves.**
 - **The TLS check probes a listener Stalwart binds to one address on that
   address.**
 - **The TLS certificates card says where an SMTP listener stopped before
@@ -1123,7 +1133,8 @@ Notable changes for operators and users. The format follows
   said to run setup again, or that Stalwart did not answer, long after it
   was mended. Such a reading is now made again in the
   next run, which asks Stalwart alone, one request a minute while it lasts,
-  as one made without the key is once there is one.
+  and reads anew where it answers otherwise, as one made without the key is
+  once there is one.
 - **The DNS and reputation cards name the option that gives them a
   resolver.** Where `/etc/resolv.conf` names no resolver, they said only
   that; they now add "name one with `resolver`".

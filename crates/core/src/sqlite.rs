@@ -5,16 +5,19 @@
 //! reader would need write access to the shared-memory file, which would weaken
 //! the boundary.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions, Permissions};
+use std::io;
 use std::ops::Deref;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use rusqlite::config::DbConfig;
+use rusqlite::limits::Limit;
 use rusqlite::{Connection, OpenFlags};
 
 use crate::config::Database;
@@ -34,7 +37,7 @@ pub enum SqliteError {
     #[error("The database holds objects Garrison never creates; it is not read")]
     ForeignSchema,
     #[error("{0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
     #[error("{0}")]
     Sqlite(#[from] rusqlite::Error),
 }
@@ -142,6 +145,11 @@ impl Deref for Reader {
     }
 }
 
+/// The longest value a reader of a database another user writes takes: more
+/// than Garrison writes in one (a status snapshot of the `stalwart` check's
+/// 20 000 accounts is some MiB, the receiver's batch at most 8 MiB), and
+/// little beside a service's memory, which holds a value twice as it is read.
+const LONGEST: i32 = 16 << 20;
 /// How long a reader waits for the writer's lock each time it meets it.
 const FOR_THE_WRITER: Duration = Duration::from_secs(2);
 /// How long a reader whose request may go away sleeps between two tries
@@ -154,6 +162,14 @@ const QUIET: Duration = Duration::from_secs(60);
 /// When the journal last said that a reader waited out the writer of each
 /// database, and how many more did since.
 static WAITED: Mutex<BTreeMap<PathBuf, (Instant, u64)>> = Mutex::new(BTreeMap::new());
+/// How long a reader waits for SQLite to open a database and begin its
+/// snapshot: the writer's lock twice, as SQLite meets it reading the schema
+/// and again beginning the snapshot, and a second for the disk.
+const OPEN_WAIT: Duration = Duration::from_secs(5);
+/// The databases, by their resolved path, of which a reader was left
+/// waiting in SQLite's open: one such thread at the most for each, as a
+/// further reader of one is refused at once until that open has ended.
+static LEFT_WAITING: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
 
 /// The line for a reader of `path` that waited out its writer at `now`,
 /// where one is due: at once, and then at most once a minute for that
@@ -219,6 +235,16 @@ pub fn reading_until(
     if fs::symlink_metadata(path).is_err() {
         return Ok(None);
     }
+    let database = path.to_owned();
+    bounded(path, move || begin_reading(&database, budget, gone)).map(Some)
+}
+
+/// The reader of [`reading_until`], its snapshot begun.
+fn begin_reading(
+    path: &Path,
+    budget: Duration,
+    gone: Arc<AtomicBool>,
+) -> Result<Reader, SqliteError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let mut db = connect_untrusted(path, flags)?;
     // While the writer commits, the reader waits for its lock as any other
@@ -238,9 +264,19 @@ pub fn reading_until(
             waited_out(&database);
             return false;
         }
-        std::thread::sleep(RETRY);
+        thread::sleep(RETRY);
         true
     }))?;
+    // In exclusive locking mode SQLite reads a database in write-ahead mode
+    // only under a lock that a read-only reader cannot take, so it never
+    // opens a write-ahead log or its shared memory, which it opens holding a
+    // lock of the whole process: a pipe there would hold every open of the
+    // process. The reader keeps its shared lock until it is dropped, as its
+    // snapshot does anyway. The snapshot begins with the read of the schema,
+    // at which SQLite opens a journal there is by its name: within the
+    // open's wait, and no later query of the reader opens anything.
+    db.pragma_update_and_check(None, "locking_mode", "EXCLUSIVE", |_| Ok(()))?;
+    db.execute_batch("BEGIN")?;
     harden(&db)?;
     db.pragma_update(None, "query_only", "ON")?;
     let deadline = Instant::now() + budget;
@@ -248,8 +284,68 @@ pub fn reading_until(
         10_000,
         Some(move || Instant::now() > deadline || gone.load(Ordering::Relaxed)),
     )?;
-    db.execute_batch("BEGIN")?;
-    Ok(Some(Reader { db }))
+    Ok(Reader { db })
+}
+
+/// `open`, which opens the database at `path` that another user writes, on
+/// a thread of its own, waited for no longer than [`OPEN_WAIT`]. SQLite
+/// opens the database, its journal, and a write-ahead log and its shared
+/// memory by their names and without `O_NONBLOCK`, so a named pipe that the
+/// user who writes the folder puts in place of one of them, at any moment,
+/// holds the open for good. Such an open is left to wait on its thread, and
+/// the reader gets an error.
+fn bounded<T: Send + 'static>(
+    path: &Path,
+    open: impl FnOnce() -> Result<T, SqliteError> + Send + 'static,
+) -> Result<T, SqliteError> {
+    let database = with_resolved_directory(path)?;
+    let left = || LEFT_WAITING.lock().unwrap_or_else(PoisonError::into_inner);
+    if left().contains(&database) {
+        return Err(io::Error::other(format!(
+            "an earlier reader of {} still waits for SQLite to open it, as where a named pipe \
+             stands in its place or its journal's: take away what is no regular file there; it is \
+             read again once that reader ends or the service starts again",
+            database.display()
+        ))
+        .into());
+    }
+    let (sender, receiver) = mpsc::channel();
+    let opening = database.clone();
+    thread::Builder::new()
+        .name("sqlite-open".to_owned())
+        .spawn(move || {
+            let opened = open();
+            // The answer goes while the lock is held: a reader that gave up
+            // on it marked the database first and listens no more.
+            let mut waiting = left();
+            if sender.send(opened).is_err() {
+                waiting.remove(&opening);
+            }
+        })?;
+    match receiver.recv_timeout(OPEN_WAIT) {
+        Ok(opened) => opened,
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(io::Error::other("SQLite's open ended without an answer").into())
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            let mut waiting = left();
+            if let Ok(opened) = receiver.try_recv() {
+                return opened;
+            }
+            waiting.insert(database.clone());
+            drop(receiver);
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "SQLite did not open {} within {} s, as where a named pipe stands in its place \
+                     or its journal's: take away what is no regular file there",
+                    database.display(),
+                    OPEN_WAIT.as_secs()
+                ),
+            )
+            .into())
+        }
+    }
 }
 
 /// Whether a query failed because its reader's time budget ran out, or its
@@ -284,10 +380,13 @@ pub fn held_by_the_writer(error: &rusqlite::Error) -> bool {
 /// resolved first: it is the operator's (a state directory may live on another
 /// disk), while only the file itself is the writing user's to replace.
 pub fn open_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, SqliteError> {
-    let db = connect_untrusted(path, flags)?;
-    db.busy_timeout(FOR_THE_WRITER)?;
-    harden(&db)?;
-    Ok(db)
+    let database = path.to_owned();
+    bounded(path, move || {
+        let db = connect_untrusted(&database, flags)?;
+        db.busy_timeout(FOR_THE_WRITER)?;
+        harden(&db)?;
+        Ok(db)
+    })
 }
 
 /// The connection [`open_untrusted`] begins with, before it waits for a
@@ -295,10 +394,10 @@ pub fn open_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, Sqlit
 fn connect_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, SqliteError> {
     let path = with_resolved_directory(path)?;
     regular(&path)?;
-    Ok(Connection::open_with_flags(
-        path,
-        flags | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )?)
+    let db = Connection::open_with_flags(path, flags | OpenFlags::SQLITE_OPEN_NOFOLLOW)?;
+    // SQLite refuses a longer value as it reads it, before it holds it.
+    db.set_limit(Limit::SQLITE_LIMIT_LENGTH, LONGEST)?;
+    Ok(db)
 }
 
 /// Refuses a named pipe or other file that is no regular file at `path`,
@@ -306,22 +405,22 @@ fn connect_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, Sqlite
 /// without opening: closing a descriptor of the file would drop every lock
 /// this process holds on it, another reader's among them. A link, or what
 /// cannot be looked at, is left to SQLite's own open to refuse or name. A
-/// swap between this look and SQLite's open needs write access to the
-/// folder, which only the writing service and root have.
+/// pipe swapped in after this look holds SQLite's open; [`bounded`] bounds
+/// how long a reader waits for it.
 fn regular(path: &Path) -> Result<(), SqliteError> {
     match fs::symlink_metadata(path) {
         Ok(found) if !found.is_file() && !found.file_type().is_symlink() => {
-            Err(SqliteError::Io(std::io::Error::other("not a regular file")))
+            Err(SqliteError::Io(io::Error::other("not a regular file")))
         }
         _ => Ok(()),
     }
 }
 
 /// `path` with its directory resolved to the real one; the file name is kept.
-fn with_resolved_directory(path: &Path) -> std::io::Result<PathBuf> {
+fn with_resolved_directory(path: &Path) -> io::Result<PathBuf> {
     let name = path
         .file_name()
-        .ok_or_else(|| std::io::Error::other("a database path names a file"))?;
+        .ok_or_else(|| io::Error::other("a database path names a file"))?;
     let directory = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
@@ -387,6 +486,10 @@ fn blanks_skipped(mut text: &str) -> &str {
 }
 
 #[cfg(test)]
+mod length_tests;
+#[cfg(test)]
 mod reader_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wait_tests;

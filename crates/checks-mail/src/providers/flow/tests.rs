@@ -1,10 +1,10 @@
 use garrison_core::time;
-use garrison_testing::http::{json as answer_json, serve};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use super::read::DAY;
 use super::*;
+use crate::testing::objects::objects;
 use crate::testing::{Canned, Receiver, Remembered, assert_dated, config, now, table};
 
 /// One event: its type, how many seconds before the tests' clock, its span
@@ -36,11 +36,8 @@ pub(super) fn observed_from(
 ) -> Vec<Observation> {
     let directory = tempfile::tempdir().unwrap();
     let mut config = history(directory.path(), receiver, events, later);
-    let stalwart = accounts.map(|accounts| {
-        serve(vec![answer_json(&json!({
-            "methodResponses": [["x:Account/get", {"list": accounts}, "0"]]
-        }))])
-    });
+    let stalwart =
+        accounts.map(|accounts| objects("Account", accounts.as_array().unwrap().clone()));
     if let Some(stalwart) = &stalwart {
         config.deployment.stalwart_url.clone_from(&stalwart.url);
     }

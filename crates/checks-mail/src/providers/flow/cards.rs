@@ -150,9 +150,11 @@ impl Flow {
                     ]
                 })
                 .collect();
-            // Without the domains it is about, the card is not in order; the
-            // mail is counted under "unknown".
+            // Without the domains it is about, the card is not in order, and
+            // without some of them it is a part; that mail is counted under
+            // "unknown".
             let unread = read.domains_unread.as_ref();
+            let accounts_left = read.domains_left.clone();
             let (part, cut) = left_out(
                 week,
                 &["message-ingest.ham", "message-ingest.spam"],
@@ -167,7 +169,7 @@ impl Flow {
                     ModuleId::Spam,
                     if unread.is_some() {
                         State::Unknown
-                    } else if part {
+                    } else if part || accounts_left.is_some() {
                         State::Partial
                     } else {
                         State::Ok
@@ -186,6 +188,7 @@ impl Flow {
             by_domain.findings.extend(
                 unread.map(|why| format!("The domains of the mailboxes are not known: {why}.")),
             );
+            by_domain.findings.extend(accounts_left);
             by_domain.findings.extend(cut);
             report.observations.push(by_domain);
         }

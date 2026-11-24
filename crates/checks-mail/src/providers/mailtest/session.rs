@@ -59,6 +59,20 @@ fn host(origin: &str) -> &str {
     }
 }
 
+/// What the session greets with: the host, or an address as an address
+/// literal, `[192.0.2.1]` or `[IPv6:2001:db8::1]` (RFC 5321, 4.1.3), as a
+/// notification greets.
+fn greeting(host: &str) -> String {
+    match host
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
+        Some(address) => format!("[IPv6:{address}]"),
+        None if host.parse::<std::net::Ipv4Addr>().is_ok() => format!("[{host}]"),
+        None => host.to_owned(),
+    }
+}
+
 /// `Message queued with id 4b786a616e00000.` names the queue ID in hex; the
 /// event history writes it as a number.
 pub(super) fn queue_id(reply: &str) -> Option<String> {
@@ -67,9 +81,9 @@ pub(super) fn queue_id(reply: &str) -> Option<String> {
 }
 
 impl MailTest {
-    /// One session that hands `test` to the server, all of it within the
-    /// session's time.
-    pub(super) fn send(&self, context: &Context<'_>, test: Test) -> Sent {
+    /// One session that hands `test` to the server, or its copy sent again
+    /// where `again`, all of it within the session's time.
+    pub(super) fn send(&self, context: &Context<'_>, test: Test, again: bool) -> Sent {
         let failed = |reply: String| Sent {
             reply,
             ..Sent::default()
@@ -100,10 +114,11 @@ impl MailTest {
             date: time::mail_date(context.now),
             stamp: context.now.as_second(),
             host: name,
+            again,
         });
         let steps = [
             (None, 220),
-            (Some(format!("EHLO {name}\r\n")), 250),
+            (Some(format!("EHLO {}\r\n", greeting(name))), 250),
             (Some(format!("MAIL FROM:<{}>\r\n", self.sender)), 250),
             (Some(format!("RCPT TO:<{}>\r\n", self.recipient)), 250),
             (Some("DATA\r\n".to_owned()), 354),
@@ -123,8 +138,7 @@ impl MailTest {
                         reply: said,
                         code,
                         at_data: index == 5,
-                        at: None,
-                        cut: false,
+                        ..Sent::default()
                     };
                     if code != *expected {
                         break;

@@ -13,6 +13,8 @@ pub use mailtest::MailTest;
 pub use senders::Senders;
 
 #[cfg(test)]
+mod listed_tests;
+#[cfg(test)]
 mod pipe_tests;
 #[cfg(test)]
 mod tests;

@@ -94,10 +94,13 @@ fn a_database_from_a_newer_release_is_refused() {
 
 #[test]
 fn readers_see_one_snapshot_and_cannot_write() {
+    // A database that another service reads keeps the rollback journal: a
+    // writer's commit waits for a reader's snapshot, as the reader tests
+    // show, and the reader writes nothing.
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("items.sqlite");
     assert!(reading(&path, Duration::from_secs(2)).unwrap().is_none());
-    let writer = open_writer(&path, MIGRATIONS, Sharing::Private, 0o600).unwrap();
+    let writer = open_writer(&path, MIGRATIONS, Sharing::WithReaders, 0o600).unwrap();
     writer
         .execute("INSERT INTO item (name) VALUES ('a')", [])
         .unwrap();
@@ -108,20 +111,16 @@ fn readers_see_one_snapshot_and_cannot_write() {
             .unwrap()
     };
     assert_eq!(count(&reader), 1);
-    writer
-        .execute("INSERT INTO item (name) VALUES ('b')", [])
-        .unwrap();
-    assert_eq!(
-        count(&reader),
-        1,
-        "the snapshot does not change within one request"
-    );
     assert!(
         reader
             .execute("INSERT INTO item (name) VALUES ('c')", [])
             .is_err()
     );
+    assert_eq!(count(&reader), 1);
     drop(reader);
+    writer
+        .execute("INSERT INTO item (name) VALUES ('b')", [])
+        .unwrap();
     assert_eq!(
         count(&reading(&path, Duration::from_secs(2)).unwrap().unwrap()),
         2

@@ -191,20 +191,24 @@ minutes. They count; none of them is a verdict, except where it says so.
 
 - `spam`: ham and spam by day, with the training runs of the classifier, on
   the Spam filter page; and the same by the domain of the mailbox the mail
-  went to, which Stalwart's accounts name. Where Stalwart did not give them
-  to the collector's key, or the collector has no key for Stalwart, that
-  mail is counted under "unknown", and the card by domain is Unknown and
-  says why; the first run with a key reads them at once, and while Stalwart
-  does not give them, each run asks it again, so that the card follows its
-  next answer, as once setup gave the key its rights. The other cards
-  need no account, and a Stalwart that is slow to answer costs them
-  nothing: it is asked before the history is read.
+  went to, which Stalwart's first 20 000 accounts name, read while the run
+  has time: mail to an account after those is counted under "unknown", and
+  the card says how many there are and is Partial. Where Stalwart did not
+  give them to the collector's key, or the collector has no key for
+  Stalwart, that mail is counted under "unknown", and the card by domain is
+  Unknown and says why; the first run with a key reads them at once, and
+  while Stalwart does not give them, each run asks it again, so that the
+  card follows its next answer, as once setup gave the key its rights. The
+  other cards need no account, and a Stalwart that is slow to answer costs
+  them nothing: it is asked before the history is read.
 - `milter`: what Stalwart's milters said of the mail they were shown (a
   virus scanner's, Garrison's own macro filter), by day, on the Antivirus
   page. A milter that could not be reached since yesterday is a warning,
   and so is a deferral of every message the milters were shown since
   yesterday, as a scanner gives that cannot scan, also where another milter
-  passed them first. A reply of the milter's own, with which Garrison's
+  passed them first. The history names no milter, so a message is told by
+  its session: a session in which a milter deferred anything counts as
+  deferred. A reply of the milter's own, with which Garrison's
   macro filter refuses a message, is counted apart: Stalwart's event does
   not say whether it refused or deferred, so a milter that defers with one
   is not warned of. A host without a milter has no such card.
@@ -503,19 +507,26 @@ The collector hands two messages to the local SMTP listener without signing
 in: the antivirus test file (EICAR), which a scanner must refuse, and the spam
 test text (GTUBE), which must be refused or filed as spam. The event history
 shows how an accepted one was filed. The check runs only where you name a
-`recipient`. Make a mailbox of its own for it: it receives a harmless message
-in each round in which a test is refused, a day by default, and one from a
-test that goes wrong.
+`recipient`. Make a mailbox of its own for it: it receives a harmless message,
+with `macro_document` a harmless document too, in each round in which the
+server refuses a test, one round a day by default and two where a test was
+tried again an hour later, and one from a test that goes wrong.
 
 Each test is sent again `every_hours` after it was sent. One that did not
 happen, because no session came about, the server turned it away before
 the message or it deferred the message with a temporary reply (4xx), is
 "not tested": it alone is tried again after an hour, and the table says when
-each test was sent. A refusal counts only where the server takes the
-harmless message the collector sends after it in the same run ("Garrison
-mail test: Harmless message (control)"); where the server refuses that one
-too, as clamav-milter does with `OnFail Reject` while clamd is down, or it
-does not get through, the refused tests are "not tested" as well. A
+each test was sent. A refused test is sent again at once, and its refusal
+counts only where the server refuses that copy too and takes the harmless
+message of the same build that the collector sends after the run's tests
+("Garrison mail test: Harmless message (control)", beside the test document
+a harmless document): a server that refuses by turns takes one of the
+copies, which counts as taken, and a policy on attachments refuses the
+harmless document. Where the server refuses the harmless message, as
+clamav-milter does with `OnFail Reject` while clamd is down, or a policy
+that refuses the tests' sender, the card is a warning, of which an operator
+is told; where it does not get through, the refused tests are "not tested".
+A refusal that an earlier release kept is sent again in the first run. A
 deferral is no verdict: Stalwart defers a message
 where a milter defers it, as a scanner that cannot scan does
 (clamav-milter's `OnFail Defer` while clamd is down), and where it cannot
@@ -551,7 +562,8 @@ Unknown; a policy that was read stays a warning where only clamd's file
 cannot be read. One that is not there names its option and
 `garrison detect --format toml`, which prints where this host keeps it, as
 the card "Signature databases" does where none of its files is in
-`database_directory`. `garrison check-config` takes for `expect_on_infected` only
+`database_directory`; where the collector's user may not search that
+folder, the card says so instead. `garrison check-config` takes for `expect_on_infected` only
 `Accept`, `Reject`, `Defer`, `Blackhole` and `Quarantine`, and for
 `expect_on_fail` only the first three.
 
@@ -560,7 +572,12 @@ Where `fangfrisch_database` names Fangfrisch's database, the card
 its whole refresh log; where that database cannot be read, the card says
 why and is Partial where it would be OK. A file a check reads that is no
 regular file, such as a named pipe in place of a database or of ClamAV's
-files, is not opened, and the card says "not a regular file".
+files, is not opened, and the card says "not a regular file". One put in
+place of a database or of its journal while the check opens it holds the
+check five seconds at the most, and the card says that SQLite did not open
+the database. A database another user writes is not read where a value in
+it is longer than 16 MiB, more than Garrison or Fangfrisch writes in one:
+the card says "string or blob too big".
 
 ## `receipt`
 
