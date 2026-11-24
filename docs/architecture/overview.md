@@ -53,12 +53,14 @@ then asks the broker for a grant. Without one, the token is revoked and no
 session is created. Sessions are stored as SHA-256 digests of a random
 identifier in a `__Host-` cookie of Garrison's own host name.
 
-A session ends when its row is deleted, and its token is revoked at Stalwart
-with it: at sign-out, when the policy refuses the user, when the token turns
-out to be another user's, and when the same browser signs in again. A
-sign-out whose row could not be deleted answers with an error and keeps the
-cookie, so that it can be tried again; it never answers "ok" for a session
-that is still there.
+A session ends, and its token is revoked at Stalwart with it, at sign-out,
+when the policy refuses the user, when the token turns out to be another
+user's, when the same browser signs in again, and when its time is over,
+within a second of it. Its row goes once Stalwart has answered the
+revocation; until then no cookie finds it, and the web service asks again a
+minute later. A sign-out whose row could not be ended answers with an error
+and keeps the cookie, so that it can be tried again; it never answers "ok"
+for a session that is still there.
 
 **Every API request.** Except for sign-out and the switch row's question
 (`/api/switch`), which look only at the session, the web service sends the
