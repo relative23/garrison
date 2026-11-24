@@ -209,6 +209,23 @@ scenario_restore_refused_config() {
     running "after the restore under a refused configuration" "$new"
 }
 
+scenario_rollback_refused_config() {
+    step "A rollback with the state from before the upgrade under a configuration the release it returns to refuses is refused before anything stops"
+    upgraded_from_old
+    # Written since the services started, which run on what they loaded.
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.refused && mkdir -p /home/jobs &&
+        printf "\n[[providers]]\ntype = \"receipt\"\nid = \"nightly\"\ntitle = \"Nightly job\"\npath = \"/home/jobs/nightly.json\"\nmodules = [\"services\"]\nmax_age_hours = 24\n" \
+            >> /etc/garrison/garrison.toml'
+    pid=$(web_pid)
+    refused "a rollback under a configuration the release it returns to refuses is refused" \
+        '/opt/garrison/current/bin/garrison install --rollback --restore-state' "cannot load /etc/garrison/garrison.toml"
+    check "and nothing stopped or switched" "
+        test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid' &&
+            $(current_is "$new")"
+    inside 'cat /root/garrison.toml.refused > /etc/garrison/garrison.toml && rm -r /home/jobs'
+    running "after the rollback under a refused configuration" "$new"
+}
+
 scenario_rollback_refused() {
     step "A rollback whose state from before the upgrade the configuration no longer takes is refused before anything stops"
     upgraded
@@ -348,4 +365,30 @@ scenario_restore_room() {
         umount /var/lib/garrison/ingest && cp -a /root/ingest-room/. /var/lib/garrison/ingest/ &&
         rm -r /root/ingest-room /root/room-state && systemctl start garrison-ingest.service'
     running "after the restore that did not fit" "$new"
+}
+
+scenario_rollback_room() {
+    step "A rollback with the state from before the upgrade whose copies do not fit is refused before anything stops"
+    upgraded_from_old
+    last=$(inside 'readlink -f /var/backups/garrison/last-pre-upgrade')
+    # The copy of the event history grows to some 10 MiB, more than the
+    # small file system that the receiver's folder lies on below.
+    inside "sqlite3 $last/ingest/events.sqlite 'CREATE TABLE padding(x);
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 10000)
+        INSERT INTO padding SELECT randomblob(1000) FROM n;'"
+    inside 'systemctl stop garrison-ingest.service && cp -a /var/lib/garrison/ingest /root/ingest-room &&
+        mount -t tmpfs -o size=8m garrison-room /var/lib/garrison/ingest &&
+        cp -a /root/ingest-room/. /var/lib/garrison/ingest/ && rm -r /root/ingest-room &&
+        systemctl start garrison-ingest.service'
+    pid=$(web_pid)
+    refused "a rollback whose copy does not fit beside its database is refused" \
+        '/opt/garrison/current/bin/garrison install --rollback --restore-state' "MiB free and the rollback needs"
+    check "and nothing stopped or switched" "
+        test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid' &&
+            $(current_is "$new")"
+    inside "systemctl stop garrison-ingest.service && cp -a /var/lib/garrison/ingest /root/ingest-room &&
+        umount /var/lib/garrison/ingest && cp -a /root/ingest-room/. /var/lib/garrison/ingest/ &&
+        rm -r /root/ingest-room && systemctl start garrison-ingest.service &&
+        sqlite3 $last/ingest/events.sqlite 'DROP TABLE padding; VACUUM;'"
+    running "after the rollback that did not fit" "$new"
 }
