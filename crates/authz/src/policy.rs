@@ -27,7 +27,7 @@ use serde_json::Value;
 
 use crate::Error;
 
-pub const SCHEMA_VERSION: u64 = 1;
+pub(crate) const SCHEMA_VERSION: u64 = 1;
 /// Rights a profile needs before it may start host maintenance jobs.
 pub const ACTION_PERMISSIONS: [&str; 2] = ["authenticate", "sysActionCreate"];
 
@@ -101,8 +101,8 @@ pub struct Profile {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SubjectEntry {
-    pub account_id: String,
-    pub profile: String,
+    pub(crate) account_id: String,
+    pub(crate) profile: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -199,7 +199,7 @@ fn profile(
 
 /// The actions the profiles of a policy document name, as it is written;
 /// none of a profile that does not read so far.
-pub fn named_actions(raw: &Value) -> BTreeSet<&str> {
+pub(crate) fn named_actions(raw: &Value) -> BTreeSet<&str> {
     let profiles = raw["profiles"].as_object().into_iter().flatten();
     profiles
         .filter_map(|(_, profile)| profile["actions"].as_array())

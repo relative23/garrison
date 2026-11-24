@@ -79,7 +79,7 @@ impl Authority {
         self
     }
 
-    pub fn action_ids(&self) -> BTreeSet<&str> {
+    pub(crate) fn action_ids(&self) -> BTreeSet<&str> {
         self.action_ids.iter().map(String::as_str).collect()
     }
 

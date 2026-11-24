@@ -11,4 +11,3 @@ pub mod policy;
 pub use authority::Authority;
 pub use garrison_stalwart::{Error, SUPPORTED};
 pub use grant::Grant;
-pub use policy::Policy;
