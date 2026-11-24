@@ -415,6 +415,30 @@ scenario_milter_asked() {
     running "after the filter Stalwart asked" "$new"
 }
 
+scenario_milter_port() {
+    step "The installer leaves the macro filter on the port Stalwart asks until setup moves it"
+    upgraded
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.port &&
+        printf "\n[milter]\n" >> /etc/garrison/garrison.toml'
+    installer '/root/release/bin/garrison install'
+    check "the filter listens on its port" 'ncat -z 127.0.0.1 8096'
+    # Stalwart's entry asks that port, and the configuration names another,
+    # as before `garrison stalwart setup` has moved the entry.
+    inside 'printf "%s" "{\"id\": \"m1\", \"host\": \"127.0.0.1\", \"port\": 8096, \"enable\": true}" \
+            > /root/stand-in-milters && printf "port = 8097\n" >> /etc/garrison/garrison.toml'
+    says "the next installer run leaves the filter where Stalwart asks it, and names setup" \
+        '/root/release/bin/garrison install' "\`garrison stalwart setup\` moves it to port 8097"
+    check "and the filter still answers there" 'ncat -z 127.0.0.1 8096 && ! ncat -z 127.0.0.1 8097'
+    inside 'rm /root/stand-in-milters'
+    installer '/root/release/bin/garrison install'
+    check "once nothing asks that port, the next run moves the filter" \
+        'ncat -z 127.0.0.1 8097 && ! ncat -z 127.0.0.1 8096'
+    inside 'cat /root/garrison.toml.port > /etc/garrison/garrison.toml'
+    installer '/root/release/bin/garrison install'
+    check "without the section the next run stops it" '! systemctl is-active --quiet garrison-milter.service'
+    running "after the filter's port" "$new"
+}
+
 scenario_milter_sandbox() {
     step "The macro filter's unit writes nowhere: no /tmp of its own, not the host's shared memory"
     upgraded
@@ -467,7 +491,7 @@ for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check base_hidden fai
     rollback_refused_config rollback_room \
     interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere \
     policy_foreign unwritten \
-    rotation milter_asked milter_sandbox collect_beside restore_leftovers access_links access_folder access_actions}; do
+    rotation milter_asked milter_port milter_sandbox collect_beside restore_leftovers access_links access_folder access_actions}; do
     "scenario_$scenario"
 done
 

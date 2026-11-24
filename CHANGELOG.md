@@ -1780,6 +1780,10 @@ Notable changes for operators and users. The format follows
   while Stalwart may still ask it**, which left Stalwart deferring all
   incoming mail; they say why the filter keeps running and that `garrison
   stalwart setup` takes it out.
+- **The installer no longer moves the macro filter away from the port
+  Stalwart asks**, which deferred all incoming mail after a change of
+  `[milter] port`: it leaves the filter there and says that `garrison stalwart
+  setup` moves it.
 - **The installer loads the SELinux module again where its last load
   failed**, where it took the module as loaded and nginx answered 502; its
   warning says how `semodule` ended where it said nothing.

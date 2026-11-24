@@ -4,10 +4,16 @@
 use std::fs;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
+use std::time::Duration;
 
-use super::files::{Step, io, must, run};
+use garrison_core::config::{self, Config};
+use garrison_core::credentials::Credentials;
+use garrison_stalwart::jmap::JmapClient;
+
+use super::files::{Step, announce, io, must, run};
 use super::system::unit_file;
 use super::{CONFIG, SYSTEMCTL, UNITS, cli, milter, settle};
+use crate::doctor::milter::entries::{self, Entry};
 use crate::units;
 
 pub(super) const ENABLE: [&str; 5] = [
@@ -97,14 +103,85 @@ pub(super) fn start(release: &Path) -> Step {
     let mut enable = vec!["enable"];
     enable.extend(&shipped);
     must(SYSTEMCTL, &enable)?;
+    let held = milter && filter_held();
     // One start per unit: `restart` also starts a stopped unit. The units are
     // ready only once they serve, so a release that cannot come up fails here,
     // its broker too, which otherwise its first client would start.
     let mut restart = vec!["restart"];
-    restart.extend(&shipped);
+    restart.extend(
+        shipped
+            .iter()
+            .filter(|unit| !held || **unit != units::MILTER),
+    );
     must(SYSTEMCTL, &restart)?;
     must(SYSTEMCTL, &["start", units::BROKER])?;
     settle::settle(milter)
+}
+
+/// Whether the macro filter is to stay where it runs, and says so: it listens
+/// on a port `garrison.toml` no longer names, and a start would move it away
+/// from an entry Stalwart asks there, which would then defer every message.
+/// `garrison stalwart setup` moves the entry, then the filter.
+fn filter_held() -> bool {
+    let Ok(config) = config::load(&Path::new(CONFIG).join("garrison.toml")) else {
+        return false;
+    };
+    let Some(filter) = &config.milter else {
+        return false;
+    };
+    let Some(why) = held(filter.port, &entries::listening(), || {
+        stalwart_milters(&config)
+    }) else {
+        return false;
+    };
+    announce(&format!(
+        "The macro filter stays on the port it listens on, which garrison.toml no longer names: \
+         {why}. `garrison stalwart setup` moves it to port {}.",
+        filter.port
+    ));
+    true
+}
+
+/// Why the filter, listening on `listening`, is not to move to `port`: an
+/// entry Stalwart asks at a port it would leave, or Stalwart's milters that
+/// could not be asked; `None` where it may move.
+fn held(
+    port: u16,
+    listening: &[u16],
+    entries: impl FnOnce() -> Result<Vec<Entry>, String>,
+) -> Option<String> {
+    let left: Vec<u16> = listening
+        .iter()
+        .copied()
+        .filter(|old| *old != port)
+        .collect();
+    if left.is_empty() {
+        return None;
+    }
+    match entries() {
+        Ok(entries) => entries
+            .iter()
+            .find(|entry| entry.asked() && left.iter().any(|old| entry.asks(*old)))
+            .map(|entry| {
+                format!(
+                    "Stalwart asks its milter entry {} at {}",
+                    entry.id,
+                    entry.address()
+                )
+            }),
+        Err(why) => Some(format!("Stalwart's milters could not be asked ({why})")),
+    }
+}
+
+/// Stalwart's milters, as the collector's API key reads them.
+fn stalwart_milters(config: &Config) -> Result<Vec<Entry>, String> {
+    let key = Credentials::new(&config.credentials_directory)
+        .read_secret(&config.collector.native_key)
+        .map_err(|error| format!("the collector's API key: {error}"))?;
+    JmapClient::new(&config.deployment.stalwart_url, &key)
+        .with_timeout(Duration::from_secs(10))
+        .get::<Entry>("MtaMilter", None, &["id", "host", "port", "enable"])
+        .map_err(|error| error.to_string())
 }
 
 /// Forget failures and systemd's start limit (5 starts in 10 s) left by a
@@ -211,7 +288,47 @@ fn installed(shown: &str, shipped: &[&str], milter: bool, changed: Option<u64>) 
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
+
+    /// The filter stays on a port it would leave where Stalwart asks an
+    /// entry there that is switched on, or where Stalwart cannot be asked;
+    /// it moves where it does not run, runs on its port already, or nothing
+    /// asks the port it leaves.
+    #[test]
+    fn the_filter_stays_where_stalwart_asks_it() {
+        let read = |list: serde_json::Value| -> Result<Vec<Entry>, String> {
+            Ok(serde_json::from_value(list).unwrap())
+        };
+        let unasked = || -> Result<Vec<Entry>, String> { panic!("asked Stalwart") };
+        assert_eq!(held(8097, &[], unasked), None);
+        assert_eq!(held(8097, &[8097], unasked), None);
+        let said = held(8097, &[8096], || {
+            read(json!([{"id": "m1", "host": "127.0.0.1", "port": 8096, "enable": true}]))
+        });
+        assert_eq!(
+            said.as_deref(),
+            Some("Stalwart asks its milter entry m1 at 127.0.0.1:8096")
+        );
+        for others in [
+            json!([{"id": "m1", "host": "127.0.0.1", "port": 8096, "enable": {"match": {}, "else": "false"}}]),
+            json!([{"id": "m1", "host": "10.0.0.5", "port": 8096}]),
+            json!([{"id": "m1", "host": "127.0.0.1", "port": 8097}]),
+            json!([]),
+        ] {
+            assert_eq!(
+                held(8097, &[8096], || read(others.clone())),
+                None,
+                "{others}"
+            );
+        }
+        let refused = held(8097, &[8096], || Err("Stalwart did not answer".to_owned()));
+        assert_eq!(
+            refused.as_deref(),
+            Some("Stalwart's milters could not be asked (Stalwart did not answer)")
+        );
+    }
 
     fn block(id: &str, file: &str, state: &str, restarts: u32) -> String {
         format!(
@@ -310,7 +427,7 @@ mod tests {
         let changed = changed_at(&file).unwrap();
         assert!(u128::from(changed) <= now + 1_000_000, "{changed} {now}");
         assert!(u128::from(changed) + 2_000_000 >= now, "{changed} {now}");
-        let ahead = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+        let ahead = std::time::SystemTime::now() + Duration::from_hours(1);
         fs::File::options()
             .write(true)
             .open(&file)
