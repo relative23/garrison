@@ -99,7 +99,9 @@ fn update_gives_the_profiles_the_actions_as_garrison_toml_names_them() {
     for line in [
         "Profile administrator: install_updates added, run_backup taken out.\n",
         "Profile operator: install_updates added.\n",
-        "Run the installer again now",
+        "Run the installer again now: it writes the polkit rule for these actions and restarts \
+         the broker and the web service, which read them only when they start; until then an \
+         added action is offered to nobody.\n",
     ] {
         assert!(said.contains(line), "{said}");
     }

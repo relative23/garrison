@@ -278,8 +278,8 @@ fn update(config: &Config) -> Result<u8, String> {
         }
         say(
             "Run the installer again now: it writes the polkit rule for these actions and \
-             restarts the broker, which reads them only when it starts. Until then a broker \
-             that does not know an action the policy names lets nobody use Garrison.",
+             restarts the broker and the web service, which read them only when they start; \
+             until then an added action is offered to nobody.",
         );
         Ok(0)
     })
