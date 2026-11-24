@@ -399,7 +399,7 @@ fn declares_encoding(data: &[u8]) -> bool {
             && data
                 .get(dash - DASH..dash - DASH + NAME.len())
                 .is_some_and(|name| name.eq_ignore_ascii_case(NAME))
-    }) || uu::next_begin(data, 0).is_some()
+    }) || uu::next_begin(data, 0, false).is_some()
 }
 
 #[cfg(test)]

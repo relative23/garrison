@@ -160,3 +160,187 @@ fn a_triplet_among_the_headers_has_nothing_read_again() {
         assert_eq!(unquoted(early).1, 1, "{}", String::from_utf8_lossy(early));
     }
 }
+
+/// How a uuencode block is written.
+struct Uu<'a> {
+    /// The headers before it, without the empty line.
+    headers: &'a str,
+    begin: &'a str,
+    /// The values 1 to 26 as the lower-case letters `(c - 0x20) & 0x3f`
+    /// gives them too.
+    alias: bool,
+    /// Bytes to a line; the format's own writers take 45.
+    line: usize,
+    end: bool,
+    line_end: &'a str,
+}
+
+const USUAL: Uu<'static> = Uu {
+    headers: "Subject: x",
+    begin: "begin 644 a.docm",
+    alias: false,
+    line: 45,
+    end: true,
+    line_end: "\r\n",
+};
+const DECLARED: &str = "Subject: x\r\nContent-Transfer-Encoding: x-uuencode";
+
+fn uuencoded(body: &[u8], how: &Uu<'_>) -> Vec<u8> {
+    let character = |value: u8| match value & 0x3f {
+        0 => 0x60,
+        value @ 1..=26 if how.alias => 0x60 + value,
+        value => value + 0x20,
+    };
+    let mut out = Vec::new();
+    for text in [how.headers, "", how.begin] {
+        out.extend_from_slice(text.as_bytes());
+        out.extend_from_slice(how.line_end.as_bytes());
+    }
+    for line in body.chunks(how.line) {
+        out.push(u8::try_from(line.len()).unwrap_or(0) + 0x20);
+        for group in line.chunks(3) {
+            let first = group[0];
+            let second = group.get(1).copied().unwrap_or(0);
+            let third = group.get(2).copied().unwrap_or(0);
+            out.push(character(first >> 2));
+            out.push(character((first << 4) | (second >> 4)));
+            out.push(character((second << 2) | (third >> 6)));
+            out.push(character(third));
+        }
+        out.extend_from_slice(how.line_end.as_bytes());
+    }
+    if how.end {
+        out.extend_from_slice(format!("`{0}end{0}", how.line_end).as_bytes());
+    }
+    out
+}
+
+// A mail program's uuencode reader takes each character as
+// `(c - 0x20) & 0x3f` without asking what it is, a line of up to 63 bytes,
+// and a line's end of any kind; under a declared uuencode it takes any line
+// that starts with `begin ` for a block's first.
+#[test]
+fn uuencode_is_read_as_a_mail_program_reads_it() {
+    let ways = [
+        ("the usual", USUAL),
+        (
+            "aliased",
+            Uu {
+                alias: true,
+                ..USUAL
+            },
+        ),
+        (
+            "aliased, not ended",
+            Uu {
+                alias: true,
+                end: false,
+                ..USUAL
+            },
+        ),
+        ("lines of 60", Uu { line: 60, ..USUAL }),
+        (
+            "CR alone",
+            Uu {
+                line_end: "\r",
+                ..USUAL
+            },
+        ),
+        (
+            "LF alone",
+            Uu {
+                line_end: "\n",
+                ..USUAL
+            },
+        ),
+        (
+            "declared, a mode of six digits",
+            Uu {
+                headers: DECLARED,
+                begin: "begin 100644 a.docm",
+                ..USUAL
+            },
+        ),
+        (
+            "declared, two spaces",
+            Uu {
+                headers: DECLARED,
+                begin: "begin  644 a.docm",
+                ..USUAL
+            },
+        ),
+        (
+            "declared, no mode",
+            Uu {
+                headers: DECLARED,
+                begin: "begin a.docm",
+                ..USUAL
+            },
+        ),
+        (
+            "declared, aliased",
+            Uu {
+                headers: DECLARED,
+                alias: true,
+                ..USUAL
+            },
+        ),
+        (
+            "no name",
+            Uu {
+                begin: "begin 644 ",
+                ..USUAL
+            },
+        ),
+    ];
+    for (way, how) in &ways {
+        for (name, body, found) in macro_documents() {
+            assert_eq!(
+                macros(&uuencoded(&body, how)),
+                Outcome::Macros(found),
+                "{name}, {way}"
+            );
+        }
+        for (name, body) in clean_documents() {
+            assert_eq!(
+                macros(&uuencoded(&body, how)),
+                Outcome::Clean,
+                "{name}, {way}"
+            );
+        }
+    }
+    // A block as a writer of the format makes it, without its `end`, was
+    // cut: what it lacks was not read.
+    let cut = Uu {
+        end: false,
+        ..USUAL
+    };
+    for (name, body) in clean_documents() {
+        assert_eq!(
+            macros(&uuencoded(&body, &cut)),
+            Outcome::Incomplete(Gap::Encoding),
+            "{name}"
+        );
+    }
+    // A line of one character stands for up to 63 zeros: a block that gives
+    // more than the message is long is not read to its end.
+    let mut zeros = b"Subject: x\r\n\r\nbegin 644 a\r\n".to_vec();
+    zeros.extend(std::iter::repeat_n(&b"_\r\n"[..], 1000).flatten());
+    assert_eq!(macros(&zeros), Outcome::Incomplete(Gap::Encoding));
+}
+
+#[test]
+fn text_that_says_begin_is_no_uuencode_block() {
+    for text in [
+        "Subject: x\r\n\r\nWe begin 2 weeks earlier\r\nif possible, please send it\r\n",
+        "Subject: x\r\n\r\nbegin 2 weeks earlier\r\nif possible, please send it\r\n",
+        "Subject: x\r\n\r\nbegin the work\r\nas soon as you can\r\n",
+        "Subject: x\r\n\r\nbegin 644 notes.txt\r\nThis line is no data: its length would be 52.\r\n",
+    ] {
+        assert_eq!(macros(text.as_bytes()), Outcome::Clean, "{text}");
+    }
+    // Under a declared uuencode a mail program decodes what follows `begin `
+    // whatever it is, and so does the scan: it holds nothing.
+    let declared = format!("{DECLARED}\r\n\r\nbegin the work\r\nThis line is no data.\r\n");
+    assert_eq!(macros(declared.as_bytes()), Outcome::Clean);
+}

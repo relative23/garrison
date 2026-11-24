@@ -9,32 +9,31 @@
 //!   value the scan does not decode means the message was not scanned
 //!   completely. No boundary and no part structure is read.
 //!
-//! The line helpers here are shared with [`super::uu`].
 
 use super::unpack::Work;
 use super::{Found, Gap, uu};
 
 impl Work {
     /// Decode and scan every uuencode block in the message. A block that
-    /// began and did not end leaves [`Gap::Encoding`]; the first document
-    /// found ends the search.
+    /// was not read whole leaves [`Gap::Encoding`]; the first document found
+    /// ends the search.
     pub(super) fn scanned_uuencoded(&mut self, message: &[u8]) -> Option<Found> {
+        let declared = content_transfer_encodings(message)
+            .iter()
+            .any(|value| is_uuencode(value));
         let mut at = 0;
-        while let Some(begin) = uu::next_begin(message, at) {
-            match uu::decode(&message[begin..]) {
-                Some((decoded, whole, consumed)) => {
-                    at = begin + consumed;
-                    if !self.may_decode(decoded.len()) {
-                        return None;
-                    }
-                    if let Some(found) = self.scanned_deep(&decoded) {
-                        return Some(found);
-                    }
-                    if !whole {
-                        self.gap.get_or_insert(Gap::Encoding);
-                    }
-                }
-                None => at = after(message, line_end(message, begin)),
+        while let Some(begin) = uu::next_begin(message, at, declared) {
+            // No block gives more than the message is long.
+            let block = uu::decode(&message[begin..], declared, message.len());
+            at = begin + block.length;
+            if !self.may_decode(block.bytes.len()) {
+                return None;
+            }
+            if let Some(found) = self.scanned_deep(&block.bytes) {
+                return Some(found);
+            }
+            if !block.whole {
+                self.gap.get_or_insert(Gap::Encoding);
             }
         }
         None
@@ -52,24 +51,30 @@ impl Work {
     }
 }
 
+/// The token of a transfer-encoding value, in lower case.
+fn token(value: &[u8]) -> Vec<u8> {
+    first_token(&without_comments(value)).to_ascii_lowercase()
+}
+
+/// Whether a transfer-encoding value declares uuencode, in any of the four
+/// spellings mail programs take.
+fn is_uuencode(value: &[u8]) -> bool {
+    matches!(
+        token(value).as_slice(),
+        b"x-uuencode" | b"uuencode" | b"x-uue" | b"uue"
+    )
+}
+
 /// Whether a transfer-encoding value is one the scan decodes (base64 and
 /// quoted-printable over the whole message, uuencode by its block, and the
 /// encodings that keep the bytes as they are). An empty value is none
 /// declared, which is 7bit.
 fn decodable(value: &[u8]) -> bool {
-    let token = first_token(&without_comments(value)).to_ascii_lowercase();
-    matches!(
-        token.as_slice(),
-        b"" | b"7bit"
-            | b"8bit"
-            | b"binary"
-            | b"base64"
-            | b"quoted-printable"
-            | b"x-uuencode"
-            | b"uuencode"
-            | b"x-uue"
-            | b"uue"
-    )
+    is_uuencode(value)
+        || matches!(
+            token(value).as_slice(),
+            b"" | b"7bit" | b"8bit" | b"binary" | b"base64" | b"quoted-printable"
+        )
 }
 
 /// Every `Content-Transfer-Encoding` value in the message, at any line's
@@ -86,7 +91,7 @@ fn content_transfer_encodings(message: &[u8]) -> Vec<Vec<u8>> {
         let begins = message
             .get(at..at + name.len())
             .is_some_and(|found| found.eq_ignore_ascii_case(name));
-        if !begins || (at > 0 && message[at - 1] != b'\n') {
+        if !begins || (at > 0 && !matches!(message[at - 1], b'\n' | b'\r')) {
             continue;
         }
         let end = line_end(message, at);
