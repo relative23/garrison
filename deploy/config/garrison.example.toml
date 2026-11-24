@@ -145,8 +145,8 @@ type = "host-care"
 
 # A restic or borg repository as `garrison backup-check` reported it: the
 # newest snapshot, the stored size, the last integrity check and the last
-# test restore. The backup job calls the command as root; see the
-# configuration reference.
+# test restore. The backup job calls the command as root; see
+# docs/operator/checks.md, "backup-check".
 # [[providers]]
 # type = "backup-check"
 # tool = "restic"

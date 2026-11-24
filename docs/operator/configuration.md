@@ -29,20 +29,20 @@ either.
 | `issuer` | Stalwart's OAuth issuer (`https://host`): the name Stalwart gives itself, `https://` and its Default Hostname, under which it sends every sign-in back; `garrison doctor` compares the two. |
 | `stalwart_url` | Stalwart's HTTP listener, **loopback only** (e.g. `http://127.0.0.1:8080`). |
 | `admin_url` | Native Stalwart administration (default `<issuer>/admin/`). |
-| `links` | Extra header links, e.g. `{ webmail = "https://..." }`. |
+| `links` | Extra header links, e.g. `{ webmail = "https://..." }`; at most 16. |
 
 ## `[web]`, `[ingest]`, `[collector]`, `[broker]`
 
 | Key | Default | Meaning |
 |---|---|---|
-| `web.port` | 8091 | Loopback port behind nginx; see below. |
-| `web.session_minutes` | 30 | Session lifetime (never longer than the token). |
+| `web.port` | 8091 | Loopback port behind nginx, 1024 to 65535; see below. |
+| `web.session_minutes` | 30 | Session lifetime, 5 to 480 minutes (never longer than the token). |
 | `web.bind_client_ip` | false | Answer the session's cookie from another client address than the sign-in's as if signed out; the session goes on from its own address, and a sign-out ends it from any. Breaks mobile users, whose address changes. |
-| `ingest.port` | 8094 | Loopback port that Stalwart's webhook calls. |
+| `ingest.port` | 8094 | Loopback port that Stalwart's webhook calls, 1024 to 65535. |
 | `ingest.signature_key` | `credential:webhook-signature-key` | The key Stalwart signs its event batches with; `stalwart setup` writes it, also where the file is empty or holds no key, which is as good as none. |
-| `ingest.retention_days` | 30 | Event history retention. An event that is older than this when it arrives is not stored. |
-| `ingest.max_events` / `max_database_mib` | 1000000 / 256 | Size limits. When one is reached, the oldest events go before their retention ends; the event views say from when on events are kept. An event takes about 400 bytes, and a server on the internet records some 15,000 a day from unsolicited connections alone. |
-| `collector.history_days` | 90 | Metric history retention: every minute of the last eight days, ten-minute values before them. With every check that is about 21 MiB for eight days and 48 MiB for 90. Counted from the collector's own run time: a pause of more than ten minutes or a clock that jumps ahead is not counted, so the history keeps that much longer until the collector has run at the new time for a day. |
+| `ingest.retention_days` | 30 | Event history retention, 1 to 365 days. An event that is older than this when it arrives is not stored. |
+| `ingest.max_events` / `max_database_mib` | 1000000 / 256 | Size limits, 1000 to 10 000 000 events and 16 to 16 384 MiB. When one is reached, the oldest events go before their retention ends; the event views say from when on events are kept. An event takes about 400 bytes, and a server on the internet records some 15,000 a day from unsolicited connections alone. |
+| `collector.history_days` | 90 | Metric history retention, 1 to 730 days: every minute of the last eight days, ten-minute values before them. With every check that is about 21 MiB for eight days and 48 MiB for 90. Counted from the collector's own run time: a pause of more than ten minutes or a clock that jumps ahead is not counted, so the history keeps that much longer until the collector has run at the new time for a day. |
 | `collector.native_key`, `broker.native_key` | `credential:collector-native-key`, `credential:broker-native-key` | The two read-only API keys; `stalwart setup` writes them, also where a file is empty or holds no key, which is as good as none. |
 | `collector.metrics_credential` | `credential:metrics-credential` | User name and password for Stalwart's Prometheus exporter, which the `prometheus` check reads. `stalwart setup` writes the file while the exporter is Garrison's or off, also where it is there but holds no credential; for an exporter of another's, write its user and password into it as `{"username": "...", "secret": "..."}`. The installer keeps an empty file, which means none; `""` turns the setting off. Without a credential the metrics exporter's card says why, with the file and what fills it, as `garrison doctor` does. |
 | `collector.dqs_key` | none | Where the key of Spamhaus' Data Query Service is read from: `credential:spamhaus-dqs-key`. The `reputation` check asks a list written without its key, such as `zen.dq.spamhaus.net`, with it, read anew for each run; the key goes into the question and nowhere else ([checks](checks.md#reputation)). Write the key into the file with `sudo sh -c 'cat > /etc/garrison/credentials/spamhaus-dqs-key'` (paste it, Enter, Ctrl-D); the installer keeps an empty file there, which means none, and such a list is then not asked. `check-config` refuses such a list without this setting, and `garrison doctor` fails the file where such a list is asked and it holds no key. |
@@ -383,10 +383,12 @@ timeout_seconds = 3600            # how long the broker waits for the result
 operator = false                  # true: included in the default "operator" profile
 ```
 
-An action is not started again within its `cooldown_seconds`, and no action
-within 30 seconds of any other job, counted from when each job began. A job
-dated ahead of this host's clock, as after the clock went back, holds nothing
-back.
+Both times are required: `cooldown_seconds` from 0 to 86 400 (a day) and
+`timeout_seconds` from 5 to 7200 (two hours), so a job that runs longer cannot
+be an action. An action is not started again within its `cooldown_seconds`,
+and no action within 30 seconds of any other job, counted from when each job
+began. A job dated ahead of this host's clock, as after the clock went back,
+holds nothing back.
 
 After changing actions, give the profiles of the access policy the actions
 as they are now, then run the installer again, or write the polkit rule and
