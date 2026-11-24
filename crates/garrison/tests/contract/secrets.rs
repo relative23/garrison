@@ -50,7 +50,9 @@ fn refused(response: &Value) -> bool {
 
 /// The objects with a secret that Stalwart is to refuse, each in the form
 /// setup sends with one field Stalwart does not take, and what it answered:
-/// new webhooks, changes of Garrison's webhook `id` and of the metrics.
+/// new webhooks, changes of Garrison's webhook `id` and of the metrics. An
+/// empty secret, which holds none to show, says whether Stalwart repeats a
+/// secret's value where it refuses that.
 fn probes(lab: &Lab, id: &str, secret: &str) -> Vec<(&'static str, Value)> {
     let value = || json!({"@type": "Value", "secret": secret});
     let unknown = || json!({"@type": "NoSuchSecret", "secret": secret});
@@ -60,6 +62,7 @@ fn probes(lab: &Lab, id: &str, secret: &str) -> Vec<(&'static str, Value)> {
         json!({"timeout": "never"}),
         json!({"level": "loudest"}),
         json!({"signatureKey": unknown()}),
+        json!({"signatureKey": {"@type": "Value", "secret": ""}}),
     ] {
         let create = json!({"create": {"probe": webhook(secret, &changed)}});
         let response = answer(lab, "x:WebHook/set", &create);
@@ -78,6 +81,8 @@ fn probes(lab: &Lab, id: &str, secret: &str) -> Vec<(&'static str, Value)> {
         json!({"@type": "Enabled", "authUsername": 5, "authSecret": value()}),
         json!({"@type": "Enabled", "authUsername": "garrison", "authSecret": unknown()}),
         json!({"@type": "NoSuchExporter", "authUsername": "garrison", "authSecret": value()}),
+        json!({"@type": "Enabled", "authUsername": "garrison",
+            "authSecret": {"@type": "Value", "secret": ""}}),
     ] {
         let update = json!({"update": {"singleton": {"prometheus": prometheus}}});
         let response = answer(lab, "x:Metrics/set", &update);
