@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use garrison_core::config::{self, Database};
 
 use super::files::{Step, io, run};
-use super::{BASE, CONFIG, SYSTEMCTL};
+use super::{BASE, CONFIG, SYSTEMCTL, states};
 
 /// `LoadCredential=` in the units arrived with systemd 247.
 const SYSTEMD: u32 = 247;
@@ -21,28 +21,25 @@ const SPARE: u64 = 64 << 20;
 /// systemd that knows the units' settings, which only a start needs.
 pub(super) fn root_with_systemctl() -> Step {
     if !rustix::process::geteuid().is_root() {
-        return Err("Run as root.".into());
+        return Err(states::not_root());
     }
     if !Path::new(SYSTEMCTL).exists() {
-        return Err(format!("{SYSTEMCTL} is required."));
+        return Err(states::tool_missing(SYSTEMCTL));
     }
     Ok(())
 }
 
 pub(super) fn preflight() -> Step {
     root_with_systemctl()?;
-    if !Path::new("/usr/bin/systemd-sysusers").exists() {
-        return Err("/usr/bin/systemd-sysusers is required.".into());
+    let sysusers = "/usr/bin/systemd-sysusers";
+    if !Path::new(sysusers).exists() {
+        return Err(states::tool_missing(sysusers));
     }
     let output = run(SYSTEMCTL, &["--version"])?;
     match systemd_version(&String::from_utf8_lossy(&output.stdout)) {
         Some(version) if version >= SYSTEMD => {}
-        Some(version) => {
-            return Err(format!(
-                "systemd {version} is too old: Garrison's units need systemd {SYSTEMD} or newer."
-            ));
-        }
-        None => return Err("`systemctl --version` names no systemd version.".into()),
+        Some(version) => return Err(states::old_systemd(version, SYSTEMD)),
+        None => return Err(states::systemd_unknown()),
     }
     // polkit 0.105, still shipped by some long-term releases, ignores rules files
     // and has no rules.d; naming its version tells the operator what to change.
@@ -52,17 +49,11 @@ pub(super) fn preflight() -> Step {
         if let Some(version) = text.trim().strip_prefix("pkaction version ")
             && !has_rules(version)
         {
-            return Err(format!(
-                "polkit {version} has no JavaScript rules: Garrison needs polkit 0.106 or newer."
-            ));
+            return Err(states::old_polkit(version));
         }
     }
     if !Path::new("/etc/polkit-1/rules.d").is_dir() {
-        return Err(
-            "polkit is required for service actions, with JavaScript rules \
-                    (polkit 0.106 or newer, /etc/polkit-1/rules.d)."
-                .into(),
-        );
+        return Err(states::no_polkit());
     }
     Ok(())
 }
@@ -71,7 +62,7 @@ pub(super) fn preflight() -> Step {
 /// release where it lies, not through a link into a place they hide.
 pub(super) fn base_shown() -> Step {
     match crate::units::hidden_base(Path::new(BASE)) {
-        Some(why) => Err(format!("{why}; nothing was changed.")),
+        Some(why) => Err(states::base_hidden(&why)),
         None => Ok(()),
     }
 }
@@ -142,12 +133,7 @@ fn existing(path: &Path) -> &Path {
 /// needs the room, such as "the installation".
 pub(super) fn room(needs: &[(&Path, u64)], what: &str) -> Step {
     match lacking(needs, true)? {
-        Some((directory, free, wanted)) => Err(format!(
-            "{} has {} MiB free and {what} needs {} MiB; nothing was changed.",
-            directory.display(),
-            free >> 20,
-            wanted >> 20
-        )),
+        Some((directory, free, wanted)) => Err(states::no_room(&directory, free, what, wanted)),
         None => Ok(()),
     }
 }
@@ -157,13 +143,7 @@ pub(super) fn room(needs: &[(&Path, u64)], what: &str) -> Step {
 /// needs no room to spare.
 pub(super) fn exact_room(needs: &[(&Path, u64)]) -> Step {
     match lacking(needs, false)? {
-        Some((directory, free, wanted)) => Err(format!(
-            "{} has {} MiB free and the copies from before the upgrade need {} MiB there; free \
-             space there",
-            directory.display(),
-            free >> 20,
-            wanted.div_ceil(1 << 20)
-        )),
+        Some((directory, free, wanted)) => Err(states::copies_no_room(&directory, free, wanted)),
         None => Ok(()),
     }
 }
@@ -182,7 +162,7 @@ fn lacking(needs: &[(&Path, u64)], spare: bool) -> Step<Option<(PathBuf, u64, u6
     }
     for (_, directory, bytes) in filesystems {
         let stat = rustix::fs::statvfs(directory)
-            .map_err(|error| format!("{}: {error}", directory.display()))?;
+            .map_err(|error| states::io(directory.display(), error))?;
         let free = stat.f_bavail.saturating_mul(stat.f_frsize);
         let wanted = if spare {
             bytes + bytes / 10 + SPARE
@@ -247,11 +227,7 @@ mod tests {
         let missing = directory.path().join("not/yet/created");
         room(&[(&missing, 1)], "the installation").unwrap();
         let refused = room(&[(&missing, u64::MAX / 4)], "the installation").unwrap_err();
-        assert!(refused.ends_with("; nothing was changed."), "{refused}");
-        assert!(
-            refused.contains(" MiB free and the installation needs "),
-            "{refused}"
-        );
+        assert_eq!(refused.name, "install-no-room");
         // Two needs on one filesystem add up.
         let stat = rustix::fs::statvfs(directory.path()).unwrap();
         let half = stat.f_bavail * stat.f_frsize / 2;

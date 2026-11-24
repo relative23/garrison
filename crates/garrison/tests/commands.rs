@@ -11,7 +11,7 @@ mod support;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use support::{finished, prepared, run, text};
+use support::{finished, prepared, run, states, text};
 
 /// `garrison modules --set` without `--yes` would ask before it writes,
 /// and nobody can answer where no terminal is: it refuses, names `--yes`
@@ -23,11 +23,7 @@ fn modules_asks_nobody_where_no_terminal_is() {
     let before = std::fs::read_to_string(&path).unwrap();
     let asked = run(directory.path(), &["modules", "--set", "antivirus,logs"]);
     assert_eq!(asked.status.code(), Some(2), "{}", text(&asked.stdout));
-    assert_eq!(
-        text(&asked.stderr),
-        "garrison modules asks before it writes, and no terminal is here to answer: add --yes \
-         to write it.\n"
-    );
+    assert_eq!(states(&asked.stderr), ["modules-unasked"]);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
 }
 
@@ -42,11 +38,11 @@ fn notify_test_without_root_says_to_run_as_root() {
     std::fs::write(&path, config).unwrap();
     let test = run(directory.path(), &["notify-test"]);
     assert_eq!(
-        (test.status.code(), text(&test.stdout), text(&test.stderr)),
+        (test.status.code(), text(&test.stdout), states(&test.stderr)),
         (
             Some(2),
             String::new(),
-            "Run as root: the channels' secrets are files only root may read.\n".to_owned()
+            vec!["notify-test-not-root".to_owned()]
         )
     );
 }
@@ -57,16 +53,15 @@ fn notify_test_without_root_says_to_run_as_root() {
 fn a_command_that_follows_no_config_refuses_it() {
     let directory = tempfile::tempdir().unwrap();
     let named = directory.path().join("garrison.toml");
-    let units = "uses /etc/garrison/garrison.toml, the units' configuration";
-    let none = "reads no configuration";
-    for (command, why) in [
-        (&["install"][..], units),
-        (&["uninstall", "--dry-run"], units),
-        (&["setup"], units),
-        (&["upgrade", "garrison-0.2.0-x86_64.tar.gz"], units),
-        (&["restore", "--from", "/var/backups/garrison"], units),
-        (&["backup-check", "restic"], none),
-        (&["detect"], none),
+    // Each command, and whether it uses the units' file or reads none.
+    for (command, units) in [
+        (&["install"][..], true),
+        (&["uninstall", "--dry-run"], true),
+        (&["setup"], true),
+        (&["upgrade", "garrison-0.2.0-x86_64.tar.gz"], true),
+        (&["restore", "--from", "/var/backups/garrison"], true),
+        (&["backup-check", "restic"], false),
+        (&["detect"], false),
     ] {
         let ran = finished(
             Command::new(env!("CARGO_BIN_EXE_garrison"))
@@ -74,15 +69,21 @@ fn a_command_that_follows_no_config_refuses_it() {
                 .arg(&named)
                 .args(command),
         );
-        let refused = format!(
-            "garrison {} {why}, so it takes no --config ({}).\n",
-            command[0],
-            named.display()
-        );
         assert_eq!(
-            (ran.status.code(), text(&ran.stdout), text(&ran.stderr)),
-            (Some(2), String::new(), refused),
+            (ran.status.code(), text(&ran.stdout), states(&ran.stderr)),
+            (
+                Some(2),
+                String::new(),
+                vec!["config-not-followed".to_owned()]
+            ),
             "{command:?}"
+        );
+        let said = text(&ran.stderr);
+        assert!(
+            said.contains(&format!("garrison {} ", command[0]))
+                && said.contains(&named.display().to_string())
+                && said.contains("/etc/garrison/garrison.toml") == units,
+            "{command:?}: {said}"
         );
     }
 }
@@ -395,17 +396,19 @@ fn every_command_is_held_to_the_four_questions() {
         let right = match (takes, command[0]) {
             (Follows, "watch") => {
                 named.status.code() == Some(0)
-                    && stderr.contains(&format!("{} does not load", missing.display()))
+                    && states(&named.stderr).contains(&"watch-unloaded".to_owned())
+                    && stderr.contains(&missing.display().to_string())
             }
             (Follows, _) => {
                 named.status.code() == Some(2)
                     && stdout.is_empty()
-                    && stderr.starts_with(&format!("Cannot load {}", missing.display()))
+                    && states(stderr.as_bytes()) == ["config-unloadable"]
+                    && stderr.contains(&missing.display().to_string())
             }
             (Refuses, _) => {
                 named.status.code() == Some(2)
                     && stdout.is_empty()
-                    && stderr.contains("so it takes no --config")
+                    && states(stderr.as_bytes()) == ["config-not-followed"]
             }
         };
         if !right {

@@ -25,7 +25,7 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 use stand_in::{REPOSITORY_ID, Tools, read, timeless};
-use support::{finished, text};
+use support::{finished, states, text};
 
 #[test]
 fn restic_is_asked_without_a_lock_and_the_report_keeps_the_last_check() {
@@ -47,14 +47,26 @@ fn restic_is_asked_without_a_lock_and_the_report_keeps_the_last_check() {
     );
     assert_eq!(all.status.code(), Some(0), "{}", text(&all.stderr));
     assert_eq!(
-        text(&all.stdout),
-        format!(
-            "restic: 2 snapshots, the newest of 2026-11-11T02:00:04+00:00.\n\
-             Integrity check: passed (no errors were found)\n\
-             Restore test: passed (/etc/hosts: 1 files, 8 bytes)\n\
-             Report written to {to}.\n"
-        )
+        states(&all.stdout),
+        [
+            "backup-check-listed",
+            "backup-check-verified",
+            "backup-check-restored",
+            "backup-check-written"
+        ]
     );
+    // What restic listed and said of its check, what came back, and where
+    // the report went.
+    let said = text(&all.stdout);
+    for data in [
+        "2 snapshots",
+        "2026-11-11T02:00:04+00:00",
+        "no errors were found",
+        "/etc/hosts: 1 files, 8 bytes",
+        to,
+    ] {
+        assert!(said.contains(data), "{data}: {said}");
+    }
     // Listing and measuring take no lock, so they never wait for a backup
     // that runs; the restore goes to a directory of its own, which is gone.
     let calls = tools.calls();
@@ -138,11 +150,9 @@ fn what_restic_fails_at_ends_the_command_with_its_last_word() {
         "Fatal: the repository is locked by another process"
     );
     // The failure's reason is on standard error, as for every command.
-    assert_eq!(
-        text(&damaged.stderr),
-        "Integrity check: FAILED (Fatal: the repository is locked by another process)\n"
-    );
-    assert!(!text(&damaged.stdout).contains("FAILED"));
+    assert_eq!(states(&damaged.stderr), ["backup-check-verify-failed"]);
+    assert!(text(&damaged.stderr).contains("Fatal: the repository is locked by another process"));
+    assert!(!states(&damaged.stdout).contains(&"backup-check-verify-failed".to_owned()));
     assert_eq!(read(&report)["verify"]["ok"], false);
     assert_eq!(read(&report)["restore"]["ok"], true);
     assert_eq!(tools.calls().len(), 4);
@@ -164,7 +174,8 @@ fn what_restic_fails_at_ends_the_command_with_its_last_word() {
     );
     assert_eq!(locked.status.code(), Some(1));
     assert!(
-        text(&locked.stderr).contains("restic did not list its snapshots: Fatal: the repository"),
+        states(&locked.stderr).contains(&"backup-check-unlisted".to_owned())
+            && text(&locked.stderr).contains("Fatal: the repository"),
         "{}",
         text(&locked.stderr)
     );
@@ -191,12 +202,13 @@ fn what_restic_fails_at_ends_the_command_with_its_last_word() {
     );
     assert_eq!(missing.status.code(), Some(1));
     assert_eq!(read(&report)["restore"]["ok"], false);
-    assert!(
-        text(&missing.stderr).starts_with("Restore test: FAILED ("),
+    assert_eq!(
+        states(&missing.stderr).first().map(String::as_str),
+        Some("backup-check-restore-failed"),
         "{}",
         text(&missing.stderr)
     );
-    assert!(!text(&missing.stdout).contains("FAILED"));
+    assert!(!states(&missing.stdout).contains(&"backup-check-restore-failed".to_owned()));
 }
 
 #[test]
@@ -218,10 +230,18 @@ fn borg_runs_in_utc_and_restores_from_its_newest_archive() {
         None,
     );
     assert_eq!(all.status.code(), Some(0), "{}", text(&all.stderr));
-    assert!(text(&all.stdout).starts_with(
-        "borg: 2 archives, the newest of 2026-11-11T02:00:04+00:00.\n\
-         Integrity check: passed (no problems found)\n"
-    ));
+    assert_eq!(
+        states(&all.stdout)[..2],
+        ["backup-check-listed", "backup-check-verified"]
+    );
+    let said = text(&all.stdout);
+    for data in [
+        "2 archives",
+        "2026-11-11T02:00:04+00:00",
+        "no problems found",
+    ] {
+        assert!(said.contains(data), "{data}: {said}");
+    }
     // borg writes its times in the zone it runs in, restores into the
     // directory it runs in, and names paths without their first slash.
     assert_eq!(
@@ -260,7 +280,7 @@ fn another_tool_or_a_place_that_cannot_be_written_ends_the_command() {
     let tools = Tools::new();
     let other = tools.run(&["tar"], None);
     assert_eq!(other.status.code(), Some(2));
-    assert!(text(&other.stderr).contains("The backup tool is restic or borg."));
+    assert_eq!(states(&other.stderr), ["backup-check-unknown-tool"]);
     assert_eq!(tools.calls(), Vec::<String>::new());
     let nowhere = tools.run(
         &[
@@ -273,10 +293,15 @@ fn another_tool_or_a_place_that_cannot_be_written_ends_the_command() {
         None,
     );
     assert_eq!(nowhere.status.code(), Some(1));
-    assert_eq!(
-        text(&nowhere.stderr),
-        "The report's folder /proc/garrison cannot be made: No such file or directory (os error \
-         2).\n"
+    assert_eq!(states(&nowhere.stderr), ["backup-check-io"]);
+    // The folder, not the report in it, in the system's words for why it is
+    // not there.
+    let said = text(&nowhere.stderr);
+    assert!(
+        said.contains("/proc/garrison ")
+            && !said.contains("/proc/garrison/restic.json")
+            && said.contains("No such file or directory"),
+        "{said}"
     );
     assert_eq!(tools.calls(), Vec::<String>::new());
     // A folder at the report's name takes no report.
@@ -286,7 +311,8 @@ fn another_tool_or_a_place_that_cannot_be_written_ends_the_command() {
     let taken = tools.run(&["restic", "--repo", "/srv/repo", "--report", to], None);
     assert_eq!(taken.status.code(), Some(1));
     assert!(
-        text(&taken.stderr).contains(&format!("The report could not be written to {to}: ")),
+        states(&taken.stderr).last().map(String::as_str) == Some("backup-check-unwritten")
+            && text(&taken.stderr).contains(to),
         "{}",
         text(&taken.stderr)
     );
@@ -324,14 +350,11 @@ fn the_last_report_is_read_only_from_a_file_of_its_own() {
         let listed = tools.run(&["restic", "--report", to], None);
         assert_eq!(listed.status.code(), Some(0), "{what}");
         assert_eq!(
-            text(&listed.stderr),
-            format!(
-                "The last report, {to}, cannot be read: it must be a file, not a link, of at \
-                 most 256 KiB of valid JSON. Its last integrity check and test restore are \
-                 not kept.\n"
-            ),
+            states(&listed.stderr),
+            ["backup-check-report-unread"],
             "{what}"
         );
+        assert!(text(&listed.stderr).contains(to), "{what}");
         let written = std::fs::symlink_metadata(&report).unwrap();
         assert!(written.file_type().is_file(), "{what}");
         assert_eq!(read(&report)["verify"], Value::Null, "{what}");

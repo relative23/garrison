@@ -14,6 +14,7 @@ use garrison_core::config::{self, Database};
 use garrison_core::credentials::Credentials;
 use garrison_core::time;
 
+use crate::states::services;
 use crate::units;
 
 const MARKER: &str = "collector-stopped";
@@ -21,10 +22,7 @@ const MARKER: &str = "collector-stopped";
 pub(crate) fn run(path: &Path) -> u8 {
     let loaded = config::load(path);
     if let Err(error) = &loaded {
-        log::warn!(
-            "{} does not load ({error}); watching with what the last collection run left",
-            path.display()
-        );
+        log::warn!("{}", services::watch_unloaded(path, error));
     }
     let (database, credentials) = match &loaded {
         Ok(config) => (
@@ -60,28 +58,24 @@ pub(crate) fn run(path: &Path) -> u8 {
     };
     match watch.look() {
         Ok(Outcome::NotKnown) => {
-            log::warn!(
-                "Whether the collector runs is not known: the newest snapshot in {} is dated at \
-                 a time that is none",
-                database.display()
-            );
+            log::warn!("{}", services::watch_not_known(&database));
             0
         }
         Ok(outcome) => {
             log::info!(
                 "{}",
                 match outcome {
-                    Outcome::NeverRan => "No collection run has finished yet",
-                    Outcome::Running | Outcome::NotKnown => "The collector runs",
-                    Outcome::Stopped => "The collector has stopped",
-                    Outcome::ToldStopped => "The collector has stopped; the channels were told",
-                    Outcome::ToldRunning => "The collector runs again; the channels were told",
+                    Outcome::NeverRan => services::watch_never_ran(),
+                    Outcome::Running | Outcome::NotKnown => services::watch_running(),
+                    Outcome::Stopped => services::watch_stopped(),
+                    Outcome::ToldStopped => services::watch_told_stopped(),
+                    Outcome::ToldRunning => services::watch_told_running(),
                 }
             );
             0
         }
         Err(error) => {
-            log::error!("The watch over the collector did not finish: {error}");
+            log::error!("{}", services::watch_unfinished(error));
             1
         }
     }

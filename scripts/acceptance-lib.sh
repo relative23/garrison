@@ -329,6 +329,18 @@ if command -v ncat >/dev/null 2>&1; then
 fi
 exec socat -t 10 - "UNIX-CONNECT:$1"
 CONNECT
+    # The one test of what a command reported: the name of a state, which
+    # never changes, in the brackets it is printed in after its sentence.
+    inside_input 'cat > /usr/local/bin/acceptance-state && chmod 755 /usr/local/bin/acceptance-state' <<'STATE'
+#!/bin/sh
+# acceptance-state FILE STATE...: FILE says one of the states named.
+file=$1
+shift
+for state in "$@"; do
+    grep -q -F -- "[$state]" "$file" && exit 0
+done
+exit 1
+STATE
     copy_in "$previous" /root/previous.tar.gz
     copy_in "$release" /root/release.tar.gz
     inside 'cd /root && mkdir previous release &&
@@ -440,7 +452,8 @@ services() {
         if [ -x /usr/bin/apt-get ] || { [ -x /usr/bin/dnf ] && [ ! -x /usr/bin/dnf5 ]; }; then
             printf %s "$document" | grep -o "\"id\":\"host.updates\"[^}]*\"state\":\"[a-z]*\"" | grep -q -E "\"state\":\"(ok|warning)\"" || exit 1
         fi'
-    # In its own sandbox the watch reads the collector's database.
+    # In its own sandbox the watch reads the collector's database. The check
+    # runs on the previous releases too, which print no name: hence the words.
     check "$1: the watch over the collector finds it running" \
         'systemctl start garrison-watch.service &&
             journalctl -u garrison-watch.service -n 5 --no-pager | grep -q "The collector runs"'
@@ -459,42 +472,3 @@ services() {
 }
 
 events() { inside 'sqlite3 /var/lib/garrison/ingest/events.sqlite "SELECT count(*) FROM events"'; }
-
-# A stand-in for ntfy on https://localhost:8443 that keeps what it is sent,
-# with a certificate the collector's and the watch's units are told to trust.
-ntfy_stand_in() {
-    inside_input 'cat > /root/ntfy.sh' <<'NTFY'
-#!/bin/sh
-# One request: keep its body, answer 200.
-length=0
-while IFS= read -r line; do
-    line=$(printf %s "$line" | tr -d '\r')
-    [ -n "$line" ] || break
-    case $line in [Cc]ontent-[Ll]ength:*) length=${line#*: } ;; esac
-done
-head -c "$length" >> /root/ntfy-bodies
-echo >> /root/ntfy-bodies
-printf 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}'
-NTFY
-    inside 'cd /root && : > ntfy-bodies &&
-        openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out /etc/acceptance-ca.crt \
-            -days 2 -subj "/CN=Acceptance CA" 2>/dev/null &&
-        openssl req -newkey rsa:2048 -nodes -keyout ntfy.key -out ntfy.csr -subj /CN=localhost 2>/dev/null &&
-        printf "subjectAltName=DNS:localhost\nbasicConstraints=CA:FALSE\n" > ntfy.ext &&
-        openssl x509 -req -in ntfy.csr -CA /etc/acceptance-ca.crt -CAkey ca.key -CAcreateserial \
-            -days 2 -extfile ntfy.ext -out ntfy.crt 2>/dev/null &&
-        for unit in garrison-collect garrison-watch; do
-            mkdir -p /etc/systemd/system/$unit.service.d &&
-            printf "[Service]\nEnvironment=SSL_CERT_FILE=/etc/acceptance-ca.crt\n" \
-                > /etc/systemd/system/$unit.service.d/acceptance.conf
-        done &&
-        systemctl daemon-reload &&
-        if command -v ncat >/dev/null 2>&1; then
-            systemd-run --quiet --unit=acceptance-ntfy ncat --ssl --ssl-cert /root/ntfy.crt \
-                --ssl-key /root/ntfy.key -lk 127.0.0.1 8443 --sh-exec "sh /root/ntfy.sh"
-        else
-            systemd-run --quiet --unit=acceptance-ntfy socat \
-                OPENSSL-LISTEN:8443,bind=127.0.0.1,reuseaddr,fork,cert=/root/ntfy.crt,key=/root/ntfy.key,verify=0 \
-                SYSTEM:"sh /root/ntfy.sh"
-        fi'
-}

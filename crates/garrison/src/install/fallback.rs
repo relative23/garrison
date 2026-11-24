@@ -17,23 +17,24 @@ use std::path::Path;
 
 use garrison_core::config;
 
-use super::files::{Step, announce, switch};
+use super::files::{announce, switch};
 use super::system::install_system_files;
-use super::{BASE, CONFIG, cli, command, name, start, state, stop_services};
+use super::{BASE, CONFIG, cli, name, start, state, states, stop_services};
+use crate::state::State;
 
 /// Back to `old`, the release that ran, from `attempted`: what the new
 /// release migrated goes back to its copy in `backup`, `old` must read the
 /// state and stay up, and `previous` names `earlier` again. Where that
 /// fails, nothing of a release that is not current keeps running, and the
 /// links are set so that `install --rollback --restore-state` is the second
-/// attempt; the error says so. Where `current` did not name `attempted` yet,
-/// it stays at `old`.
+/// attempt; the failure says so. Where `current` did not name `attempted`
+/// yet, it stays at `old`.
 pub(super) fn switch_back(
     old: &Path,
     earlier: Option<&Path>,
     attempted: &Path,
     backup: Option<&Path>,
-) -> Step {
+) -> Result<(), Box<SwitchBack>> {
     let base = Path::new(BASE);
     let switched = std::fs::canonicalize(base.join("current")).ok().as_deref() == Some(attempted);
     let mut returned = state::Returned::default();
@@ -45,27 +46,27 @@ pub(super) fn switch_back(
         } else {
             switch(&base.join("current"), old)
         };
-        let what = match failure {
-            Failure::Before(error) => format!("switching back to {} failed ({error})", name(old)),
-            Failure::Start(error) => format!("the previous release did not start either ({error})"),
-        };
-        let went = backup.map_or_else(String::new, |backup| returned.said(backup));
-        match kept {
-            Ok(()) => format!(
-                "{what}.{went} `{} install --rollback --restore-state` returns to it with the state \
-                 from before the upgrade",
-                command::name()
-            ),
-            Err(links) => format!("{what}, and the links could not be set back ({links}).{went}"),
-        }
+        Box::new(SwitchBack {
+            failure,
+            links: kept.err(),
+            went: backup.and_then(|backup| returned.said(backup)),
+        })
     })
+}
+
+/// A switch back that failed: why, the links where they could not be set
+/// back, and what went back to its copy meanwhile.
+pub(super) struct SwitchBack {
+    pub(super) failure: Failure,
+    pub(super) links: Option<State>,
+    pub(super) went: Option<State>,
 }
 
 /// Why a switch back failed: before the release that ran started again,
 /// or as it started.
-enum Failure {
-    Before(String),
-    Start(String),
+pub(super) enum Failure {
+    Before(State),
+    Start(State),
 }
 
 /// Return what the new release migrated, then start `old` and see that it
@@ -81,16 +82,11 @@ fn switched_back(
     stop_services();
     if let Some(backup) = backup {
         let settings = Path::new(CONFIG).join("garrison.toml");
-        let config = config::load(&settings).map_err(|error| {
-            Failure::Before(format!("cannot load {}: {error}", settings.display()))
-        })?;
+        let config = config::load(&settings)
+            .map_err(|error| Failure::Before(states::unloadable(&settings, error)))?;
         state::restore_migrated(backup, &config, returned).map_err(Failure::Before)?;
-        let went = returned.said(backup);
-        if !went.is_empty() {
-            announce(&format!(
-                "The new release had changed what the release that ran cannot read.{went} The \
-                 other databases keep their data."
-            ));
+        if let Some(went) = returned.said(backup) {
+            announce(&states::migrated_back(&went).to_string());
         }
     }
     let base = Path::new(BASE);
@@ -110,10 +106,10 @@ fn switched_back(
     // a database it cannot read must be found now.
     let checked = cli(old, &["self-check"]).map_err(Failure::Before)?;
     if !checked.status.success() {
-        return Err(Failure::Before(format!(
-            "{} cannot read the current state, as its self-check says of {}",
-            name(old),
-            state::unreadable(&checked.stdout)
+        let unreadable = state::unreadable(&checked.stdout);
+        return Err(Failure::Before(states::unreadable_state(
+            &name(old),
+            &unreadable,
         )));
     }
     start(old).map_err(Failure::Start)

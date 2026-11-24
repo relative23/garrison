@@ -431,6 +431,21 @@ such as `<code>`. `npm run lint` rejects text written directly in JSX, and
 3. Export the API contract (above). `tests/registry.test.ts` fails until both
    registries and the English texts match.
 
+### Adding a state
+
+A refusal a command ends with, and an outcome another program acts on, is a
+`State` (`crates/garrison/src/state.rs`): its name, its sentence and, where it
+is said apart, what mends it. One constructor function makes each, in the
+`states.rs` of its area (`install/`, `upgrade/`, and `src/states/` for the
+other commands); no sentence of a state is built anywhere else. A name is
+lower-case words joined by hyphens, the area first (`install-no-room`), and
+never changes once released. Functions return `Result<T, State>`. Tests compare
+a state with its constructor, or look for its name (`support::states` in
+`tests/`), never for its words; the area's table test holds each state's whole
+line once and fails for a state it lacks. An acceptance script looks for a
+state by its name with `acceptance-state`, and `tests/states.rs` fails for a
+name that no constructor makes.
+
 ### Adding a provider
 
 1. Implement `Provider` (`name`, `collect`) in `src/providers/` of the

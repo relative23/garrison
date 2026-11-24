@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
 
-use super::support::{against, names, prepared, run, text};
+use super::support::{against, names, prepared, run, states, text};
 use super::{ADMINISTRATOR_RIGHTS, policy, role};
 
 /// A stand-in for Stalwart that answers by what it is asked, as Stalwart
@@ -103,8 +103,8 @@ fn a_server_with_more_roles_than_an_evaluation_takes_binds_by_the_role_alone() {
     let init = run(directory.path(), &["access", "init"]);
     assert_eq!(init.status.code(), Some(0), "{}", text(&init.stderr));
     assert!(
-        text(&init.stdout)
-            .contains("Bound native role admins (Administrators) to profile administrator.\n"),
+        states(&init.stdout).contains(&"access-bound".to_owned())
+            && text(&init.stdout).contains("admins (Administrators)"),
         "{}",
         text(&init.stdout)
     );
@@ -113,13 +113,12 @@ fn a_server_with_more_roles_than_an_evaluation_takes_binds_by_the_role_alone() {
         &["access", "bind-role", "base", "--profile", "viewer"],
     );
     assert_eq!(bound.status.code(), Some(0), "{}", text(&bound.stderr));
+    let said = text(&bound.stdout);
     assert!(
-        text(&bound.stdout).contains(
-            "Note: role base lacks sysAccountGet and sysDomainGet, which the profile viewer \
-             requires"
-        ),
-        "{}",
-        text(&bound.stdout)
+        states(&bound.stdout).contains(&"access-role-lacks".to_owned())
+            && said.contains("sysAccountGet")
+            && said.contains("sysDomainGet"),
+        "{said}"
     );
     assert_eq!(
         policy(directory.path())["roleBindings"],
@@ -131,13 +130,8 @@ fn a_server_with_more_roles_than_an_evaluation_takes_binds_by_the_role_alone() {
         &["access", "bind-role", "no-such-role", "--profile", "viewer"],
     );
     assert_eq!(
-        (typed.status.code(), text(&typed.stderr)),
-        (
-            Some(1),
-            "Stalwart has no role no-such-role: bind one of the roles the native administration \
-             shows (Roles).\n"
-                .to_owned()
-        )
+        (typed.status.code(), states(&typed.stderr)),
+        (Some(1), vec!["access-no-role".to_owned()])
     );
     // init read admins and base, bind-role base.
     assert_eq!(sent.load(Ordering::SeqCst), 3);
@@ -177,35 +171,25 @@ fn a_role_whose_rights_cannot_be_evaluated_is_named_with_the_reason() {
     let settings = directory.path().join("garrison.toml");
     let written = std::fs::read_to_string(&settings).unwrap();
     std::fs::write(&settings, written.replace("http://127.0.0.1:9", &url)).unwrap();
-    for (bound, why) in [
-        ("tenants", "it belongs to a tenant"),
-        (
-            "local",
-            "role tenants, from which it inherits, belongs to a tenant",
-        ),
-        (
-            "orphan",
-            "it inherits from role gone, which Stalwart does not have",
-        ),
-        ("odd", "this release cannot read role odd"),
-        (
-            "wide",
-            "it inherits from more than 64 roles, more than Garrison evaluates",
-        ),
+    // Each role with why it cannot be evaluated, and the role that reason names.
+    for (bound, why, named) in [
+        ("tenants", "access-tenant-role", "tenants"),
+        ("local", "access-tenant-role", "role tenants"),
+        ("orphan", "access-inherits-missing", "role gone"),
+        ("odd", "access-role-unreadable", "role odd"),
+        ("wide", "access-too-many-roles", "64"),
     ] {
         let ran = run(
             directory.path(),
             &["access", "bind-role", bound, "--profile", "viewer"],
         );
         assert_eq!(ran.status.code(), Some(0), "{bound}: {}", text(&ran.stderr));
+        let said = text(&ran.stdout);
+        let noted = states(&ran.stdout);
         assert!(
-            text(&ran.stdout).contains(&format!(
-                "Note: the rights of role {bound} cannot be evaluated ({why}), so whether its \
-                 users get the profile viewer is not known; `garrison access check <subject>` \
-                 shows what a user gets.\n"
-            )),
-            "{bound}: {}",
-            text(&ran.stdout)
+            noted.ends_with(&[why.to_owned(), "access-role-unjudged".to_owned()])
+                && said.contains(named),
+            "{bound}: {said}"
         );
         assert_eq!(
             policy(directory.path())["roleBindings"][bound],

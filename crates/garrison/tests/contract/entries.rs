@@ -53,15 +53,6 @@ fn filter() -> u16 {
     port
 }
 
-/// A port of this host where nothing listens.
-fn silent() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 /// A port of this host that another program holds, which is no milter.
 fn held() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -349,11 +340,14 @@ fn no_run_of_setup_leaves_stalwart_asking_a_filter_in_vain() {
     let setup = Setup::new(&lab, "http://127.0.0.1:9/webhook");
     let credentials = setup.directory.join("credentials");
     forget(&lab, &credentials);
+    // Held, so that none of the listeners below is given either port.
+    let ((_old, old), (_gone, gone)) =
+        (super::support::silent_port(), super::support::silent_port());
     let ports = Ports {
         filter: filter(),
         other: filter(),
-        old: silent(),
-        gone: silent(),
+        old,
+        gone,
         taken: held(),
     };
     clear(&lab, &ports);

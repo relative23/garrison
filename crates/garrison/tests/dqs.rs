@@ -9,7 +9,7 @@
 
 mod support;
 
-use support::{prepared, run, text};
+use support::{prepared, run, states, text};
 
 /// A reputation check of one mail host against `lists`.
 fn reputation(lists: &str) -> String {
@@ -27,16 +27,14 @@ fn a_zone_without_its_key_needs_the_key_setting_and_one_with_its_key_is_warned_o
     std::fs::write(&path, base.clone() + &reputation("\"zen.dq.spamhaus.net\"")).unwrap();
     let refused = run(directory.path(), &["check-config"]);
     assert_eq!(refused.status.code(), Some(2), "{}", text(&refused.stdout));
+    // The list, the setting it needs and where its key goes.
+    let said = text(&refused.stderr);
     assert!(
-        text(&refused.stderr).contains(
-            "Configuration not usable: providers[1].lists names zen.dq.spamhaus.net, a list of \
-             Spamhaus' Data Query Service written without its key, but collector.dqs_key is \
-             not set, so it could not be asked. Keep the key in \
-             /etc/garrison/credentials/spamhaus-dqs-key (root, mode 0600) and set \
-             collector.dqs_key = \"credential:spamhaus-dqs-key\".\n"
-        ),
-        "{}",
-        text(&refused.stderr)
+        states(&refused.stderr) == ["check-config-dqs-refused"]
+            && said.contains("providers[1].lists names zen.dq.spamhaus.net")
+            && said.contains("collector.dqs_key = \"credential:spamhaus-dqs-key\"")
+            && said.contains("/etc/garrison/credentials/spamhaus-dqs-key"),
+        "{said}"
     );
 
     let with_key = base.replacen(
@@ -47,7 +45,11 @@ fn a_zone_without_its_key_needs_the_key_setting_and_one_with_its_key_is_warned_o
     std::fs::write(&path, with_key + &reputation("\"zen.dq.spamhaus.net\"")).unwrap();
     let valid = run(directory.path(), &["check-config"]);
     assert_eq!(valid.status.code(), Some(0), "{}", text(&valid.stderr));
-    assert!(!text(&valid.stderr).contains("Data Query Service"));
+    assert!(
+        !states(&valid.stderr)
+            .iter()
+            .any(|state| state.starts_with("check-config-dqs-"))
+    );
 
     let key = "abcdefghijklmnopqrstuvwxyz";
     let zone = format!("\"{key}.zen.dq.spamhaus.net\"");
@@ -55,14 +57,11 @@ fn a_zone_without_its_key_needs_the_key_setting_and_one_with_its_key_is_warned_o
     let warned = run(directory.path(), &["check-config"]);
     assert_eq!(warned.status.code(), Some(0), "{}", text(&warned.stderr));
     let said = text(&warned.stderr);
+    // The zone without its key, and where the key goes; never the key.
     assert!(
-        said.contains(
-            "Warning: providers[1].lists names ….zen.dq.spamhaus.net with the key of Spamhaus' \
-             Data Query Service in it, in garrison.toml, which every user of this host may \
-             read. Write the zone without the key, zen.dq.spamhaus.net, keep the key in \
-             /etc/garrison/credentials/spamhaus-dqs-key (root, mode 0600) and set \
-             collector.dqs_key = \"credential:spamhaus-dqs-key\".\n"
-        ),
+        states(&warned.stderr).contains(&"check-config-dqs-warned".to_owned())
+            && said.contains("….zen.dq.spamhaus.net")
+            && said.contains("collector.dqs_key = \"credential:spamhaus-dqs-key\""),
         "{said}"
     );
     assert!(!said.contains(key), "{said}");

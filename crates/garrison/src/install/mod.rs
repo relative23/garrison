@@ -30,6 +30,7 @@ mod settle;
 #[cfg(test)]
 mod stand_in;
 mod state;
+mod states;
 mod system;
 mod toml_text;
 mod uninstall;
@@ -40,6 +41,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
+use crate::state::State;
 use crate::units;
 use files::{Step, announce, io, lock, run};
 use requirements::{base_shown, preflight};
@@ -102,12 +104,12 @@ fn started_before() -> bool {
 
 /// The extracted release this binary belongs to: `<release>/bin/garrison`.
 fn here() -> Step<PathBuf> {
-    let binary = std::env::current_exe().map_err(|error| error.to_string())?;
+    let binary = std::env::current_exe().map_err(|error| states::io("the installer", error))?;
     binary
         .parent()
         .and_then(Path::parent)
         .map(Path::to_owned)
-        .ok_or_else(|| "cannot locate the release".into())
+        .ok_or_else(|| states::io(binary.display(), "cannot locate the release"))
 }
 
 /// A command of an installed release, with the system configuration.
@@ -133,7 +135,7 @@ pub(crate) fn start_installed() -> Step {
     protect_policy()?;
     install_system_files(&current)?;
     start(&current)?;
-    announce(&format!("Garrison {} is running.", name(&current)));
+    announce(&states::running(&name(&current), None).to_string());
     Ok(())
 }
 
@@ -152,13 +154,13 @@ pub(super) fn name(release: &Path) -> String {
 /// there was one.
 pub(super) fn leftover() -> Step<bool> {
     let found = leftover_in(Path::new(BASE))?;
-    if let Some(line) = &found {
-        announce(line);
+    if let Some(said) = &found {
+        announce(&said.to_string());
     }
     Ok(found.is_some())
 }
 
-fn leftover_in(base: &Path) -> Step<Option<String>> {
+fn leftover_in(base: &Path) -> Step<Option<State>> {
     let path = base.join("unfinished.json");
     let Ok(text) = fs::read(&path) else {
         return Ok(None);
@@ -166,21 +168,14 @@ fn leftover_in(base: &Path) -> Step<Option<String>> {
     io(fs::remove_file(&path), &path)?;
     let record: serde_json::Value = serde_json::from_slice(&text).unwrap_or_default();
     let release = |key: &str| record[key].as_str().map(|path| name(Path::new(path)));
-    let named = match (record["command"].as_str(), release("from"), release("to")) {
+    let recorded = match (record["command"].as_str(), release("from"), release("to")) {
         (Some(command @ ("upgrade" | "rollback")), Some(from), Some(to)) => {
-            format!("an unfinished {command} from {from} to {to}")
+            states::Recorded::Switch(command, from, to)
         }
-        (Some("restore"), ..) => format!(
-            "an unfinished restore from {}",
-            record["source"].as_str().unwrap_or("a backup")
-        ),
-        _ => "a run it could not say".to_owned(),
+        (Some("restore"), ..) => states::Recorded::Restore(record["source"].as_str()),
+        _ => states::Recorded::Unknown,
     };
-    Ok(Some(format!(
-        "{} named {named}; nothing reads it any more: it was removed, and nothing was done on its \
-         word.",
-        path.display()
-    )))
+    Ok(Some(states::record_removed(&path, &recorded)))
 }
 
 pub(crate) fn run_installer(rollback_requested: bool, with_state: bool) -> u8 {
@@ -194,8 +189,8 @@ pub(crate) fn run_installer(rollback_requested: bool, with_state: bool) -> u8 {
     };
     match result {
         Ok(()) => 0,
-        Err(error) => {
-            crate::complain(&error);
+        Err(refusal) => {
+            crate::complain(&refusal.to_string());
             1
         }
     }
@@ -232,25 +227,25 @@ mod tests {
                     "to": "/opt/garrison/releases/0.2.0", "previous": null,
                     "backup": "/var/backups/garrison/pre-upgrade-20261124T080000",
                     "written": {"boot": "b", "starts": {}}}"#,
-                "an unfinished upgrade from 0.1.2 to 0.2.0",
+                states::Recorded::Switch("upgrade", "0.1.2".into(), "0.2.0".into()),
             ),
             (
                 r#"{"command": "rollback", "from": "/opt/garrison/releases/0.2.0",
                     "to": "/opt/garrison/releases/0.1.2", "previous": null, "state": null}"#,
-                "an unfinished rollback from 0.2.0 to 0.1.2",
+                states::Recorded::Switch("rollback", "0.2.0".into(), "0.1.2".into()),
             ),
             (
                 r#"{"command": "restore", "source": "/root/kept",
                     "kept": "/var/backups/garrison/pre-restore-20261124T080000"}"#,
-                "an unfinished restore from /root/kept",
+                states::Recorded::Restore(Some("/root/kept")),
             ),
-            ("not a record", "a run it could not say"),
+            ("not a record", states::Recorded::Unknown),
         ] {
-            fs::write(base.join("unfinished.json"), record).unwrap();
+            let path = base.join("unfinished.json");
+            fs::write(&path, record).unwrap();
             let said = leftover_in(base).unwrap().unwrap();
-            assert!(said.contains(&format!(" named {named}; ")), "{said}");
-            assert!(said.ends_with("nothing was done on its word."), "{said}");
-            assert!(!base.join("unfinished.json").exists());
+            assert_eq!(said, states::record_removed(&path, &named));
+            assert!(!path.exists());
             assert_eq!(leftover_in(base), Ok(None));
         }
     }

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use garrison_core::config;
 
+use super::fallback::Failure;
 use super::files::{Step, announce, fresh_folder, io, lock, place, switch};
 use super::requirements::{base_shown, preflight, room, size, state_size};
 use super::services::{self, check_config, start, stop_services};
@@ -14,8 +15,9 @@ use super::system::{install_system_files, protect_policy, unit_file};
 use super::unpack::{clear_staging, install_release, installed_now, unpacked_as};
 use super::{
     BACKUPS, BASE, CONFIG, LAST, LOCK, cli, command, configured, fallback, here, housekeeping,
-    leftover, name, rollback, verify,
+    leftover, name, rollback, states, verify,
 };
+use crate::state::State;
 use crate::{say, units};
 
 /// Back up the running state, and say where to. Only a change of release moves
@@ -28,8 +30,8 @@ fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
     } else {
         "pre-reinstall"
     };
-    let target = fresh_folder(Path::new(BACKUPS), kind)
-        .map_err(|error| format!("backup failed: {error}"))?;
+    let target =
+        fresh_folder(Path::new(BACKUPS), kind).map_err(|cause| states::backup_failed(&cause))?;
     announce(&format!(
         "Backing up the running state to {}",
         target.display()
@@ -42,14 +44,9 @@ fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
         // release knows keeps it from loading the configuration.
         if said.starts_with("Cannot load") {
             let running = fs::canonicalize(current).unwrap_or_else(|_| current.to_owned());
-            return Err(format!(
-                "backup failed: {said}; {}, the release that runs, makes the backup before the \
-                 upgrade and cannot load {CONFIG}/garrison.toml: take out the settings it does \
-                 not know, upgrade, then put them back",
-                name(&running)
-            ));
+            return Err(states::backup_unloadable(&said, &name(&running)));
         }
-        return Err(format!("backup failed: {said}"));
+        return Err(states::backup_failed(&said));
     }
     copy_config(Path::new(CONFIG), &target.join("etc"))?;
     if upgrade {
@@ -102,27 +99,8 @@ fn first_install_help() -> Step {
         }
     }
     say(&format!(
-        "
-The release is installed, but Garrison is not configured yet.
-
-  1. Edit {target} (origins, providers, actions).
-     `garrison detect` shows what this host runs, and
-     `garrison modules` chooses the modules this installation offers.
-  2. Create the Stalwart objects (webhook, API keys, metrics):
-       garrison stalwart setup        (asks for a Stalwart administrator)
-  3. Create the access policy:   garrison access init
-  4. Check everything:           garrison check-config
-  5. Run the installer again to start the services.
-  6. Give Garrison a host name of its own (never Stalwart's):
-     `garrison nginx` prints its server block and the lines for Stalwart's.
-     Add
-       include /etc/nginx/snippets/garrison-stalwart-server*.conf;
-     to every server block that proxies to Stalwart: it keeps the metrics
-     exporter that step 2 turns on off the internet.
-
-The command is available as {command}.",
-        target = target.display(),
-        command = command::name()
+        "\n{}",
+        states::not_configured(&target, &command::name())
     ));
     Ok(())
 }
@@ -153,51 +131,51 @@ fn bring_up(release: &Path, old: Option<&Path>, renewed: bool) -> Step<bool> {
     Ok(true)
 }
 
-/// Why `release` did not run, and what the run did then: where another
-/// release, `old`, ran when the run began, it goes back to it with `backup`,
-/// the copy it made; otherwise it stops what did start and names the
-/// rollback.
+/// Why `release` did not run, `cause`, and what the run did then: where
+/// another release, `old`, ran when the run began, it goes back to it with
+/// `backup`, the copy it made; otherwise it stops what did start and names
+/// the rollback.
 fn not_started(
-    error: &str,
+    cause: &State,
     release: &Path,
     old: Option<&Path>,
     earlier: Option<&Path>,
     ran: bool,
     backup: Option<&Path>,
-) -> String {
-    let outcome = match old {
+) -> State {
+    let (started, command) = (name(release), command::name());
+    match old {
         Some(old) if ran => {
-            announce("Start failed; switching back to the previous release.");
-            match fallback::switch_back(old, earlier, release, backup) {
-                Ok(()) => "the previous release is running".to_owned(),
-                Err(failure) => failure,
+            announce(&states::switching_back().to_string());
+            let Err(back) = fallback::switch_back(old, earlier, release, backup) else {
+                return states::switched_back(&started, cause);
+            };
+            let (links, went) = (back.links.as_ref(), back.went.as_ref());
+            match &back.failure {
+                Failure::Before(error) => states::switch_back_failed(
+                    &started,
+                    cause,
+                    &name(old),
+                    error,
+                    links,
+                    went,
+                    &command,
+                ),
+                Failure::Start(error) => {
+                    states::previous_failed(&started, cause, error, links, went, &command)
+                }
             }
         }
         Some(old) => {
             stop_services();
-            format!(
-                "{} did not run when this run began, so it was not started again; `{} install \
-                 --rollback` returns to it",
-                name(old),
-                command::name()
-            )
+            states::not_restarted(&started, cause, &name(old), &command)
         }
         None => {
             stop_services();
-            match earlier.filter(|earlier| *earlier != release) {
-                Some(earlier) => format!(
-                    "it was stopped; `{} install --rollback` returns to {}",
-                    command::name(),
-                    name(earlier)
-                ),
-                None => "it was stopped, and there is no other release to return to".to_owned(),
-            }
+            let earlier = earlier.filter(|earlier| *earlier != release).map(name);
+            states::stopped(&started, cause, earlier.as_deref(), &command)
         }
-    };
-    format!(
-        "Garrison {} did not start ({error}); {outcome}. See the journal.",
-        name(release)
-    )
+    }
 }
 
 pub(super) fn install() -> Step {
@@ -246,11 +224,9 @@ pub(super) fn install() -> Step {
     }
     // The installer sets the policy's owner and mode anyway; the check must
     // not refuse what it is about to correct.
-    altered |= protect_policy()
-        .map_err(|error| format!("{error}; the running release was not touched"))?;
+    altered |= protect_policy().map_err(states::untouched)?;
     // A configuration the new release refuses leaves the running one alone.
-    check_config(&release, false)
-        .map_err(|error| format!("{error}; the running release was not touched"))?;
+    check_config(&release, false).map_err(states::untouched)?;
     let ran = services::runs();
     // The installer's backups are kept here from the first start on, and
     // the operator's backup job takes the folder in.
@@ -276,10 +252,10 @@ pub(super) fn install() -> Step {
     }
     match bring_up(&release, changed.as_deref(), renewed) {
         Ok(started) => altered |= started,
-        Err(error) => {
+        Err(cause) => {
             let (old, earlier) = (changed.as_deref(), earlier.as_deref());
             return Err(not_started(
-                &error,
+                &cause,
                 &release,
                 old,
                 earlier,
@@ -309,24 +285,19 @@ pub(super) fn install() -> Step {
 /// `--rollback` refuses.
 fn last_line(version: &str, release: &Path, restore: bool, altered: bool) {
     let previous = fs::canonicalize(Path::new(BASE).join("previous")).ok();
-    let back = previous
-        .filter(|previous| previous != release)
-        .map(|_| {
-            format!(
-                " Roll back with: {} install --rollback{}",
-                command::name(),
-                if restore { " --restore-state" } else { "" }
-            )
-        })
-        .unwrap_or_default();
+    let back = previous.filter(|previous| previous != release).map(|_| {
+        format!(
+            "{} install --rollback{}",
+            command::name(),
+            if restore { " --restore-state" } else { "" }
+        )
+    });
     if !altered {
-        announce(&format!(
-            "Garrison {version} is running as installed; nothing was changed.{back}"
-        ));
+        announce(&states::as_installed(version, back.as_deref()).to_string());
         return;
     }
-    announce(&format!("Garrison {version} is running.{back}"));
-    if restore && !back.is_empty() {
+    announce(&states::running(version, back.as_deref()).to_string());
+    if restore && back.is_some() {
         announce(
             "This upgrade changes a database schema: a rollback returns to the data \
              from before it, and what was recorded since is lost.",

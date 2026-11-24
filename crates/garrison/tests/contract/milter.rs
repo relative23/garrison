@@ -38,9 +38,8 @@ pub(super) fn macro_filter(
     let before = milters(lab).len();
 
     // Nothing listens on the filter's port: setup changes nothing at all.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
+    // The port is held meanwhile, and then the filter listens on that socket.
+    let (held, port) = super::support::silent_port();
     let with_filter = format!("{plain}\n[milter]\nport = {port}\nwhen_unreachable = \"accept\"\n");
     std::fs::write(&path, &with_filter).unwrap();
     let (code, output) = setup();
@@ -55,7 +54,8 @@ pub(super) fn macro_filter(
     assert_eq!(milters(lab).len(), before);
 
     // The filter runs: Stalwart is told of it, as the configuration has it.
-    let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    rustix::net::listen(&held, 16).unwrap();
+    let listener = std::net::TcpListener::from(held);
     std::thread::spawn(move || {
         garrison_milter::server::serve(
             &listener,

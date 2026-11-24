@@ -1,6 +1,6 @@
 //! check-config: what it refuses, what it warns of, and where it says it.
 
-use super::support::{prepared, run, text};
+use super::support::{prepared, run, states, text};
 
 #[test]
 fn check_config_reports_providers_actions_and_the_policy() {
@@ -8,42 +8,52 @@ fn check_config_reports_providers_actions_and_the_policy() {
     let valid = run(directory.path(), &["check-config"]);
     assert_eq!(valid.status.code(), Some(0), "{}", text(&valid.stderr));
     assert_eq!(
-        text(&valid.stdout),
-        format!(
-            "Configuration valid: 1 providers, 2 actions.\nAccess policy valid: {}\n",
-            directory.path().join("policy.json").display()
-        )
+        states(&valid.stdout),
+        ["check-config-valid", "check-config-policy-valid"]
     );
-    // The test origins are reserved names, as the example's are.
+    // The counts and the policy, as the two outcomes carry them.
+    let said = text(&valid.stdout);
+    let policy = directory.path().join("policy.json");
+    let counts: Vec<&str> = said
+        .lines()
+        .find(|line| line.ends_with("[check-config-valid]"))
+        .unwrap_or_default()
+        .split(|character: char| !character.is_ascii_digit())
+        .filter(|number| !number.is_empty())
+        .collect();
     assert!(
-        text(&valid.stderr).contains(
-            "Warning: deployment.public_origin https://admin.example.test is a placeholder"
-        ),
-        "{}",
-        text(&valid.stderr)
+        counts == ["1", "2"] && said.contains(&policy.display().to_string()),
+        "{said}"
     );
-    // Its directories are the test's, not those of the units.
+    // The test origins are reserved names, as the example's are; its
+    // directories are the test's, not those of the units.
+    let warned = states(&valid.stderr);
+    let said = text(&valid.stderr);
+    assert!(
+        warned.contains(&"check-config-placeholder".to_owned())
+            && said.contains("https://admin.example.test"),
+        "{said}"
+    );
     let credentials = directory.path().join("credentials");
     assert!(
-        text(&valid.stderr).contains(&format!(
-            "Warning: credentials_directory is {}, but the units load every credential from \
-             /etc/garrison/credentials",
-            credentials.display()
-        )),
-        "{}",
-        text(&valid.stderr)
+        warned.contains(&"check-config-unfollowed".to_owned())
+            && said.contains(&format!(
+                "credentials_directory is {}",
+                credentials.display()
+            ))
+            && said.contains("broker.socket is "),
+        "{said}"
     );
-    assert!(text(&valid.stderr).contains("Warning: broker.socket is "));
     std::fs::remove_file(directory.path().join("policy.json")).unwrap();
     let unusable = run(directory.path(), &["check-config"]);
     assert_eq!(unusable.status.code(), Some(1));
     // The reason of a failure is on standard error, as for every command.
     assert!(
-        text(&unusable.stderr).contains("Access policy not usable: "),
+        states(&unusable.stderr).contains(&"check-config-policy-refused".to_owned()),
         "{}",
         text(&unusable.stderr)
     );
-    assert!(!text(&unusable.stdout).contains("Access policy"));
+    assert!(!states(&unusable.stdout).contains(&"check-config-policy-valid".to_owned()));
 }
 
 /// systemd hands a service only the credentials its unit loads, under the
@@ -69,17 +79,24 @@ fn a_credential_name_the_unit_does_not_load_is_refused() {
     let refused = run(directory.path(), &["check-config"]);
     assert_eq!(refused.status.code(), Some(2), "{}", text(&refused.stderr));
     let said = text(&refused.stderr);
-    for line in [
-        "Configuration not usable: collector.native_key is credential:my-key, but \
-         garrison-collect.service loads this secret only as credential:collector-native-key. \
-         Write collector.native_key = \"credential:collector-native-key\" and keep the \
-         secret in /etc/garrison/credentials/collector-native-key.\n",
-        "Configuration not usable: notifications.token is credential:my-token, but \
-         garrison-collect.service and garrison-watch.service load this secret only as \
-         credential:ntfy-token. Write notifications.token = \"credential:ntfy-token\" and \
-         keep the secret in /etc/garrison/credentials/ntfy-token.\n",
-    ] {
-        assert!(said.contains(line), "{said}");
+    assert_eq!(
+        states(&refused.stderr),
+        ["check-config-unloaded", "check-config-unloaded"],
+        "{said}"
+    );
+    // Each secret with the name its unit loads it as.
+    let lines: Vec<&str> = said.lines().collect();
+    for (line, (setting, named)) in lines.iter().zip([
+        (
+            "collector.native_key is credential:my-key",
+            "credential:collector-native-key",
+        ),
+        (
+            "notifications.token is credential:my-token",
+            "credential:ntfy-token",
+        ),
+    ]) {
+        assert!(line.contains(setting) && line.contains(named), "{said}");
     }
     assert_eq!(text(&refused.stdout), "");
     let test = run(directory.path(), &["notify-test"]);
@@ -90,7 +107,8 @@ fn a_credential_name_the_unit_does_not_load_is_refused() {
         text(&test.stderr)
     );
     assert!(
-        text(&test.stderr).contains("notifications.token is credential:my-token, but "),
+        states(&test.stderr) == ["notify-test-unloaded"]
+            && text(&test.stderr).contains("notifications.token is credential:my-token"),
         "{}",
         text(&test.stderr)
     );
@@ -114,17 +132,15 @@ fn a_secret_named_by_its_path_is_refused() {
     std::fs::write(&path, config).unwrap();
     let refused = run(directory.path(), &["check-config"]);
     assert_eq!(refused.status.code(), Some(2), "{}", text(&refused.stderr));
+    let said = text(&refused.stderr);
     assert!(
-        text(&refused.stderr).contains(&format!(
-            "Configuration not usable: notifications.token names the file {}, which the \
-             service would read itself, as its own user; garrison-collect.service and \
-             garrison-watch.service load this secret for it only as credential:ntfy-token. \
-             Move the file to /etc/garrison/credentials/ntfy-token (root, mode 0600) and write \
-             notifications.token = \"credential:ntfy-token\".\n",
-            token.display()
-        )),
-        "{}",
-        text(&refused.stderr)
+        states(&refused.stderr) == ["check-config-unloaded"]
+            && said.contains(&format!(
+                "notifications.token names the file {}",
+                token.display()
+            ))
+            && said.contains("credential:ntfy-token"),
+        "{said}"
     );
     let test = run(directory.path(), &["notify-test"]);
     assert_eq!(
@@ -134,7 +150,8 @@ fn a_secret_named_by_its_path_is_refused() {
         text(&test.stderr)
     );
     assert!(
-        text(&test.stderr).starts_with("Not tested: notifications.token names the file "),
+        states(&test.stderr) == ["notify-test-unloaded"]
+            && text(&test.stderr).contains(&token.display().to_string()),
         "{}",
         text(&test.stderr)
     );
@@ -150,6 +167,8 @@ fn check_config_refuses_two_providers_that_report_one_observation() {
     std::fs::write(&path, config).unwrap();
     let refused = run(directory.path(), &["check-config"]);
     assert_eq!(refused.status.code(), Some(2));
+    assert_eq!(states(&refused.stderr), ["check-config-providers"]);
+    // The collector's own words for the two providers.
     assert!(
         text(&refused.stderr).contains(
             "providers[1] (host) reports the observation host.resources as well as providers[0] (host)"
@@ -173,19 +192,19 @@ fn check_config_names_a_policy_where_the_broker_cannot_read_it() {
     );
     std::fs::write(&path, config).unwrap();
     let checked = run(directory.path(), &["check-config"]);
+    let said = text(&checked.stderr);
+    let warned = said
+        .lines()
+        .find(|line| states(line.as_bytes()) == ["check-config-policy-warned"])
+        .unwrap_or_default();
     assert!(
-        text(&checked.stderr).contains(
-            "Warning: broker.policy is /home/garrison-cli-test/policy.json, under /home, which \
-             garrison-broker.service hides from the broker (ProtectHome=true): the broker cannot \
-             read it there, and nobody can sign in. Keep the policy where the broker sees it, \
-             such as /etc/garrison/access-policy.json, and name that in broker.policy.\n"
-        ),
-        "{}",
-        text(&checked.stderr)
+        warned.contains("/home/garrison-cli-test/policy.json")
+            && warned.contains("ProtectHome=true"),
+        "{said}"
     );
     // Nothing is there, which check-config says after it.
     assert_eq!(checked.status.code(), Some(1));
-    assert!(text(&checked.stderr).contains("Access policy not usable: "));
+    assert!(states(&checked.stderr).contains(&"check-config-policy-refused".to_owned()));
 }
 
 /// The collector's unit hides the same places from the collector, so a
@@ -202,16 +221,12 @@ fn check_config_names_a_checks_path_where_the_collector_cannot_see_it() {
     );
     std::fs::write(&path, config).unwrap();
     let checked = run(directory.path(), &["check-config"]);
+    let said = text(&checked.stderr);
     assert!(
-        text(&checked.stderr).contains(
-            "Warning: providers[receipt].path is /home/garrison-cli-test/nightly.json, under \
-             /home, which garrison-collect.service hides from the collector (ProtectHome=true): \
-             the check cannot read it there. Keep it where the collector sees it and name that \
-             in providers[receipt].path, or show the collector that place read-only at another \
-             one (docs/operator/checks.md, \"Paths the collector cannot see\").\n"
-        ),
-        "{}",
-        text(&checked.stderr)
+        states(&checked.stderr).contains(&"check-config-hidden-check-warned".to_owned())
+            && said.contains("providers[receipt].path is /home/garrison-cli-test/nightly.json")
+            && said.contains("ProtectHome=true"),
+        "{said}"
     );
     assert_eq!(checked.status.code(), Some(0), "{}", text(&checked.stderr));
 }

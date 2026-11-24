@@ -18,9 +18,11 @@ use garrison_stalwart::permissions::{
 use serde_json::Value;
 
 use super::{native, said};
+use crate::state::State;
+use crate::states::access as states;
 
 const VIEWER_PERMISSIONS: [&str; 3] = ["authenticate", "sysAccountGet", "sysDomainGet"];
-const ADMIN_PERMISSIONS: [&str; 5] = [
+pub(crate) const ADMIN_PERMISSIONS: [&str; 5] = [
     "authenticate",
     "sysAccountUpdate",
     "sysDomainUpdate",
@@ -80,7 +82,7 @@ pub(super) fn default_profiles(config: &Config) -> BTreeMap<String, Profile> {
 }
 
 /// The server's authentication settings, which name its default roles.
-pub(super) fn authentication(client: &JmapClient) -> Result<Authentication, String> {
+pub(super) fn authentication(client: &JmapClient) -> Result<Authentication, State> {
     client
         .get(
             "Authentication",
@@ -90,13 +92,13 @@ pub(super) fn authentication(client: &JmapClient) -> Result<Authentication, Stri
         .map_err(said)?
         .into_iter()
         .next()
-        .ok_or_else(|| "Stalwart returned no object".to_owned())
+        .ok_or_else(states::no_object)
 }
 
 /// The roles `ids` as Stalwart sends them, with their descriptions, and the
 /// IDs it says it does not have; any other answer is one this release does
 /// not read.
-fn by_id(client: &JmapClient, ids: &[&str]) -> Result<(Vec<Object>, Vec<String>), String> {
+fn by_id(client: &JmapClient, ids: &[&str]) -> Result<(Vec<Object>, Vec<String>), State> {
     let method = "x:Role/get";
     let mut properties: Vec<&str> = ROLE_PROPERTIES.to_vec();
     properties.push("description");
@@ -144,7 +146,7 @@ fn by_id(client: &JmapClient, ids: &[&str]) -> Result<(Vec<Object>, Vec<String>)
 /// be evaluated.
 pub(super) struct Judged {
     pub(super) description: Option<String>,
-    pub(super) rights: Result<BTreeSet<String>, String>,
+    pub(super) rights: Result<BTreeSet<String>, State>,
 }
 
 /// `role` judged as the broker judges an account's roles: the role and those
@@ -155,7 +157,7 @@ pub(super) fn judged(
     client: &JmapClient,
     authentication: &Authentication,
     role: &str,
-) -> Result<Option<Judged>, String> {
+) -> Result<Option<Judged>, State> {
     // A role's ID is a numeral of Stalwart's: any other is none of its
     // roles', and Stalwart is not asked.
     if decode_native_id(role).is_none() {
@@ -164,7 +166,7 @@ pub(super) fn judged(
     let mut roles = BTreeMap::new();
     let mut description = None;
     let mut pending = BTreeSet::from([role.to_owned()]);
-    let not = |description: Option<String>, why: String| {
+    let not = |description: Option<String>, why: State| {
         Ok(Some(Judged {
             description,
             rights: Err(why),
@@ -173,20 +175,14 @@ pub(super) fn judged(
     while !pending.is_empty() {
         let batch: Vec<&str> = pending.iter().take(8).map(String::as_str).collect();
         if roles.len() + batch.len() > MAX_ROLES {
-            let why = format!(
-                "it inherits from more than {MAX_ROLES} roles, more than Garrison evaluates"
-            );
-            return not(description, why);
+            return not(description, states::too_many_roles(MAX_ROLES));
         }
         let (objects, missing) = by_id(client, &batch)?;
         if missing.iter().any(|id| id == role) {
             return Ok(None);
         }
         if let Some(gone) = missing.first() {
-            return not(
-                description,
-                format!("it inherits from role {gone}, which Stalwart does not have"),
-            );
+            return not(description, states::inherits_missing(gone));
         }
         for object in objects {
             let id = object
@@ -201,16 +197,12 @@ pub(super) fn judged(
                     .map(str::to_owned);
             }
             let Ok(read) = serde_json::from_value::<Role>(Value::Object(object)) else {
-                return not(description, format!("this release cannot read role {id}"));
+                return not(description, states::role_unreadable(&id));
             };
             // A tenant's role grants nothing the broker evaluates.
             if read.member_tenant_id.is_some() {
-                let why = if id == role {
-                    "it belongs to a tenant".to_owned()
-                } else {
-                    format!("role {id}, from which it inherits, belongs to a tenant")
-                };
-                return not(description, why);
+                let parent = (id != role).then_some(id.as_str());
+                return not(description, states::tenant_role(parent));
             }
             pending.extend(read.role_ids.0.iter().cloned());
             roles.insert(read.id.clone(), read);
@@ -227,7 +219,7 @@ pub(super) fn judged(
     };
     let rights = evaluate(&account, &roles, authentication)
         .map(|rights| rights.permissions)
-        .map_err(|error| error.to_string());
+        .map_err(states::unevaluable);
     Ok(Some(Judged {
         description,
         rights,
@@ -237,38 +229,35 @@ pub(super) fn judged(
 /// One of Stalwart's default administrator roles as it is: what it lacks of
 /// the administrator profile's rights and the default profiles it meets, or
 /// why `init` leaves it out.
-pub(super) struct Candidate {
-    pub(super) description: Option<String>,
-    pub(super) fit: Result<Fit, String>,
+pub(crate) struct Candidate {
+    pub(crate) description: Option<String>,
+    pub(crate) fit: Result<Fit, State>,
 }
 
-pub(super) struct Fit {
-    pub(super) lacks: Vec<String>,
-    pub(super) meets: Vec<String>,
+pub(crate) struct Fit {
+    pub(crate) lacks: Vec<String>,
+    pub(crate) meets: Vec<String>,
 }
 
 /// Stalwart's default administrator roles, each as it is. `init` binds those
 /// that lack nothing, and leaves out one that is every user's default role
 /// too, which would make every user an administrator.
-pub(super) fn administrator_roles(config: &Config) -> Result<BTreeMap<String, Candidate>, String> {
+pub(super) fn administrator_roles(config: &Config) -> Result<BTreeMap<String, Candidate>, State> {
     let client = native(config)?;
     let authentication = authentication(&client)?;
     let profiles = default_profiles(config);
     let user = &authentication.default_user_role_ids.0;
     let mut result = BTreeMap::new();
     for identifier in &authentication.default_admin_role_ids.0 {
-        let left = |why: &str| Candidate {
+        let left = |why: State| Candidate {
             description: None,
-            fit: Err(why.to_owned()),
+            fit: Err(why),
         };
         let candidate = if user.contains(identifier) {
-            left(
-                "it is every user's default role too, and binding it would make every user an \
-                 administrator",
-            )
+            left(states::every_users_role())
         } else {
             match judged(&client, &authentication, identifier)? {
-                None => left("Stalwart has no role of that ID"),
+                None => left(states::no_such_role()),
                 Some(Judged {
                     description,
                     rights,
@@ -279,7 +268,7 @@ pub(super) fn administrator_roles(config: &Config) -> Result<BTreeMap<String, Ca
                             lacks: lacking(&strings(&ADMIN_PERMISSIONS), &rights),
                             meets: meets(&profiles, &rights),
                         })
-                        .map_err(|why| format!("its rights cannot be evaluated ({why})")),
+                        .map_err(|why| states::rights_unevaluated(&why)),
                 },
             }
         };
@@ -297,14 +286,6 @@ pub(super) fn qualified(candidates: &BTreeMap<String, Candidate>) -> Vec<String>
         .collect()
 }
 
-/// A role as messages name it: its ID, with its description where it has one.
-pub(super) fn named(identifier: &str, candidate: &Candidate) -> String {
-    match &candidate.description {
-        Some(description) => format!("{identifier} ({description})"),
-        None => identifier.to_owned(),
-    }
-}
-
 /// What of `required` `rights` does not hold.
 fn lacking(required: &BTreeSet<String>, rights: &BTreeSet<String>) -> Vec<String> {
     required.difference(rights).cloned().collect()
@@ -319,79 +300,6 @@ fn meets(profiles: &BTreeMap<String, Profile>, rights: &BTreeSet<String>) -> Vec
         .collect()
 }
 
-/// `a`, `a and b`, `a, b and c`.
-fn listed(names: &[String]) -> String {
-    match names {
-        [] => String::new(),
-        [one] => one.clone(),
-        [first @ .., last] => format!("{} and {last}", first.join(", ")),
-    }
-}
-
-/// What a role meets as it is, as a sentence ends.
-fn as_it_is(meets: &[String]) -> String {
-    match meets {
-        [] => "As it is, it meets none of the profiles.".to_owned(),
-        [one] => format!("As it is, it meets the profile {one}."),
-        more => format!("As it is, it meets the profiles {}.", listed(more)),
-    }
-}
-
-/// The rights the administrator profile requires, as a sentence.
-pub(super) fn requires() -> String {
-    let required: Vec<String> = strings(&ADMIN_PERMISSIONS).into_iter().collect();
-    format!("The administrator profile requires {}.", listed(&required))
-}
-
-/// For each of Stalwart's default administrator roles what it lacks of the
-/// administrator profile's rights, where to give them and what it meets as
-/// it is, or why `init` leaves it out; and how to bind a role of one's own
-/// where none is left that only lacks rights. One line each.
-pub(super) fn candidates_said(candidates: &BTreeMap<String, Candidate>) -> Vec<String> {
-    let mut lines = Vec::new();
-    for (identifier, candidate) in candidates {
-        let role = named(identifier, candidate);
-        lines.push(match &candidate.fit {
-            Ok(fit) => format!(
-                "Stalwart's default administrator role {role} lacks {}: give the role {} in the \
-                 native administration (Roles), then run garrison access bind-role {identifier} \
-                 --profile administrator. {}",
-                listed(&fit.lacks),
-                if fit.lacks.len() == 1 {
-                    "that right"
-                } else {
-                    "those rights"
-                },
-                as_it_is(&fit.meets)
-            ),
-            Err(why) => format!("Stalwart's default administrator role {role} is left out: {why}."),
-        });
-    }
-    let bind = "bind it with garrison access bind-role <role-id> --profile administrator.";
-    if candidates.is_empty() {
-        lines.push(format!(
-            "Stalwart names no default administrator role: once the role of your \
-             administrators holds these rights, {bind}"
-        ));
-    } else if candidates.values().all(|candidate| candidate.fit.is_err()) {
-        lines.push(format!(
-            "Once the role of your administrators holds these rights, {bind}"
-        ));
-    }
-    lines
-}
-
-/// What `init` says where it bound no role and wrote the policy anew.
-pub(super) fn unbound(candidates: &BTreeMap<String, Candidate>) -> String {
-    let mut lines = vec![format!(
-        "No native administrator role with full administrative rights was found, so the policy \
-         binds no role and nobody can sign in yet. {}",
-        requires()
-    )];
-    lines.extend(candidates_said(candidates));
-    lines.join("\n")
-}
-
 /// What `bind-role` says where `role` lacks a right that `profile` of
 /// `policy` requires, or where its rights cannot be evaluated: its users get
 /// nothing of the profile until Stalwart gives the role those rights.
@@ -399,34 +307,16 @@ pub(super) fn fit(
     policy: &Policy,
     profile: &str,
     role: &str,
-    rights: Result<&BTreeSet<String>, &String>,
-) -> Option<String> {
+    rights: Result<&BTreeSet<String>, &State>,
+) -> Option<State> {
     let required = &policy.profiles.get(profile)?.required;
     let rights = match rights {
         Ok(rights) => rights,
-        Err(why) => {
-            return Some(format!(
-                "Note: the rights of role {role} cannot be evaluated ({why}), so whether its \
-                 users get the profile {profile} is not known; `garrison access check \
-                 <subject>` shows what a user gets."
-            ));
-        }
+        Err(why) => return Some(states::role_unjudged(role, profile, why)),
     };
     let lacks = lacking(required, rights);
-    (!lacks.is_empty()).then(|| {
-        format!(
-            "Note: role {role} lacks {}, which the profile {profile} requires, so its users get \
-             nothing of it until Stalwart's administrator gives the role {} in the native \
-             administration (Roles). {}",
-            listed(&lacks),
-            if lacks.len() == 1 {
-                "that right"
-            } else {
-                "those rights"
-            },
-            as_it_is(&meets(&policy.profiles, rights))
-        )
-    })
+    (!lacks.is_empty())
+        .then(|| states::role_lacks(role, profile, &lacks, &meets(&policy.profiles, rights)))
 }
 
 /// The default profiles whose actions follow garrison.toml: `init` gives
@@ -447,7 +337,7 @@ fn holds_actions(profile: &Profile) -> bool {
 /// garrison.toml has them now, where they may hold actions, and take from
 /// every profile the actions garrison.toml no longer has. What changed,
 /// one line for each profile.
-pub(super) fn follow(config: &Config, policy: &mut Policy) -> Vec<String> {
+pub(super) fn follow(config: &Config, policy: &mut Policy) -> Vec<State> {
     let configured: BTreeSet<String> = config
         .broker
         .actions
@@ -472,13 +362,8 @@ pub(super) fn follow(config: &Config, policy: &mut Policy) -> Vec<String> {
             .difference(&wanted)
             .map(String::as_str)
             .collect();
-        let said: Vec<String> = [(added, "added"), (taken, "taken out")]
-            .into_iter()
-            .filter(|(actions, _)| !actions.is_empty())
-            .map(|(actions, what)| format!("{} {what}", actions.join(", ")))
-            .collect();
-        if !said.is_empty() {
-            changes.push(format!("Profile {name}: {}.", said.join(", ")));
+        if !added.is_empty() || !taken.is_empty() {
+            changes.push(states::profile_changed(name, &added, &taken));
         }
         profile.actions = wanted;
     }

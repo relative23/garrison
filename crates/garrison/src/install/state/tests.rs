@@ -109,10 +109,7 @@ fn a_switch_back_puts_nothing_back_where_a_copy_does_not_fit() {
         .unwrap();
     let mut returned = Returned::default();
     let refused = restore_migrated(&backup, &config, &mut returned).unwrap_err();
-    assert!(
-        refused.contains("the copies from before the upgrade need"),
-        "{refused}"
-    );
+    assert_eq!(refused.name, "install-copies-no-room");
     assert_eq!(returned, Returned::default());
     let status = config.database(Database::Status);
     assert_eq!(crate::ops::stored_version(&status), Some(2));
@@ -124,11 +121,7 @@ fn a_switch_back_puts_nothing_back_where_a_copy_does_not_fit() {
     .said(&backup);
     assert_eq!(
         said,
-        format!(
-            " These went back to their copies in {}: collector. Removed, as they did not exist \
-             then: broker.",
-            backup.display()
-        )
+        states::went_back(&backup, &["collector"], &["broker"])
     );
 }
 
@@ -148,13 +141,9 @@ fn the_whole_state_goes_back_and_what_did_not_exist_is_removed() {
     assert_eq!(restored.removed, ["broker"]);
     assert_eq!(
         restored.said(&backup),
-        format!(
-            " These went back to their copies in {}: web, ingest, collector, the access policy. \
-             Removed, as they did not exist then: broker.",
-            backup.display()
-        )
+        states::went_back(&backup, &restored.back, &["broker"])
     );
-    assert_eq!(Returned::default().said(&backup), "");
+    assert_eq!(Returned::default().said(&backup), None);
     for kept in [Database::Web, Database::Events, Database::Status] {
         assert_eq!(note(&config.database(kept)), "before the upgrade");
     }
@@ -183,7 +172,7 @@ fn the_policy_never_goes_back_through_a_link() {
     std::os::unix::fs::symlink(&victim, &config.broker.policy).unwrap();
     let mut restored = Returned::default();
     let refused = restore_all(&backup, &config, own(), &mut restored).unwrap_err();
-    assert!(refused.contains("not a file of its own"), "{refused}");
+    assert_eq!(refused, states::policy_left(&config.broker.policy));
     // What went back before the policy is named as such.
     assert_eq!(restored.back, ["web", "ingest", "collector"]);
     assert_eq!(restored.removed, ["broker"]);
@@ -252,10 +241,9 @@ fn a_state_written_by_a_newer_release_does_not_suit_an_older_one() {
     // Written by 0.1.2: it suits 0.1.2 and what came after it.
     assert_eq!(unsuited(&backup, "0.1.2"), None);
     assert_eq!(unsuited(&backup, "0.2.0"), None);
-    let refusal = unsuited(&backup, "0.1.1").unwrap();
-    assert!(
-        refusal.contains("written by Garrison 0.1.2, which is newer than 0.1.1"),
-        "{refusal}"
+    assert_eq!(
+        unsuited(&backup, "0.1.1"),
+        Some(states::state_newer(&backup, "0.1.2", "0.1.1"))
     );
     // A backup that does not name its release is taken as before.
     fs::write(backup.join("backup.json"), r#"{"databases": {}}"#).unwrap();

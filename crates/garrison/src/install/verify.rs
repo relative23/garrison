@@ -7,45 +7,42 @@ use std::path::Path;
 use garrison_core::hex;
 use sha2::{Digest, Sha256};
 
-use super::files::{Step, io};
+use super::states;
+use crate::state::State;
+
+fn io<T>(result: std::io::Result<T>, path: &Path) -> Result<T, State> {
+    result.map_err(|error| states::io(path.display(), error))
+}
 
 /// Every file of the release must be listed in SHA256SUMS and match it, and the
 /// release may hold nothing but directories and regular files. Root copies the
 /// tree, so an unlisted file or a link pointing elsewhere (say, to `/etc`) must
 /// stop the installation before it starts.
-pub(super) fn verify(here: &Path) -> Step<String> {
+pub(super) fn verify(here: &Path) -> Result<String, State> {
     let sums = here.join("SHA256SUMS");
     let text = match fs::read_to_string(&sums) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err("SHA256SUMS is missing; this is not a complete release.".into());
+            return Err(states::sums_missing());
         }
-        Err(error) => return Err(format!("{}: {error}", sums.display())),
+        Err(error) => return Err(states::io(sums.display(), error)),
     };
     let mut listed = BTreeSet::new();
     for line in text.lines() {
-        let (digest, name) = line.split_once("  ").ok_or("SHA256SUMS is malformed.")?;
+        let (digest, name) = line.split_once("  ").ok_or_else(states::sums_malformed)?;
         if !inside(name) || name == "SHA256SUMS" {
-            return Err(format!(
-                "SHA256SUMS lists {name:?}, which is no file of a release; nothing was installed."
-            ));
+            return Err(states::sums_outside(name));
         }
         if !listed.insert(name) {
-            return Err(format!(
-                "SHA256SUMS lists {name} twice; nothing was installed."
-            ));
+            return Err(states::sums_twice(name));
         }
         let path = here.join(name);
         if !io(fs::symlink_metadata(&path), &path)?.is_file() {
-            return Err(format!(
-                "{name} is not a regular file; nothing was installed."
-            ));
+            return Err(states::not_a_file(name));
         }
         let data = io(fs::read(&path), &path)?;
         if hex::encode(&Sha256::digest(&data)) != digest {
-            return Err(format!(
-                "Checksum mismatch for {name}; nothing was installed."
-            ));
+            return Err(states::checksum_mismatch(name));
         }
     }
     let mut present = Vec::new();
@@ -54,9 +51,7 @@ pub(super) fn verify(here: &Path) -> Step<String> {
         .iter()
         .find(|name| *name != "SHA256SUMS" && !listed.contains(name.as_str()))
     {
-        return Err(format!(
-            "{extra} is not listed in SHA256SUMS; nothing was installed."
-        ));
+        return Err(states::unlisted(extra));
     }
     let path = here.join("VERSION");
     let version = io(fs::read_to_string(&path), &path)?.trim().to_owned();
@@ -67,9 +62,7 @@ pub(super) fn verify(here: &Path) -> Step<String> {
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || ".+-".contains(character));
     if !usable {
-        return Err(format!(
-            "VERSION {version:?} is not a release version; nothing was installed."
-        ));
+        return Err(states::bad_version(&version));
     }
     Ok(version)
 }
@@ -82,7 +75,7 @@ fn inside(name: &str) -> bool {
 
 /// The regular files below `directory`, relative to the release. Anything but
 /// a directory or a regular file is refused; links are not followed.
-fn files(directory: &Path, prefix: &str, found: &mut Vec<String>) -> Step {
+fn files(directory: &Path, prefix: &str, found: &mut Vec<String>) -> Result<(), State> {
     for entry in io(fs::read_dir(directory), directory)? {
         let entry = io(entry, directory)?;
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -98,9 +91,7 @@ fn files(directory: &Path, prefix: &str, found: &mut Vec<String>) -> Step {
         } else if kind.is_file() {
             found.push(relative);
         } else {
-            return Err(format!(
-                "{relative} is not a regular file; nothing was installed."
-            ));
+            return Err(states::not_a_file(relative));
         }
     }
     Ok(())
@@ -133,31 +124,20 @@ mod tests {
         assert_eq!(verify(root).unwrap(), "0.1.0-dev");
         fs::write(root.join("VERSION"), "../../etc\n").unwrap();
         sums(root, &["VERSION", "a.txt"]);
-        assert!(
-            verify(root)
-                .unwrap_err()
-                .starts_with("VERSION \"../../etc\"")
-        );
+        assert_eq!(verify(root).unwrap_err(), states::bad_version("../../etc"));
         fs::write(root.join("a.txt"), "b").unwrap();
         assert_eq!(
             verify(root).unwrap_err(),
-            "Checksum mismatch for a.txt; nothing was installed."
+            states::checksum_mismatch("a.txt")
         );
         // A list that cannot be read says why, not that it is missing.
         let list = root.join("SHA256SUMS");
         fs::set_permissions(&list, fs::Permissions::from_mode(0o000)).unwrap();
-        if fs::read(&list).is_err() {
-            let refused = verify(root).unwrap_err();
-            assert!(
-                refused.ends_with("SHA256SUMS: Permission denied (os error 13)"),
-                "{refused}"
-            );
+        if let Err(error) = fs::read(&list) {
+            assert_eq!(verify(root).unwrap_err(), states::io(list.display(), error));
         }
         fs::remove_file(&list).unwrap();
-        assert_eq!(
-            verify(root).unwrap_err(),
-            "SHA256SUMS is missing; this is not a complete release."
-        );
+        assert_eq!(verify(root).unwrap_err(), states::sums_missing());
     }
 
     #[test]
@@ -174,16 +154,13 @@ mod tests {
         fs::write(root.join("static/extra.js"), "steal()").unwrap();
         assert_eq!(
             verify(root).unwrap_err(),
-            "static/extra.js is not listed in SHA256SUMS; nothing was installed."
+            states::unlisted("static/extra.js")
         );
         fs::remove_file(root.join("static/extra.js")).unwrap();
 
         // A link, listed or not, would make root copy what it points to.
         symlink("/etc", root.join("static/etc")).unwrap();
-        assert_eq!(
-            verify(root).unwrap_err(),
-            "static/etc is not a regular file; nothing was installed."
-        );
+        assert_eq!(verify(root).unwrap_err(), states::not_a_file("static/etc"));
         fs::remove_file(root.join("static/etc")).unwrap();
         symlink("index.html", root.join("static/copy.html")).unwrap();
         let digest = hex::encode(&Sha256::digest(b"<p>"));
@@ -195,7 +172,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             verify(root).unwrap_err(),
-            "static/copy.html is not a regular file; nothing was installed."
+            states::not_a_file("static/copy.html")
         );
     }
 
@@ -228,21 +205,13 @@ mod tests {
             "SHA256SUMS",
         ] {
             fs::write(root.join("SHA256SUMS"), format!("{digest}  {name}\n")).unwrap();
-            assert_eq!(
-                verify(root).unwrap_err(),
-                format!(
-                    "SHA256SUMS lists {name:?}, which is no file of a release; nothing was installed."
-                )
-            );
+            assert_eq!(verify(root).unwrap_err(), states::sums_outside(name));
         }
         fs::write(
             root.join("SHA256SUMS"),
             format!("{digest}  VERSION\n{digest}  VERSION\n"),
         )
         .unwrap();
-        assert_eq!(
-            verify(root).unwrap_err(),
-            "SHA256SUMS lists VERSION twice; nothing was installed."
-        );
+        assert_eq!(verify(root).unwrap_err(), states::sums_twice("VERSION"));
     }
 }

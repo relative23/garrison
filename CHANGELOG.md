@@ -160,6 +160,10 @@ Notable changes for operators and users. The format follows
 
 ### Changed
 
+- **What the installer, `garrison upgrade` and the commands beside them refuse,
+  and the outcomes scripts act on, end with a name in brackets, such as
+  `[install-no-room]`.** A script looks for that name, which stays, not for the
+  words.
 - **`garrison stalwart setup` changes nothing where it finds Stalwart set up
   as asked,** and says "Stalwart is set up as asked; nothing was changed."
   It still has Stalwart reload its settings, since no read shows whether

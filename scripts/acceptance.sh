@@ -45,15 +45,13 @@ inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.before-new &&
 if inside '/root/previous/bin/garrison --config /etc/garrison/garrison.toml check-config' >/dev/null 2>&1; then
     echo "skip  the previous release knows collector.dqs_key, so the upgrade is not refused for it"
 else
-    answer=$(mktemp)
-    if installer '/root/release/bin/garrison install' >"$answer" 2>&1 ||
-        ! grep -q "$old, the release that runs, makes the backup before the upgrade" "$answer"; then
-        cat "$answer"
+    if installer '/root/release/bin/garrison install > /root/answer 2>&1' ||
+        ! inside "acceptance-state /root/answer install-backup-unloadable && grep -q -F -- '$old' /root/answer"; then
+        inside 'cat /root/answer' || true
         echo "FAIL  an upgrade over a setting the release that runs does not know names that release"
         exit 1
     fi
     echo "ok    an upgrade over a setting the release that runs does not know names that release"
-    rm -f "$answer"
     names "current is still the release before" current "$old"
 fi
 inside 'cp -p /root/garrison.toml.before-new /etc/garrison/garrison.toml'
@@ -215,7 +213,7 @@ inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.before-dqs &&
     printf "\n[[providers]]\ntype = \"reputation\"\nresolver = \"127.0.0.1:5353\"\nhosts = [\"mail.example.test\"]\nlists = [\"zen.dq.spamhaus.net\"]\nlists_ipv6 = []\n" \
         >> /etc/garrison/garrison.toml'
 check "check-config refuses a list written without its key while collector.dqs_key is unset" \
-    '! garrison check-config >/root/check.log 2>&1 && grep -q "written without its key" /root/check.log'
+    '! garrison check-config >/root/check.log 2>&1 && acceptance-state /root/check.log check-config-dqs-refused'
 inside 'printf "\n[collector]\ndqs_key = \"credential:spamhaus-dqs-key\"\n" >> /etc/garrison/garrison.toml'
 check "check-config takes it with collector.dqs_key" 'garrison check-config >/dev/null'
 # One collection run each; a check repeats only its look at what the run left.
@@ -325,15 +323,13 @@ check "without the maintenance module the broker offers no action" "$catalog | g
 if inside '/root/previous/bin/garrison --config /etc/garrison/garrison.toml check-config' >/dev/null 2>&1; then
     echo "skip  the previous release loads the modules setting, so no rollback is refused"
 else
-    answer=$(mktemp)
-    if installer '/opt/garrison/current/bin/garrison install --rollback --restore-state' >"$answer" 2>&1 ||
-        ! grep -q "cannot load /etc/garrison/garrison.toml" "$answer"; then
-        cat "$answer"
+    if installer '/opt/garrison/current/bin/garrison install --rollback --restore-state > /root/answer 2>&1' ||
+        ! inside 'acceptance-state /root/answer install-rollback-unloadable'; then
+        inside 'cat /root/answer' || true
         echo "FAIL  a rollback to a release that cannot load the configuration is refused"
         exit 1
     fi
     echo "ok    a rollback to a release that cannot load the configuration is refused"
-    rm -f "$answer"
     names "current is still the release under test" current "$new"
     names "previous is still the release before it" previous "$old"
 fi
@@ -343,23 +339,22 @@ inside 'mv /etc/garrison/garrison.toml.previous /etc/garrison/garrison.toml &&
 check "with every module back the broker offers its action again" "$catalog | grep -q '\"run_check\"'"
 
 step "Rolling back to the previous release"
-answer=$(mktemp)
 refused=
-if installer '/opt/garrison/current/bin/garrison install --rollback' >"$answer" 2>&1; then
+if installer '/opt/garrison/current/bin/garrison install --rollback > /root/answer 2>&1'; then
     names "current is the previous release" current "$old"
     names "previous is the release it rolled back from" previous "$new"
     services "rolled back"
 else
     # Across a schema change the previous release cannot read the data, so the
     # rollback must stop before it changes anything and name --restore-state.
-    if ! grep -q -- "--restore-state" "$answer"; then
-        cat "$answer"
+    if ! inside 'acceptance-state /root/answer install-rollback-unreadable'; then
+        inside 'cat /root/answer' || true
         echo "FAIL  a refused rollback names --restore-state"
         exit 1
     fi
     echo "ok    a rollback across a schema change is refused"
-    if ! grep -q "as its self-check says of collector (schema " "$answer"; then
-        cat "$answer"
+    if ! inside 'grep -q -F collector /root/answer'; then
+        inside 'cat /root/answer' || true
         echo "FAIL  a refused rollback names the database its release cannot read"
         exit 1
     fi
@@ -369,7 +364,6 @@ else
     names "previous is still the release before it" previous "$old"
     services "kept after the refused rollback"
 fi
-rm -f "$answer"
 # The upgrade's last line names the rollback that works: --restore-state
 # exactly when a schema changed and the plain rollback is refused. The
 # collection run of "services upgraded" has migrated every database by now.
@@ -414,14 +408,12 @@ kept=$(events)
 services "after the backup"
 check "more was recorded since the backup" \
     "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -gt $kept"
-answer=$(mktemp)
-if installer '/opt/garrison/current/bin/garrison restore --from /root/no-backup' >"$answer" 2>&1 ||
-    ! grep -q "nothing was changed" "$answer"; then
-    cat "$answer"
+if installer '/opt/garrison/current/bin/garrison restore --from /root/no-backup > /root/answer 2>&1' ||
+    ! inside 'acceptance-state /root/answer install-not-a-backup'; then
+    inside 'cat /root/answer' || true
     echo "FAIL  a directory that is no backup is refused, and nothing changes"
     exit 1
 fi
-rm -f "$answer"
 echo "ok    a directory that is no backup is refused, and nothing changes"
 installer '/opt/garrison/current/bin/garrison restore --from /root/kept-state'
 check "the events are those of the backup" \

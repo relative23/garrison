@@ -30,26 +30,39 @@ previous=$1
 release=$2
 # shellcheck source=scripts/acceptance-lib.sh
 . "$(dirname "$0")/acceptance-lib.sh"
+# shellcheck source=scripts/acceptance-ntfy.sh
+. "$(dirname "$0")/acceptance-ntfy.sh"
 
-# The command must fail and say `message`.
+# The command must fail and say one of the states `3` (their names, apart by
+# spaces). Its answer stays in /root/answer for the checks after it.
 refused() {
-    answer=$(mktemp)
-    if inside "umask 077 && $2" >"$answer" 2>&1; then
-        cat "$answer"
+    if inside "umask 077 && { $2; } > /root/answer 2>&1"; then
+        inside 'cat /root/answer' || true
         echo "FAIL  $1: the installer succeeded"
         exit 1
     fi
-    if ! grep -q -F -- "$3" "$answer"; then
-        cat "$answer"
-        echo "FAIL  $1: the answer does not say \"$3\""
+    if ! inside "acceptance-state /root/answer $3"; then
+        inside 'cat /root/answer' || true
+        echo "FAIL  $1: the answer does not say $3"
         exit 1
     fi
-    rm -f "$answer"
     echo "ok    $1"
 }
 
-# The command must succeed and say `message`. It runs once: it changes things.
+# The command must succeed and say one of the states `3`. It runs once: it
+# changes things.
 says() {
+    if ! inside "umask 077 && { $2; } > /root/answer 2>&1" || ! inside "acceptance-state /root/answer $3"; then
+        inside 'cat /root/answer' || true
+        echo "FAIL  $1: the answer does not say $3"
+        exit 1
+    fi
+    echo "ok    $1"
+}
+
+# As `says`, for words that no state names: doctor's lines and setup's,
+# which report no states yet.
+says_words() {
     answer=$(mktemp)
     if ! inside "umask 077 && $2" >"$answer" 2>&1 || ! grep -q -F -- "$3" "$answer"; then
         cat "$answer"
@@ -87,9 +100,9 @@ scenario_refusals() {
     inside 'cp -r /root/release /srv/unprivileged && chmod -R a+rX /srv/unprivileged &&
         chmod 600 /srv/unprivileged/SHA256SUMS'
     refused "the installer needs root" \
-        'runuser -u nobody -- /srv/unprivileged/bin/garrison install' "Run as root."
+        'runuser -u nobody -- /srv/unprivileged/bin/garrison install' install-not-root
     inside 'mv /etc/polkit-1/rules.d /etc/polkit-1/rules.d.away'
-    refused "the installer needs polkit" '/root/release/bin/garrison install' "polkit is required"
+    refused "the installer needs polkit" '/root/release/bin/garrison install' install-no-polkit
     inside 'mv /etc/polkit-1/rules.d.away /etc/polkit-1/rules.d'
     # polkit 0.105, as some long-term releases still ship it, ignores rules files;
     # Ubuntu 22.04's has no rules.d either, and the answer names the version.
@@ -97,17 +110,17 @@ scenario_refusals() {
         printf "#!/bin/sh\necho \"pkaction version 0.105\"\n" > /usr/bin/pkaction &&
         chmod 755 /usr/bin/pkaction && mv /etc/polkit-1/rules.d /etc/polkit-1/rules.d.away'
     refused "the installer names a polkit without JavaScript rules" '/root/release/bin/garrison install' \
-        "polkit 0.105 has no JavaScript rules"
+        install-old-polkit
     inside 'mv /usr/bin/pkaction.away /usr/bin/pkaction && mv /etc/polkit-1/rules.d.away /etc/polkit-1/rules.d'
     inside 'cp -a /root/release /root/tampered && printf x >> /root/tampered/static/index.html'
-    refused "a changed file is refused" '/root/tampered/bin/garrison install' \
-        "Checksum mismatch for static/index.html"
+    refused "a changed file is refused" '/root/tampered/bin/garrison install' install-checksum-mismatch
+    check "and named" 'grep -q -F static/index.html /root/answer'
     check "a refused release is not unpacked" "test ! -e '/opt/garrison/releases/$new'"
     backups=$(inside 'ls /var/backups/garrison | wc -l')
     inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.good &&
         printf "\nunknown_setting = 1\n" >> /etc/garrison/garrison.toml'
     refused "a configuration the release refuses stops the upgrade" \
-        '/root/release/bin/garrison install' "the running release was not touched"
+        '/root/release/bin/garrison install' install-config-refused
     # A script that keeps only standard error finds the reason there.
     check "the installer names the refused setting on standard error" \
         'umask 077 && /root/release/bin/garrison install 2>&1 >/dev/null | grep -q unknown_setting'
@@ -116,11 +129,11 @@ scenario_refusals() {
     # Too little room for the backup: a small file system over the backups.
     inside 'mount -t tmpfs -o size=8m garrison-full /var/backups/garrison'
     refused "an upgrade without room for the backup is refused" '/root/release/bin/garrison install' \
-        "MiB free and the installation needs"
+        install-no-room
     inside 'umount /var/backups/garrison'
     check "the refused upgrade backed nothing up either" "test \$(ls /var/backups/garrison | wc -l) -eq $backups"
     inside 'mv /var/backups/garrison /var/backups/garrison.away && touch /var/backups/garrison'
-    refused "a failed backup stops the upgrade" '/root/release/bin/garrison install' "backup failed"
+    refused "a failed backup stops the upgrade" '/root/release/bin/garrison install' install-backup-failed
     inside 'rm /var/backups/garrison && mv /var/backups/garrison.away /var/backups/garrison'
     running "after the refusals" "$old"
 }
@@ -133,7 +146,8 @@ scenario_base_hidden() {
     inside 'mv /opt/garrison /home/garrison && ln -s /home/garrison /opt/garrison'
     pid=$(inside 'systemctl show -p MainPID --value garrison-web.service')
     refused "an installer whose release base leads under /home is refused" \
-        '/root/release/bin/garrison install' "/opt/garrison leads to /home/garrison, which lies under /home"
+        '/root/release/bin/garrison install' install-base-hidden
+    check "and names where it leads" 'grep -q -F /home/garrison /root/answer'
     check "and nothing stopped" "test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
     inside 'rm /opt/garrison && mv /home/garrison /opt/garrison'
     running "after the base under /home" "$new"
@@ -150,7 +164,7 @@ scenario_failed_start() {
         find . -type f ! -name SHA256SUMS | sed "s|^\./||" | sort | xargs sha256sum > SHA256SUMS'
     current=$(inside 'basename "$(readlink -f /opt/garrison/current)"')
     refused "a release whose web service fails is switched back" \
-        '/root/broken/bin/garrison install' "the previous release is running"
+        '/root/broken/bin/garrison install' install-switched-back
     running "after the failed start" "$current"
 }
 
@@ -165,7 +179,7 @@ scenario_crash_loop() {
         find . -type f ! -name SHA256SUMS | sed "s|^\./||" | sort | xargs sha256sum > SHA256SUMS'
     current=$(inside 'basename "$(readlink -f /opt/garrison/current)"')
     refused "a release whose web service keeps restarting is switched back" \
-        '/root/unsteady/bin/garrison install' "the previous release is running"
+        '/root/unsteady/bin/garrison install' install-switched-back
     running "after the unsteady release" "$current"
 }
 
@@ -198,7 +212,7 @@ scenario_migrated_then_failed() {
     schema=$(status_schema)
     before=$(events)
     refused "a release that migrated and then kept falling over is switched back" \
-        '/root/migrating/bin/garrison install' "the previous release is running"
+        '/root/migrating/bin/garrison install' install-switched-back
     check "the migrated database is the one from before again" \
         "test '$schema' = \"\$(sqlite3 /var/lib/garrison/collector/status.sqlite 'PRAGMA user_version')\""
     check "the other databases kept their data" \
@@ -216,7 +230,8 @@ scenario_migrated_then_failed() {
             > /etc/systemd/system/garrison-web.service.d/acceptance-fail.conf &&
         systemctl daemon-reload && touch /run/garrison-acceptance-fail'
     refused "the installer says that neither release started, and what returns to the old one" \
-        '/root/migrating/bin/garrison install' "install --rollback --restore-state"
+        '/root/migrating/bin/garrison install' install-previous-failed
+    check "and names the rollback that returns to it" 'grep -q -F "install --rollback --restore-state" /root/answer'
     check "the migrated database went back all the same" \
         "test '$schema' = \"\$(sqlite3 /var/lib/garrison/collector/status.sqlite 'PRAGMA user_version')\""
     check "previous names the release to return to" \
@@ -249,8 +264,10 @@ scenario_switch_back_room() {
         exit 1
     fi
     check "the switch back says where a copy does not fit, not that the old release failed" \
-        '{ grep -q "the copies from before the upgrade need" /root/switch-room.log &&
-            ! grep -q "did not start either" /root/switch-room.log; } || { cat /root/switch-room.log; false; }'
+        '{ acceptance-state /root/switch-room.log install-switch-back-failed &&
+            acceptance-state /root/switch-room.log install-copies-no-room &&
+            ! acceptance-state /root/switch-room.log install-previous-failed; } ||
+            { cat /root/switch-room.log; false; }'
     check "and puts nothing back" \
         "test \"\$(sqlite3 -readonly /var/lib/garrison/collector/status.sqlite 'PRAGMA user_version')\" = 99"
     # With room again, what the answer names returns to the release that ran.
@@ -272,7 +289,7 @@ scenario_concurrent() {
         wait'
     check "of two installers at once one runs and one is refused" \
         'cd /root && test "$(sort one.status two.status | tr "\n" " ")" = "0 1 " &&
-            grep -q "already running" one.log two.log'
+            { acceptance-state one.log install-busy || acceptance-state two.log install-busy; }'
     running "after two installers at once" "$new"
 }
 
@@ -287,7 +304,7 @@ scenario_reinstall() {
     backups=$(inside 'ls /var/backups/garrison | wc -l')
     pid=$(inside 'systemctl show -p MainPID --value garrison-web.service')
     says "a reinstall of the release that runs as installed says that it changed nothing" \
-        '/root/release/bin/garrison install' "Garrison $new is running as installed; nothing was changed."
+        '/root/release/bin/garrison install' install-as-installed
     check "and stops nothing and copies nothing" "
         test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid' &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
@@ -298,7 +315,8 @@ scenario_reinstall() {
     inside 'mv /opt/garrison/previous /root/previous.link'
     installer '/root/release/bin/garrison install > /root/reinstall.log 2>&1'
     check "a reinstall without a previous release names no rollback" \
-        "{ ! grep -q 'Roll back with' /root/reinstall.log && grep -q -F 'Garrison $new is running' /root/reinstall.log; } ||
+        "{ ! grep -q -F 'install --rollback' /root/reinstall.log &&
+            acceptance-state /root/reinstall.log install-running install-as-installed; } ||
             { cat /root/reinstall.log; false; }"
     inside 'mv /root/previous.link /opt/garrison/previous && rm /root/reinstall.log'
     running "after the reinstall" "$new"
@@ -309,7 +327,7 @@ scenario_rollback_without_state() {
     upgraded
     inside 'mv /var/backups/garrison/last-pre-upgrade /root/last-pre-upgrade.away'
     refused "a rollback without the state from before the upgrade is refused" \
-        '/opt/garrison/current/bin/garrison install --rollback --restore-state' "last-pre-upgrade"
+        '/opt/garrison/current/bin/garrison install --rollback --restore-state' install-no-state
     inside 'mv /root/last-pre-upgrade.away /var/backups/garrison/last-pre-upgrade'
     running "after the refused rollback" "$new"
 }
@@ -372,7 +390,8 @@ scenario_collect_beside() {
     check "a run beside it ends as a success and says why" \
         'systemctl start garrison-collect.service &&
             test "$(systemctl show -p Result --value garrison-collect.service)" = success &&
-            journalctl -u garrison-collect.service -n 20 --no-pager | grep -q "Another collection run is under way"'
+            journalctl -u garrison-collect.service -n 20 --no-pager > /root/collect.log &&
+            acceptance-state /root/collect.log collect-busy'
     check "and stores no snapshot" "test \"\$($newest)\" = '$before'"
     inside 'systemctl stop acceptance-collecting'
     check "once that run is over, the next one stores its snapshot" \

@@ -20,6 +20,8 @@ use serde_json::{Map, Value};
 
 use super::files::{Step, announce, relabel, replace_in};
 use super::requirements::{exact_room, size};
+use super::states;
+use crate::state::State;
 
 /// What a backup says of itself in `backup.json`.
 #[derive(Debug, Default, Deserialize)]
@@ -49,17 +51,11 @@ fn absent_before(manifest: &Manifest, database: Database) -> bool {
 /// Why release `target` cannot take the state in `source`, if it cannot: a
 /// release newer than `target` wrote it, and no release reads a database a
 /// newer one has written. A backup that does not name its release passes.
-pub(super) fn unsuited(source: &Path, target: &str) -> Option<String> {
+pub(super) fn unsuited(source: &Path, target: &str) -> Option<State> {
     let written_by = manifest(source).release?;
     version::newer(&written_by, target)
         .unwrap_or(false)
-        .then(|| {
-            format!(
-                "The state in {} was written by Garrison {written_by}, which is newer than \
-                 {target}; {target} cannot read it.",
-                source.display()
-            )
-        })
+        .then(|| states::state_newer(source, &written_by, target))
 }
 
 /// The databases a release's `self-check` report in `report` calls
@@ -126,7 +122,7 @@ fn take_away(config: &Config, database: Database) -> Step {
     if let Some(folder) = destination.parent() {
         without_journals(folder, database);
     }
-    fs::remove_file(&destination).map_err(|error| format!("{}: {error}", destination.display()))
+    fs::remove_file(&destination).map_err(|error| states::io(destination.display(), error))
 }
 
 fn copy_of(source: &Path, database: Database) -> std::path::PathBuf {
@@ -136,10 +132,7 @@ fn copy_of(source: &Path, database: Database) -> std::path::PathBuf {
 /// Who owns the access policy, as the installer leaves it: root, with the
 /// broker's group, which alone reads it. Asked before anything stops.
 pub(super) fn policy_owner() -> Step<(Uid, Gid)> {
-    let group = crate::access::group_id("garrison-broker").ok_or(
-        "The group garrison-broker, which reads the access policy, does not exist; the \
-         installer makes it.",
-    )?;
+    let group = crate::access::group_id("garrison-broker").ok_or_else(states::no_broker_group)?;
     Ok((Uid::ROOT, Gid::from_raw(group)))
 }
 
@@ -182,19 +175,16 @@ pub(super) fn restore_all(
 /// and so does what a link points to; a policy kept outside /etc/garrison
 /// may lie in a folder that others can write.
 fn put_policy_back(copy: &Path, target: &Path, owner: (Uid, Gid)) -> Step {
-    let named = || format!("broker.policy names {}", target.display());
     if fs::symlink_metadata(target).is_ok_and(|kind| !kind.is_file()) {
-        return Err(format!(
-            "{}, which is not a file of its own; it was left as it is",
-            named()
-        ));
+        return Err(states::policy_left(target));
     }
     let (Some(folder), Some(name)) = (target.parent(), target.file_name().and_then(OsStr::to_str))
     else {
-        return Err(format!("{}, which is no file's name", named()));
+        return Err(states::policy_nameless(target));
     };
     // The broker reaches the file through the folders' links, as here.
-    let folder = fs::canonicalize(folder).map_err(|error| format!("{}: {error}", named()))?;
+    let folder =
+        fs::canonicalize(folder).map_err(|error| states::policy_unreachable(target, error))?;
     replace_in(&folder, name, copy, 0o640, Some(owner))?;
     relabel(&[target.to_owned()]);
     Ok(())
@@ -209,26 +199,9 @@ pub(super) struct Returned {
 }
 
 impl Returned {
-    /// As a sentence to append to a message: nothing where nothing changed.
-    pub(super) fn said(&self, source: &Path) -> String {
-        let back = (!self.back.is_empty()).then(|| {
-            format!(
-                " These went back to their copies in {}: {}.",
-                source.display(),
-                self.back.join(", ")
-            )
-        });
-        let removed = (!self.removed.is_empty()).then(|| {
-            format!(
-                " Removed, as they did not exist then: {}.",
-                self.removed.join(", ")
-            )
-        });
-        format!(
-            "{}{}",
-            back.unwrap_or_default(),
-            removed.unwrap_or_default()
-        )
+    /// What went back from `source`; none where nothing changed.
+    pub(super) fn said(&self, source: &Path) -> Option<State> {
+        states::went_back(source, &self.back, &self.removed)
     }
 }
 

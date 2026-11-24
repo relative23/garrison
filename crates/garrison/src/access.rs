@@ -11,7 +11,7 @@ use std::path::Path;
 
 use clap::Subcommand;
 use garrison_authz::policy::{Policy, is_profile_name, parse_policy};
-use garrison_authz::{Authority, Error, SUPPORTED};
+use garrison_authz::{Authority, Error};
 use garrison_core::config::Config;
 use garrison_core::files::{ProtectedFileError, read_protected};
 use garrison_stalwart::jmap::JmapClient;
@@ -19,22 +19,28 @@ use garrison_stalwart::oidc::is_subject;
 use garrison_stalwart::permissions::native_rights;
 use serde_json::{Value, json};
 
+use crate::state::State;
+use crate::states::access as states;
 use crate::{complain, credentials, say};
 
 mod defaults;
 mod folder;
 
-use defaults::{Candidate, administrator_roles, default_profiles};
-use folder::{Current, Folder, MAX_POLICY};
-pub(crate) use folder::{too_large, way_out};
+#[cfg(test)]
+pub(crate) use defaults::Fit;
+pub(crate) use defaults::{ADMIN_PERMISSIONS, Candidate};
+use defaults::{administrator_roles, default_profiles};
+use folder::{Current, Folder};
+pub(crate) use folder::{MAX_POLICY, way_out};
 
 const POLICY_GROUP: &str = "garrison-broker";
 
+/// clap's parser of `--profile`, which takes the error as a sentence.
 fn profile_name(value: &str) -> Result<String, String> {
     if is_profile_name(value) {
         Ok(value.to_owned())
     } else {
-        Err(format!("invalid profile name '{value}'"))
+        Err(states::invalid_profile(value).to_string())
     }
 }
 
@@ -93,38 +99,26 @@ pub(crate) fn group_id(name: &str) -> Option<u32> {
 }
 
 /// Validate, back up the previous file and put the new one in its place.
-fn save(config: &Config, folder: &Folder, policy: &Policy) -> Result<(), String> {
+fn save(config: &Config, folder: &Folder, policy: &Policy) -> Result<(), State> {
     let document = policy.to_document();
     // Never write an invalid policy.
-    parse_policy(&document, &action_ids(config)).map_err(|error| error.to_string())?;
+    parse_policy(&document, &action_ids(config)).map_err(states::invalid_policy)?;
     let path = &config.broker.policy;
     let text = format!("{}\n", pretty(&document));
     // Nor one larger than the broker reads, which would be none.
     if text.len() > MAX_POLICY {
-        return Err(format!(
-            "The policy would be larger than the broker reads ({} KiB): the change is not saved, \
-             and {} stays as it is.",
-            MAX_POLICY / 1024,
-            path.display()
-        ));
+        return Err(states::save_too_large(path));
     }
     let kept = match folder.current()? {
         Current::File => Some(folder.back_up(&folder.content()?)?),
         Current::Missing => None,
-        Current::Other => return Err(not_a_file(path)),
+        Current::Other => return Err(states::not_a_file(path)),
     };
     let group = group_id(POLICY_GROUP).map(rustix::fs::Gid::from_raw);
     if let Some(note) = folder.replace(text.as_bytes(), group)? {
-        say(&note);
+        say(&note.to_string());
     }
-    match kept {
-        Some(backup) => say(&format!(
-            "Saved {}; the previous file is kept as {}.",
-            path.display(),
-            backup.display()
-        )),
-        None => say(&format!("Saved {}", path.display())),
-    }
+    say(&states::saved(path, kept.as_deref()).to_string());
     Ok(())
 }
 
@@ -133,21 +127,11 @@ fn save(config: &Config, folder: &Folder, policy: &Policy) -> Result<(), String>
 fn locked<T>(
     config: &Config,
     make: bool,
-    work: impl FnOnce(&Folder) -> Result<T, String>,
-) -> Result<T, String> {
+    work: impl FnOnce(&Folder) -> Result<T, State>,
+) -> Result<T, State> {
     let folder = Folder::open(&config.broker.policy, make)?;
     let _held = folder.lock()?;
     work(&folder)
-}
-
-/// What to say of a link, a folder or anything else at the policy's name,
-/// which neither this command nor the installer changes.
-fn not_a_file(path: &Path) -> String {
-    format!(
-        "{} is a link or a folder, not a file: remove it; then `garrison access init` makes \
-         the file itself there.",
-        path.display()
-    )
 }
 
 fn authority(config: &Config) -> Authority {
@@ -157,30 +141,27 @@ fn authority(config: &Config) -> Authority {
 /// What the command says where it got no answer it can use, by its kind:
 /// an answer this release does not read with where the supported Stalwart
 /// releases are named, any other as the error says it.
-fn said(error: Error) -> String {
+fn said(error: Error) -> State {
     match error {
-        Error::Unreadable(why) => format!(
-            "Stalwart answered in a form this release of Garrison does not read ({why}); \
-             {SUPPORTED}"
-        ),
-        Error::Unavailable(why)
-        | Error::Limited(why)
-        | Error::InvalidToken(why)
-        | Error::Denied(why)
-        | Error::Misconfigured(why) => why,
+        Error::Unreadable(why) => states::unread_answer(&why),
+        Error::Unavailable(why) => states::unavailable(why),
+        Error::Limited(why) => states::limited(why),
+        Error::InvalidToken(why) => states::invalid_token(why),
+        Error::Denied(why) => states::denied(why),
+        Error::Misconfigured(why) => states::misconfigured(why),
     }
 }
 
 /// Whether there is a file at the policy's name to read.
-fn there(path: &Path) -> Result<(), String> {
+fn there(path: &Path) -> Result<(), State> {
     match fs::symlink_metadata(path) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(folder::missing(path)),
-        Ok(kind) if !kind.is_file() => Err(not_a_file(path)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(states::missing(path)),
+        Ok(kind) if !kind.is_file() => Err(states::not_a_file(path)),
         _ => Ok(()),
     }
 }
 
-fn load(config: &Config) -> Result<Policy, String> {
+fn load(config: &Config) -> Result<Policy, State> {
     let path = &config.broker.policy;
     there(path)?;
     authority(config).policy().map_err(|error| {
@@ -193,20 +174,8 @@ fn load(config: &Config) -> Result<Policy, String> {
         if gone.is_empty() {
             return said(error);
         }
-        removed(path, &gone)
+        states::actions_gone(path, &gone)
     })
-}
-
-/// What to say of the policy at `path`, which names the actions `gone` that
-/// garrison.toml no longer has.
-fn removed(path: &Path, gone: &[String]) -> String {
-    format!(
-        "The access policy {} names {}, which garrison.toml no longer has: run `garrison access \
-         update`, which takes {} out of the profiles.",
-        path.display(),
-        gone.join(", "),
-        if gone.len() == 1 { "it" } else { "them" }
-    )
 }
 
 /// The actions the policy's profiles name, as it is written; none where it
@@ -244,60 +213,53 @@ fn action_ids(config: &Config) -> BTreeSet<&str> {
 
 /// The policy as it is written, actions that garrison.toml no longer has
 /// among them, which `update` takes out.
-fn written(config: &Config) -> Result<Policy, String> {
+fn written(config: &Config) -> Result<Policy, State> {
     let path = &config.broker.policy;
     there(path)?;
     let raw = read_protected(path, MAX_POLICY).map_err(|error| match error {
-        ProtectedFileError::TooLarge(_) => too_large(path),
-        error => format!("Garrison access policy: {error}"),
+        ProtectedFileError::TooLarge(_) => states::too_large(path),
+        error => states::unread_policy(error),
     })?;
     let named = named(config);
     let mut known = action_ids(config);
     known.extend(named.iter().map(String::as_str));
-    parse_policy(&raw, &known).map_err(|error| error.to_string())
+    parse_policy(&raw, &known).map_err(states::invalid_policy)
 }
 
 /// The profiles get the actions of garrison.toml, as `defaults::follow`
 /// gives them.
-fn update(config: &Config) -> Result<u8, String> {
+fn update(config: &Config) -> Result<u8, State> {
     locked(config, false, |folder| {
         let mut policy = written(config)?;
         let changes = defaults::follow(config, &mut policy);
         if changes.is_empty() {
-            say("The profiles have the actions garrison.toml names; nothing to change.");
+            say(&states::actions_held().to_string());
             return Ok(0);
         }
         save(config, folder, &policy)?;
         for change in &changes {
-            say(change);
+            say(&change.to_string());
         }
-        say(
-            "Run the installer again now: it writes the polkit rule for these actions and \
-             restarts the broker and the web service, which read them only when they start; \
-             until then an added action is offered to nobody.",
-        );
+        say(&states::run_installer().to_string());
         Ok(0)
     })
 }
 
-fn native(config: &Config) -> Result<JmapClient, String> {
+fn native(config: &Config) -> Result<JmapClient, State> {
     Ok(authority(config)
         .native_client()
         .map_err(said)?
         .with_timeout(std::time::Duration::from_secs(10)))
 }
 
-fn init(config: &Config, force: bool) -> Result<u8, String> {
+fn init(config: &Config, force: bool) -> Result<u8, State> {
     let path = &config.broker.policy;
     let exists = || {
-        complain(&format!(
-            "{} exists; use --force to replace it (a backup is kept).",
-            path.display()
-        ));
+        complain(&states::exists(path).to_string());
         Ok(1)
     };
     match fs::symlink_metadata(path) {
-        Ok(kind) if !kind.is_file() => return Err(not_a_file(path)),
+        Ok(kind) if !kind.is_file() => return Err(states::not_a_file(path)),
         Ok(_) if !force => return exists(),
         _ => {}
     }
@@ -332,20 +294,20 @@ fn init(config: &Config, force: bool) -> Result<u8, String> {
         return exists();
     };
     if bound.is_empty() {
-        complain(&match kept {
-            None => defaults::unbound(&candidates),
-            Some(policy) => kept_said(config, &policy, &candidates),
-        });
+        complain(
+            &match kept {
+                None => states::unbound(&candidates),
+                Some(policy) => kept_said(config, &policy, &candidates),
+            }
+            .to_string(),
+        );
         return Ok(1);
     }
     for role in &bound {
-        let named = candidates.get(role).map_or_else(
-            || role.clone(),
-            |candidate| defaults::named(role, candidate),
-        );
-        say(&format!(
-            "Bound native role {named} to profile administrator."
-        ));
+        let description = candidates
+            .get(role)
+            .and_then(|candidate| candidate.description.as_deref());
+        say(&states::bound(role, description).to_string());
     }
     Ok(0)
 }
@@ -353,29 +315,16 @@ fn init(config: &Config, force: bool) -> Result<u8, String> {
 /// What `init --force` says where it keeps `policy`, since no role
 /// qualifies: what keeps that policy from working, if anything, and what to
 /// do then.
-fn kept_said(config: &Config, policy: &Policy, candidates: &BTreeMap<String, Candidate>) -> String {
+fn kept_said(config: &Config, policy: &Policy, candidates: &BTreeMap<String, Candidate>) -> State {
     let path = &config.broker.policy;
-    let mut lines = vec![format!(
-        "No native administrator role with full administrative rights was found, and a new \
-         default policy would bind no role and sign everyone out: {} is kept as it is.",
-        path.display()
-    )];
     let gone = gone(config);
-    if !gone.is_empty() {
-        lines.push(removed(path, &gone));
-    }
-    if policy.role_bindings.is_empty() && policy.subjects.is_empty() {
-        lines.push(format!(
-            "It binds no role or account either, so nobody can sign in yet. {}",
-            defaults::requires()
-        ));
-        lines.extend(defaults::candidates_said(candidates));
-    }
-    lines.join("\n")
+    let gone = (!gone.is_empty()).then(|| states::actions_gone(path, &gone));
+    let nobody = policy.role_bindings.is_empty() && policy.subjects.is_empty();
+    states::kept(path, gone.as_ref(), nobody, candidates)
 }
 
 /// What the broker would grant `subject` now, as it decides it.
-fn check(config: &Config, subject: &str) -> Result<u8, String> {
+fn check(config: &Config, subject: &str) -> Result<u8, State> {
     let policy = load(config)?;
     let account = policy.account_for(subject).map_err(said)?;
     let rights = native_rights(&native(config)?, &account).map_err(said)?;
@@ -395,7 +344,7 @@ fn check(config: &Config, subject: &str) -> Result<u8, String> {
     Ok(0)
 }
 
-fn execute(config: &Config, command: &Command) -> Result<u8, String> {
+fn execute(config: &Config, command: &Command) -> Result<u8, State> {
     match command {
         Command::Init { force } => init(config, *force),
         Command::List => {
@@ -406,25 +355,19 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
             let mut policy = load(config)?;
             if !policy.profiles.contains_key(profile) {
                 let known: Vec<&str> = policy.profiles.keys().map(String::as_str).collect();
-                complain(&format!(
-                    "Unknown profile {profile}; known: {}",
-                    known.join(", ")
-                ));
+                complain(&states::unknown_profile(profile, &known).to_string());
                 return Ok(1);
             }
             // The role must exist; what it lacks for the profile is said.
             let client = native(config)?;
             let authentication = defaults::authentication(&client)?;
             let Some(judged) = defaults::judged(&client, &authentication, role)? else {
-                return Err(format!(
-                    "Stalwart has no role {role}: bind one of the roles the native \
-                     administration shows (Roles)."
-                ));
+                return Err(states::no_role(role));
             };
             policy.role_bindings.insert(role.clone(), profile.clone());
             save(config, folder, &policy)?;
             if let Some(note) = defaults::fit(&policy, profile, role, judged.rights.as_ref()) {
-                say(&note);
+                say(&note.to_string());
             }
             Ok(0)
         }),
@@ -435,10 +378,7 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
         }),
         Command::Deny { subject, undo } => {
             if !is_subject(subject) {
-                complain(&format!(
-                    "{subject:?} is no subject: a subject is 1 to 128 letters, digits and _ . : \
-                     @ -, and that of a local Stalwart account its numeric account ID."
-                ));
+                complain(&states::no_subject(subject).to_string());
                 return Ok(1);
             }
             locked(config, false, |folder| {
@@ -457,8 +397,8 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
 }
 
 pub(crate) fn run(config: &Config, command: &Command) -> u8 {
-    execute(config, command).unwrap_or_else(|error| {
-        complain(&error);
+    execute(config, command).unwrap_or_else(|refusal| {
+        complain(&refusal.to_string());
         1
     })
 }

@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 use super::case::{Case, HERE, NEW, OLD, Way, id, way};
 use super::spellings;
 use super::stand_in::read;
-use super::support::text;
+use super::support::{states, text};
 
 /// The repository asked again, under the name it had or under another.
 fn places(tool: &str) -> Vec<Way> {
@@ -242,7 +242,9 @@ fn no_check_or_restore_of_another_repository_or_of_none_known_reaches_the_card()
                 let right = if kept {
                     said.is_empty()
                 } else {
-                    said.contains("are not kept")
+                    states(said.as_bytes())
+                        .iter()
+                        .any(|state| state.starts_with("backup-check-report-"))
                 };
                 if !right {
                     wrong.push(format!("{tool}, {name}: the run said {said:?}"));
@@ -259,35 +261,32 @@ fn no_check_or_restore_of_another_repository_or_of_none_known_reaches_the_card()
 fn a_run_says_why_it_keeps_nothing_and_names_what_the_file_names() {
     let case = Case::new("restic");
     let to = case.report.display().to_string();
-    let lost = "its last integrity check and test restore are not kept.\n";
-    let after = |arguments: &[&str], environment: &[(&str, &str)]| {
+    // The one state a run says of the last report, and whether it names
+    // what it says it of: the report, the places and the IDs.
+    let after = |arguments: &[&str], environment: &[(&str, &str)], named: &[&str]| {
         case.checked(&HERE, &id(OLD));
         let ran = case.run(arguments, environment);
         assert_eq!(ran.status.code(), Some(0), "{}", text(&ran.stderr));
-        text(&ran.stderr)
+        let said = text(&ran.stderr);
+        assert!(said.contains(&to), "{said}");
+        for data in named {
+            assert!(said.contains(data), "{data}: {said}");
+        }
+        states(&ran.stderr)
     };
+    let other = ["/srv/repo (ID ", OLD, NEW];
     assert_eq!(
-        after(&HERE, &id(NEW)),
-        format!(
-            "The last report, {to}, is of the restic repository /srv/repo (ID {OLD}), and this \
-             run asks the restic repository /srv/repo (ID {NEW}): {lost}"
-        )
+        after(&HERE, &id(NEW), &other),
+        ["backup-check-report-other"]
+    );
+    let copy = ["/srv/repo (ID ", "/mnt/copy (ID ", OLD];
+    assert_eq!(
+        after(&["--repo", "/mnt/copy"], &id(OLD), &copy),
+        ["backup-check-report-copy"]
     );
     assert_eq!(
-        after(&["--repo", "/mnt/copy"], &id(OLD)),
-        format!(
-            "The last report, {to}, is of the restic repository /srv/repo (ID {OLD}), and this \
-             run asks the restic repository /mnt/copy (ID {OLD}): its last integrity check and \
-             test restore are not kept. The same ID at another place is a copy, which needs a \
-             --report of its own; name one repository alike in every run.\n"
-        )
-    );
-    assert_eq!(
-        after(&HERE, &id("")),
-        format!(
-            "The last report, {to}, is not known to be of this repository, since restic gave no \
-             ID for it: {lost}"
-        )
+        after(&HERE, &id(""), &[]),
+        ["backup-check-report-unidentified"]
     );
     assert_eq!(read(&case.report)["repositoryId"], Value::Null);
     // A listing that fails is said first, and is the cause.
@@ -295,35 +294,22 @@ fn a_run_says_why_it_keeps_nothing_and_names_what_the_file_names() {
     let unlisted = case.run(&HERE, &[("REPO_ID", OLD), ("BROKEN", "snapshots")]);
     assert_eq!(unlisted.status.code(), Some(1));
     assert_eq!(
-        text(&unlisted.stderr),
-        format!(
-            "restic did not list its snapshots: Fatal: the repository is locked by another \
-             process\nThe last report, {to}, is not known to be of this repository, since restic \
-             could not list it: {lost}"
-        )
+        states(&unlisted.stderr),
+        ["backup-check-unlisted", "backup-check-report-unlisted"]
     );
-    assert_eq!(
-        after(&[], &id(OLD)),
-        format!(
-            "The last report, {to}, is not known to be of this repository, since the command is \
-             not told where this one is: {lost}"
-        )
-    );
+    assert_eq!(after(&[], &id(OLD), &[]), ["backup-check-report-unplaced"]);
     case.checked(&HERE, &id(OLD));
     case.changed(|report| {
         report.remove("repositoryId");
     });
     let earlier = case.run(&HERE, &id(OLD));
-    assert_eq!(
-        text(&earlier.stderr),
-        format!("The last report, {to}, holds no repository ID: {lost}")
-    );
+    assert_eq!(states(&earlier.stderr), ["backup-check-report-anonymous"]);
     case.checked(&HERE, &id(OLD));
     let open = std::fs::Permissions::from_mode(0o666);
     std::fs::set_permissions(&case.report, open).unwrap();
     assert_eq!(
-        text(&case.run(&HERE, &id(OLD)).stderr),
-        format!("The last report, {to}, can be changed by users other than root: {lost}")
+        states(&case.run(&HERE, &id(OLD)).stderr),
+        ["backup-check-report-foreign"]
     );
     // restic's repository file names it by what it holds, as restic reads
     // it, and by itself where it cannot be read.

@@ -8,9 +8,11 @@ use std::process::{Command, Output};
 
 use rustix::fs::{AtFlags, CWD, FlockOperation, Gid, Mode, OFlags, RenameFlags, Uid};
 
+use super::states;
 use crate::say;
+use crate::state::State;
 
-pub(super) type Step<T = ()> = Result<T, String>;
+pub(super) type Step<T = ()> = Result<T, State>;
 
 pub(super) fn announce(message: &str) {
     say(&format!("==> {message}"));
@@ -20,7 +22,7 @@ pub(super) fn run(program: &str, arguments: &[&str]) -> Step<Output> {
     Command::new(program)
         .args(arguments)
         .output()
-        .map_err(|error| format!("{program}: {error}"))
+        .map_err(|error| states::io(program, error))
 }
 
 /// Run and require success.
@@ -29,16 +31,16 @@ pub(super) fn must(program: &str, arguments: &[&str]) -> Step {
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "{program} {} failed: {}",
-            arguments.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
+        Err(states::failed(
+            program,
+            arguments,
+            String::from_utf8_lossy(&output.stderr).trim(),
         ))
     }
 }
 
 pub(super) fn io<T>(result: std::io::Result<T>, what: &Path) -> Step<T> {
-    result.map_err(|error| format!("{}: {error}", what.display()))
+    result.map_err(|error| states::io(what.display(), error))
 }
 
 /// Copy contents and permission bits only. Extended attributes, such as the
@@ -69,7 +71,7 @@ pub(super) fn put(target: &Path, contents: &[u8], mode: u32) -> Step<bool> {
 }
 
 fn at<T>(result: rustix::io::Result<T>, what: &Path) -> Step<T> {
-    result.map_err(|error| format!("{}: {error}", what.display()))
+    result.map_err(|error| states::io(what.display(), error))
 }
 
 /// Replace `name` in `directory` with a copy of `source`, with `mode`, owned
@@ -94,7 +96,12 @@ pub(super) fn replace_in(
     // A leftover or a planted link under that name goes first; unlink never follows it.
     match rustix::fs::unlinkat(&folder, pending.as_str(), AtFlags::empty()) {
         Ok(()) | Err(rustix::io::Errno::NOENT) => {}
-        Err(error) => return Err(format!("{}/{pending}: {error}", directory.display())),
+        Err(error) => {
+            return Err(states::io(
+                format_args!("{}/{pending}", directory.display()),
+                error,
+            ));
+        }
     }
     let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let created = rustix::fs::openat(&folder, pending.as_str(), flags, Mode::RUSR | Mode::WUSR);
@@ -136,7 +143,7 @@ pub(super) fn copy_tree(source: &Path, target: &Path) -> Step {
         } else if kind.is_file() {
             place(&from, &to, (kind.permissions().mode() & 0o755) | 0o644)?;
         } else {
-            return Err(format!("{} is not a regular file.", from.display()));
+            return Err(states::not_a_file(from.display()));
         }
     }
     Ok(())
@@ -178,10 +185,8 @@ pub(super) fn lock(path: &Path) -> Step<File> {
     at(rustix::fs::fchmod(&file, Mode::RUSR | Mode::WUSR), path)?;
     match rustix::fs::flock(&file, FlockOperation::NonBlockingLockExclusive) {
         Ok(()) => Ok(file),
-        Err(rustix::io::Errno::WOULDBLOCK) => Err(
-            "Another garrison install is already running; try again when it has finished.".into(),
-        ),
-        Err(error) => Err(format!("{}: {error}", path.display())),
+        Err(rustix::io::Errno::WOULDBLOCK) => Err(states::busy()),
+        Err(error) => Err(states::io(path.display(), error)),
     }
 }
 
@@ -209,7 +214,7 @@ pub(super) fn fresh_folder(parent: &Path, kind: &str) -> Step<PathBuf> {
             {
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
-            Err(error) => return Err(format!("{}: {error}", folder.display())),
+            Err(error) => return Err(states::io(folder.display(), error)),
         }
     }
 }
@@ -247,9 +252,9 @@ mod tests {
 
         symlink(directory.path().join("secret"), source.join("assets/leak")).unwrap();
         let refused = copy_tree(&source, &directory.path().join("again")).unwrap_err();
-        assert!(
-            refused.ends_with("assets/leak is not a regular file."),
-            "{refused}"
+        assert_eq!(
+            refused,
+            states::not_a_file(source.join("assets/leak").display())
         );
         assert!(!directory.path().join("again/assets/leak").exists());
     }
@@ -316,10 +321,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("install.lock");
         let held = lock(&path).unwrap();
-        assert_eq!(
-            lock(&path).unwrap_err(),
-            "Another garrison install is already running; try again when it has finished."
-        );
+        assert_eq!(lock(&path).unwrap_err(), states::busy());
         drop(held);
         assert!(once_given_up(&path).is_ok());
         // A lock file made by hand with a looser mode becomes the installer's own.

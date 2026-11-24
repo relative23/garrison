@@ -12,13 +12,13 @@
 scenario_warnings() {
     step "The installer and doctor say what check-config warns of"
     upgraded
-    says "the installer passes check-config's warnings on" \
-        '/root/release/bin/garrison install' \
-        "Warning: deployment.public_origin https://admin.example.test is a placeholder"
+    says "the installer passes check-config's warnings on" '/root/release/bin/garrison install' \
+        check-config-placeholder
+    check "and names the placeholder" 'grep -q -F https://admin.example.test /root/answer'
     inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.warnings &&
         sed -i "s|^schema = 1\$|schema = 1\ncredentials_directory = \"/etc/garrison/elsewhere\"|" \
             /etc/garrison/garrison.toml'
-    says "doctor warns of a setting the units do not follow" \
+    says_words "doctor warns of a setting the units do not follow" \
         '/opt/garrison/current/bin/garrison doctor || true' \
         "warn  credentials_directory is /etc/garrison/elsewhere, but the units load every credential"
     inside 'cat /root/garrison.toml.warnings > /etc/garrison/garrison.toml'
@@ -34,12 +34,14 @@ scenario_unloaded() {
         'systemctl start garrison-collect.service &&
             journalctl -u garrison-collect.service -n 30 --no-pager | grep -q "The collector has no API key for Stalwart"'
     refused "the installer refuses a secret under a name its unit does not load" \
-        '/root/release/bin/garrison install' \
-        "garrison-collect.service loads this secret only as credential:collector-native-key"
+        '/root/release/bin/garrison install' check-config-unloaded
+    check "and names the name its unit loads it as" \
+        'grep -q -F credential:collector-native-key /root/answer'
     inside 'sed -i "s|^native_key = \"credential:my-key\"\$|native_key = \"/etc/garrison/credentials/my-key\"|" \
         /etc/garrison/garrison.toml'
     refused "the installer refuses a secret named by its path" '/root/release/bin/garrison install' \
-        "collector.native_key names the file /etc/garrison/credentials/my-key"
+        check-config-unloaded
+    check "and names the file" 'grep -q -F /etc/garrison/credentials/my-key /root/answer'
     inside 'cat /root/garrison.toml.unloaded > /etc/garrison/garrison.toml &&
         rm /etc/garrison/credentials/my-key'
     services "after the refused secrets"
@@ -55,7 +57,7 @@ scenario_policy_elsewhere() {
         chmod 644 /etc/garrison-policy/access.json &&
         printf "\n[broker]\npolicy = \"/etc/garrison-policy/access.json\"\n" >> /etc/garrison/garrison.toml'
     says "the installer starts Garrison with the policy where garrison.toml names it" \
-        '/root/release/bin/garrison install' "is running"
+        '/root/release/bin/garrison install' "install-running install-as-installed"
     check "the installer makes that policy root's, readable for the broker's group alone" \
         'test "$(stat -c "%U %G %a" /etc/garrison-policy/access.json)" = "root garrison-broker 640"'
     check "the broker grants by that policy" "$catalog | grep -q run_check"
@@ -69,7 +71,7 @@ scenario_policy_elsewhere() {
         sed -i "s|^policy = \"/etc/garrison-policy/access.json\"\$|policy = \"/srv/policy-folder\"|" \
             /etc/garrison/garrison.toml'
     refused "the installer refuses a policy that is a folder" '/root/release/bin/garrison install' \
-        "Access policy not usable"
+        check-config-policy-refused
     check "and leaves that folder as it was" \
         'test "$(stat -c "%U %a" /srv/policy-folder)" = "root 755" && test -s /srv/policy-folder/mail/inbox'
     check "a purge would not remove it" \
@@ -90,7 +92,7 @@ scenario_policy_foreign() {
     inside 'chown nobody /etc/garrison/access-policy.json'
     pid=$(web_pid)
     refused "the installer refuses a policy of another user" '/root/release/bin/garrison install' \
-        "not to root: the installer makes no other user's file the policy"
+        install-policy-foreign
     check "and leaves it that user's, and nothing stopped" "
         test \"\$(stat -c %U /etc/garrison/access-policy.json)\" = nobody &&
             test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
@@ -111,7 +113,8 @@ scenario_unwritten() {
             garrison-collect.timer garrison-watch.timer &&
         sed -i "s|^schema = 1\$|schema = 1\nnonsense = 1|" /etc/garrison/garrison.toml'
     says "the installer names the polkit rule it could not write" '/root/release/bin/garrison install' \
-        "/etc/polkit-1/rules.d/50-garrison.rules was not written, since"
+        install-unwritten
+    check "and which file" 'grep -q -F /etc/polkit-1/rules.d/50-garrison.rules /root/answer'
     inside 'mv /root/access-policy.away /etc/garrison/access-policy.json &&
         cat /root/garrison.toml.unwritten > /etc/garrison/garrison.toml'
     installer '/root/release/bin/garrison install'
@@ -130,13 +133,15 @@ scenario_hidden_policy() {
         cp -p /etc/garrison/garrison.toml /root/garrison.toml.named'
     backups=$(inside 'ls /var/backups/garrison | wc -l')
     refused "the installer refuses a policy the broker's unit hides" '/root/release/bin/garrison install' \
-        "broker.policy is /home/admin/access-policy.json, under /home, which garrison-broker.service hides from the broker (ProtectHome=true): the broker cannot read it there, and nobody can sign in"
+        check-config-policy-refused
+    check "and names it and the unit's setting" \
+        'grep -q -F /home/admin/access-policy.json /root/answer && grep -q -F ProtectHome=true /root/answer'
     # Without cmp, which minimal images lack.
     check "and changes nothing: the release that ran is current, garrison.toml as it was, nothing backed up" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$current' &&
             test \"\$(cat /etc/garrison/garrison.toml)\" = \"\$(cat /root/garrison.toml.named)\" &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
-    says "doctor names the policy the broker cannot read" '/opt/garrison/current/bin/garrison doctor || true' \
+    says_words "doctor names the policy the broker cannot read" '/opt/garrison/current/bin/garrison doctor || true' \
         "FAIL  broker.policy is /home/admin/access-policy.json, under /home, which garrison-broker.service hides"
     inside 'cat /root/garrison.toml.hidden > /etc/garrison/garrison.toml && rm -r /home/admin'
     running "after the policy under /home" "$current"
@@ -157,20 +162,23 @@ scenario_hidden_check() {
         cp -p /etc/garrison/garrison.toml /root/garrison.toml.named'
     backups=$(inside 'ls /var/backups/garrison | wc -l')
     refused "the installer refuses a check's path the collector's unit hides" '/root/release/bin/garrison install' \
-        "providers[receipt].path is /home/jobs/nightly.json, under /home, which garrison-collect.service hides from the collector (ProtectHome=true): the check cannot read it there"
+        check-config-hidden-check
+    check "and names it and the unit's setting" \
+        'grep -q -F /home/jobs/nightly.json /root/answer && grep -q -F ProtectHome=true /root/answer'
     # Without cmp, which minimal images lack.
     check "and changes nothing: the release that ran is current, garrison.toml as it was, nothing backed up" \
         "test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$current' &&
             test \"\$(cat /etc/garrison/garrison.toml)\" = \"\$(cat /root/garrison.toml.named)\" &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
-    says "doctor names the check's path the collector cannot see" '/opt/garrison/current/bin/garrison doctor || true' \
+    says_words "doctor names the check's path the collector cannot see" '/opt/garrison/current/bin/garrison doctor || true' \
         "FAIL  providers[receipt].path is /home/jobs/nightly.json, under /home, which garrison-collect.service hides"
     inside 'mkdir -p /srv/garrison/jobs /etc/systemd/system/garrison-collect.service.d &&
         printf "[Service]\nBindReadOnlyPaths=/home/jobs:/srv/garrison/jobs\n" \
             > /etc/systemd/system/garrison-collect.service.d/jobs.conf && systemctl daemon-reload &&
         sed -i "s|^path = \"/home/jobs/nightly.json\"\$|path = \"/srv/garrison/jobs/nightly.json\"|" \
             /etc/garrison/garrison.toml && grep -q "^path = \"/srv/garrison/jobs/nightly.json\"\$" /etc/garrison/garrison.toml'
-    says "the installer takes the place shown to the collector" '/root/release/bin/garrison install' "is running"
+    says "the installer takes the place shown to the collector" '/root/release/bin/garrison install' \
+        "install-running install-as-installed"
     check "the collector reads the receipt there, and root sees an empty folder" \
         'systemctl start garrison-collect.service && test -z "$(ls -A /srv/garrison/jobs)" &&
             sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT document FROM snapshots ORDER BY id DESC LIMIT 1" |
@@ -199,7 +207,7 @@ scenario_restore_refused() {
     pid=$(web_pid)
     copies=$(inside 'ls -d /var/backups/garrison/pre-restore-* 2>/dev/null | wc -l')
     refused "a restore whose policy grants an action the configuration no longer has is refused" \
-        '/opt/garrison/current/bin/garrison restore --from /root/policy-state' "nothing was changed"
+        '/opt/garrison/current/bin/garrison restore --from /root/policy-state' install-restore-policy
     check "and nothing stopped or changed: the web service ran on, no copy, the live policy as it was" "
         test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid' &&
             test \$(ls -d /var/backups/garrison/pre-restore-* 2>/dev/null | wc -l) -eq $copies &&
@@ -219,7 +227,7 @@ scenario_restore_refused_config() {
             >> /etc/garrison/garrison.toml'
     pid=$(web_pid)
     refused "a restore under a configuration check-config refuses is refused" \
-        '/opt/garrison/current/bin/garrison restore --from /root/config-state' "nothing was changed"
+        '/opt/garrison/current/bin/garrison restore --from /root/config-state' install-restore-config-refused
     check "and nothing stopped" "test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
     inside 'cat /root/garrison.toml.refused > /etc/garrison/garrison.toml && rm -r /home/jobs /root/config-state'
     running "after the restore under a refused configuration" "$new"
@@ -234,7 +242,7 @@ scenario_rollback_refused_config() {
             >> /etc/garrison/garrison.toml'
     pid=$(web_pid)
     refused "a rollback under a configuration the release it returns to refuses is refused" \
-        '/opt/garrison/current/bin/garrison install --rollback --restore-state' "cannot load /etc/garrison/garrison.toml"
+        '/opt/garrison/current/bin/garrison install --rollback --restore-state' install-rollback-unloadable
     check "and nothing stopped or switched" "
         test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid' &&
             $(current_is "$new")"
@@ -253,7 +261,7 @@ scenario_rollback_refused() {
         sed -i "s/\"actions\": \[\"run_check\"\]/\"actions\": []/" /etc/garrison/access-policy.json'
     pid=$(web_pid)
     refused "a rollback whose state brings a policy the configuration does not take is refused" \
-        '/opt/garrison/current/bin/garrison install --rollback --restore-state' "Nothing was changed"
+        '/opt/garrison/current/bin/garrison install --rollback --restore-state' install-rollback-policy
     check "and nothing stopped or changed: the release under test runs on, the live policy as it was" "
         test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid' &&
             test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$new' &&
@@ -272,7 +280,7 @@ scenario_restore_policy() {
     # As on a new host, where no policy exists yet.
     inside 'mv /etc/garrison/access-policy.json /root/access-policy.away'
     says "a restore without a live policy puts the backup's back" \
-        '/opt/garrison/current/bin/garrison restore --from /root/policy-back' "Restored the state"
+        '/opt/garrison/current/bin/garrison restore --from /root/policy-back' install-restored
     check "the policy is root's, readable for the broker's group alone" \
         'test "$(stat -c "%U %G %a" /etc/garrison/access-policy.json)" = "root garrison-broker 640"'
     check "the broker grants by it" "$catalog | grep -q run_check"
@@ -290,7 +298,7 @@ scenario_restore_policy_link() {
         printf "\n[broker]\npolicy = \"/etc/garrison-link/access.json\"\n" >> /etc/garrison/garrison.toml'
     pid=$(web_pid)
     refused "a restore where broker.policy names a link is refused" \
-        '/opt/garrison/current/bin/garrison restore --from /root/policy-link' "not a file of its own"
+        '/opt/garrison/current/bin/garrison restore --from /root/policy-link' install-policy-place
     check "and the link's target is as it was, and nothing stopped" "
         test \"\$(cat /root/victim)\" = kept && test \"\$(stat -c %a /root/victim)\" = 644 &&
             test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
@@ -312,7 +320,7 @@ REFUSE
         printf '[Service]\nExecStartPre=+/usr/local/bin/acceptance-refuse-release\n' \
             > /etc/systemd/system/garrison-web.service.d/acceptance-refuse.conf && systemctl daemon-reload"
     refused "a rollback that failed after the state went back names the databases that went back" \
-        '/opt/garrison/current/bin/garrison install --rollback --restore-state' "went back to their copies in"
+        '/opt/garrison/current/bin/garrison install --rollback --restore-state' install-went-back
     inside 'rm /run/garrison-acceptance-refused /etc/systemd/system/garrison-web.service.d/acceptance-refuse.conf &&
         rmdir /etc/systemd/system/garrison-web.service.d && systemctl daemon-reload'
     running "after the failed rollback" "$new"
@@ -331,7 +339,7 @@ scenario_elsewhere_unloadable() {
     # A setting no release loads, as a typo while preparing the upgrade.
     inside 'sed -i "1i nonsense_setting = 1" /etc/garrison/garrison.toml'
     refused "an upgrade over a configuration that does not load is refused, the policy kept elsewhere" \
-        '/root/release/bin/garrison install' "the running release was not touched"
+        '/root/release/bin/garrison install' install-config-refused
     check "and changes nothing: the release that ran is current, nothing backed up" "
         test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$old' &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
@@ -339,7 +347,7 @@ scenario_elsewhere_unloadable() {
     # the installer enabled say that it started them.
     inside 'systemctl disable --quiet garrison-web.service'
     refused "with the web service disabled, that upgrade is refused all the same" \
-        '/root/release/bin/garrison install' "the running release was not touched"
+        '/root/release/bin/garrison install' install-config-refused
     check "and changes nothing then either" "
         test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$old' &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
@@ -348,7 +356,7 @@ scenario_elsewhere_unloadable() {
     inside 'cat /root/garrison.toml.named > /etc/garrison/garrison.toml &&
         mv /etc/garrison-policy/access.json /root/access.json.away'
     refused "an upgrade whose access policy is missing is refused" \
-        '/root/release/bin/garrison install' "the running release was not touched"
+        '/root/release/bin/garrison install' install-config-refused
     check "and changes nothing either" "
         test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$old' &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
@@ -364,7 +372,7 @@ scenario_elsewhere_purge() {
     inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.purge &&
         sed -i "1i nonsense_setting = 1" /etc/garrison/garrison.toml'
     says "a purge's dry run says that garrison.toml does not load and names what it then leaves" \
-        '/opt/garrison/current/bin/garrison uninstall --purge --dry-run' "does not load, so an access policy it names outside /etc/garrison"
+        '/opt/garrison/current/bin/garrison uninstall --purge --dry-run' install-policy-unknown
     inside 'cat /root/garrison.toml.purge > /etc/garrison/garrison.toml'
     running "after the purge's dry run" "$new"
 }
@@ -384,7 +392,7 @@ scenario_restore_room() {
         systemctl start garrison-ingest.service'
     pid=$(web_pid)
     refused "a restore whose copy does not fit beside its database is refused" \
-        '/opt/garrison/current/bin/garrison restore --from /root/room-state' "nothing was changed"
+        '/opt/garrison/current/bin/garrison restore --from /root/room-state' install-no-room
     check "and nothing stopped" "test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
     inside 'systemctl stop garrison-ingest.service && cp -a /var/lib/garrison/ingest /root/ingest-room &&
         umount /var/lib/garrison/ingest && cp -a /root/ingest-room/. /var/lib/garrison/ingest/ &&
@@ -407,7 +415,7 @@ scenario_rollback_room() {
         systemctl start garrison-ingest.service'
     pid=$(web_pid)
     refused "a rollback whose copy does not fit beside its database is refused" \
-        '/opt/garrison/current/bin/garrison install --rollback --restore-state' "MiB free and the rollback needs"
+        '/opt/garrison/current/bin/garrison install --rollback --restore-state' install-no-room
     check "and nothing stopped or switched" "
         test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid' &&
             $(current_is "$new")"

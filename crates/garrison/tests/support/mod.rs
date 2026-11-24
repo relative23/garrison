@@ -69,8 +69,44 @@ fn drain(mut pipe: impl Read + Send + 'static) -> JoinHandle<Vec<u8>> {
     })
 }
 
+/// A port of this host where nothing answers, for as long as the socket
+/// held for it lives: bound there without listening, it refuses every
+/// connection, and the system gives the port to no listener started
+/// meanwhile, as it would give one dropped.
+pub(crate) fn silent_port() -> (std::os::fd::OwnedFd, u16) {
+    use rustix::net::{AddressFamily, SocketType, bind, getsockname, socket};
+    use std::net::{Ipv4Addr, SocketAddrV4};
+    let held = socket(AddressFamily::INET, SocketType::STREAM, None).unwrap();
+    bind(&held, &SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let bound = SocketAddrV4::try_from(getsockname(&held).unwrap()).unwrap();
+    (held, bound.port())
+}
+
 pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// The states `bytes` say, in their order: each state's name, which the
+/// binary prints in brackets after its sentence, and after the sentence of
+/// a state that carries it. A name is lower-case words joined by hyphens,
+/// two at least, so that `[deployment]` in a sentence is none.
+pub(crate) fn states(bytes: &[u8]) -> Vec<String> {
+    let said = text(bytes);
+    said.split('[')
+        .skip(1)
+        .filter_map(|rest| {
+            let name = rest.split_once(']')?.0;
+            let words: Vec<&str> = name.split('-').collect();
+            let named = words.len() >= 2
+                && words.iter().all(|word| {
+                    !word.is_empty()
+                        && word.chars().all(|character| {
+                            character.is_ascii_lowercase() || character.is_ascii_digit()
+                        })
+                });
+            named.then(|| name.to_owned())
+        })
+        .collect()
 }
 
 /// A configuration in a fresh directory, with the standard policy.

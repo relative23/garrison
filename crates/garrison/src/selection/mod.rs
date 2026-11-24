@@ -20,6 +20,8 @@ use garrison_core::config::{self, Config};
 use garrison_core::modules::ModuleId;
 use garrison_core::systemd::SYSTEMCTL;
 
+use crate::state::State;
+use crate::states::commands as states;
 use crate::{complain, detect, say, units};
 
 /// Every installation has these.
@@ -38,8 +40,8 @@ pub(crate) fn run(path: &Path, config: &Config, set: Option<&str>, yes: bool, ad
     let chosen = if let Some(list) = set {
         match parse_list(list) {
             Ok(chosen) => chosen,
-            Err(message) => {
-                complain(&message);
+            Err(refusal) => {
+                complain(&refusal.to_string());
                 return 2;
             }
         }
@@ -63,11 +65,11 @@ pub(crate) fn run(path: &Path, config: &Config, set: Option<&str>, yes: bool, ad
         ) {
             Ok(true) => chosen,
             Ok(false) => {
-                say("Nothing was changed.");
+                say(&states::modules_unchanged().to_string());
                 return 0;
             }
             Err(error) => {
-                complain(&error.to_string());
+                complain(&states::modules_io("standard input", error).to_string());
                 return 1;
             }
         }
@@ -79,29 +81,23 @@ pub(crate) fn run(path: &Path, config: &Config, set: Option<&str>, yes: bool, ad
         offer,
     );
     if chosen == config.modules && entries.is_empty() {
-        say("The configuration offers these modules already; nothing was changed.");
+        say(&states::modules_held().to_string());
         return 0;
     }
     say(&format!("{}\ngoes into {}.", line(&chosen), path.display()));
     if !yes && !crate::at_terminal() {
-        complain(
-            "garrison modules asks before it writes, and no terminal is here to answer: add \
-             --yes to write it.",
-        );
+        complain(&states::modules_unasked().to_string());
         return 2;
     }
     let question = "Write it? [y/N]";
     if !yes && !ask(question, false, &mut io::stdin().lock(), &mut io::stdout()) {
-        say("Nothing was changed.");
+        say(&states::modules_unchanged().to_string());
         return 0;
     }
     match write(path, &chosen, &entries) {
-        Ok(previous) => say(&format!(
-            "Written; the previous file is {}.",
-            previous.display()
-        )),
-        Err(message) => {
-            complain(&message);
+        Ok(previous) => say(&states::modules_written(&previous).to_string()),
+        Err(refusal) => {
+            complain(&refusal.to_string());
             return 1;
         }
     }
@@ -114,7 +110,7 @@ pub(crate) fn first(path: &Path) {
     let config = match config::load(path) {
         Ok(config) => config,
         Err(error) => {
-            complain(&format!("Cannot load {}: {error}", path.display()));
+            complain(&crate::states::config::unloadable(path, error).to_string());
             return;
         }
     };
@@ -149,14 +145,14 @@ pub(crate) fn first(path: &Path) {
             ),
         ) {
             Ok(_) => say(&format!("{} is in {}.", line(&chosen), path.display())),
-            Err(message) => complain(&message),
+            Err(refusal) => complain(&refusal.to_string()),
         },
         _ => say("Every module stays on; change it later with garrison modules."),
     }
 }
 
 /// `antivirus,backups`: the modules besides the dashboard and services.
-fn parse_list(list: &str) -> Result<BTreeSet<ModuleId>, String> {
+fn parse_list(list: &str) -> Result<BTreeSet<ModuleId>, State> {
     let mut chosen = BTreeSet::from(ALWAYS);
     let words = list
         .split(|character: char| character == ',' || character.is_whitespace())
@@ -164,7 +160,7 @@ fn parse_list(list: &str) -> Result<BTreeSet<ModuleId>, String> {
     for word in words {
         let id = word.parse().map_err(|_| {
             let known: Vec<&str> = ModuleId::all().map(ModuleId::as_str).collect();
-            format!("{word} is not a module ID; known: {}", known.join(", "))
+            states::unknown_module(word, &known)
         })?;
         chosen.insert(id);
     }
@@ -381,8 +377,8 @@ fn is_modules(line: &str) -> bool {
 
 /// Writes `chosen`, and provider `entries` at the end, into the file at `path`
 /// and keeps the old file next to it.
-fn write(path: &Path, chosen: &BTreeSet<ModuleId>, entries: &str) -> Result<PathBuf, String> {
-    let failed = |error: &dyn std::fmt::Display| format!("{}: {error}", path.display());
+fn write(path: &Path, chosen: &BTreeSet<ModuleId>, entries: &str) -> Result<PathBuf, State> {
+    let failed = |error: &dyn std::fmt::Display| states::modules_io(path.display(), error);
     let text = fs::read_to_string(path).map_err(|error| failed(&error))?;
     let mut updated = with_modules(&text, chosen);
     if !entries.is_empty() {
@@ -393,15 +389,15 @@ fn write(path: &Path, chosen: &BTreeSet<ModuleId>, entries: &str) -> Result<Path
     // collector accepts replaces the old one.
     let loaded = config::from_text(&updated).map_err(|error| failed(&error))?;
     if loaded.modules != *chosen {
-        return Err(failed(&"the edited file does not offer the chosen modules"));
+        return Err(states::not_offered(path));
     }
     garrison_collector::build(&loaded.collector.providers).map_err(|error| failed(&error))?;
-    crate::config_file::replace(path, &text, &updated)
+    crate::config_file::replace(path, &text, &updated, failed)
 }
 
 /// The broker and the web service read the modules when they start.
 fn restart() {
-    let apply = format!("Restart {} to apply it.", RESTART.join(" and "));
+    let apply = states::modules_unapplied(&RESTART).to_string();
     if !rustix::process::geteuid().is_root() {
         say(&apply);
         return;
@@ -410,7 +406,7 @@ fn restart() {
     arguments.extend(RESTART);
     match garrison_core::command::run(&arguments, Duration::from_secs(60)) {
         Ok(output) if output.code == Some(0) => {
-            say("The broker and the web service were restarted where they ran.");
+            say(&states::modules_restarted().to_string());
         }
         _ => complain(&apply),
     }

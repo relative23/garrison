@@ -48,18 +48,18 @@ copy_in "$release" "/root/$file"
 copy_in "$release.minisig" "/root/$file.minisig"
 
 current() { inside 'basename "$(readlink -f /opt/garrison/current)"'; }
-# `garrison upgrade` must fail with `expected` in its output, keep the running
-# release and leave no unpacked tree behind.
+# `garrison upgrade` must fail and say the state `3`, keep the running
+# release and leave no unpacked tree behind. Its answer stays in /root/answer.
 refused() {
     before=$(current)
-    if inside "$2" > "$cases/output" 2>&1; then
+    if inside "{ $2; } > /root/answer 2>&1"; then
         echo "FAIL  $1: it succeeded"
-        cat "$cases/output"
+        inside 'cat /root/answer' || true
         exit 1
     fi
-    if ! grep -q -- "$3" "$cases/output"; then
-        echo "FAIL  $1: expected \"$3\""
-        cat "$cases/output"
+    if ! inside "acceptance-state /root/answer $3"; then
+        echo "FAIL  $1: expected $3"
+        inside 'cat /root/answer' || true
         exit 1
     fi
     if [ "$(current)" != "$before" ] || inside 'ls /opt/garrison | grep -q "^upgrade\."'; then
@@ -73,10 +73,9 @@ refused() {
 # say that nothing was changed, stop nothing and leave no unpacked tree.
 unchanged() {
     pid=$(inside 'systemctl show -p MainPID --value garrison-web.service')
-    if ! inside "$2" > "$cases/output" 2>&1 ||
-        ! grep -q -- "is running as installed; nothing was changed." "$cases/output"; then
+    if ! inside "{ $2; } > /root/answer 2>&1" || ! inside 'acceptance-state /root/answer install-as-installed'; then
         echo "FAIL  $1: it did not say that nothing was changed"
-        cat "$cases/output"
+        inside 'cat /root/answer' || true
         exit 1
     fi
     if [ "$(inside 'systemctl show -p MainPID --value garrison-web.service')" != "$pid" ] ||
@@ -90,21 +89,23 @@ unchanged() {
 step "Refusals change nothing"
 upgrade=/opt/garrison/current/bin/garrison
 refused "an archive changed after signing is refused" \
-    "$upgrade upgrade /root/cases/changed/$file" "does not match its signature"
+    "$upgrade upgrade /root/cases/changed/$file" upgrade-signature-mismatch
 refused "a signature whose comment names another release is refused" \
-    "$upgrade upgrade /root/cases/comment/$file" "The signature is for \"garrison $older $arch\""
+    "$upgrade upgrade /root/cases/comment/$file" upgrade-other-release
+check "and names the release it is for" "grep -q -F 'garrison $older $arch' /root/answer"
 refused "a key the release does not trust is refused" \
-    "$upgrade upgrade /root/cases/foreign/$file" "no key this release trusts"
+    "$upgrade upgrade /root/cases/foreign/$file" upgrade-signature-mismatch
 refused "an archive without a signature is refused" \
-    "$upgrade upgrade /root/cases/unsigned/$file" "$file.minisig"
+    "$upgrade upgrade /root/cases/unsigned/$file" upgrade-io
+check "and names the signature it lacks" "grep -q -F '$file.minisig' /root/answer"
 refused "an archive for another architecture is refused" \
-    "$upgrade upgrade /root/cases/arch/garrison-$newer-$other.tar.gz" "is built for $other"
+    "$upgrade upgrade /root/cases/arch/garrison-$newer-$other.tar.gz" upgrade-other-architecture
 unchanged "the running release's own archive changes nothing" \
     "$upgrade upgrade /root/cases/older/garrison-$older-$arch.tar.gz"
 refused "only root upgrades" \
-    "setpriv --reuid=65534 --regid=65534 --clear-groups $upgrade upgrade /root/$file" "Run as root."
+    "setpriv --reuid=65534 --regid=65534 --clear-groups $upgrade upgrade /root/$file" upgrade-not-root
 refused "only an installed release upgrades" \
-    "/root/release/bin/garrison upgrade /root/$file" "Run the installed release"
+    "/root/release/bin/garrison upgrade /root/$file" upgrade-not-installed
 
 step "Upgrading with a valid signature"
 installer "$upgrade upgrade /root/$file"
@@ -115,6 +116,6 @@ unchanged "the same release again changes nothing" \
     "/opt/garrison/current/bin/garrison upgrade /root/$file"
 refused "an older release is not installed" \
     "/opt/garrison/current/bin/garrison upgrade /root/cases/older/garrison-$older-$arch.tar.gz" \
-    "is older than the running $newer"
+    upgrade-older-archive
 
 step "Accepted: garrison upgrade installs only what a trusted key signed for it"

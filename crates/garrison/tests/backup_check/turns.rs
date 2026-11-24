@@ -13,7 +13,7 @@ use serde_json::json;
 
 use super::case::{Case, HERE, OLD};
 use super::stand_in::read;
-use super::support::{finished, text};
+use super::support::{finished, states, text};
 
 /// A check that fails while another run restores is the last check the
 /// report holds, beside that run's restore.
@@ -87,10 +87,9 @@ fn a_check_made_while_another_run_restores_is_the_one_kept() {
         (&json!(false), &json!(true)),
         "{written}"
     );
-    let waits = format!(
-        "Another `garrison backup-check` writes {report}; this run waits until it has ended."
-    );
-    assert_eq!(first, Some(waits));
+    let first = first.unwrap_or_default();
+    assert_eq!(states(first.as_bytes()), ["backup-check-waits"], "{first}");
+    assert!(first.contains(&report), "{first}");
 }
 
 /// A link or a pipe at the lock's name is no lock: the run ends before it
@@ -112,13 +111,9 @@ fn a_lock_that_is_no_file_of_the_users_own_ends_the_run() {
         }
         let ran = case.run(&HERE, &[("REPO_ID", OLD)]);
         assert_eq!(ran.status.code(), Some(1), "{what}");
-        assert_eq!(
-            text(&ran.stderr),
-            format!(
-                "{} is no lock of `garrison backup-check`'s, but a link, another user's file or \
-                 no file: remove it, then run the command again.\n",
-                lock.display()
-            ),
+        assert_eq!(states(&ran.stderr), ["backup-check-lock-other"], "{what}");
+        assert!(
+            text(&ran.stderr).contains(&lock.display().to_string()),
             "{what}"
         );
         assert_eq!(case.tools.calls(), Vec::<String>::new(), "{what}");

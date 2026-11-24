@@ -14,7 +14,7 @@ use std::process::Command;
 
 use garrison_core::config::Database;
 use serde_json::{Value, json};
-use support::{finished, prepared, run, text};
+use support::{finished, prepared, run, states, text};
 
 #[test]
 fn the_version_and_a_missing_configuration() {
@@ -29,8 +29,9 @@ fn the_version_and_a_missing_configuration() {
     assert!(text(&nothing.stderr).contains("Usage: garrison"));
     let missing = run(directory.path(), &["check-config"]);
     assert_eq!(missing.status.code(), Some(2));
-    assert!(
-        text(&missing.stderr).starts_with("Cannot load "),
+    assert_eq!(
+        states(&missing.stderr),
+        ["config-unloadable"],
         "{}",
         text(&missing.stderr)
     );
@@ -44,7 +45,9 @@ fn a_service_that_stops_says_why_in_the_journal_format() {
     assert_eq!(plain.status.code(), Some(1));
     let logged = text(&plain.stderr);
     assert!(
-        logged.starts_with("ERROR garrison: The ingest service stopped: "),
+        logged.starts_with("ERROR garrison: ")
+            && logged.contains("ingest")
+            && states(&plain.stderr) == ["service-stopped"],
         "{logged}"
     );
     // Under systemd, stderr is the stream that $JOURNAL_STREAM names.
@@ -66,7 +69,9 @@ fn a_service_that_stops_says_why_in_the_journal_format() {
     let mut journal = String::new();
     reader.read_to_string(&mut journal).unwrap();
     assert!(
-        journal.starts_with("<3>ERROR garrison: The ingest service stopped: "),
+        journal.starts_with("<3>ERROR garrison: ")
+            && journal.contains("ingest")
+            && states(journal.as_bytes()) == ["service-stopped"],
         "{journal}"
     );
 }
@@ -109,8 +114,8 @@ fn the_switch_snippet_comes_from_the_interface_next_to_the_binary() {
     let missing = switch();
     assert_eq!(missing.status.code(), Some(1));
     assert!(
-        text(&missing.stderr)
-            .ends_with("stalwart-switch.js is missing; build the interface first.\n")
+        states(&missing.stderr) == ["switch-script-missing"]
+            && text(&missing.stderr).contains("stalwart-switch.js")
     );
     std::fs::create_dir(release.path().join("static")).unwrap();
     std::fs::write(
@@ -299,18 +304,22 @@ fn modules_writes_the_choice_and_keeps_the_previous_file() {
     let previous = directory.path().join("garrison.toml.previous");
     assert_eq!(std::fs::read_to_string(previous).unwrap(), before);
     // Without root nothing is restarted; the output says what to restart.
-    assert!(text(&chosen.stdout).contains("Restart garrison-broker.service"));
+    assert!(
+        states(&chosen.stdout)
+            .ends_with(&["modules-written".to_owned(), "modules-unapplied".to_owned()])
+            && text(&chosen.stdout).contains("garrison-broker.service")
+    );
     let again = run(
         directory.path(),
         &["modules", "--set", "logs antivirus", "--yes"],
     );
-    assert!(text(&again.stdout).contains("nothing was changed"));
+    assert_eq!(states(&again.stdout), ["modules-held"]);
     // A typo is refused before anything is written.
     let typo = run(
         directory.path(),
         &["modules", "--set", "antivirus,backup", "--yes"],
     );
     assert_eq!(typo.status.code(), Some(2));
-    assert!(text(&typo.stderr).starts_with("backup is not a module ID"));
+    assert_eq!(states(&typo.stderr), ["modules-unknown"]);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
 }

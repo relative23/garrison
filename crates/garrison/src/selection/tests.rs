@@ -126,7 +126,8 @@ fn a_list_on_the_command_line_names_known_modules() {
     );
     assert_eq!(parse_list("").unwrap(), set(&[]));
     let refused = parse_list("antivirus,backup").unwrap_err();
-    assert!(refused.starts_with("backup is not a module ID; known: dashboard, services,"));
+    let known: Vec<&str> = ModuleId::all().map(ModuleId::as_str).collect();
+    assert_eq!(refused, states::unknown_module("backup", &known));
 }
 
 #[test]

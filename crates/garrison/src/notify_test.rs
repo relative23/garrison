@@ -2,6 +2,7 @@
 
 use garrison_core::config::Config;
 
+use crate::states::commands as states;
 use crate::{complain, credentials, loaded, say};
 
 /// One message on every configured channel, so that an operator sees them
@@ -15,35 +16,29 @@ pub(crate) fn run(config: &Config) -> u8 {
         .collect();
     if !unloaded.is_empty() {
         for secret in &unloaded {
-            complain(&format!("Not tested: {}", secret.line()));
+            complain(&states::notify_unloaded(&secret.line()).to_string());
         }
         return 2;
     }
     // Without root no secret reads, and every channel would look broken.
     if !rustix::process::geteuid().is_root() {
-        complain("Run as root: the channels' secrets are files only root may read.");
+        complain(&states::notify_not_root().to_string());
         return 2;
     }
     let credentials = credentials(config);
     let secrets = Secrets::read(&credentials, &config.notifications);
     let channels = Channels::of(config, secrets).located(&credentials);
     if channels.is_empty() {
-        complain(
-            "No channel is configured: set ntfy_url, webhook_url or the mail settings under \
-             [notifications] in garrison.toml.",
-        );
+        complain(&states::no_channel().to_string());
         return 2;
     }
     let mut failed = false;
     for (channel, outcome) in test(&channels, garrison_core::time::now()) {
         match outcome {
-            Ok(()) => say(&format!("{channel}: the test message is out.")),
+            Ok(()) => say(&states::notify_sent(channel).to_string()),
             Err(error) => {
                 failed = true;
-                complain(&format!(
-                    "{channel}: the test message did not go out: {error}. Check its address and \
-                     its secret in /etc/garrison/credentials."
-                ));
+                complain(&states::notify_failed(channel, error).to_string());
             }
         }
     }

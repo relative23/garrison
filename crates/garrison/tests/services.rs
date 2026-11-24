@@ -5,6 +5,9 @@
 // Helpers fail the test by panicking, like the tests themselves.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod support;
+
+use std::io::Read;
 use std::net::TcpListener;
 use std::os::unix::net::UnixDatagram;
 use std::os::unix::process::ExitStatusExt;
@@ -93,6 +96,61 @@ fn ready(notify: &UnixDatagram) {
     assert_eq!(&message[..length], b"READY=1");
 }
 
+/// A service that reported ready, with the ports it was given.
+struct Serving {
+    directory: tempfile::TempDir,
+    child: Child,
+    /// Open as long as the service runs, as systemd keeps its socket.
+    _notify: UnixDatagram,
+    web: u16,
+    ingest: u16,
+}
+
+/// `command` started with ports of its own, once it reports ready. A port
+/// the system gives another program between the test's pick and the
+/// service's bind ends the service before it serves, with the system's
+/// error 98 (EADDRINUSE); it is then started with other ports.
+fn serving(command: &str) -> Serving {
+    for _ in 0..5 {
+        let (web, ingest) = (free_port(), free_port());
+        let directory = prepared(web, ingest);
+        let (mut child, notify) = start(directory.path(), command);
+        notify
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let deadline = Instant::now() + PATIENCE;
+        let mut message = [0; 64];
+        loop {
+            if let Ok(length) = notify.recv(&mut message) {
+                assert_eq!(&message[..length], b"READY=1");
+                return Serving {
+                    directory,
+                    child,
+                    _notify: notify,
+                    web,
+                    ingest,
+                };
+            }
+            if child.try_wait().unwrap().is_some() {
+                let mut said = String::new();
+                child
+                    .stderr
+                    .take()
+                    .unwrap()
+                    .read_to_string(&mut said)
+                    .unwrap();
+                assert!(said.contains("(os error 98)"), "{said}");
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the service did not report ready"
+            );
+        }
+    }
+    panic!("five times another program took a port the service was given")
+}
+
 /// Wait for the process to end. One still running after `PATIENCE` is killed
 /// and fails the test instead of letting it hang.
 fn ended(mut child: Child, waiting_for: &str) -> ExitStatus {
@@ -131,11 +189,8 @@ fn agent() -> ureq::Agent {
 
 #[test]
 fn the_ingest_service_stores_a_signed_batch_and_stops_cleanly() {
-    let port = free_port();
-    let directory = prepared(free_port(), port);
-    let (child, notify) = start(directory.path(), "ingest");
-    ready(&notify);
-    let base = format!("http://127.0.0.1:{port}");
+    let service = serving("ingest");
+    let base = format!("http://127.0.0.1:{}", service.ingest);
     let body = json!({"events": [{"id": "1", "createdAt": "2026-10-29T10:00:00Z", "type": "auth.failed", "data": {}}]}).to_string();
     let signature = garrison_ingest::app::signature(b"signature-key-0123456789", body.as_bytes());
     let mut answer = agent()
@@ -149,17 +204,20 @@ fn the_ingest_service_stores_a_signed_batch_and_stops_cleanly() {
         stored,
         json!({"status": "stored", "stored": 1, "skipped": 0})
     );
-    assert_eq!(stop(child), Some(0));
-    assert!(directory.path().join("ingest/events.sqlite").is_file());
+    assert_eq!(stop(service.child), Some(0));
+    assert!(
+        service
+            .directory
+            .path()
+            .join("ingest/events.sqlite")
+            .is_file()
+    );
 }
 
 #[test]
 fn the_web_service_answers_and_stops_cleanly() {
-    let port = free_port();
-    let directory = prepared(port, free_port());
-    let (child, notify) = start(directory.path(), "web");
-    ready(&notify);
-    let base = format!("http://127.0.0.1:{port}");
+    let service = serving("web");
+    let base = format!("http://127.0.0.1:{}", service.web);
     let mut session = agent().get(&format!("{base}/api/session")).call().unwrap();
     assert_eq!(session.status().as_u16(), 200);
     assert_eq!(
@@ -172,7 +230,7 @@ fn the_web_service_answers_and_stops_cleanly() {
         503,
         "no interface is built next to the test binary"
     );
-    assert_eq!(stop(child), Some(0));
+    assert_eq!(stop(service.child), Some(0));
 }
 
 #[test]
@@ -237,12 +295,9 @@ fn a_collection_run_beside_one_under_way_ends_without_collecting() {
     let mut said = String::new();
     let stderr = child.stderr.take().unwrap();
     let status = ended(child, "the collection run did not end");
-    std::io::Read::read_to_string(&mut { stderr }, &mut said).unwrap();
+    Read::read_to_string(&mut { stderr }, &mut said).unwrap();
     assert!(status.success(), "{said}");
-    assert!(
-        said.contains("Another collection run is under way; this one ends without collecting"),
-        "{said}"
-    );
+    assert_eq!(support::states(said.as_bytes()), ["collect-busy"], "{said}");
     assert!(!state.join("status.sqlite").exists());
     // Once that run has ended, the next one collects.
     drop(under_way);

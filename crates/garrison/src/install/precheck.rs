@@ -18,7 +18,7 @@ use garrison_core::config::{self, Config, Database};
 
 use super::files::{Step, io, place, run};
 use super::requirements::{room, size};
-use super::{CONFIG, cli, toml_text};
+use super::{CONFIG, cli, states, toml_text};
 
 /// Where a release's check of the policy that comes back is prepared:
 /// root's alone; the installer's lock keeps a second run out.
@@ -41,10 +41,11 @@ pub(super) fn brings_policy(source: &Path) -> bool {
     source.join(crate::ops::POLICY_COPY).is_file()
 }
 
-/// `release`'s check-config of today's configuration. Where the state
-/// brings a policy, the verdict on the live one, which goes, is left to
-/// the check of the policy that comes back: every release exits with 1
-/// where only the policy fails, and with 2 for the configuration.
+/// `release`'s check-config of today's configuration, with what it said
+/// where it refused. Where the state brings a policy, the verdict on the
+/// live one, which goes, is left to the check of the policy that comes
+/// back: every release exits with 1 where only the policy fails, and with 2
+/// for the configuration.
 pub(super) fn configuration(release: &Path, policy_comes_back: bool) -> Step<Result<(), String>> {
     let check = cli(release, &["check-config"])?;
     Ok(match check.status.code() {
@@ -56,30 +57,22 @@ pub(super) fn configuration(release: &Path, policy_comes_back: bool) -> Step<Res
 
 /// The place `broker.policy` names takes the policy that comes back as a
 /// file of its own: nothing there yet or a file, never a link or a folder,
-/// in a folder that exists, where the broker's unit does not hide it.
+/// in a folder that exists, where the broker's unit does not hide it. A
+/// refusal says that nothing was changed: nothing has stopped yet.
 pub(super) fn policy_place(config: &Config) -> Step {
     let policy = &config.broker.policy;
     match fs::symlink_metadata(policy) {
-        Ok(kind) if !kind.is_file() => {
-            return Err(format!(
-                "broker.policy names {}, which is not a file of its own: the access policy \
-                 goes back only as a file, never through a link or into a folder.",
-                policy.display()
-            ));
-        }
+        Ok(kind) if !kind.is_file() => return Err(states::policy_place(policy)),
         Err(error) if error.kind() != ErrorKind::NotFound => {
-            return Err(format!("{}: {error}", policy.display()));
+            return Err(states::unchanged(states::io(policy.display(), error)));
         }
         _ => {}
     }
     if !policy.parent().is_some_and(Path::is_dir) {
-        return Err(format!(
-            "The folder of broker.policy, {}, does not exist.",
-            policy.parent().unwrap_or(policy).display()
-        ));
+        return Err(states::policy_folder(policy.parent().unwrap_or(policy)));
     }
     if let Err(refusal) = crate::units::policy_place(policy, Path::new(config::DEFAULT_PATH)) {
-        return Err(format!("Access policy not usable: {refusal}"));
+        return Err(states::policy_hidden(&refusal));
     }
     Ok(())
 }
@@ -115,7 +108,7 @@ fn check_in(
     let text = io(fs::read_to_string(settings), settings)?;
     let mut table: toml::Table = text
         .parse()
-        .map_err(|error| format!("{}: {error}", settings.display()))?;
+        .map_err(|error| states::io(settings.display(), error))?;
     let copy = folder.join("access-policy.json");
     place(&source.join(crate::ops::POLICY_COPY), &copy, 0o600)?;
     if let Some(broker) = table
@@ -186,20 +179,18 @@ mod tests {
         fs::write(&victim, "root:x:0:0::/root:/bin/sh\n").unwrap();
         std::os::unix::fs::symlink(&victim, &config.broker.policy).unwrap();
         let refused = policy_place(&config).unwrap_err();
-        assert!(refused.contains("not a file of its own"), "{refused}");
+        assert_eq!(refused, states::policy_place(&config.broker.policy));
         fs::remove_file(&config.broker.policy).unwrap();
         fs::create_dir(&config.broker.policy).unwrap();
-        assert!(
-            policy_place(&config)
-                .unwrap_err()
-                .contains("not a file of its own")
+        assert_eq!(
+            policy_place(&config).unwrap_err(),
+            states::policy_place(&config.broker.policy)
         );
         // A folder that does not exist takes nothing.
         config.broker.policy = directory.path().join("absent/access.json");
-        assert!(
-            policy_place(&config)
-                .unwrap_err()
-                .contains("does not exist")
+        assert_eq!(
+            policy_place(&config).unwrap_err(),
+            states::policy_folder(&directory.path().join("absent"))
         );
     }
 
@@ -297,10 +288,6 @@ mod tests {
         let stat = rustix::fs::statvfs(directory.path()).unwrap();
         copy.set_len(stat.f_bavail * stat.f_frsize).unwrap();
         let refused = copies_fit(&source, &config, &[], "the rollback").unwrap_err();
-        assert!(
-            refused.contains(" MiB free and the rollback needs "),
-            "{refused}"
-        );
-        assert!(refused.ends_with("; nothing was changed."), "{refused}");
+        assert_eq!(refused.name, "install-no-room");
     }
 }

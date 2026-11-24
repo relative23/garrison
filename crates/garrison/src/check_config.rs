@@ -6,13 +6,14 @@ use std::path::Path;
 use garrison_core::config::{self, Config};
 
 use crate::doctor::policy::{self, Met, Unread};
+use crate::states::config as states;
 use crate::{complain, dqs, loaded, placeholder, say, unfollowed, units};
 
 pub(crate) fn run(config: &Config, path: &Path) -> u8 {
     let providers = match garrison_collector::build(&config.collector.providers) {
         Ok(providers) => providers,
         Err(error) => {
-            complain(&format!("Configuration not usable: {error}"));
+            complain(&states::providers_refused(error).to_string());
             return 2;
         }
     };
@@ -22,49 +23,47 @@ pub(crate) fn run(config: &Config, path: &Path) -> u8 {
     let places = units::collector_places(&providers, path);
     if !unloaded.is_empty() || !unaskable.is_empty() || places.is_err() {
         for secret in &unloaded {
-            complain(&format!("Configuration not usable: {}", secret.line()));
+            complain(&states::unloaded(&secret.line()).to_string());
         }
         for (what, fix) in &unaskable {
-            complain(&format!("Configuration not usable: {what}. {fix}"));
+            complain(&states::dqs_refused(what, fix).to_string());
         }
         for refusal in places.err().unwrap_or_default() {
-            complain(&format!("Configuration not usable: {refusal}"));
+            complain(&states::hidden_check(&refusal).to_string());
         }
         return 2;
     }
-    say(&format!(
-        "Configuration valid: {} providers, {} actions.",
+    let (providers, actions) = (
         config.collector.providers.len(),
-        config.broker.actions.len()
-    ));
+        config.broker.actions.len(),
+    );
+    say(&states::valid(providers, actions).to_string());
     let deployment = &config.deployment;
     for (setting, origin) in [
         ("public_origin", &deployment.public_origin),
         ("issuer", &deployment.issuer),
     ] {
         if placeholder(origin) {
-            complain(&format!(
-                "Warning: deployment.{setting} {origin} is a placeholder; set the real name."
-            ));
+            complain(&states::placeholder(setting, origin).to_string());
         }
     }
     let include = unfollowed::installed_include();
     for setting in unfollowed::settings(config, include.as_deref()) {
-        complain(&format!("Warning: {}. {}", setting.what, setting.fix));
+        complain(&states::unfollowed(&setting.what, &setting.fix).to_string());
     }
     for (what, fix) in dqs::warned(config) {
-        complain(&format!("Warning: {what}. {fix}"));
+        complain(&states::dqs_warned(&what, &fix).to_string());
     }
     for warning in places.unwrap_or_default() {
-        complain(&format!("Warning: {warning}"));
+        complain(&states::hidden_check_warned(&warning).to_string());
     }
     // Root reads the policy here; the broker, in its unit's sandbox, may not.
     match units::policy_place(&config.broker.policy, path) {
         Err(refusal) => {
-            complain(&format!("Access policy not usable: {refusal}"));
+            complain(&states::policy_refused(&refusal).to_string());
             return 1;
         }
-        Ok(Some(warning)) => complain(&format!("Warning: {warning}")),
+        Ok(Some(warning)) => complain(&states::policy_warned(&warning).to_string()),
         Ok(None) => {}
     }
     // Nor may it read what root reads, which is judged for the broker: a
@@ -73,27 +72,24 @@ pub(crate) fn run(config: &Config, path: &Path) -> u8 {
     let units_read = path == Path::new(config::DEFAULT_PATH);
     match refused(policy::as_the_broker(&config.broker.policy), units_read) {
         Err(said) => {
-            complain(&format!("Access policy not usable: {said}"));
+            complain(&states::policy_refused(&said).to_string());
             return 1;
         }
-        Ok(Some(said)) => complain(&format!("Warning: {said}")),
+        Ok(Some(said)) => complain(&states::policy_warned(&said).to_string()),
         Ok(None) => {}
     }
     match policy::granted(config) {
         Ok(_) => {
-            say(&format!(
-                "Access policy valid: {}",
-                config.broker.policy.display()
-            ));
+            say(&states::policy_valid(&config.broker.policy).to_string());
             0
         }
         Err(Unread::TooLarge) => {
-            let said = crate::access::too_large(&config.broker.policy);
-            complain(&format!("Access policy not usable: {said}"));
+            let said = crate::states::access::too_large(&config.broker.policy);
+            complain(&states::policy_refused(said).to_string());
             1
         }
         Err(Unread::Other(error)) => {
-            complain(&format!("Access policy not usable: {error}"));
+            complain(&states::policy_refused(error).to_string());
             1
         }
     }

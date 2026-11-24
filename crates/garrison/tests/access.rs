@@ -24,7 +24,7 @@ use std::collections::BTreeSet;
 
 use garrison_testing::http::serve;
 use serde_json::{Value, json};
-use support::{against, names, prepared, respond, run, text};
+use support::{against, names, prepared, respond, run, states, text};
 
 const ADMINISTRATOR_RIGHTS: [&str; 5] = [
     "authenticate",
@@ -66,9 +66,10 @@ fn init_binds_only_roles_with_every_administrator_right() {
     assert_eq!(init.status.code(), Some(0), "{}", text(&init.stderr));
     let said = text(&init.stdout);
     assert!(
-        said.contains("Bound native role admin (Administrators) to profile administrator.\n"),
+        states(&init.stdout).contains(&"access-bound".to_owned()),
         "{said}"
     );
+    assert!(said.contains("admin (Administrators)"), "{said}");
     assert!(!said.contains("partial"), "{said}");
     let policy = policy(directory.path());
     assert_eq!(policy["roleBindings"], json!({"admin": "administrator"}));
@@ -105,7 +106,7 @@ fn init_binds_only_roles_with_every_administrator_right() {
     let again = run(directory.path(), &["access", "init"]);
     assert_eq!(again.status.code(), Some(1));
     assert_eq!(text(&again.stdout), "");
-    assert!(text(&again.stderr).contains("exists; use --force to replace it"));
+    assert_eq!(states(&again.stderr), ["access-exists"]);
 }
 
 /// Where no role qualifies, as where the administrators' role lacks a right
@@ -135,16 +136,18 @@ fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
     let directory = against(&server.url);
     let init = run(directory.path(), &["access", "init"]);
     assert_eq!(init.status.code(), Some(1), "{}", text(&init.stderr));
-    assert_eq!(
-        text(&init.stderr),
-        "No native administrator role with full administrative rights was found, so the \
-         policy binds no role and nobody can sign in yet. The administrator profile requires \
-         authenticate, sysAccountUpdate, sysActionCreate, sysDomainUpdate and sysRoleUpdate.\n\
-         Stalwart's default administrator role weak (Weak) lacks sysAccountUpdate, \
-         sysActionCreate, sysDomainUpdate and sysRoleUpdate: give the role those rights in the \
-         native administration (Roles), then run garrison access bind-role weak --profile \
-         administrator. As it is, it meets none of the profiles.\n"
-    );
+    // The one candidate, named with its description and what it lacks.
+    let said = text(&init.stderr);
+    assert_eq!(states(&init.stderr), ["access-unbound"], "{said}");
+    assert!(said.contains("weak (Weak)"), "{said}");
+    for right in [
+        "sysAccountUpdate",
+        "sysActionCreate",
+        "sysDomainUpdate",
+        "sysRoleUpdate",
+    ] {
+        assert_eq!(said.matches(right).count(), 2, "{right}: {said}");
+    }
     let written = policy(directory.path());
     assert_eq!(written["roleBindings"], json!({}));
     let profiles: Vec<&String> = written["profiles"].as_object().unwrap().keys().collect();
@@ -161,7 +164,9 @@ fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
     );
     assert_eq!(bound.status.code(), Some(0), "{}", text(&bound.stderr));
     assert!(
-        !text(&bound.stdout).contains("Note: role"),
+        !states(&bound.stdout)
+            .iter()
+            .any(|state| state.starts_with("access-role-")),
         "{}",
         text(&bound.stdout)
     );
@@ -252,13 +257,9 @@ fn check_shows_only_what_this_installation_offers() {
         (
             refused.status.code(),
             text(&refused.stdout),
-            text(&refused.stderr)
+            states(&refused.stderr)
         ),
-        (
-            Some(1),
-            String::new(),
-            "This identity's profiles grant no module this installation offers\n".to_owned()
-        )
+        (Some(1), String::new(), vec!["access-denied".to_owned()])
     );
     server.requests();
 }
@@ -278,15 +279,10 @@ fn an_answer_this_release_does_not_read_is_said_as_one() {
     );
     let check = run(directory.path(), &["access", "check", "1"]);
     assert_eq!(
-        (check.status.code(), text(&check.stderr)),
-        (
-            Some(1),
-            "Stalwart answered in a form this release of Garrison does not read \
-             (x:Account/get returned an unsupported object); see the supported Stalwart \
-             releases in the README\n"
-                .to_owned()
-        )
+        (check.status.code(), states(&check.stderr)),
+        (Some(1), vec!["access-unread-answer".to_owned()])
     );
+    assert!(text(&check.stderr).contains("x:Account/get"));
     server.requests();
 }
 
@@ -319,12 +315,10 @@ fn a_role_is_bound_to_a_known_profile_once_stalwart_knows_it() {
     );
     assert_eq!(unknown.status.code(), Some(1));
     assert_eq!(
-        (text(&unknown.stdout), text(&unknown.stderr)),
-        (
-            String::new(),
-            "Unknown profile auditor; known: administrator, viewer\n".to_owned()
-        )
+        (text(&unknown.stdout), states(&unknown.stderr)),
+        (String::new(), vec!["access-unknown-profile".to_owned()])
     );
+    assert!(text(&unknown.stderr).contains("administrator, viewer"));
 }
 
 #[test]
@@ -345,13 +339,21 @@ fn access_changes_keep_a_backup_and_write_the_policy() {
             text(&output.stderr)
         );
         let said = text(&output.stdout);
-        assert!(said.contains("Saved "), "{said}");
         // Without root the file cannot be made root's, and the note says
         // which file the broker cannot read.
-        if !rustix::process::geteuid().is_root() {
+        let said_states = states(&output.stdout);
+        if rustix::process::geteuid().is_root() {
+            assert_eq!(said_states, ["access-saved"], "{said}");
+        } else {
             let policy = directory.path().join("policy.json");
-            let note = format!("Note: the broker cannot read {}: ", policy.display());
-            assert!(said.contains(&note), "{said}");
+            let note = ["access-no-group", "access-not-chowned"];
+            assert!(
+                said_states.len() == 2
+                    && note.contains(&said_states[0].as_str())
+                    && said_states[1] == "access-saved",
+                "{said}"
+            );
+            assert!(said.contains(&policy.display().to_string()), "{said}");
         }
     }
     let written = std::fs::read_to_string(directory.path().join("policy.json")).unwrap();
@@ -375,20 +377,14 @@ fn access_changes_keep_a_backup_and_write_the_policy() {
         (
             invalid.status.code(),
             text(&invalid.stdout),
-            text(&invalid.stderr)
+            states(&invalid.stderr)
         ),
-        (
-            Some(1),
-            String::new(),
-            "\"a b\" is no subject: a subject is 1 to 128 letters, digits and _ . : @ -, and \
-             that of a local Stalwart account its numeric account ID.\n"
-                .to_owned()
-        )
+        (Some(1), String::new(), vec!["access-no-subject".to_owned()])
     );
     let profile = run(
         directory.path(),
         &["access", "bind-role", "r", "--profile", "Bad"],
     );
     assert_eq!(profile.status.code(), Some(2));
-    assert!(text(&profile.stderr).contains("invalid profile name 'Bad'"));
+    assert!(states(&profile.stderr).contains(&"access-invalid-profile".to_owned()));
 }

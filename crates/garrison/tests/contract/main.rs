@@ -41,6 +41,9 @@ mod stops;
 mod together;
 mod wire;
 
+#[path = "../support/mod.rs"]
+mod support;
+
 /// The tests of this target share Garrison's objects in the lab, one key
 /// of each description and one webhook, so they run one at a time.
 static LAB: Mutex<()> = Mutex::new(());
@@ -147,6 +150,13 @@ fn text(output: &Output) -> String {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     )
+}
+
+/// The states `output` says, on standard output and then standard error.
+fn states(output: &Output) -> Vec<String> {
+    let mut said = support::states(&output.stdout);
+    said.extend(support::states(&output.stderr));
+    said
 }
 
 /// What a write that was interrupted leaves beside the files, which the
@@ -280,14 +290,14 @@ fn access_after_the_rotation(lab: &Lab, directory: &std::path::Path) {
     let init = run(directory, &["access", "init"]);
     assert_eq!(init.status.code(), Some(0), "{}", text(&init));
     assert!(
-        text(&init).contains("to profile administrator."),
+        states(&init).contains(&"access-bound".to_owned()),
         "{}",
         text(&init)
     );
     access::bind_role(lab, directory);
     let check = run(directory, &["check-config"]);
     assert!(
-        text(&check).contains("Access policy valid"),
+        states(&check).contains(&"check-config-policy-valid".to_owned()),
         "{}",
         text(&check)
     );
