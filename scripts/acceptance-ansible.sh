@@ -194,20 +194,20 @@ nothing_secret() {
 # what the role and the scenarios left in /root.
 fresh() {
     if ! inside '/opt/garrison/current/bin/garrison uninstall --purge >/dev/null &&
-        rm -rf /root/garrison-* /root/stand-in-keys'; then
+        rm -rf /root/garrison-* /root/stand-in-keys /root/stand-in-objects'; then
         echo "FAIL  Garrison is taken off the host for the next scenario"
         exit 1
     fi
 }
 
-# Setup fails at its last step, after it wrote every key file: the stand-in
-# refuses the keys' sessions, as Stalwart refuses a key it does not take.
+# Setup fails once it made a key and wrote its file: the stand-in refuses the
+# keys' sessions, as Stalwart refuses a key it does not take.
 scenario_setup_refused() {
     step "A setup that fails says why and shows no secret"
     inside 'cd /etc/garrison/credentials && rm webhook-signature-key collector-native-key broker-native-key &&
         touch /root/stand-in-refuses'
     # At -vvv a task without no_log shows what went in on its standard input.
-    stops "$newer" "Stalwart does not take the API key it just made" -vvv
+    stops "$newer" "Stalwart does not take the API key in" -vvv
     nothing_secret
     inside 'rm /root/stand-in-refuses'
     play "$newer"
@@ -227,12 +227,32 @@ acceptance_config: |
   policy = "/etc/garrison/policy/access.json"
 VARS
     play "$newer" -e "@$work/elsewhere.yml"
-    said "Stalwart accepts both API keys from this host"
+    said "Stalwart is set up as asked; nothing was changed."
     check "the installer took the policy there" \
         '/opt/garrison/current/bin/garrison check-config 2>/dev/null | grep -q "Access policy valid: /etc/garrison/policy/access.json"'
     services "with the policy kept elsewhere"
     unchanged "a further run changes nothing" "$newer" -e "@$work/elsewhere.yml"
     inside 'mv /etc/garrison/policy/access.json /etc/garrison/access-policy.json && rmdir /etc/garrison/policy'
+}
+
+# A play that moves the receiver to another port and names a secret by its
+# path, which the release refuses: it stops before setup gives Stalwart's
+# webhook the new port, and the next play brings back what the release takes.
+scenario_refused_config() {
+    step "A configuration the release refuses stops the play before setup changes Stalwart"
+    cat > "$work/refused.yml" <<'VARS'
+acceptance_config: |
+  [ingest]
+  port = 8095
+  [notifications]
+  token = "/etc/garrison/ntfy.token"
+VARS
+    stops "$newer" "Configuration not usable" -e "@$work/refused.yml"
+    check "Stalwart's webhook still names the port the receiver listens on" \
+        'grep -q "127.0.0.1:8094/webhook" /root/stand-in-objects/WebHook'
+    play "$newer"
+    services "after a configuration the release refused"
+    unchanged "a further run changes nothing" "$newer"
 }
 
 # An unpacking cut short after its first files: tar writes SHA256SUMS and
@@ -447,14 +467,16 @@ services "installed by the role"
 
 step "A second run changes nothing"
 unchanged "a second run changes nothing" "$older"
+said "Stalwart is set up as asked; nothing was changed."
 unchanged "a dry run changes nothing" "$older" --check
 
 step "A new version upgrades"
 play "$newer"
+said "Stalwart is set up as asked; nothing was changed."
 check "the role upgraded to $newer" "test \"\$(cat /opt/garrison/current/VERSION)\" = '$newer'"
 services "upgraded by the role"
 
-all="setup_refused policy_elsewhere no_room upgrade_failed hand_changed rebuilt ignored
+all="setup_refused policy_elsewhere refused_config no_room upgrade_failed hand_changed rebuilt ignored
     unbound unpack_cut first_unfinished restart"
 for scenario in ${SCENARIOS:-$all}; do
     "scenario_$scenario"
