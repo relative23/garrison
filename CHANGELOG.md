@@ -1968,8 +1968,7 @@ Notable changes for operators and users. The format follows
   last completes**; the other's return, or one a page made up, no longer
   ends it.
 - **After the host's clock went back, the Maintenance page lists the job
-  started last first**, a job recorded while it ran ahead leaves the audit
-  with the jobs after it, and a session signed in meanwhile ends.
+  started last first**, and a session signed in meanwhile ends.
 - **The polkit rule's first line names the command that writes it,
   `garrison polkit-rule`**, where it named one that does not exist, and says
   to run the installer again after `[[actions]]` changed.

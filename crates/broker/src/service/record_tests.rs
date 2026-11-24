@@ -249,6 +249,32 @@ fn a_job_recorded_ahead_of_the_clock_holds_no_action_back() {
     }
 }
 
+/// A job recorded while the clock ran 400 days behind, after a job that
+/// ran: the Maintenance page's list, which cleans up the audit, leaves the
+/// job that ran, so that its request asked again, as after a lost answer,
+/// is that job's and runs nothing again.
+#[test]
+fn a_job_dated_behind_lets_no_request_run_again() {
+    let setup = make(false);
+    let ask = || {
+        setup
+            .broker
+            .submit("admin-token", "run_backup", REQUEST, "RUN BACKUP")
+            .map(sent)
+            .unwrap()
+    };
+    let first = ask();
+    let behind = old_job("1", "run_monitor", 400 * 86_400);
+    setup.broker.store().insert(&behind).unwrap();
+    setup.broker.catalog("admin-token").unwrap();
+    let again = ask();
+    assert_eq!(
+        (&again["replayed"], &again["job"]["id"]),
+        (&Value::Bool(true), &first["job"]["id"])
+    );
+    assert_eq!(*setup.systemd.runs.lock().unwrap(), ["run_backup"]);
+}
+
 /// The newest of all jobs, which the settle time waits for.
 #[test]
 fn a_job_recorded_at_the_least_integer_holds_no_action_back() {

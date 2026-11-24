@@ -198,15 +198,14 @@ impl JobStore {
         Ok(store)
     }
 
-    /// Expire old records, but keep anything that may still be running. A
-    /// job recorded before one that is old enough was created before it,
-    /// whatever its own date, as a date from while the clock ran ahead.
+    /// Expire old records, but keep anything that may still be running.
+    /// Each record leaves by its own date alone: another's, which a clock
+    /// that ran behind may have written, takes none out early.
     pub fn prune(&self) -> rusqlite::Result<()> {
         self.db.execute(
-            "DELETE FROM jobs WHERE may_still_run=0 AND status NOT IN ('queued','running') \
-             AND (created_at < ?1 OR rowid < (SELECT max(rowid) FROM jobs \
-             WHERE created_at BETWEEN ?2 AND ?1))",
-            [now() - RETENTION_SECONDS, time::Timestamp::MIN.as_second()],
+            "DELETE FROM jobs WHERE created_at < ? AND may_still_run=0 \
+             AND status NOT IN ('queued','running')",
+            [now() - RETENTION_SECONDS],
         )?;
         Ok(())
     }
