@@ -249,8 +249,12 @@ done
 body=$(head -c "$length")
 answer=
 status="200 OK"
-respond() { answer="{\"methodResponses\": [[\"$1\", {\"list\": [$2], \"notFound\": []}, \"0\"]]}"; }
-answered() { answer="{\"methodResponses\": [[\"$1\", $2, \"0\"]]}"; }
+# The form Stalwart 1.1.0 answers in: a list names its account, b, the
+# administrator's own.
+respond() {
+    answer="{\"methodResponses\": [[\"$1\", {\"accountId\": \"b\", \"list\": [$2], \"notFound\": []}, \"0\"]], \"sessionState\": \"0\"}"
+}
+answered() { answer="{\"methodResponses\": [[\"$1\", $2, \"0\"]], \"sessionState\": \"0\"}"; }
 case "$method $path" in
     "GET /auth/userinfo")
         if [ "$authorization" = "Bearer acceptance-token-0123456789abcdef" ]; then
@@ -270,7 +274,7 @@ case "$method $path" in
             *x:Role/get*) respond x:Role/get '{"id": "e", "roleIds": {}, "memberTenantId": null, "disabledPermissions": {},
                 "enabledPermissions": {"authenticate": true, "sysActionCreate": true, "sysRoleUpdate": true}}' ;;
             *x:ApiKey/get*)
-                respond "$call" "$(sed 's/^\([^ ]*\) \(.*\)$/{"id": "\1", "description": "\2"}/' \
+                respond "$call" "$(sed 's/^\([^ ]*\) \(.*\)$/{"id": "\1", "description": "\2", "allowedIps": {"127.0.0.1": true, "::1": true}, "createdAt": "2026-11-24T00:00:00Z", "expiresAt": null, "permissions": {"@type": "Replace", "permissions": {"authenticate": true}}, "secret": "kept"}/' \
                     /root/stand-in-keys 2>/dev/null | paste -s -d , -)" ;;
             *x:ApiKey/set*'"create"'*)
                 id=k$(date +%s%N)
