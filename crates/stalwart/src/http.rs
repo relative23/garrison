@@ -24,7 +24,7 @@ use ureq::{Agent, AsSendBody, Body};
 use crate::Error;
 
 pub const MAX_RESPONSE: usize = 1024 * 1024;
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
 static AGENT: LazyLock<Agent> = LazyLock::new(|| {
     Agent::config_builder()

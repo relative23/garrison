@@ -27,7 +27,7 @@ pub fn is_subject(text: &str) -> bool {
 }
 
 /// An access token: 16 to 4096 printable ASCII characters.
-pub fn is_token(text: &str) -> bool {
+pub(crate) fn is_token(text: &str) -> bool {
     (16..=4096).contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_graphic())
 }
 

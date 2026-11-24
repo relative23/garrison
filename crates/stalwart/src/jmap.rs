@@ -23,7 +23,7 @@ pub use listed::{Listed, PAGE};
 /// The arguments or the answer of a native method, as Stalwart sent them.
 pub type Object = Map<String, Value>;
 
-pub const USING: [&str; 2] = ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"];
+pub(crate) const USING: [&str; 2] = ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"];
 
 /// One request: each method with its arguments and a tag, which is its
 /// position in the request and names it in the answer.
