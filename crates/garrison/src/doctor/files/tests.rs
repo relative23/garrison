@@ -1,6 +1,5 @@
 use std::os::unix::fs::PermissionsExt;
 
-use super::super::Level;
 use super::*;
 
 /// The mode of the file at `path`, as doctor shows it.
