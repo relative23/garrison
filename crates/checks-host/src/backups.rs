@@ -145,7 +145,9 @@ pub fn borg_id(output: &str) -> Option<String> {
 
 /// `borg list --json`: where the repository is, in the form borg writes
 /// every name of it in ("Canonicalized repository path", its documentation
-/// of `--json` says).
+/// of `--json` says): measured on borg 1.4.5, a folder here absolute and
+/// cleaned of doubled slashes, dots and a slash at its end, but with its
+/// links, and `user@host:repo` as `ssh://user@host/./repo`.
 #[must_use]
 pub fn borg_location(output: &str) -> Option<String> {
     serde_json::from_str::<Value>(output).ok()?["repository"]["location"]

@@ -13,8 +13,9 @@ use super::support::finished;
 /// that fails; every call is noted in `CALLS` with borg's time zone.
 /// `REPO_ID` is the ID the repository has, whatever its name; empty, none.
 /// borg's listing reports the repository's location in borg's own form,
-/// as its documentation of `--json` gives it: `user@host:repo` and
-/// `ssh://user@host/./repo` alike.
+/// as borg 1.4.5 writes it (measured): a folder here absolute, without
+/// doubled slashes, dots or a slash at its end, but with its links, and
+/// `user@host:repo` and `ssh://user@host/./repo` alike.
 pub(super) const STAND_IN: &str = r#"#!/bin/sh
 tool=$(basename "$0")
 echo "$tool TZ=${TZ-unset} $*" >> "$CALLS"
@@ -43,14 +44,16 @@ case $tool-$verb in
     borg-list)
         repo=${BORG_REPO-}
         for word in "$@"; do case $word in list | --json) ;; *) repo=$word ;; esac; done
-        # The location borg reports: a folder here as given, one elsewhere as ssh://.
+        # The location borg 1.4.5 reports: a folder here absolute and cleaned,
+        # its links kept; one elsewhere as ssh://.
         case $repo in
-            ssh://* | /*) location=$repo ;;
-            file://*) location=${repo#file://} ;;
+            "" | ssh://*) location=$repo ;;
+            file://*) location=$(realpath -m -s -- "${repo#file://}") ;;
+            /*) location=$(realpath -m -s -- "$repo") ;;
             *:*) path=${repo#*:}
                  case $path in /*) ;; "~"*) path=/$path ;; *) path=/./$path ;; esac
                  location=ssh://${repo%%:*}$path ;;
-            *) location=$repo ;;
+            *) location=$(realpath -m -s -- "$repo") ;;
         esac
         where=${location:+,\"location\":\"$location\"}
         printf '{"archives":[{"name":"host-2026-11-11","time":"2026-11-11T02:00:04.000000"},
