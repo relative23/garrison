@@ -157,7 +157,7 @@ Stalwart serves its WebUI from outside the release and changes it without a
 new version. The job `contract-newest` runs them against Stalwart's newest
 release (`NEWEST`, `cargo xtask lab start newest`) while it is not a
 supported one. Renovate moves `NEWEST` to each new release and to a new
-image of the same release, without the 14 days' wait, so its pull request
+image of the same release at any time, outside the weekly schedule, so its pull request
 shows whether Garrison still fits.
 
 ## Tests
@@ -461,17 +461,16 @@ Every dependency is code that runs on a mail host, so the bar is high.
 
 1. Prefer the standard library and crates or packages already in use. A new one
    needs a reason in the commit message: what it replaces and who maintains it.
-2. Use releases that are at least 14 days old, including everything they add to
-   `Cargo.lock` or `package-lock.json`: `cargo update -p <crate> --precise
-   <version>`, `npm install --before=<date>`. The exception is a fix for an
-   advisory; take the oldest release that fixes it and name the advisory.
+2. A release may be used as soon as it is published: there is no waiting time
+   (the maintainer's decision of 2026-11-24; until then a release had to be
+   14 days old). A fix for an advisory is taken at once and names the advisory.
 3. Rust dependencies are declared once in `[workspace.dependencies]` and must
    pass `cargo deny --locked check`. A license not listed in `deny.toml` needs a
    review before it is added there.
 4. Install npm packages with `--ignore-scripts`; a package that needs an
    install script needs a review.
 
-Renovate (`renovate.json`) proposes updates once a release is 14 days old,
+Renovate (`renovate.json`) proposes updates as soon as a release is published,
 keeps npm packages at exact versions, moves Rust crates through `Cargo.lock`
 and keeps the GitHub Actions pinned to commit digests; review its pull
 requests like any other change.

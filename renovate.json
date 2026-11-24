@@ -1,8 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", ":semanticCommitsDisabled", "helpers:pinGitHubActionDigests"],
-  "minimumReleaseAge": "14 days",
-  "internalChecksFilter": "strict",
   "customManagers": [
     {
       "customType": "regex",
@@ -18,12 +16,11 @@
   "packageRules": [
     {
       "matchDepNames": ["stalwartlabs/stalwart"],
-      "minimumReleaseAge": "0 days",
       "schedule": ["at any time"],
       "prBodyNotes": [
         "The job contract-newest runs Garrison's contract tests against this image. Once they pass, \"Supporting a new Stalwart release\" in CONTRIBUTING.md makes a new release a supported one."
       ],
-      "description": "A new Stalwart release, or a new image of it, gets its contract tests at once: no waiting time, no schedule."
+      "description": "A new Stalwart release, or a new image of it, gets its contract tests at once: no schedule."
     },
     {
       "matchManagers": ["npm"],
