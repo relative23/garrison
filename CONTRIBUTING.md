@@ -165,7 +165,9 @@ shows whether Garrison still fits.
 Test what a user or an attacker can observe: permissions, refused input,
 cancellation, concurrent requests, what survives a restart and what an upgrade
 or a rollback leaves behind. A test names the behavior it proves, such as
-`a_demotion_before_execution_prevents_the_run`.
+`a_demotion_before_execution_prevents_the_run`. Its files lie in `TMPDIR`,
+which may be on any file system, and what it reads of one there holds on
+each: btrfs, for one, counts no inodes.
 
 - **Unit tests** sit next to the code (`mod tests`, or `tests.rs` beside a
   module that would otherwise grow past 500 lines).

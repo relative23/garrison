@@ -54,7 +54,11 @@ fn readings_come_from_proc_and_the_configured_disk() {
     let raw = format!("proc = \"{0}\"\ndisk_path = \"{0}\"", proc.display());
     let host = Host::new(&table(&raw)).unwrap();
     let (config, runner) = (config(proc), Canned(String::new()));
+    // The folder's file system, which others write to as well, as it is
+    // just before and just after the card measures it.
+    let before = rustix::fs::statvfs(proc).unwrap();
     let report = host.collect(&context(&config, &runner)).unwrap();
+    let after = rustix::fs::statvfs(proc).unwrap();
     let field = |label: &str| {
         let field = report.observations[0]
             .fields
@@ -66,18 +70,29 @@ fn readings_come_from_proc_and_the_configured_disk() {
     assert_eq!(field("CPU cores"), serde_json::json!(cores));
     assert_eq!(field("Load (1 / 5 / 15 min)"), "0.50 / 0.40 / 0.30");
     assert_eq!(field("Uptime"), 3600);
-    let disk = rustix::fs::statvfs(proc).unwrap();
-    let inodes: f64 = field("Free inodes")
-        .as_str()
-        .unwrap()
-        .trim_end_matches('%')
-        .parse()
-        .unwrap();
-    let expected = 100.0 * ratio(disk.f_favail, disk.f_files.max(1));
-    assert!((inodes - expected).abs() < 0.2, "{inodes} {expected}");
+    let between = |of: &dyn Fn(&rustix::fs::StatVfs) -> f64, shown: f64, slack: f64| {
+        let (one, other) = (of(&before), of(&after));
+        let (low, high) = (one.min(other) - slack, one.max(other) + slack);
+        assert!((low..=high).contains(&shown), "{shown} {one} {other}");
+    };
+    // btrfs, which makes inodes as it needs them, counts none: the card
+    // shows no share there (`a_count_the_file_system_does_not_keep_is_unknown`).
+    let inodes = field("Free inodes");
+    if before.f_files > 0 {
+        let shown: f64 = inodes
+            .as_str()
+            .unwrap()
+            .trim_end_matches('%')
+            .parse()
+            .unwrap();
+        let share = |disk: &rustix::fs::StatVfs| 100.0 * ratio(disk.f_favail, disk.f_files);
+        between(&share, shown, 0.051);
+    } else {
+        assert_eq!(inodes, serde_json::Value::Null);
+    }
     #[allow(clippy::cast_precision_loss)]
-    let free = (disk.f_bavail * disk.f_frsize) as f64 / GIB;
-    assert!((report.gauges["disk_free_gib"] - free).abs() < 0.01);
+    let free = |disk: &rustix::fs::StatVfs| (disk.f_bavail * disk.f_frsize) as f64 / GIB;
+    between(&free, report.gauges["disk_free_gib"], 1e-9);
     assert!((report.gauges["ram_used_gib"] - 0.5).abs() < f64::EPSILON);
     assert!((report.gauges["load_1m"] - 0.5).abs() < f64::EPSILON);
 }
