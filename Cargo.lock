@@ -708,6 +708,7 @@ dependencies = [
  "garrison-core",
  "garrison-testing",
  "log",
+ "memchr",
  "rustix",
  "serde_json",
 ]

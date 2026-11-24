@@ -14,18 +14,15 @@ const UU_FULL: usize = 45;
 /// The start of the next uuencode block at or after `from`: a line
 /// `begin <octal mode> <name>` whose first data line is a valid one.
 pub(super) fn next_begin(body: &[u8], from: usize) -> Option<usize> {
-    let mut at = from;
-    while at < body.len() {
-        let end = line_end(body, at);
-        if at == 0 || body[at - 1] == b'\n' {
-            let line = trim_cr(&body[at..end]);
-            if begins_block(line) && first_data_line_valid(body, after(body, end)) {
-                return Some(at);
-            }
-        }
-        at = after(body, end);
-    }
-    None
+    let from = from.min(body.len());
+    memchr::memmem::find_iter(&body[from..], BEGIN)
+        .map(|offset| from + offset)
+        .filter(|begin| *begin == 0 || body[*begin - 1] == b'\n')
+        .find(|begin| {
+            let end = line_end(body, *begin);
+            begins_block(trim_cr(&body[*begin..end]))
+                && first_data_line_valid(body, after(body, end))
+        })
 }
 
 /// Decode the uuencode block that begins at the start of `block`. Returns the

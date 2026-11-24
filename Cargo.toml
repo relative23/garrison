@@ -49,6 +49,8 @@ regex-lite = "0.1.9"
 # Takes over the socket systemd passes to the broker, without unsafe code here.
 listenfd = "1.0.2"
 log = { version = "0.4.34", features = ["std"] }
+# Byte search for the macro scan, which reads a message many times over.
+memchr = "2.8.3"
 # Checks release signatures for `garrison upgrade`; verification only, no dependencies.
 minisign-verify = "0.3.0"
 # The broker's peer credentials (SO_PEERCRED): its type holds the kernel's

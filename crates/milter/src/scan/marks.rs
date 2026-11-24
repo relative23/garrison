@@ -2,6 +2,8 @@
 //! stand. Every search here reads its data a fixed number of times, however
 //! the data is written: a sender chooses the bytes, never the work.
 
+use memchr::memmem;
+
 use super::Found;
 
 /// A compound file's first bytes.
@@ -19,19 +21,16 @@ const ACTIVE_MIME: &[u8] = b"ActiveMime";
 const ZIP_MACROS: [&[u8]; 2] = [b"vbaproject.bin", b"xl/macrosheets/"];
 
 pub(super) fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty()
-        && haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
+    !needle.is_empty() && memmem::find(haystack, needle).is_some()
 }
 
 /// Where `needle`, which is in lower case, first stands in `haystack` in
 /// either case.
 fn position_lowercase(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     let first = *needle.first()?;
-    haystack.windows(needle.len()).position(|window| {
-        window[0].to_ascii_lowercase() == first && window.eq_ignore_ascii_case(needle)
-    })
+    let starts = haystack.len().checked_sub(needle.len())? + 1;
+    memchr::memchr2_iter(first, first.to_ascii_uppercase(), &haystack[..starts])
+        .find(|at| haystack[*at..*at + needle.len()].eq_ignore_ascii_case(needle))
 }
 
 pub(super) fn number(data: &[u8], at: usize, bytes: usize) -> Option<usize> {
@@ -88,10 +87,7 @@ fn names_macros(data: &[u8]) -> bool {
     // headers of one kind ask about only rise.
     let searches = || ZIP_MACROS.map(|name| Next::new(data, name));
     let (mut before_files, mut listed) = (searches(), searches());
-    let mut at = 0;
-    while let Some(offset) = data[at..].windows(2).position(|window| window == b"PK") {
-        let header = at + offset;
-        at = header + 2;
+    for header in memmem::find_iter(data, b"PK") {
         // Where the name's length stands, and where the name begins.
         let (names, length, name) = match data.get(header..header + 4) {
             Some(ZIP_ENTRY) => (&mut before_files, 26, 30),
@@ -115,22 +111,12 @@ fn names_macros(data: &[u8]) -> bool {
 /// holds the file with noise before it, so where the file begins is not read;
 /// the binary bytes that must follow keep the word in prose from counting.
 fn active_mime(data: &[u8]) -> bool {
-    let mut at = 0;
-    while let Some(offset) = data[at..]
-        .windows(ACTIVE_MIME.len())
-        .position(|window| window == ACTIVE_MIME)
-    {
-        let found = at + offset;
-        at = found + ACTIVE_MIME.len();
-        let binary = data[at..]
+    memmem::find_iter(data, ACTIVE_MIME).any(|found| {
+        data[found + ACTIVE_MIME.len()..]
             .iter()
             .take(16)
-            .any(|byte| *byte < 0x20 && !matches!(byte, b'\t' | b'\r' | b'\n'));
-        if binary {
-            return true;
-        }
-    }
-    false
+            .any(|byte| *byte < 0x20 && !matches!(byte, b'\t' | b'\r' | b'\n'))
+    })
 }
 
 /// What `data` shows without unpacking anything.

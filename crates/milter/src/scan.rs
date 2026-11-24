@@ -296,7 +296,7 @@ impl Work {
     /// quoted-printable undone, `rounds` times over at the most.
     fn encoded(&mut self, data: &[u8], readings: &mut Readings, rounds: usize) -> Option<Found> {
         let symbols = base64_stream::count(data);
-        let tokens = base64_stream::count_tokens(data);
+        let tokens = symbols + base64_stream::padding(data);
         let dropped = |phase| base64_stream::decode_phase(data, phase, symbols);
         let grouped = |phase| base64_stream::decode_tokens(data, phase, tokens);
         if let Some(found) = self.reading(readings, |work| work.base64(dropped)) {
@@ -391,9 +391,15 @@ impl Work {
 /// or a uuencode block's `begin` line.
 fn declares_encoding(data: &[u8]) -> bool {
     const NAME: &[u8] = b"content-transfer-encoding";
-    data.windows(NAME.len())
-        .any(|window| window[0].eq_ignore_ascii_case(&NAME[0]) && window.eq_ignore_ascii_case(NAME))
-        || uu::next_begin(data, 0).is_some()
+    // Found by its first `-`, which decoded noise holds far less often than
+    // a letter.
+    const DASH: usize = 7;
+    memchr::memchr_iter(b'-', data).any(|dash| {
+        dash >= DASH
+            && data
+                .get(dash - DASH..dash - DASH + NAME.len())
+                .is_some_and(|name| name.eq_ignore_ascii_case(NAME))
+    }) || uu::next_begin(data, 0).is_some()
 }
 
 #[cfg(test)]

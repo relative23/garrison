@@ -36,13 +36,70 @@ const LENIENT: GeneralPurpose = GeneralPurpose::new(
         .with_decode_allow_trailing_bits(true),
 );
 
-pub(super) fn is_symbol(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/')
+/// For every byte, whether it is a symbol of the alphabet, or that or `=`.
+const fn table(padding: bool) -> [bool; 256] {
+    let mut table = [false; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        #[allow(clippy::cast_possible_truncation)]
+        let character = byte as u8;
+        table[byte] = character.is_ascii_alphanumeric()
+            || matches!(character, b'+' | b'/')
+            || (padding && character == b'=');
+        byte += 1;
+    }
+    table
 }
+static SYMBOL: [bool; 256] = table(false);
+static TOKEN: [bool; 256] = table(true);
 
 /// How many base64 symbols the message holds.
 pub(super) fn count(message: &[u8]) -> usize {
-    message.iter().filter(|byte| is_symbol(**byte)).count()
+    message
+        .iter()
+        .filter(|byte| SYMBOL[usize::from(**byte)])
+        .count()
+}
+
+/// How many `=` the message holds.
+pub(super) fn padding(message: &[u8]) -> usize {
+    memchr::memchr_iter(b'=', message).count()
+}
+
+/// The message's bytes that `of` has, from the `phase`-th of them, handed to
+/// `whole` in pieces of whole groups of four. What is left at the end, fewer
+/// than four, is returned. The bytes are taken a run at a time, since an
+/// encoded body is lines of them.
+fn pieces(message: &[u8], of: &[bool; 256], phase: usize, mut whole: impl FnMut(&[u8])) -> Vec<u8> {
+    let has = |at: usize| of[usize::from(message[at])];
+    let mut piece: Vec<u8> = Vec::with_capacity(PIECE);
+    let mut skip = phase;
+    let mut at = 0;
+    while at < message.len() {
+        if !has(at) {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < message.len() && has(at) {
+            at += 1;
+        }
+        let gone = skip.min(at - start);
+        skip -= gone;
+        let mut run = &message[start + gone..at];
+        while !run.is_empty() {
+            let (now, later) = run.split_at(run.len().min(PIECE - piece.len()));
+            piece.extend_from_slice(now);
+            run = later;
+            if piece.len() == PIECE {
+                whole(&piece);
+                piece.clear();
+            }
+        }
+    }
+    let cut = piece.len() - piece.len() % 4;
+    whole(&piece[..cut]);
+    piece.split_off(cut)
 }
 
 /// The bytes the message's base64 stream holds, read from its `phase`-th
@@ -50,26 +107,11 @@ pub(super) fn count(message: &[u8]) -> usize {
 /// [`count`] of the same message, so the buffer is sized once and does not
 /// grow past three quarters of the stream.
 pub(super) fn decode_phase(message: &[u8], phase: usize, symbols: usize) -> Vec<u8> {
-    let kept = symbols.saturating_sub(phase);
-    let mut out = Vec::with_capacity(kept / 4 * 3 + 3);
-    let mut piece: Vec<u8> = Vec::with_capacity(PIECE);
-    let mut skipped = 0;
-    for symbol in message.iter().copied().filter(|byte| is_symbol(*byte)) {
-        if skipped < phase {
-            skipped += 1;
-            continue;
-        }
-        piece.push(symbol);
-        if piece.len() == PIECE {
-            append(&piece, &mut out);
-            piece.clear();
-        }
-    }
-    let whole = piece.len() - piece.len() % 4;
-    append(&piece[..whole], &mut out);
+    let mut out = Vec::with_capacity(symbols.saturating_sub(phase) / 4 * 3 + 3);
+    let rest = pieces(message, &SYMBOL, phase, |piece| append(piece, &mut out));
     // Two or three symbols more are one or two bytes; one alone is none.
-    if piece.len() - whole >= 2 {
-        append(&piece[whole..], &mut out);
+    if rest.len() >= 2 {
+        append(&rest, &mut out);
     }
     out
 }
@@ -82,41 +124,17 @@ fn append(symbols: &[u8], data: &mut Vec<u8>) {
     }
 }
 
-/// How many characters the message holds that a decoder of groups of four
-/// takes: the symbols and `=`.
-pub(super) fn count_tokens(message: &[u8]) -> usize {
-    message
-        .iter()
-        .filter(|byte| is_symbol(**byte) || **byte == b'=')
-        .count()
-}
-
 /// The bytes a decoder gives that reads the message's symbols and `=` four at
 /// a time from the `phase`-th of them: three bytes for a group, two where it
 /// holds one `=` and one where it holds more, with `=` counted as zero, and
-/// the next group read as any other. `tokens` is [`count_tokens`] of the same
-/// message. A group the message's end cuts short gives nothing.
+/// the next group read as any other. `tokens` is [`count`] and [`padding`] of
+/// the same message together. A group the message's end cuts short gives
+/// nothing.
 pub(super) fn decode_tokens(message: &[u8], phase: usize, tokens: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(tokens.saturating_sub(phase) / 4 * 3);
-    let mut piece: Vec<u8> = Vec::with_capacity(PIECE);
-    let mut skipped = 0;
-    for token in message
-        .iter()
-        .copied()
-        .filter(|byte| is_symbol(*byte) || *byte == b'=')
-    {
-        if skipped < phase {
-            skipped += 1;
-            continue;
-        }
-        piece.push(token);
-        if piece.len() == PIECE {
-            append_groups(&piece, &mut out);
-            piece.clear();
-        }
-    }
-    let whole = piece.len() - piece.len() % 4;
-    append_groups(&piece[..whole], &mut out);
+    pieces(message, &TOKEN, phase, |piece| {
+        append_groups(piece, &mut out);
+    });
     out
 }
 

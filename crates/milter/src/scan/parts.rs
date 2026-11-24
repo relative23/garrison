@@ -78,19 +78,20 @@ fn decodable(value: &[u8]) -> bool {
 fn content_transfer_encodings(message: &[u8]) -> Vec<Vec<u8>> {
     let name = b"content-transfer-encoding";
     let mut values = Vec::new();
-    let mut at = 0;
-    while at < message.len() {
-        let end = line_end(message, at);
-        let line = trim_cr(&message[at..end]);
-        let mut next = after(message, end);
-        if line
-            .first()
-            .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
-        {
-            at = next; // A continuation line starts no header.
+    // The lines that begin with the name, found by its first `-`.
+    for dash in memchr::memchr_iter(b'-', message) {
+        let Some(at) = dash.checked_sub(7) else {
+            continue;
+        };
+        let begins = message
+            .get(at..at + name.len())
+            .is_some_and(|found| found.eq_ignore_ascii_case(name));
+        if !begins || (at > 0 && message[at - 1] != b'\n') {
             continue;
         }
-        let mut logical = line.to_vec();
+        let end = line_end(message, at);
+        let mut next = after(message, end);
+        let mut logical = trim_cr(&message[at..end]).to_vec();
         while next < message.len() && matches!(message[next], b' ' | b'\t') {
             let cont = line_end(message, next);
             logical.push(b' ');
@@ -102,7 +103,6 @@ fn content_transfer_encodings(message: &[u8]) -> Vec<Vec<u8>> {
         {
             values.push(logical[colon + 1..].to_vec());
         }
-        at = next;
     }
     values
 }
@@ -134,10 +134,7 @@ fn first_token(value: &[u8]) -> &[u8] {
 }
 
 pub(super) fn line_end(data: &[u8], from: usize) -> usize {
-    data[from..]
-        .iter()
-        .position(|byte| *byte == b'\n')
-        .map_or(data.len(), |at| from + at)
+    memchr::memchr(b'\n', &data[from..]).map_or(data.len(), |at| from + at)
 }
 
 pub(super) fn after(data: &[u8], line_end: usize) -> usize {

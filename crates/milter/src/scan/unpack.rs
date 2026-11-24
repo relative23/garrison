@@ -159,10 +159,7 @@ impl Work {
         // Every header, wherever the archive begins: the one before a file,
         // and the directory's entry for it, which is what a program that
         // opens the archive goes by.
-        let mut at = 0;
-        while let Some(offset) = data[at..].windows(2).position(|window| window == b"PK") {
-            let header = at + offset;
-            at = header + 2;
+        for header in memchr::memmem::find_iter(data, b"PK") {
             match data.get(header..header + 4) {
                 Some(ZIP_LISTED) => {
                     if number(data, header + 10, 2).is_some_and(unread) {
