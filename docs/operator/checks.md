@@ -545,7 +545,9 @@ A receipt counts only if nobody else can have written it: it must belong to
 root (or to the collector's own user) and must not be writable by others, nor
 by its group unless that group is root. Otherwise the observation is Unknown.
 Let the job write it as root with mode `0644`. Where the card cannot read the
-receipt, it says why and what mends it: there is no file at `path`, which the
+receipt, it says why and what mends it: the collector's unit hides the place,
+as it does `/home` and `/tmp` (see [below](#paths-the-collector-cannot-see));
+there is no file at `path`, which the
 job has not written; the collector's user may not search a folder on the way
 there (`chmod o+x` that folder) or may not open the file, as where a job
 under umask 027 or 077 writes it with mode 0640 or 0600 (mode `0644` mends

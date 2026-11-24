@@ -1,6 +1,7 @@
 //! The checks of the host itself.
 
 mod backupcheck;
+mod hidden;
 mod host;
 mod hostcare;
 mod receipt;

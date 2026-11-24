@@ -41,6 +41,11 @@ fn no_check_waits_for_a_file_that_another_user_may_replace() {
             "the report, through core",
         ),
         (
+            "providers/hidden.rs",
+            "read_to_string(",
+            "/proc/self/mountinfo, the kernel's",
+        ),
+        (
             "providers/host.rs",
             "read_to_string(",
             "the files below `proc`, which only the kernel writes",

@@ -1322,6 +1322,9 @@ Notable changes for operators and users. The format follows
   the collection run.**
 - **A receipt whose `ok_rows` finds no row to judge is no longer in
   order.** An empty list of rows is Unknown now, as a missing one is.
+- **A receipt in a place the collector's unit hides, such as `/root` or
+  `/tmp`, says so instead of asking for a `chmod`.** Let the job write it
+  where the collector sees it, as under `/var/lib`.
 - **A receipt's time is the same instant for every viewer.** A field or
   column of a receipt with `format = "datetime"` went out as the job wrote
   it, and a time written without its offset, such as `2026-11-17T03:00:00`,

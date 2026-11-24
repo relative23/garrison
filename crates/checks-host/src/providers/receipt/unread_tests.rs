@@ -10,7 +10,7 @@ use super::*;
 use crate::testing::{Canned, config, context, table};
 
 /// A receipt only this user can change, whatever the umask.
-fn write(path: &std::path::Path, text: &str) {
+fn write(path: &Path, text: &str) {
     std::fs::write(path, text).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).unwrap();
 }
@@ -166,4 +166,34 @@ fn a_fifo_swapped_in_for_the_receipt_never_holds_up_a_collect() {
         held_up
     });
     assert_eq!(held_up, None, "the collect that waited for a writer");
+}
+
+/// Where the collector's sandbox hides the place that holds the receipt,
+/// as the collector's unit hides `/root` and `/tmp`, neither a mode nor the
+/// job mends it: the card says so where the place can be neither searched
+/// nor looked in. Seen as the host's, `/tmp` gets the words for the host,
+/// while a home folder that this user may not search, as `/root`, is never
+/// to be opened to every user: the card says that the unit hides it too.
+#[test]
+fn a_receipt_in_a_place_the_sandbox_hides_says_so() {
+    for (path, place) in [
+        ("/root/garrison-test-hidden/last.json", "/root"),
+        ("/tmp/garrison-test-hidden/last.json", "/tmp"),
+    ] {
+        let receipt = Receipt::new(&table(&format!(
+            "type = \"receipt\"\nid = \"r\"\ntitle = \"R\"\npath = \"{path}\"\nmodules = [\"backups\"]"
+        )))
+        .unwrap();
+        let hides = format!(
+            "The receipt at {path} lies under {place}, which the collector's unit hides from \
+             it: let the job write it where the collector sees it, as under /var/lib \
+             (docs/operator/checks.md, \"Paths the collector cannot see\")."
+        );
+        assert_eq!(receipt.unread(Some(Path::new(place))), hides);
+        let kept_out = std::fs::symlink_metadata(path)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied);
+        let seen = receipt.unread(None);
+        assert_eq!(seen == hides, kept_out, "{path}: {seen}");
+        assert!(!seen.contains("chmod"), "{path}: {seen}");
+    }
 }

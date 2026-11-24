@@ -19,7 +19,7 @@
 
 use std::collections::BTreeSet;
 use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use garrison_core::files::{changed_only_by_trusted, open_regular_file, read_json_with_metadata};
 use garrison_core::modules::ModuleId;
@@ -27,6 +27,7 @@ use garrison_core::observations::{Evidence, Observation, Required, State};
 use garrison_core::time::Written;
 use serde_json::Value;
 
+use super::hidden;
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
@@ -275,25 +276,44 @@ impl Receipt {
         }
     }
 
-    /// Why there is no receipt to read, with what mends it: none at its
-    /// path, which a job of the operator's writes; a folder on the way that
-    /// the collector's user may not search; a file it may not open, as one
-    /// a job writes under umask 027 or 077; a link or no plain file; or a
-    /// file too large or no JSON object or list.
-    fn unread(&self) -> String {
+    /// Why there is no receipt to read, with what mends it: a place that the
+    /// collector's sandbox hides, `hidden` where it hides one of the path;
+    /// none at its path, which a job of the operator's writes; a folder on
+    /// the way that the collector's user may not search; a file it may not
+    /// open, as one a job writes under umask 027 or 077; a link or no plain
+    /// file; or a file too large or no JSON object or list.
+    fn unread(&self, hidden: Option<&Path>) -> String {
         let path = self.path.display();
         let denied = |error: &std::io::Error| error.kind() == std::io::ErrorKind::PermissionDenied;
-        match std::fs::symlink_metadata(&self.path) {
+        let looked = std::fs::symlink_metadata(&self.path);
+        // The deepest folder that can be looked at is the one that cannot be
+        // searched, where one cannot be.
+        let folder = looked.as_ref().is_err_and(denied).then(|| {
+            self.path
+                .ancestors()
+                .skip(1)
+                .find(|folder| std::fs::symlink_metadata(folder).is_ok())
+                .unwrap_or(&self.path)
+        });
+        // Neither a mode nor the job mends what the sandbox hides, and a home
+        // folder, which the collector's unit hides, is opened to nobody.
+        let home =
+            folder.filter(|folder| hidden::HOMES.iter().any(|home| *folder == Path::new(home)));
+        if let Some(place) = hidden.or(home)
+            && looked
+                .as_ref()
+                .is_err_and(|error| denied(error) || error.kind() == std::io::ErrorKind::NotFound)
+        {
+            return format!(
+                "The receipt at {path} lies under {}, which the collector's unit hides from it: \
+                 let the job write it where the collector sees it, as under /var/lib \
+                 (docs/operator/checks.md, \"Paths the collector cannot see\").",
+                place.display()
+            );
+        }
+        match looked {
             Err(error) if denied(&error) => {
-                // The deepest folder that can be looked at is the one that
-                // cannot be searched.
-                let folder = self
-                    .path
-                    .ancestors()
-                    .skip(1)
-                    .find(|folder| std::fs::symlink_metadata(folder).is_ok())
-                    .unwrap_or(&self.path)
-                    .display();
+                let folder = folder.unwrap_or(&self.path).display();
                 format!(
                     "The receipt at {path} cannot be looked for: the collector's user may not \
                      search the folder {folder}; let every user search it (chmod o+x {folder})."
@@ -361,7 +381,8 @@ impl Provider for Receipt {
             .map(|observation| observation.with_scope(self.scope.clone()))
         };
         let Some((document, metadata)) = read else {
-            let unknown = base(State::Unknown)?.with_findings(vec![self.unread()]);
+            let unknown = base(State::Unknown)?
+                .with_findings(vec![self.unread(hidden::place(&self.path).as_deref())]);
             return Ok(Report::of(unknown));
         };
         // A result that someone else could have written is not evidence.

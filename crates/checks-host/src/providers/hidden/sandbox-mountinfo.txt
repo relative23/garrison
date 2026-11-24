@@ -1,0 +1,10 @@
+1097 910 0:29 /@ / rw,relatime shared:552 master:1 - btrfs /dev/mapper/root rw,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=256,subvol=/@
+1121 1097 0:26 / /run rw,nosuid,nodev,relatime shared:737 master:12 - tmpfs run rw,mode=755,inode64,huge=advise
+1124 1121 0:82 / /run/user/1000 rw,nosuid,nodev,relatime shared:758 master:670 - tmpfs tmpfs rw,size=6545228k,nr_inodes=1636307,mode=700,uid=1000,gid=1000,inode64,huge=advise
+1170 1097 0:29 /@home /home rw,relatime shared:768 master:162 - btrfs /dev/mapper/root rw,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=259,subvol=/@home
+1173 1097 0:58 / /tmp rw,nosuid,nodev shared:772 master:177 - tmpfs tmpfs rw,size=32726144k,nr_inodes=1048576,inode64,huge=advise,usrquota
+1186 1170 0:82 /systemd/inaccessible/dir /home ro,nosuid,nodev,noexec,relatime shared:769 master:670 - tmpfs tmpfs rw,size=6545228k,nr_inodes=1636307,mode=700,uid=1000,gid=1000,inode64,huge=advise
+1187 1097 0:82 /systemd/inaccessible/dir /root ro,nosuid,nodev,noexec,relatime shared:791 master:670 - tmpfs tmpfs rw,size=6545228k,nr_inodes=1636307,mode=700,uid=1000,gid=1000,inode64,huge=advise
+1189 1121 0:82 /systemd/inaccessible/dir /run/user ro,nosuid,nodev,noexec,relatime shared:765 master:670 - tmpfs tmpfs rw,size=6545228k,nr_inodes=1636307,mode=700,uid=1000,gid=1000,inode64,huge=advise
+1198 1173 0:58 /systemd-private-994b3b7d2c11478585842ed861f759d9-run-p1339936-i1381618.service-OjJIQh/tmp /tmp rw,nosuid,nodev shared:774 master:177 - tmpfs tmpfs rw,size=32726144k,nr_inodes=1048576,inode64,huge=advise,usrquota
+1199 1097 0:29 /@/var/tmp/systemd-private-994b3b7d2c11478585842ed861f759d9-run-p1339936-i1381618.service-W0YCWA/tmp /var/tmp rw,relatime shared:792 master:1 - btrfs /dev/mapper/root rw,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=256,subvol=/@
