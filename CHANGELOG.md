@@ -665,6 +665,9 @@ Notable changes for operators and users. The format follows
 - **Two `garrison backup-check` runs that write one report take turns**, so
   that one never writes back an older check or restore over the one the
   other made meanwhile.
+- **`garrison nginx` prints a block that listens on the port
+  `public_origin` names**, and its redirect from plain HTTP keeps that port;
+  it listened on 443 whatever the origin said.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year
