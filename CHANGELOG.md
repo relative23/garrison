@@ -605,6 +605,10 @@ Notable changes for operators and users. The format follows
   everyone out, and says what keeps the kept one from working.
 - **`garrison access init` and `bind-role` work on a Stalwart with more than
   64 roles, and `bind-role` names why a role's rights cannot be evaluated.**
+- **A `garrison access` command no longer waits without a word for a lock
+  that another process holds.** Where no command runs, remove
+  `access-policy.json.lock`, which an earlier release made readable for
+  others.
 - **An action added after `garrison access init` reaches its users.**
   `init` gives the `administrator` profile every action of `[[actions]]`
   and the `operator` profile those marked `operator = true`, as

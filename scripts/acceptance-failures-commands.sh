@@ -4,10 +4,11 @@
 # restore takes away the copies interrupted ones left in /var/tmp, and
 # nothing of other users' there, and backup-check keeps no check from a
 # report another user could write. `garrison access` follows no link that
-# another user put in the policy's folder and takes no lock that is not its
-# own, makes a missing folder the broker can read, names what a role lacks
-# where none of Stalwart's qualifies, and its profiles follow `[[actions]]`,
-# which the broker takes once it restarts.
+# another user put in the policy's folder, takes no lock that is not its own
+# and waits for none that another process holds, makes a missing folder the
+# broker can read, names what a role lacks where none of Stalwart's
+# qualifies, and its profiles follow `[[actions]]`, which the broker takes
+# once it restarts.
 # They use that script's helpers and its `new`.
 # shellcheck disable=SC2154
 
@@ -103,6 +104,17 @@ scenario_access_links() {
         "/srv/shared/access.json.lock has another name too (a hard link)"
     check "and that file keeps its mode" \
         'test "$(cat /etc/acceptance-target)" = kept && test "$(stat -c %a /etc/acceptance-target)" = 644'
+    # A lock that an earlier release made readable for others, which a
+    # process of another user opened then and holds for ten seconds.
+    inside 'rm /srv/shared/access.json.lock && touch /srv/shared/access.json.lock &&
+        chmod 644 /srv/shared/access.json.lock &&
+        (runuser -u nobody -- flock -x /srv/shared/access.json.lock sleep 10 </dev/null >/dev/null 2>&1 &) &&
+        sleep 1'
+    refused "a lock that another user's process holds is said at once, not waited for" \
+        '/opt/garrison/current/bin/garrison --config /root/shared.toml access deny 5' \
+        "/srv/shared/access.json.lock is held by another process"
+    # Until that process has ended.
+    inside 'flock -x /srv/shared/access.json.lock true'
     # Links at every name a backup may take in the next seconds.
     inside 'rm /srv/shared/access.json.lock && now=$(date -u +%s) &&
         for second in 0 1 2 3 4 5; do

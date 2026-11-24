@@ -152,11 +152,19 @@ impl Folder {
                 path.display()
             ));
         }
-        // One that an earlier release made may be readable for others.
+        // One that an earlier release made may be readable for others, and
+        // a process that opened it then can hold it: it is not waited for.
         rustix::fs::fchmod(&file, Mode::RUSR | Mode::WUSR).map_err(|error| failed(&path, error))?;
-        rustix::fs::flock(&file, FlockOperation::LockExclusive)
-            .map_err(|error| failed(&path, error))?;
-        Ok(file)
+        match rustix::fs::flock(&file, FlockOperation::NonBlockingLockExclusive) {
+            Ok(()) => Ok(file),
+            Err(Errno::WOULDBLOCK) => Err(format!(
+                "{} is held by another process, as another `garrison access` command: try \
+                 again once it has ended. Where none runs, remove the file, which an earlier \
+                 release made readable for others, and run the command again.",
+                path.display()
+            )),
+            Err(error) => Err(failed(&path, error)),
+        }
     }
 
     /// What is at the policy's name now, looked at without reading it.
