@@ -3,6 +3,7 @@
 //! clock, free space, SELinux and recent events.
 
 use std::fs;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -196,14 +197,14 @@ fn space() -> Vec<Finding> {
         .collect()
 }
 
-/// Where SELinux says what it does, and where the installer keeps the
-/// module it loaded (install/selinux.rs); a test names other places.
+/// Where SELinux says what it does, and where the installer writes the
+/// module it loads (install/selinux.rs); a test names other places.
 pub(super) struct SeLinux<'a> {
     /// `1` where SELinux enforces.
     pub(super) enforce: &'a str,
     /// The boolean that lets nginx connect to every port.
     pub(super) everywhere: &'a str,
-    /// The module's text as the installer last loaded it.
+    /// The module's text as the installer last wrote it, before it loads it.
     pub(super) module: &'a str,
 }
 
@@ -225,19 +226,51 @@ fn module_port(text: &str) -> Option<u16> {
     })
 }
 
+const SEMODULE: &str = "/usr/sbin/semodule";
+
+/// The module SELinux has loaded, as `semodule` extracts it into a folder
+/// of doctor's own, or why there is none to read. The installer's file is
+/// written before the module is loaded, so it names the port of a load that
+/// may have failed.
+fn loaded_module() -> Result<String, String> {
+    let folder = std::env::temp_dir().join(format!("garrison-doctor-{}", std::process::id()));
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&folder)
+        .map_err(|error| format!("{}: {error}", folder.display()))?;
+    let extracted = Command::new(SEMODULE)
+        .args(["-c", "-E", "garrison"])
+        .current_dir(&folder)
+        .output();
+    let text = fs::read_to_string(folder.join("garrison.cil"));
+    let _ = fs::remove_dir_all(&folder);
+    match (text, extracted) {
+        (Ok(text), _) => Ok(text),
+        (Err(_), Ok(output)) => Err(format!(
+            "`semodule -c -E garrison` extracted no module ({})",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        (Err(_), Err(error)) => Err(format!("`semodule` did not run ({error})")),
+    }
+}
+
 fn selinux(config: &Config) -> Option<Finding> {
-    let listed = output("/usr/sbin/semodule", &["-l"]).is_some_and(|list| {
+    let listed = output(SEMODULE, &["-l"]).is_some_and(|list| {
         list.lines()
             .any(|line| line.split_whitespace().next() == Some("garrison"))
     });
-    selinux_at(&SELINUX, listed, config.web.port)
+    selinux_at(&SELINUX, listed.then(loaded_module), config.web.port)
 }
 
 /// Whether SELinux, where it is in use, lets nginx (`httpd_t`) reach the
 /// web service on `port`: only a port of a type it may connect to, as the
-/// module gives the port it was loaded for. `listed`: whether `semodule -l`
-/// lists the module.
-pub(super) fn selinux_at(places: &SeLinux<'_>, listed: bool, port: u16) -> Option<Finding> {
+/// module SELinux has loaded gives it. `loaded`: that module's text, or why
+/// it could not be read, where `semodule -l` lists it.
+pub(super) fn selinux_at(
+    places: &SeLinux<'_>,
+    loaded: Option<Result<String, String>>,
+    port: u16,
+) -> Option<Finding> {
     let enforcing = fs::read_to_string(places.enforce).ok()?.trim() == "1";
     let everywhere = fs::read_to_string(places.everywhere)
         .is_ok_and(|value| value.split_whitespace().next() == Some("1"));
@@ -246,7 +279,7 @@ pub(super) fn selinux_at(places: &SeLinux<'_>, listed: bool, port: u16) -> Optio
             "SELinux lets nginx connect to every port (httpd_can_network_connect)",
         ));
     }
-    if !listed {
+    let Some(loaded) = loaded else {
         return Some(if enforcing {
             Finding::fail(
                 "SELinux is enforcing and the module garrison is not loaded, so nginx cannot reach \
@@ -259,12 +292,10 @@ pub(super) fn selinux_at(places: &SeLinux<'_>, listed: bool, port: u16) -> Optio
                 "Run the installer again.",
             )
         });
-    }
-    let labelled = fs::read_to_string(places.module)
-        .map_err(|error| format!("{} cannot be read ({error})", places.module))
-        .and_then(|text| {
-            module_port(&text).ok_or_else(|| format!("{} names no port", places.module))
-        });
+    };
+    let labelled = loaded.and_then(|text| {
+        module_port(&text).ok_or_else(|| "the loaded module names no port".to_owned())
+    });
     Some(match labelled {
         Ok(labelled) if labelled == port => Finding::ok(format!(
             "the SELinux module garrison is loaded and lets nginx reach the web service on port \
@@ -275,7 +306,19 @@ pub(super) fn selinux_at(places: &SeLinux<'_>, listed: bool, port: u16) -> Optio
                 "the SELinux module garrison lets nginx reach port {labelled}, not {port} \
                  (web.port)"
             );
-            let fix = "Run the installer again; it loads the module for web.port.";
+            // The installer loads nothing while its file is the one it
+            // would write: after a load that failed, only a load by hand.
+            let written = fs::read_to_string(places.module)
+                .ok()
+                .and_then(|text| module_port(&text));
+            let fix = if written == Some(port) {
+                format!(
+                    "Load the module the installer wrote for web.port: semodule -i {}",
+                    places.module
+                )
+            } else {
+                "Run the installer again; it loads the module for web.port.".to_owned()
+            };
             if enforcing {
                 Finding::fail(format!("{what}, so nginx answers 502"), fix)
             } else {

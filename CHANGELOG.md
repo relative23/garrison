@@ -1869,6 +1869,9 @@ Notable changes for operators and users. The format follows
   in its way without the installer**, which left nginx answering 502, and
   `garrison doctor`'s line of a 502 says whether anything listens on
   `web.port`.
+- **`garrison doctor` reads the port of the SELinux module SELinux has
+  loaded**, no longer that of the file the installer writes before it loads
+  it, and names the `semodule -i` that repeats a load that failed.
 
 ## [0.1.2] - 2026-11-13
 
