@@ -156,8 +156,8 @@ impl Folder {
             Ok(()) => Ok(file),
             Err(Errno::WOULDBLOCK) => Err(format!(
                 "{} is held by another process, as another `garrison access` command: try \
-                 again once it has ended. Where none runs, remove the file, which an earlier \
-                 release made readable for others, and run the command again.",
+                 again once it has ended. Where none runs, remove the file and run the command \
+                 again.",
                 path.display()
             )),
             Err(error) => Err(failed(&path, error)),
