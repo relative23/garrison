@@ -243,3 +243,42 @@ fn a_502_names_the_restart_where_nothing_listens_on_web_port() {
         );
     }
 }
+
+/// Only Stalwart's exporter's own answer is taken for it: Prometheus text,
+/// or its refusal of a scrape without its credential. A web page that a
+/// webmail's server block answers for any path serves no metrics.
+#[test]
+fn only_the_exporters_own_answer_is_taken_for_it() {
+    let page = "<html><body>Welcome to our webmail</body></html>";
+    let exported = "# HELP stalwart_up Up.\n# TYPE stalwart_up gauge\nstalwart_up 1\n";
+    for (status, kind, body, public) in [
+        (200, "text/html", page, false),
+        (200, "text/plain; version=0.0.4", exported, true),
+        (401, "text/plain", "", true),
+    ] {
+        let server = garrison_testing::tls::serve_until(
+            vec![format!(
+                "HTTP/1.1 {status} X\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n\
+                 Connection: close\r\n\r\n{body}",
+                body.len()
+            )],
+            2036,
+            1,
+            1,
+        );
+        let roots = Arc::new(server.roots.clone());
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        config.deployment.issuer.clone_from(&server.url);
+        config.deployment.admin_url = format!("{}/admin/", server.url);
+        let found = metrics(&config, &roots);
+        server.finish();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(
+            found[0].level == Level::Fail,
+            public,
+            "{status} {kind}: {}",
+            found[0].line()
+        );
+    }
+}

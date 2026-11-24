@@ -134,7 +134,32 @@ pub(super) fn interface(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Find
     }
 }
 
+/// Whether `body` is the text of a Prometheus exporter: a `# TYPE` line or
+/// a sample, a series' name and a number, and no markup, which a web page
+/// has.
+fn exported(body: &str) -> bool {
+    let sample = |line: &str| {
+        let name: String = line
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':'))
+            .collect();
+        !name.is_empty()
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && line.len() > name.len()
+            && line
+                .split_whitespace()
+                .last()
+                .is_some_and(|value| value.parse::<f64>().is_ok())
+    };
+    !body.contains('<')
+        && body
+            .lines()
+            .any(|line| line.starts_with("# TYPE ") || sample(line))
+}
+
 /// The exporter that `stalwart setup` enables must not answer from outside.
+/// Only its own answer counts: its text, or 401 for a scrape without its
+/// credential; a page that answers every path serves no metrics.
 pub(super) fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Finding> {
     let mut origins = vec![origin(&config.deployment.issuer)];
     let admin = origin(&config.deployment.admin_url);
@@ -146,7 +171,10 @@ pub(super) fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Findin
         .map(|origin| {
             let url = format!("{origin}/metrics/prometheus");
             match get(&url, roots) {
-                Ok(answer) if matches!(answer.status, 403 | 404 | 410) => {
+                Ok(answer)
+                    if matches!(answer.status, 403 | 404 | 410)
+                        || (answer.status == 200 && !exported(&answer.body)) =>
+                {
                     Finding::ok(format!("{origin} does not serve Stalwart's metrics"))
                 }
                 Ok(answer) if matches!(answer.status, 200 | 401) => Finding::fail(

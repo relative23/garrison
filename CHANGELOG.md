@@ -1875,6 +1875,9 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` judges the free space where `/var/backups` will be
   made** on a host that has none yet, as the installer does, where it was
   unknown until the first upgrade.
+- **`garrison doctor` no longer calls a web page at `/metrics/prometheus`
+  Stalwart's public exporter**, as a webmail answers one for any path: only
+  the exporter's own text, or its 401 without a credential, counts.
 
 ## [0.1.2] - 2026-11-13
 
