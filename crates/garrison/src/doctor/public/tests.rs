@@ -282,3 +282,10 @@ fn only_the_exporters_own_answer_is_taken_for_it() {
         );
     }
 }
+
+/// An IPv6 origin is named as a URL names it, in brackets, before its port.
+#[test]
+fn an_ipv6_origin_is_named_in_brackets() {
+    let found = certificate("https://[::1]:1", &roots());
+    assert!(found.what.starts_with("TLS to [::1]:1: "), "{}", found.what);
+}

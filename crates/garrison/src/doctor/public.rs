@@ -43,10 +43,15 @@ fn authority(origin: &str) -> (&str, u16) {
 /// the port `public_origin` names.
 pub(super) fn certificate(origin: &str, roots: &Arc<RootCertStore>) -> Finding {
     let (name, port) = authority(origin);
-    let shown = if port == 443 {
-        name.to_owned()
+    let host = if name.contains(':') {
+        format!("[{name}]")
     } else {
-        format!("{name}:{port}")
+        name.to_owned()
+    };
+    let shown = if port == 443 {
+        host
+    } else {
+        format!("{host}:{port}")
     };
     match probe(name, port, name, false, roots, time::now()) {
         Ok(probed) if probed.days < 0 => Finding::fail(
