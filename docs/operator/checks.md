@@ -45,7 +45,7 @@ observation the checks report is in [observation ids](observations.md).
 | `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; an alias, such as `sshd.service`, shows the state of the unit it names and names that unit ("Alias of"). Timers show their schedule and next run. For one-shot jobs see below |
 | `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `max_domains` (20, at most 100), `modules` | Certificate validity per endpoint; see below |
 | `mail-flow` | `checks` (default: all of `spam`, `milter`, `authentication`, `tls`) | A week of the recorded events in numbers; see below |
-| `stalwart` | `milter_host`, `milter_port`, `max_accounts` (1000, at most 20 000: how many of Stalwart's accounts the mailbox storage reads) | Spam settings, classifier, milter, queue, mailbox storage, running version |
+| `stalwart` | `milter_host`, `milter_port`, `max_accounts` (1000, at most 20 000: how many of Stalwart's accounts the mailbox storage reads, the oldest first) | Spam settings, classifier, milter, queue, mailbox storage, running version |
 | `prometheus` | `path` | Native counters and gauges for the dashboard |
 | `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
 | `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning, and so is one dated more than five minutes ahead of the host's clock, whose age is not known; where both are there the newer one counts, also for the dashboard's signature age |
@@ -171,7 +171,7 @@ warning. Without `endpoints` the check asks Stalwart what to probe: every
 listener that speaks TLS (25 with STARTTLS, 465, 993, 443 and whatever else
 is set up), on the address it is bound to, or on 127.0.0.1 where it listens
 on every address, once under the name of each mail host of Stalwart's
-domains, of the first `max_domains` of them; the card says when Stalwart has
+domains, of the `max_domains` oldest of them; the card says when Stalwart has
 more. It
 probes 24 such endpoints at the most; where there are more, the card says how
 many and is Partial where it would be OK. A listener added later is then
@@ -191,7 +191,7 @@ minutes. They count; none of them is a verdict, except where it says so.
 
 - `spam`: ham and spam by day, with the training runs of the classifier, on
   the Spam filter page; and the same by the domain of the mailbox the mail
-  went to, which Stalwart's first 20 000 accounts name, read while the run
+  went to, which Stalwart's 20 000 oldest accounts name, read while the run
   has time: mail to an account after those is counted under "unknown", and
   the card says how many there are and is Partial. Where Stalwart did not
   give them to the collector's key, or the collector has no key for
@@ -372,19 +372,20 @@ checks is up, the records left say "not asked", and the domain is Partial, or
 Unknown where nothing was asked; an MTA-STS policy that is due is then fetched
 in the next run. Of each domain it asks the first 60 records Stalwart names;
 where Stalwart names more, the card says how many and is Partial where it
-would be OK. The check takes the first `max_domains` of the domains
-Stalwart lists, 100 at the most: each run asks every record of each of them
+would be OK. The check takes the `max_domains` oldest of Stalwart's
+domains (Stalwart 1.2.0 numbers them in the order it makes them), 100 at
+the most: each run asks every record of each of them
 again, and each is a card of its own. Where Stalwart has more, the card "DNS
 records" is Unknown and says how many it has; it sends no notification. With
 more than 100 domains it stays Unknown, since Garrison does not check the
-records of the domains after the first 100.
+records of the domains after the oldest 100.
 
 ## `reputation`
 
 A receiving server looks the sender's address up in blocklists and asks for
 its reverse name. The check asks the same questions, every six hours, for
 every address of the mail hosts: `hosts`, or without it the hosts Stalwart
-names in the MX records of its domains, of the first `max_domains` of them;
+names in the MX records of its domains, of the `max_domains` oldest of them;
 the cards say when Stalwart has more. A reading made with another resolver
 than the run's, the one `resolver` names or else the first of
 `/etc/resolv.conf`, or with other `hosts`, `max_domains`, `lists` or

@@ -62,9 +62,9 @@ fn fetch(lab: &Lab, account_id: &str) -> (Account, BTreeMap<String, Role>, Authe
 }
 
 /// The tests that create or remove accounts hold this shared while they
-/// run, their clean-up included; the test that counts every account of the
-/// server holds it alone: Stalwart lists the newest accounts first, so one
-/// added or removed meanwhile moves the others across a page.
+/// run, their clean-up included; the tests that read every account of the
+/// server hold it alone, since one added or removed meanwhile changes what
+/// they read.
 static ACCOUNTS: RwLock<()> = RwLock::new(());
 
 fn creating_accounts() -> RwLockReadGuard<'static, ()> {

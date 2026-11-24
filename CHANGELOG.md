@@ -1085,11 +1085,12 @@ Notable changes for operators and users. The format follows
 - **A long DNS answer no longer stops the DNS and reputation checks where
   the resolver refuses TCP.** That record or host is named with why; let the
   resolver answer over TCP on port 53.
-- **The DNS, reputation and TLS checks take their first `max_domains`
-  domains however many Stalwart has, and count the rest.**
-- **The mailbox storage card reads Stalwart's accounts up to `max_accounts`
-  and says how many it leaves.** Raise `max_accounts` where it names some.
-- **Spam and ham by domain names the domains of Stalwart's first 20 000
+- **The DNS, reputation and TLS checks take Stalwart's `max_domains` oldest
+  domains however many it has, and count the rest.**
+- **The mailbox storage card reads Stalwart's oldest accounts up to
+  `max_accounts` and says how many it leaves.** Raise `max_accounts` where it
+  names some.
+- **Spam and ham by domain names the domains of Stalwart's 20 000 oldest
   accounts, not of the first 500 alone, and says how many it leaves.**
 - **The TLS check probes a listener Stalwart binds to one address on that
   address.**

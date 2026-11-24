@@ -63,3 +63,61 @@ fn objects_beyond_the_500_of_one_get_are_listed_in_pages() {
         Err(Error::Denied("x:Account/query was refused".to_owned()))
     );
 }
+
+/// The pages list the objects of a kind oldest first, as a `/get` of all of
+/// them lists them and as the checks of 0.1.2 took them: one made later,
+/// also after one was removed, comes last and pushes none of the first out.
+/// So for the domains, of which the network checks take the first
+/// `max_domains`, and the accounts, of which the mailbox storage takes the
+/// first `max_accounts`.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn the_pages_list_the_oldest_first_and_one_made_later_last() {
+    let _alone = ACCOUNTS.write().unwrap_or_else(PoisonError::into_inner);
+    let mut lab = Lab::from_environment();
+    let tag = unique();
+    let domain = domain_id(&lab);
+    let client = keyed(
+        &mut lab,
+        &tag,
+        &[
+            "authenticate",
+            "sysDomainGet",
+            "sysDomainQuery",
+            "sysAccountGet",
+            "sysAccountQuery",
+        ],
+    );
+    let mut seen = Vec::new();
+    for kind in ["Domain", "Account"] {
+        // By name, the ones made later would come first; the one made after
+        // a removal still comes last, as no ID is given again.
+        for name in ["zz", "aa", "mm"] {
+            if name == "mm" {
+                let (_, first) = lab.created.remove(lab.created.len() - 2);
+                lab.call(&format!("x:{kind}/set"), &json!({"destroy": [first]}));
+            }
+            let object = if kind == "Domain" {
+                json!({"name": format!("{name}{tag}.example.test"), "dkimManagement": {"@type": "Manual"}})
+            } else {
+                json!({"@type": "User", "name": format!("{name}{tag}"), "domainId": domain})
+            };
+            lab.create(kind, &object);
+        }
+        let all = lab.call(
+            &format!("x:{kind}/get"),
+            &json!({"ids": null, "properties": ["id"]}),
+        );
+        let listed = client.listed::<Value>(kind, &["id"], 100_000, || true);
+        let newest = lab.created.last().map(|(_, id)| json!({"id": id}));
+        seen.push((kind, all["list"].as_array().cloned(), listed, newest));
+    }
+    // What was made goes before anything is judged, so that a failure
+    // leaves no domain behind for the tests after this one.
+    drop(lab);
+    for (kind, all, listed, newest) in seen {
+        let (all, listed) = (all.unwrap(), listed.unwrap().objects);
+        assert_eq!(listed[..all.len()], all[..], "{kind}");
+        assert_eq!(listed.last(), newest.as_ref(), "{kind}");
+    }
+}

@@ -84,3 +84,27 @@ fn accounts_after_the_first_max_accounts_are_counted_and_named() {
     );
     assert_eq!(field(&card, "User accounts"), json!(100));
 }
+
+/// The first `max_accounts` are the oldest, as earlier releases read them:
+/// the oldest account's full mailbox is warned of, and the account made
+/// after the first `max_accounts` is the one left out.
+#[test]
+fn the_oldest_accounts_are_read_and_a_newer_one_is_left_out() {
+    let card = mailbox_storage(accounts(101, 0), "max_accounts = 100");
+    assert_eq!(
+        (card.state, card.findings.clone()),
+        (
+            State::Warning,
+            vec![
+                "user0@example.test uses 90 % or more of its quota.".to_owned(),
+                "Stalwart has 101 accounts; only the first 100 are read (`max_accounts`)."
+                    .to_owned()
+            ]
+        )
+    );
+    let rows = &card.table.as_ref().unwrap().rows;
+    assert!(
+        rows.iter()
+            .all(|row| row[0] != json!("user100@example.test"))
+    );
+}
