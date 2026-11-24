@@ -44,7 +44,7 @@ function page(shell, markup, first) {
   const links = first
     ? [
         ...chunks(first.module).map((file) => `<link rel="modulepreload" crossorigin href="/admin/${file}">`),
-        ...first.requests.map((path) => `<link rel="preload" href="/api/${path}" as="fetch" crossorigin="anonymous">`),
+        ...first.requests.map((path) => `<link rel="preload" href="/api/${path}" as="fetch">`),
       ]
     : [];
   // Functions as replacements: a "$" in the stylesheet or the markup stays as it is.

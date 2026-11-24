@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 import type { Preferences } from "../src/api/client";
 import { metrics, session, status } from "./support/fixtures";
@@ -124,6 +124,39 @@ describe("settings", () => {
       ),
     ).toBeTruthy();
     expect(screen.queryByText("Settings could not be saved.")).toBeNull();
+  });
+});
+
+describe("settings saved in another tab", () => {
+  const channels: BroadcastChannel[] = [];
+  afterEach(() => {
+    for (const channel of channels.splice(0)) channel.close();
+  });
+
+  it("are taken by every box not changed here, and a save here keeps them", async () => {
+    const server = serve({ ...signedIn(), "PUT preferences": echo });
+    const other = new BroadcastChannel("garrison-session");
+    channels.push(other);
+    openApp("/admin/preferences");
+    const box = (name: string | RegExp) => screen.getByRole("checkbox", { name });
+    await screen.findByRole("checkbox", { name: "Backups" });
+    // Changed here and not saved yet: the theme and the Antivirus box.
+    fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    fireEvent.click(box("Antivirus"));
+    // The other tab saves a theme, hides Backups and the switch rows, and says so.
+    kept = { theme: "system", hiddenModules: ["backups"], showSwitch: false };
+    other.postMessage("changed");
+    await waitFor(() => expect(box("Backups")).toHaveProperty("checked", false));
+    expect(box(/^Show “Switch to Stalwart WebUI”/)).toHaveProperty("checked", false);
+    expect(box("Antivirus")).toHaveProperty("checked", false);
+    expect(screen.getByRole("radio", { name: "Dark" })).toHaveProperty("checked", true);
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await screen.findByText("Settings saved.");
+    expect(server.requests("PUT preferences")[0]?.body).toEqual({
+      theme: "dark",
+      hiddenModules: ["antivirus", "backups"],
+      showSwitch: false,
+    });
   });
 });
 

@@ -1,5 +1,6 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 
+import { ApiError } from "../src/api/client";
 import { Attacks } from "../src/modules/Attacks";
 import { attacks, coverage, observation, status } from "./support/fixtures";
 import { renderView } from "./support/render";
@@ -76,7 +77,7 @@ describe("Attacks & bans", () => {
 
   it("say that the module's checks could not be read when the status cannot be", async () => {
     serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks() } });
-    renderView(<Attacks />, { status: new Error("The status database is not readable") });
+    renderView(<Attacks />, { status: new ApiError(503, "The status database is not readable") });
     await screen.findByRole("table", { name: "Addresses" });
     // Where the collector's checks would be, such as the sending addresses.
     const notice = screen.getByText("The collector's checks of this module could not be read.").closest("[role]");
@@ -87,7 +88,7 @@ describe("Attacks & bans", () => {
   it("say that a refresh of the status failed above the checks they still show", async () => {
     serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks() } });
     const senders = observation({ id: "senders.accounts", title: "Sending addresses", modules: ["attacks"] });
-    renderView(<Attacks />, { status: status([senders]), refreshError: new Error("The broker is not reachable") });
+    renderView(<Attacks />, { status: status([senders]), refreshError: new ApiError(503, "The broker is not reachable") });
     await screen.findByRole("table", { name: "Addresses" });
     const notice = screen.getByText(/The status could not be refreshed/).closest("[role]");
     expect(notice?.textContent).toContain("The broker is not reachable");

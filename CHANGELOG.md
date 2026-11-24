@@ -178,6 +178,29 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A page opened in a WebKit browser asks for its first answers once, not
+  twice.** It takes the answers the page starts loading with it, as Chrome
+  and Firefox do; on the Maintenance page that is one check of rights less.
+- **A button that goes once pressed leaves the keyboard in the content.**
+  "Show all rows" and "Try again" dropped the focus to the page.
+- **Following a started job costs Stalwart about 30 checks of rights a
+  minute, not 50.** The Maintenance page no longer reads its list again with
+  every look at the job; the list takes the result when the job ends.
+- **A ban reason the page does not know is shown as the server named it.**
+  A page loaded before an upgrade that adds one showed "attacks.reason.…",
+  and a check of a kind it does not know was missing from its status page.
+- **An empty Recent jobs list no longer says that the audit holds no job.**
+  It lists the recent jobs of the actions your profile grants, and says so.
+- **A job whose result is uncertain is announced as a warning.** The
+  Maintenance page showed it in the same calm tile as a success, though its
+  row in Recent jobs says it is not known.
+- **Saving the settings no longer undoes what another tab saved.** A
+  setting not changed on the open Settings page follows a save made
+  meanwhile in another tab or with the header's theme button.
+- **A request that fails is said in Garrison's words, never the browser's.**
+  A list or summary that could not be refreshed says that it shows what was
+  read last, and a failed save, sign-out, start or theme switch gives its
+  reason and an internal error's reference.
 - **After a computer slept, a page no longer shows its checks as current.**
   A page counted the time it waited with the browser's monotonic clock,
   which stops while a computer sleeps on Linux and macOS (measured in Chrome

@@ -24,6 +24,8 @@ import { chromium } from "playwright";
 
 import { skewed, slept, untimed } from "./clocks.mjs";
 import { failingRequests } from "./failures.mjs";
+import { vanishing } from "./focus.mjs";
+import { uncertainResult } from "./jobs.mjs";
 import { paging } from "./paging.mjs";
 import { refusedSession, rightsChange, twoTabs } from "./tabs.mjs";
 import { chosenTheme, firstPaint } from "./themes.mjs";
@@ -159,6 +161,8 @@ const shared = {
   failing,
   /** The theme the signed-in user saved, as read at the sign-in. */
   savedTheme: () => savedTheme,
+  /** axe in both themes and the phone's width, on the flows' own tab. */
+  accessible,
 };
 
 try {
@@ -211,6 +215,7 @@ try {
   expect((await searched).status() === 200, "the event history answers a search");
 
   await paging(shared, page);
+  await vanishing(shared, page);
 
   step = "menu on a phone";
   await page.setViewportSize(PHONE);
@@ -325,6 +330,7 @@ try {
   expect(await page.evaluate(() => document.documentElement.classList.contains("dark")), "the saved theme is used after a reload");
   // Left dark, as this step saved it.
   await chosenTheme(shared, page, "dark");
+  savedTheme = "dark";
 
   step = "maintenance";
   const catalog = await (await page.request.get(`${origin}/api/actions`)).json();
@@ -388,6 +394,7 @@ try {
   await start.click();
   expect((await submitted).status() === 202, "a confirmed action is accepted");
   expect((await dialog.count()) === 0 && (await focused(run)), "the started dialog closes on the button that opened it");
+  await uncertainResult(shared, page, 2);
 
   await failingRequests(shared, catalog);
   await skewed(shared);
@@ -446,5 +453,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `Passed: sign-in, ${PAGES.length} pages, menu, search, paging, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, failures, HTTP/2, a clock ahead and behind, a session without a time left, a computer that slept, a viewer, a change of rights, two tabs, a refused session and sign-out.`,
+  `Passed: sign-in, ${PAGES.length} pages, menu, search, paging, buttons that go, phone, back, first paint, settings, the chosen theme from the first frame, maintenance, an uncertain job, failures, HTTP/2, a clock ahead and behind, a session without a time left, a computer that slept, a viewer, a change of rights, two tabs, a refused session and sign-out.`,
 );

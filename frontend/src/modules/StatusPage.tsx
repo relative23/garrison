@@ -31,7 +31,8 @@ export function StatusPage({ moduleId }: ViewProps) {
   const mine = status.data.observations.filter((item) => item.modules.includes(moduleId));
   const services = mine.filter((item) => item.kind === "service");
   const versions = mine.filter((item) => item.kind === "version");
-  const details = mine.filter((item) => item.kind === "details").sort(byAttention);
+  // Every other check is a card, of a kind this build does not know too: none goes unshown.
+  const details = mine.filter((item) => item.kind !== "service" && item.kind !== "version").sort(byAttention);
   return (
     <>
       <StatusNotice />

@@ -10,6 +10,7 @@ import { safeUrl } from "../lib/format";
 import { follow, href } from "../lib/router";
 import { applyTheme, isDark, useSystemDark, type Theme } from "../lib/theme";
 import { Brand } from "./Brand";
+import { WriteFailure } from "./Failure";
 import { PageSearch } from "./PageSearch";
 import { Sidebar } from "./Sidebar";
 import { Button } from "./ui/button";
@@ -60,6 +61,8 @@ export function Layout({
   // The theme being saved, shown at once; then the saved one, also when the
   // Settings page changed it.
   const [pending, setPending] = useState<Theme | null>(null);
+  // Why the theme of this page could not be saved, said on the page it was pressed on.
+  const [unsaved, setUnsaved] = useState<{ page: string; error: Error } | null>(null);
   const system = useSystemDark();
   const dark = isDark(pending ?? session?.preferences.theme ?? "system", system);
   const hidden = new Set(session?.preferences.hiddenModules);
@@ -72,10 +75,14 @@ export function Layout({
     const theme = dark ? "light" : "dark";
     applyTheme(theme);
     setPending(theme);
+    setUnsaved(null);
     // Saved like the setting on the Settings page; a failure restores the old look.
     app
       .updatePreferences({ ...preferences, theme })
-      .catch(() => applyTheme(preferences.theme))
+      .catch((reason: unknown) => {
+        applyTheme(preferences.theme);
+        setUnsaved({ page: current, error: reason instanceof Error ? reason : new Error(String(reason)) });
+      })
       .finally(() => setPending(null));
   };
   return (
@@ -165,6 +172,9 @@ export function Layout({
               {intro && <p className="mt-1 text-sm text-muted-foreground">{intro}</p>}
             </div>
           </div>
+          {unsaved?.page === current && (
+            <WriteFailure error={unsaved.error} refused={t("layout.themeNotSaved")} unanswered={t("layout.themeUnanswered")} />
+          )}
           {children}
         </div>
       </main>

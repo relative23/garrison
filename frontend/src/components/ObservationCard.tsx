@@ -1,5 +1,5 @@
 // One observation: what was checked, the values, and what it does not prove.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Observation } from "../api/client";
 import { useTranslation } from "../i18n";
@@ -36,14 +36,22 @@ function cellContent(value: React.ReactNode): React.ReactNode {
   return <span className="block min-w-48 wrap-anywhere">{value}</span>;
 }
 
-/** The observation's table; beyond `limit` rows, a button shows the rest. */
+/** The observation's table; beyond `limit` rows, a button shows the rest.
+ * The button goes once pressed, and the focus it held goes to the first row
+ * it showed, where the keyboard reads on. */
 function ObservationTable({ observation, limit }: { observation: Observation; limit?: number }) {
   const { t } = useTranslation();
   const [all, setAll] = useState(false);
+  const shown = useRef<HTMLTableRowElement>(null);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (all && focused.current) shown.current?.focus();
+  }, [all]);
   const table = observation.table;
   if (!table || table.rows.length === 0) return null;
   const cut = !all && limit !== undefined && table.rows.length > limit;
   const rows = cut ? table.rows.slice(0, limit) : table.rows;
+  const first = all ? limit : undefined;
   return (
     <>
       <Table>
@@ -56,7 +64,12 @@ function ObservationTable({ observation, limit }: { observation: Observation; li
         </TableHeader>
         <TableBody>
           {rows.map((row, index) => (
-            <TableRow key={index}>
+            <TableRow
+              key={index}
+              ref={index === first ? shown : undefined}
+              tabIndex={index === first ? -1 : undefined}
+              className={index === first ? "focus-visible:outline-1 focus-visible:outline-solid focus-visible:outline-ring" : undefined}
+            >
               {row.map((cell, column) => (
                 <TableCell key={column}>{cellContent(formatValue(cell, (table.columns[column]?.format ?? "text") as Format))}</TableCell>
               ))}
@@ -65,7 +78,15 @@ function ObservationTable({ observation, limit }: { observation: Observation; li
         </TableBody>
       </Table>
       {cut && (
-        <Button variant="outline" size="sm" onClick={() => setAll(true)}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={(event) => {
+            // A pointer that gave the button no focus leaves it where it was.
+            focused.current = document.activeElement === event.currentTarget;
+            setAll(true);
+          }}
+        >
           {t("observation.showAll", { count: table.rows.length })}
         </Button>
       )}

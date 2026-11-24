@@ -238,12 +238,17 @@ grants everything, or the dashboard alone to a sign-in asked for with
 `e2e/` drives it in a real Chrome. `npm run flows` does what a user does: it
 signs in, opens every page, moves through the menu, also at a phone's width
 and from the keyboard, searches the event history and pages through it from
-the keyboard, goes Back from a page the
+the keyboard, presses Show all rows and Try again from the keyboard, which
+go once pressed and must leave the focus in the content, goes Back from a
+page the
 interface led to, opens the page search with Ctrl+K on a phone, saves
-settings, runs a maintenance action from the keyboard and signs out. It
-makes requests fail and checks what the pages say: a start of an action
-that is refused and one whose answer is lost, a status refresh, a search
-and a look at a job (with the page's clock moved on), and answers
+settings, runs a maintenance action from the keyboard, follows one whose
+result is uncertain, which must be a warning to axe and the accessibility
+tree, and signs out. It makes requests fail and checks what the pages say: a start of an action
+that is refused and one whose answer is lost, a status refresh, a search,
+a refresh without an answer over the rows a list keeps, a theme the
+header's button could not save and a look at a job (with the page's clock
+moved on), and answers
 over HTTP/2, which carries no status text, through the proxy of
 `npm run measure`; it opens pages in a browser whose clock runs three hours
 ahead of the preview's, past the session's end, and three hours behind, and
@@ -256,8 +261,9 @@ a viewer; it takes a module from the
 profile and gives it back while a page is open, through the preview's broker
 (`crates/web/examples/preview/fakes.rs`), whose questions it counts: the menu
 must follow with the next refresh, at one question each; and in two tabs it
-saves a theme, signs out and signs in again, each of which the other tab
-must follow at once, and a tab whose read of the session the policy refuses
+saves a theme, saves settings while both show Settings, signs out and signs
+in again, each of which the other tab must follow at once, and a tab whose
+read of the session the policy refuses
 must say that the session has ended. It fails on an error in the console, a
 failed request
 other than those, a finding of axe (WCAG 2.2 AA, in the light and the dark

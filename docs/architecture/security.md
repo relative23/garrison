@@ -145,7 +145,8 @@ brokers never repeat a job; pending jobs become "uncertain".
   minute for each account or key (`rateLimitAuthenticated`), of which each
   check of a user's rights takes three with the broker's one key, so that
   beyond about 330 checks a minute (an open page asks once a minute, an open
-  Maintenance page eight times) users get 503 until the minute is over and
+  Maintenance page eight times, and about 30 times while it follows a job it
+  started) users get 503 until the minute is over and
   the broker's journal names the limit; and after 100 failed password
   sign-ins within a day a block of that address, with no end by default
   (`authBanRate`, `authBanPeriod`), after which Stalwart answers neither

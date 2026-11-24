@@ -9,7 +9,8 @@ export interface Call {
   query: URLSearchParams;
   headers: Headers;
   body: unknown;
-  /** The fetch's cache and credentials modes, as the interface set them. */
+  /** The fetch's mode, cache and credentials modes, as the interface set them. */
+  mode: RequestMode | undefined;
   cache: RequestCache | undefined;
   credentials: RequestCredentials | undefined;
 }
@@ -53,6 +54,7 @@ export class FakeServer {
       query: url.searchParams,
       headers: new Headers(init.headers),
       body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
+      mode: init.mode,
       cache: init.cache,
       credentials: init.credentials,
     };

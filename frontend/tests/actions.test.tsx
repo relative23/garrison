@@ -156,6 +156,55 @@ describe("maintenance actions", () => {
     expect(server.requests(`GET ${JOB}`)).toHaveLength(2);
   });
 
+  it.each([
+    ["succeeded", "Succeeded — Done.", "bg-card"],
+    ["uncertain", "Result uncertain — The result could not be confirmed. Consult the host journal.", "bg-warning-background"],
+    ["failed", "Failed — Unit failed", "bg-failed-background"],
+  ] as const)("announce a job that ended %s in the tone of its result", async (result, said, tone) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const message = said.split(" — ")[1] ?? "";
+    serve({
+      "GET actions": { body: catalog() },
+      "POST actions": { status: 202, body: { job: job(), replayed: false } },
+      [`GET ${JOB}`]: { body: job({ status: result, message }) },
+    });
+    renderView(<Actions />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText("Job 01234567: Queued — Waiting to start")).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    const notice = screen.getByText(`Job 01234567: ${said}`).closest("[role]");
+    // A result that is not known is no success: it is a warning, as its row says.
+    expect(notice?.getAttribute("role")).toBe(result === "failed" ? "alert" : "status");
+    expect(notice?.className).toContain(tone);
+  });
+
+  it("ask for the list of actions at its own refresh while following a job, and once more at its end", async () => {
+    // Each answer to either costs a check of the user's rights at Stalwart.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const server = serve({
+      "GET actions": { body: catalog() },
+      "POST actions": { status: 202, body: { job: job(), replayed: false } },
+      [`GET ${JOB}`]: { body: job({ status: "running", message: "Started" }) },
+    });
+    renderView(<Actions />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const listed = server.requests("GET actions").length;
+    // A minute, a look at a time: each look sets the next once it is answered.
+    for (let look = 0; look < 20; look += 1) await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(server.requests(`GET ${JOB}`)).toHaveLength(20);
+    expect(server.requests("GET actions").length - listed).toBe(4);
+    // Its result goes into Recent jobs at once.
+    server.answer(`GET ${JOB}`, { body: job({ status: "succeeded", message: "Done." }) });
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(screen.getByText("Job 01234567: Succeeded — Done.")).toBeTruthy();
+    expect(server.requests("GET actions").length - listed).toBe(5);
+  });
+
   it("keep following a job whose status could not be read once, and say so meanwhile", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const server = serve({
@@ -205,10 +254,9 @@ describe("maintenance actions", () => {
     expect(dialogOpen()).toBe(true);
   });
 
-  it("say what the server answered where it gave no reason", async () => {
-    // Over HTTP/2 an answer has no status text, and a proxy's error no JSON.
+  it("say that a proxy turned the start away, by its status alone", async () => {
     // What a proxy refuses never reached Garrison; its 502 is no answer at
-    // all (tests/writes.test.tsx).
+    // all (tests/failures.test.tsx). Over HTTP/2 an answer has no status text.
     serve({
       "GET actions": { body: catalog() },
       "POST actions": { status: 413, raw: "<html>Request Entity Too Large</html>", statusText: "" },
@@ -216,7 +264,9 @@ describe("maintenance actions", () => {
     renderView(<Actions />);
     await loaded();
     fireEvent.click(confirmWith("RUN HEALTH CHECKS"));
-    expect(await screen.findByText("The server answered with status 413 and gave no reason.")).toBeTruthy();
+    const notice = (await screen.findByText("The job was not started.")).closest("[role]");
+    expect(notice?.textContent).toContain("answered with status 413 instead of Garrison.");
+    expect(notice?.textContent).not.toContain("Request Entity Too Large");
     expect(dialogOpen()).toBe(true);
   });
 
@@ -243,7 +293,17 @@ describe("maintenance actions", () => {
     serve({ "GET actions": { body: catalog({ actions: [], jobs: [] }) } });
     renderView(<Actions />);
     expect(await screen.findByText("Your profile grants no maintenance actions.")).toBeTruthy();
-    expect(screen.getByText("No jobs in the retained audit.")).toBeTruthy();
+    expect(screen.getByText("No recent job of an action your profile grants.")).toBeTruthy();
+  });
+
+  it("say of an empty list what it lists, not that the audit holds no job", async () => {
+    // The broker lists the user's actions' jobs among the audit's newest:
+    // twenty newer jobs of another profile's actions leave the list empty.
+    serve({ "GET actions": { body: catalog({ jobs: [] }) } });
+    renderView(<Actions />);
+    await loaded();
+    expect(screen.getByText("No recent job of an action your profile grants.")).toBeTruthy();
+    expect(screen.queryByText(/audit/)).toBeNull();
   });
 
   it("offer a retry when the catalog cannot be loaded", async () => {

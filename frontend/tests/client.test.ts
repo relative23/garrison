@@ -1,3 +1,5 @@
+import index from "../index.html?raw";
+import prerender from "../prerender.mjs?raw";
 import { api, ApiError, configure } from "../src/api/client";
 import { serve } from "./support/server";
 
@@ -17,19 +19,34 @@ describe("API client", () => {
     expect(write?.body).toEqual({ theme: "dark", hiddenModules: [], showSwitch: true });
   });
 
-  // A page the build drew preloads its first answers (prerender.mjs) with
-  // crossorigin="anonymous". A browser hands such an answer only to a fetch
-  // in the same credentials mode, and Firefox only to one in the default cache
-  // mode; with cache: "no-store" it asks the server again.
+  // A page preloads its first answers (index.html, prerender.mjs) with no
+  // CORS setting: a no-cors request with the cookies. A browser hands such an
+  // answer only to a fetch of the same mode and credentials, Firefox only to
+  // one in the default cache mode, and WebKit to none with another pairing
+  // (measured: WebKitGTK 2.54.1 asked each twice with crossorigin="anonymous").
   it("reads as the page's preloads ask, so that their answers are taken", async () => {
+    const preloads = [index, prerender].flatMap((text) =>
+      [...text.matchAll(/<link rel="preload"[^>]*as="fetch"[^>]*>/g)].map((link) => link[0]),
+    );
+    expect(preloads).toHaveLength(2);
+    for (const link of preloads) expect(link).not.toContain("crossorigin");
     const server = serve({ "GET status": { body: {} }, "GET session": { body: { session: null } } });
     await api.session();
     await api.status();
     for (const call of server.calls) {
-      expect(call.credentials).toBe("same-origin");
+      expect(call.mode).toBe("no-cors");
+      expect(call.credentials).toBe("include");
       expect(call.cache ?? "default").toBe("default");
     }
     expect(server.calls).toHaveLength(2);
+  });
+
+  it("sends a write in the cors mode, which keeps its headers", async () => {
+    const server = serve({ "PUT preferences": { body: { theme: "dark", hiddenModules: [], showSwitch: true } } });
+    configure({ csrf: "token-1", onUnauthorized: () => undefined, onRefused: () => undefined });
+    await api.savePreferences({ theme: "dark", hiddenModules: [], showSwitch: true });
+    expect(server.calls[0]?.mode ?? "cors").toBe("cors");
+    expect(server.calls[0]?.credentials).toBe("same-origin");
   });
 
   it("leaves unset filters out of the query", async () => {
@@ -58,9 +75,18 @@ describe("API client", () => {
     await expect(api.status()).rejects.toMatchObject({ status: 502, reference: null });
   });
 
-  it("keeps the status text when an error is not JSON", async () => {
-    serve({ "GET status": { status: 502, raw: "<html>Bad gateway</html>" } });
-    await expect(api.status()).rejects.toMatchObject({ status: 502, message: "Error" });
+  it("takes an error answer without the service's reason for a proxy's, and keeps none of its words", async () => {
+    serve({ "GET status": { status: 502, statusText: "Bad Gateway", raw: "<html>Bad gateway</html>" } });
+    const error = await api.status().catch((reason: unknown) => reason);
+    expect(error).toMatchObject({ status: 502, own: false });
+    expect((error as Error).message).not.toMatch(/Bad gateway/i);
+    // JSON that is not the service's, or the service's without a reason, is no reason either.
+    for (const body of [{ message: "upstream timed out" }, { detail: "" }]) {
+      serve({ "GET status": { status: 504, body } });
+      await expect(api.status()).rejects.toMatchObject({ status: 504, own: false });
+    }
+    serve({ "GET status": { status: 503, body: { detail: "Busy" } } });
+    await expect(api.status()).rejects.toMatchObject({ status: 503, own: true, message: "Busy" });
   });
 
   it("takes a server error that is not the service's own as no answer to a write, and to nothing else", async () => {

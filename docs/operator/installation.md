@@ -245,7 +245,8 @@ host and the Stalwart WebUI's host. The installer writes that file; it answers
 `/metrics/` with 404.
 
 Open `https://<public_origin>/admin/` and sign in with your Stalwart
-account. Its menu ends with "Switch to Stalwart WebUI".
+account. Its menu ends with "Switch to Stalwart WebUI" once you turn the
+switch rows on in Settings.
 
 For the way back, add a "Switch to Garrison WebUI" row to the Stalwart WebUI:
 include the generated file inside the location that serves it, in Stalwart's

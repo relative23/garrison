@@ -5,7 +5,7 @@
 // what they show, so a new view that shows checks is held to the same.
 import { act, screen } from "@testing-library/react";
 
-import type { StatusResponse } from "../src/api/client";
+import { ApiError, type StatusResponse } from "../src/api/client";
 import { ChunkView, VIEWS } from "../src/modules/registry";
 import { attacks, catalog, coverage, metrics, observation, status } from "./support/fixtures";
 import { renderView } from "./support/render";
@@ -67,9 +67,9 @@ describe("a view that shows the collector's checks", () => {
   });
 
   it.each(SHOWING)("says when the status cannot be read, was not refreshed, or is not there yet: %s", async (id) => {
-    const unread = await shown(id, { status: new Error("The status database is not readable") });
+    const unread = await shown(id, { status: new ApiError(503, "The status database is not readable") });
     expect(unread).toContain("The status database is not readable");
-    const kept = await shown(id, { status: EVERY, refreshError: new Error("The broker is not reachable") });
+    const kept = await shown(id, { status: EVERY, refreshError: new ApiError(503, "The broker is not reachable") });
     expect(kept).toContain("The status could not be refreshed.");
     expect(kept).toContain("The broker is not reachable");
     const none = await shown(id, { status: status([], { available: false }) });

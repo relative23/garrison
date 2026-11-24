@@ -4,8 +4,9 @@ import { useState } from "react";
 
 import { api, type Attacks as Summary } from "../api/client";
 import { CoverageBanner, useCoverage } from "../components/Events";
+import { ReadFailure } from "../components/Failure";
 import { ObservationCard } from "../components/ObservationCard";
-import { ErrorState, EvidenceLegend, Loading, Meta, Notice } from "../components/Status";
+import { EvidenceLegend, Loading, Meta, Notice } from "../components/Status";
 import { StatusNotice } from "../components/StatusNotice";
 import { COUNT, Figures, PeriodTabs, Section, type Period } from "../components/Summary";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableHeadRow, TableRow } from "../components/ui/table";
@@ -106,6 +107,12 @@ function Accounts({ accounts }: { accounts: Summary["accounts"] }) {
   );
 }
 
+const REASONS = ["abuse", "authentication", "loiter", "scan"] as const;
+
+function isReason(reason: string): reason is (typeof REASONS)[number] {
+  return (REASONS as readonly string[]).includes(reason);
+}
+
 function Bans({ bans }: { bans: Summary["bans"] }) {
   const { t } = useTranslation();
   return (
@@ -123,7 +130,8 @@ function Bans({ bans }: { bans: Summary["bans"] }) {
           <TableRow key={`${ban.at}-${ban.address}-${ban.reason}`}>
             <TableCell className="whitespace-nowrap">{dateTime(ban.at)}</TableCell>
             <TableCell className="wrap-anywhere">{ban.address}</TableCell>
-            <TableCell>{t(`attacks.reason.${ban.reason}`)}</TableCell>
+            {/* A reason this build does not know is shown as the server named it. */}
+            <TableCell>{isReason(ban.reason) ? t(`attacks.reason.${ban.reason}`) : ban.reason}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -144,7 +152,7 @@ export function Attacks() {
     <>
       <CoverageBanner coverage={coverage} />
       <PeriodTabs period={period} onChange={setPeriod}>
-        {summary.error && <ErrorState error={summary.error} retry={summary.reload} />}
+        <ReadFailure resource={summary} kept={t("failure.kept.summary")} />
         {!data && !summary.error && <Loading />}
         {data && (
           <>

@@ -82,10 +82,25 @@ describe("ObservationCard", () => {
       </Tooltip.Provider>,
     );
     expect(screen.getAllByRole("row")).toHaveLength(11);
-    fireEvent.click(screen.getByRole("button", { name: "Show all 12 rows" }));
+    const button = screen.getByRole("button", { name: "Show all 12 rows" });
+    button.focus();
+    fireEvent.click(button);
     expect(screen.getAllByRole("row")).toHaveLength(13);
     expect(screen.getByText("11.0 KiB")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
+    // The button is gone: the keyboard goes on from the first row it showed.
+    expect(document.activeElement?.textContent).toBe("user10@example.test10.0 KiB");
+  });
+
+  it("leaves the focus where it was when the rows are shown by a pointer that gave the button none", () => {
+    const rows = Array.from({ length: 12 }, (_, index) => [`user${index}@example.test`]);
+    render(
+      <Tooltip.Provider>
+        <ObservationCard observation={{ ...base, table: { columns: [{ label: "Account", format: "text" }], rows } }} limit={10} />
+      </Tooltip.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Show all 12 rows" }));
+    expect(document.activeElement).toBe(document.body);
   });
 
   it("lets a long value break inside its cell and leaves short ones alone", () => {
