@@ -182,7 +182,8 @@ Notable changes for operators and users. The format follows
   minute, not 50.** The Maintenance page no longer reads its list again with
   every look at the job; the list takes the result when the job ends.
 - **A ban reason the page does not know is shown as the server named it.**
-  A page loaded before an upgrade that adds one showed "attacks.reason.…".
+  A page loaded before an upgrade that adds one showed "attacks.reason.…",
+  and a check of a kind it does not know was missing from its status page.
 - **An empty Recent jobs list no longer says that the audit holds no job.**
   It lists the recent jobs of the actions your profile grants, and says so.
 - **A job whose result is uncertain is announced as a warning.** The

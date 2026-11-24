@@ -85,6 +85,18 @@ describe("a name the server sends that this build does not know", () => {
     expect(sets.length).toBeGreaterThan(0);
   });
 
+  // The checks a page shows, by their cards (tests/support/pages.ts gives each module one).
+  const checks = () => [...document.querySelectorAll("[id^=obs-]")].map((card) => card.id).sort();
+
+  it.each(PAGES)("leaves no check out of the %s page that shows it", async (page) => {
+    const known = await visit(page, answers());
+    const shown = checks();
+    known.view.unmount();
+    const newer = await visit(page, withNewerNames());
+    expect(checks()).toEqual(shown);
+    newer.view.unmount();
+  });
+
   it.each([...PAGES, ...PAGES.map((page) => `${page}/${DETAIL}`)])("is never shown as a catalog key on the %s page", async (page) => {
     const { view } = await visit(page, withNewerNames());
     const text = document.body.textContent ?? "";
