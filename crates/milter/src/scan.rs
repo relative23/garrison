@@ -45,6 +45,8 @@ use unpack::Work;
 
 /// Archives inside archives are opened this deep.
 pub const DEPTH: usize = 3;
+/// Quoted-printable inside quoted-printable is undone this often more.
+const QUOTED: usize = 2;
 /// What a scan holds of unpacked files at the most: one at each depth, in
 /// a buffer that may hold twice what was unpacked into it.
 pub(crate) const MOST_UNPACKED: usize = DEPTH * 2 * unpack::UNPACKED;
@@ -117,14 +119,51 @@ pub enum Outcome {
     Incomplete(Gap),
 }
 
+/// Where a message's header block ends for every reader at the latest: at the
+/// first line that is neither a header field (a name of printable characters
+/// and a colon) nor the continuation of one (white space, then more). A line
+/// ends at LF or at CR. No reader takes anything before this for a body, so
+/// what stands there belongs to no attachment.
+fn headers_end(message: &[u8]) -> usize {
+    let blank = |byte: &u8| matches!(byte, b' ' | b'\t');
+    let mut at = 0;
+    let mut field_before = false;
+    while at < message.len() {
+        let end = message[at..]
+            .iter()
+            .position(|byte| matches!(byte, b'\n' | b'\r'))
+            .map_or(message.len(), |end| at + end);
+        let line = &message[at..end];
+        let field = line
+            .iter()
+            .position(|byte| *byte == b':')
+            .is_some_and(|colon| colon > 0 && line[..colon].iter().all(u8::is_ascii_graphic));
+        let continued = field_before && line.first().is_some_and(blank) && !line.iter().all(blank);
+        if !field && !continued {
+            return at;
+        }
+        field_before = true;
+        at = end
+            + if message[end..].starts_with(b"\r\n") {
+                2
+            } else {
+                1
+            };
+    }
+    message.len()
+}
+
 /// The message with its quoted-printable undone: `=XX` is a byte in either
 /// hexadecimal case, and `=` at a line's end joins the lines. A transport
 /// may pad an encoded line with space and tab before the break; RFC 2045
 /// section 6.7 rule 3 has the decoder strip it, so `=` then white space then
-/// the line's end is a soft break as well.
-fn unquoted(message: &[u8]) -> Vec<u8> {
+/// the line's end is a soft break as well. With it, how many `=XX` were
+/// undone past the header block: each stands where a body may be.
+fn unquoted(message: &[u8]) -> (Vec<u8>, usize) {
     let hex = |byte: u8| char::from(byte).to_digit(16);
+    let body = headers_end(message);
     let mut plain = Vec::with_capacity(message.len());
+    let mut triplets = 0;
     let mut at = 0;
     while at < message.len() {
         if message[at] == b'=' {
@@ -150,6 +189,7 @@ fn unquoted(message: &[u8]) -> Vec<u8> {
                 && let (Some(high), Some(low)) = (hex(*high), hex(*low))
             {
                 plain.push(u8::try_from(high * 16 + low).unwrap_or(b'='));
+                triplets += usize::from(at >= body);
                 at += 3;
                 continue;
             }
@@ -157,7 +197,7 @@ fn unquoted(message: &[u8]) -> Vec<u8> {
         plain.push(message[at]);
         at += 1;
     }
-    plain
+    (plain, triplets)
 }
 
 /// What `message` carries, with all the time the scan needs.
@@ -189,13 +229,17 @@ fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
     // The message as it stands: a document in the clear, any encoding's bytes
     // that happen to be literal, the archives in them, and a message file in
     // an archive, which `scanned` reads as a message of its own.
+    let whole = work.allowance();
     if let Some(found) = work.scanned(message, DEPTH) {
         return Some(found);
     }
     // The message's transfer encodings, undone over the whole of it.
+    let left = work.allowance();
+    work.allow(whole);
     if let Some(found) = work.decode_encodings(message) {
         return Some(found);
     }
+    work.allow(left.least(work.allowance()));
     // The one thing a header can still decide, and only to make the answer
     // stricter: a part that declares a transfer encoding the scan does not
     // decode is a message not scanned completely, not a clean one.
@@ -203,20 +247,105 @@ fn candidates(message: &[u8], work: &mut Work) -> Option<Found> {
     None
 }
 
+/// What the readings of one text may unpack. Two readings often hold the
+/// same archive (a base64 body reads the same with `=` dropped and with `=`
+/// as a group's end, and again once quoted-printable is undone around it),
+/// and it is then unpacked for each. So each reading unpacks within the
+/// bounds the text came with, and the scan goes on with what the reading
+/// that unpacked most has left.
+struct Readings {
+    whole: unpack::Allowance,
+    least: unpack::Allowance,
+}
+
 impl Work {
     /// Undo the message's transfer encodings over the whole of it, reading no
     /// structure: the base64 on each of the four grids a run of symbols can
     /// sit on (so a base64 body anywhere comes out whole in one phase,
-    /// whatever junk, boundary or header surrounds it), the quoted-printable,
-    /// and the uuencode blocks. Each decoded stream is scanned for a document
-    /// and, where it is itself a message with a nested encoding, read again.
+    /// whatever junk, boundary or header surrounds it), the uuencode blocks,
+    /// and the same again with the quoted-printable undone. Each decoded
+    /// stream is scanned for a document and, where it is itself a message
+    /// with a nested encoding, read again.
     fn decode_encodings(&mut self, data: &[u8]) -> Option<Found> {
+        let whole = self.allowance();
+        let mut readings = Readings {
+            whole,
+            least: whole,
+        };
+        let found = self.encoded(data, &mut readings, QUOTED);
+        self.allow(readings.least);
+        found
+    }
+
+    /// One reading of `readings`' text.
+    fn reading(
+        &mut self,
+        readings: &mut Readings,
+        read: impl FnOnce(&mut Self) -> Option<Found>,
+    ) -> Option<Found> {
+        if self.stopped() {
+            return None;
+        }
+        self.allow(readings.whole);
+        let found = read(self);
+        readings.least = readings.least.least(self.allowance());
+        found
+    }
+
+    /// `data`'s base64 and uuencode, then the same of `data` with its
+    /// quoted-printable undone, `rounds` times over at the most.
+    fn encoded(&mut self, data: &[u8], readings: &mut Readings, rounds: usize) -> Option<Found> {
         let symbols = base64_stream::count(data);
+        let tokens = base64_stream::count_tokens(data);
+        let dropped = |phase| base64_stream::decode_phase(data, phase, symbols);
+        let grouped = |phase| base64_stream::decode_tokens(data, phase, tokens);
+        if let Some(found) = self.reading(readings, |work| work.base64(dropped)) {
+            return Some(found);
+        }
+        // Without `=` both ways to read base64 read the same.
+        if tokens > symbols
+            && let Some(found) = self.reading(readings, |work| work.base64(grouped))
+        {
+            return Some(found);
+        }
+        if let Some(found) = self.reading(readings, |work| work.scanned_uuencoded(data)) {
+            return Some(found);
+        }
+        if self.stopped() || !contains(data, b"=") {
+            return None;
+        }
+        let (undone, triplets) = unquoted(data);
+        if undone.len() == data.len() || !self.may_decode(undone.len()) {
+            return None;
+        }
+        if let Some(found) = self.reading(readings, |work| work.scanned(&undone, DEPTH)) {
+            return Some(found);
+        }
+        // Where only soft line breaks went, the base64 reads as before: `=`
+        // and a line's end are no symbols. A uuencode block's lines are
+        // whole only now.
+        if triplets == 0 {
+            return self.reading(readings, |work| work.scanned_uuencoded(&undone));
+        }
+        // An `=XX` is two symbols to the base64 readers and one byte, or
+        // none, to a mail program that undoes it first: one of them inside a
+        // base64 body shifts everything behind it. So the result is read as
+        // `data` was, and again where it holds quoted-printable of its own,
+        // as a message does that was wrapped twice.
+        if rounds == 0 {
+            self.gap.get_or_insert(Gap::Encoding);
+            return None;
+        }
+        self.encoded(&undone, readings, rounds - 1)
+    }
+
+    /// One way to read the base64, on each of its grids.
+    fn base64(&mut self, decode: impl Fn(usize) -> Vec<u8>) -> Option<Found> {
         for phase in 0..base64_stream::PHASES {
             if self.late() {
                 return None;
             }
-            let stream = base64_stream::decode_phase(data, phase, symbols);
+            let stream = decode(phase);
             if !self.may_decode(stream.len()) {
                 return None;
             }
@@ -224,27 +353,7 @@ impl Work {
                 return Some(found);
             }
         }
-        if contains(data, b"=") {
-            let undone = unquoted(data);
-            if !self.may_decode(undone.len()) {
-                return None;
-            }
-            if let Some(found) = self.scanned(&undone, DEPTH) {
-                return Some(found);
-            }
-            // Read the result as a nested message only where undoing
-            // quoted-printable truly decoded a body (it shrank by a quarter or
-            // more, as `=XX` triplets become one byte). A message that only
-            // carries a base64 body has little to undo, so its result is the
-            // message itself; reading that again would read its own headers,
-            // level after level.
-            if undone.len() * 4 < data.len() * 3
-                && let Some(found) = self.nested(&undone)
-            {
-                return Some(found);
-            }
-        }
-        self.scanned_uuencoded(data)
+        None
     }
 
     /// Scan a decoded stream for a document (marks and archives), and, where
@@ -289,6 +398,8 @@ fn declares_encoding(data: &[u8]) -> bool {
 
 #[cfg(test)]
 mod bounds_tests;
+#[cfg(test)]
+mod client_tests;
 #[cfg(test)]
 mod encoding_tests;
 #[cfg(test)]

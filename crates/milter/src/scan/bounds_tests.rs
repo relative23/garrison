@@ -52,8 +52,8 @@ fn the_decode_budget_caps_what_is_read() {
     // The budget is a multiple of the message's size; once it is spent the
     // message was not scanned completely.
     let mut work = Work::new(None, 100);
-    assert!(work.may_decode(1000));
-    assert!(work.may_decode(600));
+    assert!(work.may_decode(4000));
+    assert!(work.may_decode(800));
     assert!(!work.may_decode(1));
     assert_eq!(work.gap, Some(Gap::Budget));
 }

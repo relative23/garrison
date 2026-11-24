@@ -49,8 +49,26 @@ pub(super) const ENCODINGS: usize = 2;
 /// A sender can put the mark of a nested encoding into every phase's output
 /// at every level and force the recursion to branch; the bytes decoded over
 /// all levels are bounded by this multiple of the message's size. Honest
-/// nesting three levels deep decodes up to about eight times (measured).
-const DECODE_BUDGET: usize = 16;
+/// nesting three levels deep decodes up to about 22 times (measured), since
+/// the base64 is read in two ways and again with quoted-printable undone.
+const DECODE_BUDGET: usize = 48;
+
+/// What may still be unpacked: bytes of all files together, and files.
+#[derive(Clone, Copy)]
+pub(super) struct Allowance {
+    budget: usize,
+    entries: usize,
+}
+
+impl Allowance {
+    /// What is left where both were used.
+    pub(super) fn least(self, other: Self) -> Self {
+        Allowance {
+            budget: self.budget.min(other.budget),
+            entries: self.entries.min(other.entries),
+        }
+    }
+}
 
 /// What one scan may still do, and what it had to leave out.
 pub(super) struct Work {
@@ -92,6 +110,24 @@ impl Work {
             self.decoded -= bytes;
             true
         }
+    }
+
+    pub(super) fn allowance(&self) -> Allowance {
+        Allowance {
+            budget: self.budget,
+            entries: self.entries,
+        }
+    }
+
+    pub(super) fn allow(&mut self, allowance: Allowance) {
+        self.budget = allowance.budget;
+        self.entries = allowance.entries;
+    }
+
+    /// Whether the scan reads no further: its time is up, or all it may
+    /// decode is decoded.
+    pub(super) fn stopped(&self) -> bool {
+        self.gap == Some(Gap::Deadline) || (self.decoded == 0 && self.gap == Some(Gap::Budget))
     }
 
     /// Whether the scan's time is up, which then is why it is incomplete.
