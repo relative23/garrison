@@ -444,3 +444,32 @@ fn no_filter_stalwart_asks_in_vain_goes_unsaid() {
     }
     assert_eq!(faults, Vec::<String>::new(), "{}", faults.join("\n\n"));
 }
+
+/// The quick start looks in doctor's output for the filter's line and its
+/// entry's line as an empty `[milter]` makes them, after setup entered the
+/// entry: each must be a line doctor says, as a script cannot tell a line
+/// doctor no longer prints from a fault.
+#[test]
+fn the_quick_start_looks_for_lines_doctor_says() {
+    const SCRIPT: &str = include_str!("../../../../../scripts/acceptance-quickstart.sh");
+    let entered = read(&json!([row("m", 8096, true)]));
+    let mut lines = vec![answering(8096, Ok(())).line()];
+    lines.extend(
+        configured_as((8096, true), Some("m"), &entered, &|_| true)
+            .iter()
+            .map(Finding::line),
+    );
+    let looked_for: Vec<&str> = SCRIPT
+        .split("grep -q \"^")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .filter(|line| line.contains("macro milter"))
+        .collect();
+    assert_eq!(looked_for.len(), 2, "{looked_for:?}");
+    for line in looked_for {
+        assert!(
+            lines.iter().any(|said| said.starts_with(line)),
+            "{line:?} is no line of {lines:?}"
+        );
+    }
+}
