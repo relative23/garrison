@@ -21,20 +21,28 @@ fn sendable(text: &str, name: &str) -> Result<(), ConfigError> {
     let Some(rest) = text.strip_prefix("https://") else {
         return fail(format!("{name} must be an https:// URL"));
     };
-    let server = rest.split('/').next().unwrap_or_default();
-    let host = |character: char| character.is_ascii_alphanumeric() || "-._:[]".contains(character);
-    if !server.chars().all(host) {
-        return fail(format!(
-            "{name} must name its server alone before its first \"/\": write \
-             https://host/?key=…, not https://host?key=…"
-        ));
-    }
     if text
         .chars()
         .any(|character| character.is_whitespace() || character.is_control())
     {
         return fail(format!(
             "{name} must be one line of printable characters without spaces"
+        ));
+    }
+    let server = rest.split('/').next().unwrap_or_default();
+    if server.contains(['?', '#', '\\']) {
+        return fail(format!(
+            "{name} must name its server alone before its first \"/\": write \
+             https://host/?key=…, not https://host?key=…"
+        ));
+    }
+    let host =
+        |character: &char| character.is_ascii_alphanumeric() || "-._:[]".contains(*character);
+    // One character, never more of the address, which may be a secret.
+    if let Some(held) = server.chars().find(|character| !host(character)) {
+        return fail(format!(
+            "{name} must name its server in ASCII letters, digits, \"-\" and \".\", not with \
+             \"{held}\": write a name in another script in its xn-- form"
         ));
     }
     Ok(())

@@ -347,6 +347,22 @@ fn an_address_no_request_could_send_is_refused_without_a_word_of_it() {
             "{wrong}"
         );
     }
+    // A server of other characters than a name's: what it holds is named,
+    // and the name's form a request asks.
+    for (wrong, held) in [
+        ("https://bücher.example/hook", "ü"),
+        ("https://ex%61mple.org/hook", "%"),
+        ("https://hooks.example.org;key=SECRET/hook", ";"),
+    ] {
+        assert_eq!(
+            webhook_address(wrong, name).unwrap_err().0,
+            format!(
+                "{name} must name its server in ASCII letters, digits, \"-\" and \".\", not with \
+                 \"{held}\": write a name in another script in its xn-- form"
+            ),
+            "{wrong}"
+        );
+    }
     for wrong in [
         "https://hooks.example.org/a b",
         "https://hooks.example.org/a\tb",
