@@ -1,8 +1,9 @@
-//! Objects of a kind, as many as Stalwart has, in pages. Each page is a
-//! `/query` for the IDs from a position and a `/get` of those IDs in the
-//! same request (`#ids`, a result reference), so that no answer grows with
-//! the number of objects. A `/get` of all objects (`ids: null`) gets the
-//! first 500 from Stalwart and not a word of the rest (measured on 1.1.0).
+//! Objects of a kind, as many as Stalwart has, in pages, the oldest first.
+//! Each page is a `/query` for the IDs from a position and a `/get` of those
+//! IDs in the same request (`#ids`, a result reference), so that no answer
+//! grows with the number of objects. A `/get` of all objects (`ids: null`)
+//! gets the first 500 from Stalwart and not a word of the rest (measured on
+//! 1.1.0).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,7 +23,7 @@ pub const PAGE: usize = 500;
 /// The first objects of a kind, and how many Stalwart has.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Listed<T> {
-    /// In the order of Stalwart's query.
+    /// The oldest first.
     pub objects: Vec<T>,
     /// How many objects of the kind Stalwart has.
     pub total: usize,
@@ -37,15 +38,15 @@ struct Queried {
 }
 
 impl JmapClient {
-    /// The first `most` objects of `kind` in Stalwart's order, such as
-    /// `Account`, each read as a `T` with `properties`, and how many
-    /// Stalwart has: in pages of [`PAGE`], each a request of its own. Before
-    /// each page after the first, `more` says whether there is time for it;
-    /// where it says no, the objects of the pages before are listed.
+    /// The oldest `most` objects of `kind`, such as `Account`, each read as
+    /// a `T` with `properties`, and how many Stalwart has: in pages of
+    /// [`PAGE`], each a request of its own. Before each page after the
+    /// first, `more` says whether there is time for it; where it says no,
+    /// the objects of the pages before are listed.
     ///
     /// The key needs the `/query` permission of the kind beside its `/get`
     /// one, such as `sysAccountQuery`. An object that comes again in a later
-    /// page, as where objects were added meanwhile, is listed once.
+    /// page is listed once.
     pub fn listed<T: DeserializeOwned>(
         &self,
         kind: &str,
@@ -78,7 +79,7 @@ impl JmapClient {
     }
 
     /// The objects of `kind` from `position` on, `limit` of them at the
-    /// most, each with its ID, in the query's order, and how many there are.
+    /// most, each with its ID, the oldest first, and how many there are.
     fn page<T: DeserializeOwned>(
         &self,
         kind: &str,
@@ -87,10 +88,16 @@ impl JmapClient {
         limit: usize,
     ) -> Result<(Vec<(String, T)>, usize), Error> {
         let (query, get) = (format!("x:{kind}/query"), format!("x:{kind}/get"));
+        // Stalwart's IDs rise with each object made and are not given again,
+        // so by ID the oldest come first and a new one comes last; a query
+        // that names no order lists the newest first (measured on 1.2.0, the
+        // order on 1.1.0 as well).
+        let oldest = json!([{"property": "id", "isAscending": true}]);
         let calls = [
             (
                 query.as_str(),
-                json!({"position": position, "limit": limit, "calculateTotal": true}),
+                json!({"sort": oldest, "position": position, "limit": limit,
+                       "calculateTotal": true}),
             ),
             (
                 get.as_str(),

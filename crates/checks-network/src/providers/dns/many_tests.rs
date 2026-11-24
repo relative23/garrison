@@ -59,6 +59,22 @@ fn domains_beyond_the_500_of_one_request_are_counted() {
     assert_eq!((hosts.len(), rest.as_deref()), (20, Some(left_out)));
 }
 
+/// The first `max_domains` are the oldest, as earlier releases took them:
+/// a domain made after them is the one left out, with its mail host.
+#[test]
+fn a_domain_made_after_the_first_max_domains_is_the_one_left_out() {
+    let (cards, hosts) = read(domains(21, |name| {
+        format!("{name}. IN MX 10 mail.{name}.\n")
+    }));
+    let ids: Vec<&str> = cards.iter().map(|card| card.id.as_str()).collect();
+    let oldest: Vec<String> = (0..20)
+        .map(|number| format!("dns.d{number}.example.test"))
+        .collect();
+    assert_eq!(ids[..20], oldest[..]);
+    let (hosts, _) = hosts.unwrap();
+    assert!(!hosts.iter().any(|host| host.contains("d20.")), "{hosts:?}");
+}
+
 #[test]
 fn zone_files_of_more_than_a_mebibyte_in_all_are_read() {
     // 300 zone files of some 4 KB: 1.2 MB together, 80 KB for the first 20.

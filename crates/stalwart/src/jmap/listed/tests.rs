@@ -36,7 +36,7 @@ fn names(listed: &Listed<Named>) -> Vec<String> {
 }
 
 /// A page is a query and a get of its IDs in one request, from the
-/// position the pages before reached, up to `most`.
+/// position the pages before reached, up to `most`, the oldest first.
 #[test]
 fn objects_come_in_pages_of_a_query_and_a_get_of_its_ids() {
     let server = serve(vec![page(0..500, 700, None), page(500..600, 700, None)]);
@@ -52,7 +52,8 @@ fn objects_come_in_pages_of_a_query_and_a_get_of_its_ids() {
         assert_eq!(
             body["methodCalls"],
             json!([
-                ["x:Account/query", {"position": position, "limit": limit, "calculateTotal": true}, "0"],
+                ["x:Account/query", {"sort": [{"property": "id", "isAscending": true}],
+                    "position": position, "limit": limit, "calculateTotal": true}, "0"],
                 ["x:Account/get", {"#ids": {"resultOf": "0", "name": "x:Account/query", "path": "/ids"},
                     "properties": ["name"]}, "1"],
             ])

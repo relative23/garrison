@@ -1,6 +1,6 @@
 //! The API keys setup writes for the broker and the collector, tried as
-//! their services use them: Stalwart must take each from this host, and the
-//! broker's for what the broker reads with it. One it no longer takes, as
+//! their services use them: Stalwart must take each from this host, for
+//! what its service reads with it. One it no longer takes, as
 //! after the key was deleted or narrowed in the Stalwart WebUI or
 //! Stalwart's data was put back from before the last rotation, leaves
 //! nobody able to sign in, or every card that reads Stalwart unknown.
@@ -52,26 +52,48 @@ pub(super) fn tried(
     }
 }
 
+/// What a service reads with its key, and what follows where Stalwart
+/// refuses it.
+type Reads = (Vec<(&'static str, Value)>, &'static str);
+
 /// What the broker reads with its key when it checks a user's rights
 /// (`garrison_stalwart::permissions::account_rights`): the account, the
 /// sign-in settings and the roles, each of a permission of its own.
-fn broker_reads() -> [(&'static str, Value); 3] {
-    [
+fn broker_reads() -> Reads {
+    let reads = vec![
         ("x:Account/get", json!({"ids": null, "properties": ["id"]})),
         (
             "x:Authentication/get",
             json!({"ids": ["singleton"], "properties": ["id"]}),
         ),
         ("x:Role/get", json!({"ids": null, "properties": ["id"]})),
-    ]
+    ];
+    (reads, "nobody can sign in")
 }
 
-/// What Stalwart says of the broker's reads with `key`, where it opened the
-/// key's session: a refusal fails, as nobody's rights can then be checked.
-fn read_with(config: &Config, key: &str, file: &str) -> Option<Finding> {
+/// The queries by which the collector's checks find Stalwart's domains and
+/// accounts, which a key an earlier release's setup made may not make.
+fn collector_reads() -> Reads {
+    let reads = vec![
+        ("x:Domain/query", json!({"limit": 1})),
+        ("x:Account/query", json!({"limit": 1})),
+    ];
+    (
+        reads,
+        "the cards that read Stalwart's domains and accounts stay unknown",
+    )
+}
+
+/// What Stalwart says of the `service`'s `reads` with `key`, where it opened
+/// the key's session: a refusal fails, with what follows from it.
+fn read_with(
+    config: &Config,
+    (key, file, service): (&str, &str, &str),
+    (reads, follows): &Reads,
+) -> Option<Finding> {
     let answered = JmapClient::new(&config.deployment.stalwart_url, key)
         .with_timeout(WITHIN)
-        .call_many(&broker_reads(), MAX_RESPONSE);
+        .call_many(reads, MAX_RESPONSE);
     let refused = match answered {
         Ok(answers) => answers.into_iter().find_map(|answer| match answer {
             Err(Error::Denied(why)) => Some(Ok(why)),
@@ -83,14 +105,14 @@ fn read_with(config: &Config, key: &str, file: &str) -> Option<Finding> {
     Some(match refused {
         Ok(why) => Finding::fail(
             format!(
-                "Stalwart takes the broker's API key ({file}) but refuses what the broker reads \
-                 with it ({why}), so nobody can sign in"
+                "Stalwart takes the {service}'s API key ({file}) but refuses what the {service} \
+                 reads with it ({why}), so {follows}"
             ),
             "Run `garrison stalwart setup`, which gives the key the permissions it needs.",
         ),
         Err(why) => Finding::unknown(format!(
-            "whether Stalwart lets the broker's API key ({file}) read what the broker reads: \
-             {why}"
+            "whether Stalwart lets the {service}'s API key ({file}) read what the {service} \
+             reads: {why}"
         )),
     })
 }
@@ -106,11 +128,11 @@ fn session(config: &Config, key: &str) -> Result<u16, String> {
         .map_err(|error| format!("Stalwart did not answer at {url} ({error})"))
 }
 
-/// The key of `source` tried: its session, and for the broker its reads.
+/// The key of `source` tried: its session, and what its service reads.
 fn key_of(
     config: &Config,
     credentials: &Credentials,
-    (source, service, refused): (&SecretSource, &str, &str),
+    (source, service, refused, reads): (&SecretSource, &str, &str, Reads),
 ) -> Finding {
     let file = credentials.path(source);
     let name = file.file_name().map_or_else(
@@ -130,8 +152,7 @@ fn key_of(
     };
     let answer = session(config, &key);
     if answer == Ok(200)
-        && service == "broker"
-        && let Some(finding) = read_with(config, &key, &name)
+        && let Some(finding) = read_with(config, (&key, &name, service), &reads)
     {
         return finding;
     }
@@ -140,11 +161,17 @@ fn key_of(
 
 pub(super) fn checks(config: &Config, credentials: &Credentials) -> Vec<Finding> {
     [
-        (&config.broker.native_key, "broker", "nobody can sign in"),
+        (
+            &config.broker.native_key,
+            "broker",
+            "nobody can sign in",
+            broker_reads(),
+        ),
         (
             &config.collector.native_key,
             "collector",
             "every card that reads Stalwart stays unknown",
+            collector_reads(),
         ),
     ]
     .into_iter()
@@ -260,6 +287,50 @@ mod tests {
                 .contains("garrison stalwart setup"),
             "{}",
             found[0].line()
+        );
+    }
+
+    /// A collector's key that opens its session but may not query the
+    /// domains and accounts the checks read, as a key an earlier release's
+    /// setup made (measured on Stalwart 1.1.0 with 0.1.2's ten permissions:
+    /// `forbidden` for each query), leaves their cards unknown: it fails,
+    /// with the setup that gives the key its permissions again.
+    #[test]
+    fn a_collector_key_refused_the_queries_of_the_checks_fails() {
+        let read = serde_json::json!({"methodResponses": [
+            ["x:Account/get", {"list": []}, "0"],
+            ["x:Authentication/get", {"list": []}, "1"],
+            ["x:Role/get", {"list": []}, "2"]]});
+        let forbidden = serde_json::json!({"methodResponses": [
+            ["error", {"type": "forbidden"}, "0"],
+            ["error", {"type": "forbidden"}, "1"]]});
+        let stalwart = serve(vec![
+            answer(200, "{}"),
+            garrison_testing::http::json(&read),
+            answer(200, "{}"),
+            garrison_testing::http::json(&forbidden),
+        ]);
+        let directory = tempfile::tempdir().unwrap();
+        let config = garrison_testing::config(directory.path(), &stalwart.url);
+        let credentials = garrison_testing::credentials(&config);
+        garrison_testing::write_private(
+            &credentials.path(&config.collector.native_key),
+            b"collector-key-0123456789",
+        );
+        let found = checks(&config, &credentials);
+        assert_eq!(found[1].level, Level::Fail, "{}", found[1].line());
+        assert_eq!(
+            found[1].fix.as_deref(),
+            Some("Run `garrison stalwart setup`, which gives the key the permissions it needs.")
+        );
+        let asked = stalwart.requests();
+        assert!(
+            asked[3].contains("Bearer collector-key-0123456789")
+                && asked[3].contains(
+                    r#"["x:Domain/query",{"limit":1},"0"],["x:Account/query",{"limit":1},"1"]"#
+                ),
+            "{}",
+            asked[3]
         );
     }
 }

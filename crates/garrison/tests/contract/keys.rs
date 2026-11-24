@@ -157,14 +157,36 @@ pub(super) fn key_status(url: &str, key: &str) -> u16 {
 }
 
 /// What `garrison doctor` tries the broker's key with, the reads of a rights
-/// check, as doctor sends them with `key`: the method's name for each that
-/// answered, the error's type for each that did not.
+/// check, as doctor sends them with `key`.
 fn broker_reads(url: &str, key: &str) -> Vec<String> {
-    let body = json!({"using": ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"],
-        "methodCalls": [
+    reads(
+        url,
+        key,
+        &json!([
             ["x:Account/get", {"ids": null, "properties": ["id"]}, "0"],
             ["x:Authentication/get", {"ids": ["singleton"], "properties": ["id"]}, "1"],
-            ["x:Role/get", {"ids": null, "properties": ["id"]}, "2"]]});
+            ["x:Role/get", {"ids": null, "properties": ["id"]}, "2"]]),
+    )
+}
+
+/// What `garrison doctor` tries the collector's key with, the queries by
+/// which the checks find Stalwart's domains and accounts, as doctor sends
+/// them with `key`.
+fn collector_reads(url: &str, key: &str) -> Vec<String> {
+    reads(
+        url,
+        key,
+        &json!([
+            ["x:Domain/query", {"limit": 1}, "0"],
+            ["x:Account/query", {"limit": 1}, "1"]]),
+    )
+}
+
+/// What Stalwart answers `calls` with `key`: the method's name for each
+/// that answered, the error's type for each that did not.
+fn reads(url: &str, key: &str, calls: &serde_json::Value) -> Vec<String> {
+    let body = json!({"using": ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"],
+        "methodCalls": calls});
     let mut answer = ureq::post(format!("{url}/jmap/"))
         .header("Authorization", &format!("Bearer {}", key.trim()))
         .header("Content-Type", "application/json")
@@ -199,19 +221,10 @@ fn the_broker_reads_with_the_key_setup_makes_and_no_narrower_one() {
     let key = std::fs::read_to_string(credentials.join("broker-native-key")).unwrap();
     let all = ["x:Account/get", "x:Authentication/get", "x:Role/get"];
     assert_eq!(broker_reads(&lab.url, &key), all);
-    let keys = lab.call("x:ApiKey/get", &json!({"ids": null}));
-    let id = keys["list"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|key| key["description"] == "garrison broker")
-        .and_then(|key| key["id"].as_str())
-        .unwrap()
-        .to_owned();
     let only_authenticate = json!({"@type": "Replace", "permissions": {"authenticate": true}});
     lab.call(
         "x:ApiKey/set",
-        &json!({"update": {id.clone(): {"permissions": only_authenticate}}}),
+        &json!({"update": {key_id(&lab, "garrison broker"): {"permissions": only_authenticate}}}),
     );
     let narrowed = (key_status(&lab.url, &key), broker_reads(&lab.url, &key));
     let again = setup.run(&["--skip-metrics"]);
@@ -220,6 +233,66 @@ fn the_broker_reads_with_the_key_setup_makes_and_no_narrower_one() {
     assert_eq!(narrowed, (200, vec!["forbidden".to_owned(); 3]));
     assert_eq!(again.status.code(), Some(0), "{}", text(&again));
     assert_eq!(mended, all);
+}
+
+/// The ID of Garrison's API key of `description`, such as "garrison broker".
+fn key_id(lab: &Lab, description: &str) -> String {
+    let keys = lab.call("x:ApiKey/get", &json!({"ids": null}));
+    keys["list"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|key| key["description"] == description)
+        .and_then(|key| key["id"].as_str())
+        .unwrap()
+        .to_owned()
+}
+
+/// Stalwart answers the checks' queries for the collector's key setup makes,
+/// and refuses each with `forbidden` once the key holds the ten permissions
+/// 0.1.2's setup gave it, whose JMAP session it still opens: what an upgrade
+/// leaves until setup runs again, which gives the key its permissions.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn the_collector_queries_with_the_key_setup_makes_and_not_with_an_older_one() {
+    let (_guard, lab) = lab();
+    let setup = Setup::new(&lab, "http://127.0.0.1:9/webhook");
+    let credentials = setup.directory.join("credentials");
+    forget(&lab, &credentials);
+    let ran = setup.run(&["--skip-metrics"]);
+    assert_eq!(ran.status.code(), Some(0), "{}", text(&ran));
+    let file = credentials.join("collector-native-key");
+    let key = std::fs::read_to_string(&file).unwrap();
+    let both = ["x:Domain/query", "x:Account/query"];
+    assert_eq!(collector_reads(&lab.url, &key), both);
+    let older: serde_json::Map<String, serde_json::Value> = [
+        "authenticate",
+        "sysSpamSettingsGet",
+        "sysSpamClassifierGet",
+        "sysSpamRuleQuery",
+        "sysSpamTrainingSampleQuery",
+        "sysQueuedMessageQuery",
+        "sysMtaMilterGet",
+        "sysAccountGet",
+        "sysDomainGet",
+        "sysNetworkListenerGet",
+    ]
+    .iter()
+    .map(|name| ((*name).to_owned(), json!(true)))
+    .collect();
+    let older = json!({"@type": "Replace", "permissions": older});
+    lab.call(
+        "x:ApiKey/set",
+        &json!({"update": {key_id(&lab, "garrison collector"): {"permissions": older}}}),
+    );
+    let upgraded = (key_status(&lab.url, &key), collector_reads(&lab.url, &key));
+    let again = setup.run(&["--skip-metrics"]);
+    let key = std::fs::read_to_string(&file).unwrap();
+    let mended = collector_reads(&lab.url, &key);
+    forget(&lab, &credentials);
+    assert_eq!(upgraded, (200, vec!["forbidden".to_owned(); 2]));
+    assert_eq!(again.status.code(), Some(0), "{}", text(&again));
+    assert_eq!(mended, both);
 }
 
 /// The keys setup makes are the administrator's, and another administrator

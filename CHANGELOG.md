@@ -47,12 +47,11 @@ Notable changes for operators and users. The format follows
   `https://hooks.example.org?key=…`, on which nothing ever went out, is
   refused by `check-config`, and with it the upgrade. Write
   `https://hooks.example.org/?key=…`.
-- Run `garrison stalwart setup` again after the upgrade: the collector's key
-  needs `sysDomainQuery` and `sysAccountQuery` now, to find the domains and
-  accounts the checks read. Until then the DNS records, Blocklists, Reverse
-  names and TLS certificates cards say that Stalwart did not give its
-  domains, the Management API card that it refused `x:Account/query`, and
-  the Spam and ham by domain card that it did not give its accounts.
+- **Run `garrison stalwart setup` again after the upgrade, as `garrison
+  doctor` says.** Until then the collector's key lacks `sysDomainQuery` and
+  `sysAccountQuery`, and the DNS records, Blocklists, Reverse names, TLS
+  certificates, Mailbox storage and Spam and ham by domain cards stay
+  Unknown without a notification.
 - **The first play of the Ansible role runs `garrison stalwart setup`, where
   `garrison_stalwart_admin` is set, also on a host that an earlier release's
   role set up.** Stalwart must answer then, and that administrator must still
@@ -1086,11 +1085,12 @@ Notable changes for operators and users. The format follows
 - **A long DNS answer no longer stops the DNS and reputation checks where
   the resolver refuses TCP.** That record or host is named with why; let the
   resolver answer over TCP on port 53.
-- **The DNS, reputation and TLS checks take their first `max_domains`
-  domains however many Stalwart has, and count the rest.**
-- **The mailbox storage card reads Stalwart's accounts up to `max_accounts`
-  and says how many it leaves.** Raise `max_accounts` where it names some.
-- **Spam and ham by domain names the domains of Stalwart's first 20 000
+- **The DNS, reputation and TLS checks take Stalwart's `max_domains` oldest
+  domains however many it has, and count the rest.**
+- **The mailbox storage card reads Stalwart's oldest accounts up to
+  `max_accounts` and says how many it leaves.** Raise `max_accounts` where it
+  names some.
+- **Spam and ham by domain names the domains of Stalwart's 20 000 oldest
   accounts, not of the first 500 alone, and says how many it leaves.**
 - **The TLS check probes a listener Stalwart binds to one address on that
   address.**

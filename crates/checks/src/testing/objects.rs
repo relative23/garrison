@@ -1,10 +1,12 @@
 //! A stand-in for Stalwart's management API that holds objects of one kind
-//! and answers `/query` and `/get` of them as Stalwart 1.1.0 does (measured
-//! in the lab): a `/get` of all objects (`ids: null`) gives the first 500
-//! of them and says nothing of the rest; a `/query` gives the IDs from
-//! `position` on, `limit` of them and 5000 at the most, with the total
-//! where it is asked to count; a `/get` may take the IDs a query before it
-//! in the same request gave (`#ids`). Every other method is unknown.
+//! and answers `/query` and `/get` of them as Stalwart 1.2.0 does (measured
+//! in the lab, the 5000 on 1.1.0): a `/get` of all objects (`ids: null`)
+//! gives the first 500 of them, the oldest first, and says nothing of the
+//! rest; a `/query` gives the IDs from `position` on, `limit` of them and
+//! 5000 at the most, the newest first, or the oldest first where it sorts
+//! by ID, with the total where it is asked to count; a `/get` may take the
+//! IDs a query before it in the same request gave (`#ids`). A sort Garrison
+//! does not ask for, and every other method, it does not know.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -37,8 +39,8 @@ impl Objects {
     }
 }
 
-/// A stand-in that holds `objects` of `kind`, such as `Domain`, in their
-/// order; each has an `id`.
+/// A stand-in that holds `objects` of `kind`, such as `Domain`, in the
+/// order they were made, the oldest first; each has an `id`.
 pub fn objects(kind: &str, objects: Vec<Value>) -> Objects {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -106,12 +108,23 @@ fn answered_call(call: &Value, kind: &str, objects: &[Value], before: &[Value]) 
     let (method, arguments, tag) = (&call[0], &call[1], &call[2]);
     let id = |object: &Value| object["id"].clone();
     if *method == format!("x:{kind}/query") {
+        let ordered: Vec<&Value> = match &arguments["sort"] {
+            Value::Null => objects.iter().rev().collect(),
+            sort if *sort == json!([{"property": "id", "isAscending": true}]) => {
+                objects.iter().collect()
+            }
+            _ => return json!(["error", {"type": "unsupportedSort"}, tag]),
+        };
         let position = arguments["position"].as_u64().unwrap_or(0);
         let position = usize::try_from(position).unwrap().min(objects.len());
         let limit = arguments["limit"].as_u64().map_or(MOST_IN_QUERY, |limit| {
             usize::try_from(limit).unwrap().min(MOST_IN_QUERY)
         });
-        let ids: Vec<Value> = objects[position..].iter().take(limit).map(id).collect();
+        let ids: Vec<Value> = ordered[position..]
+            .iter()
+            .take(limit)
+            .map(|object| id(object))
+            .collect();
         let mut answer = json!({"ids": ids, "position": position});
         if arguments["calculateTotal"] == json!(true) {
             answer["total"] = json!(objects.len());
