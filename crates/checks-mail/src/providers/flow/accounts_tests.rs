@@ -1,9 +1,9 @@
 //! Where Stalwart did not give the collector's key its accounts, the mail
 //! filed by domain is counted under "unknown", and the card by domain says
-//! why, each kind of failure in words of its own: Stalwart did not answer,
-//! refused the key for its rate limit, refused the key, which the setup
-//! mends, or answered in a form this release does not read, which names the
-//! answer and the supported Stalwart releases.
+//! why, each kind of failure in words of its own: Stalwart did not complete
+//! the request, and how, refused the key for its rate limit, refused the
+//! key, which the setup mends, or answered in a form this release does not
+//! read, which names the answer and the supported Stalwart releases.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -51,7 +51,9 @@ fn the_card_by_domain_says_why_the_domains_of_the_mailboxes_are_not_known() {
             &json!({"methodResponses": [["error", {"type": kind}, "0"]]}),
         ))
     };
-    let unanswered = "Stalwart did not answer the collector's request for its accounts";
+    let incomplete = |how: &str| {
+        format!("Stalwart did not complete the collector's request for its accounts ({how})")
+    };
     let limited = "Stalwart refused the collector's key for its rate limit (HTTP 429), so its \
                    accounts could not be read";
     let refused = "Stalwart did not give its accounts to the collector's API key; run `garrison \
@@ -63,9 +65,22 @@ fn the_card_by_domain_says_why_the_domains_of_the_mailboxes_are_not_known() {
         )
     };
     let cases = [
-        ("closed", None, unanswered.to_owned()),
-        ("503", Some(answer(503, "")), unanswered.to_owned()),
-        ("serverFail", method("serverFail"), unanswered.to_owned()),
+        ("closed", None, incomplete("Stalwart is unavailable")),
+        (
+            "503",
+            Some(answer(503, "")),
+            incomplete("Stalwart answered HTTP 503"),
+        ),
+        (
+            "408",
+            Some(answer(408, "")),
+            incomplete("Stalwart answered HTTP 408"),
+        ),
+        (
+            "serverFail",
+            method("serverFail"),
+            incomplete("Stalwart could not complete the request"),
+        ),
         ("429", Some(answer(429, "")), limited.to_owned()),
         ("403", Some(answer(403, "")), refused.to_owned()),
         ("forbidden", method("forbidden"), refused.to_owned()),

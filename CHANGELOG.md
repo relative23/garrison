@@ -1050,9 +1050,10 @@ Notable changes for operators and users. The format follows
 - **The DNS and reputation cards name the option that gives them a
   resolver.** Where `/etc/resolv.conf` names no resolver, they said only
   that; they now add "name one with `resolver`".
-- **The DNS, TLS and reputation cards say how Stalwart failed a request.**
-  Where Stalwart answered the collector's request for its domains or
-  listeners with HTTP 5xx or 408, or with the JMAP error serverFail, the
+- **The DNS, TLS, reputation and Spam and ham by domain cards say how
+  Stalwart failed a request.** Where Stalwart answered the collector's
+  request for its domains, listeners or accounts with HTTP 5xx or 408, or
+  with the JMAP error serverFail, the
   cards said "Stalwart did not answer the collector's request", as where it
   could not be reached. They now say that Stalwart did not complete the
   request and how, such as "(Stalwart answered HTTP 503)" or "(Stalwart is

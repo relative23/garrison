@@ -73,13 +73,14 @@ struct Account {
 }
 
 /// Why Stalwart did not give the collector's key its accounts, by what went
-/// wrong: it did not answer, or refused the key for its rate limit, which
-/// both pass by themselves; it refused the key, which the setup mends; or
-/// it answered in a form this release does not read, which no setup mends.
+/// wrong: it could not be reached or failed on its side, which the client's
+/// words name, or refused the key for its rate limit, which both pass by
+/// themselves; it refused the key, which the setup mends; or it answered in
+/// a form this release does not read, which no setup mends.
 fn unread(error: &Error) -> String {
     match error {
-        Error::Unavailable(_) => {
-            "Stalwart did not answer the collector's request for its accounts".to_owned()
+        Error::Unavailable(how) => {
+            format!("Stalwart did not complete the collector's request for its accounts ({how})")
         }
         Error::Limited(_) => "Stalwart refused the collector's key for its rate limit (HTTP 429), \
                               so its accounts could not be read"
