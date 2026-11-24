@@ -162,13 +162,12 @@ impl Admin {
                 );
             }
             // A credential Stalwart knows, from an address it does not take
-            // it from: an API key's networks, or a block of the address.
+            // it from: an API key's networks. An address it blocked gets its
+            // connections closed (measured on 1.1.0), so not this answer.
             403 => {
                 return Err(
                     "Stalwart refused the administrator from this host's address (HTTP \
-                            403): its API key may not allow that address, or Stalwart blocked \
-                            the address after failed sign-ins, which operations.md (\"Sign-in \
-                            fails\") says how to lift."
+                            403): its API key may not allow that address."
                         .into(),
                 );
             }
