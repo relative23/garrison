@@ -353,11 +353,25 @@ pub(super) fn content(config: &Config) -> Finding {
     ))
 }
 
-/// The folders above `path`, each as it is seen, nearest first.
+/// The folders the broker passes on its way to `path`, each as it is seen,
+/// nearest first: those above it as it is written, and where a link leads
+/// elsewhere, those above where it leads.
 fn folders(path: &Path) -> Vec<(PathBuf, Seen)> {
-    path.ancestors()
+    let resolved = path
+        .parent()
+        .and_then(|folder| fs::canonicalize(folder).ok());
+    let mut passed: Vec<&Path> = Vec::new();
+    for folder in path
+        .ancestors()
         .skip(1)
-        .filter(|folder| !folder.as_os_str().is_empty())
+        .chain(resolved.iter().flat_map(|folder| folder.ancestors()))
+    {
+        if !folder.as_os_str().is_empty() && !passed.contains(&folder) {
+            passed.push(folder);
+        }
+    }
+    passed
+        .into_iter()
         .filter_map(|folder| {
             let metadata = fs::metadata(folder).ok()?;
             Some((folder.to_owned(), Seen::of(&metadata)))

@@ -181,37 +181,16 @@ pub(super) fn assert_exporter_held(lab: &Lab, credentials: &Path, context: &str)
 }
 
 /// Where the configuration has the macro filter at `port`, one of
-/// Stalwart's entries asks it there, and setup's note names that entry;
-/// where it has none, no entry asks there and no note is left.
-pub(super) fn assert_milter_held(
-    lab: &Lab,
-    credentials: &Path,
-    port: u16,
-    configured: bool,
-    context: &str,
-) {
+/// Stalwart's entries asks it there.
+pub(super) fn assert_milter_held(lab: &Lab, port: u16, context: &str) {
     let entries = lab.call("x:MtaMilter/get", &json!({"ids": null}));
-    let asking: Vec<String> = entries["list"]
+    let asking = entries["list"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|entry| entry["host"] == "127.0.0.1" && entry["port"] == port)
-        .map(|entry| entry["id"].as_str().unwrap().to_owned())
-        .collect();
-    let note = fs::read_to_string(credentials.join("stalwart-milter-id"))
-        .ok()
-        .map(|id| id.trim().to_owned());
-    if configured {
-        assert_eq!(asking.len(), 1, "{context}: entries for the filter");
-        assert_eq!(note.as_ref(), asking.first(), "{context}: setup's note");
-    } else {
-        assert_eq!(
-            asking,
-            Vec::<String>::new(),
-            "{context}: entries for the filter"
-        );
-        assert_eq!(note, None, "{context}: setup's note");
-    }
+        .count();
+    assert_eq!(asking, 1, "{context}: entries for the filter");
 }
 
 /// All three.

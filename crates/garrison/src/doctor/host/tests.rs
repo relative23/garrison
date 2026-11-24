@@ -407,3 +407,16 @@ fn free_space_is_judged_where_a_folder_will_be_made() {
     );
     assert_ne!(room("/").level, Level::Unknown);
 }
+
+/// The folder doctor extracts SELinux's module into has a name nobody can
+/// guess: one another user made under the name doctor would take does not
+/// keep doctor from reading the module.
+#[test]
+fn the_extraction_folder_cannot_be_taken_first() {
+    let guessed = std::env::temp_dir().join(format!("garrison-doctor-{}", std::process::id()));
+    fs::create_dir_all(&guessed).unwrap();
+    let read = loaded_module();
+    fs::remove_dir_all(&guessed).unwrap();
+    let error = read.unwrap_err();
+    assert!(!error.contains("File exists"), "{error}");
+}

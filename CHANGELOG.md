@@ -2021,8 +2021,8 @@ Notable changes for operators and users. The format follows
   `web.port`**, with which nginx answers 502, and names the installer, which
   loads it for the port.
 - **`garrison stalwart setup` leaves one entry for the macro filter in
-  Stalwart**, also where its note of the entry is lost, and switches that
-  entry on again where it was switched off.
+  Stalwart**, which it finds by the address it asks, and switches that entry
+  on again where it was switched off.
 - **`garrison doctor` fails a macro filter entry in Stalwart that asks another
   port than `[milter]` names**, as after a change of `port` without setup, with
   which Stalwart defers all incoming mail.
@@ -2030,9 +2030,17 @@ Notable changes for operators and users. The format follows
   answers 502 for Garrison**, and names the service, the include's port and the
   SELinux module instead of the include itself.
 - **`garrison stalwart setup` no longer ends in success while Stalwart asks a
-  milter on this host where nothing answers, and `garrison doctor` names every
-  such entry**, also without setup's note of the macro filter's. Remove one
-  that setup cannot tell for the filter's in the Stalwart WebUI.
+  milter where nothing answers, and `garrison doctor` names every such entry,
+  whatever host it names.** Setup refuses before it changes anything; remove
+  such an entry that is not the filter's in the Stalwart WebUI.
+- **Setup keeps no note of the macro filter's entry any more: setup, the
+  installer and doctor find it by the address it asks, under any name of this
+  host.** The next setup run removes the note an earlier release left in
+  `/etc/garrison/credentials`.
+- **`garrison stalwart setup` no longer moves the macro filter to a port
+  another program holds**, which left Stalwart deferring all incoming mail: it
+  refuses before anything changes, and moves the filter only once Stalwart
+  asks it at the new port.
 - **`garrison doctor` judges the access policy exactly as the broker's own
   reading takes it**: one the broker owns is a warning, no longer a failure,
   one it does not take is named with why, and a closed `/etc/garrison` with
@@ -2042,22 +2050,25 @@ Notable changes for operators and users. The format follows
   that mends it, and one the broker owns is taken, with a warning. An
   upgrade stops there, before anything changes, where a folder on the way
   keeps the broker from the policy; nobody could sign in there before either.
+  one it does not take is named with why, and a closed folder on the way,
+  also behind a link, with what opens it.
 - **`garrison doctor` tries the broker's and the collector's API keys with
-  Stalwart**, as their services use them, and fails one Stalwart no longer
-  knows, with which nobody can sign in, with the setup that makes a new one.
+  Stalwart**, the broker's with what the broker reads, and fails one Stalwart
+  no longer knows or lets read it, with which nobody can sign in, with the
+  setup that mends it.
 - **The warning of nginx's include for another port restarts `garrison-web`
   in its way without the installer**, which left nginx answering 502, and
   `garrison doctor`'s line of a 502 says whether anything listens on
   `web.port`.
 - **`garrison doctor` reads the port of the SELinux module SELinux has
-  loaded**, no longer that of the file the installer writes before it loads
-  it, and names the `semodule -i` that repeats a load that failed.
+  loaded**, no longer that of the installer's file, and names what loads it
+  for `web.port`.
 - **`garrison doctor` judges the free space where `/var/backups` will be
   made** on a host that has none yet, as the installer does, where it was
   unknown until the first upgrade.
 - **`garrison doctor` no longer calls a web page at `/metrics/prometheus`
   Stalwart's public exporter**, as a webmail answers one for any path: only
-  the exporter's own text, or its 401 without a credential, counts.
+  the exporter's own text, or its 401 that names Stalwart, counts.
 - **A session that ends by its time ends its token at Stalwart too**, as a
   sign-out does, and a revocation Stalwart did not answer is asked again, so
   no token outlasts its session for the rest of Stalwart's hour.

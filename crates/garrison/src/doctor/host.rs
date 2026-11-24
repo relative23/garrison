@@ -244,11 +244,15 @@ fn module_port(text: &str) -> Option<u16> {
 const SEMODULE: &str = "/usr/sbin/semodule";
 
 /// The module SELinux has loaded, as `semodule` extracts it into a folder
-/// of doctor's own, or why there is none to read. The installer's file is
-/// written before the module is loaded, so it names the port of a load that
-/// may have failed.
+/// of doctor's own, or why there is none to read. The installer's file
+/// names the port of its last load that succeeded, or, where an earlier
+/// release wrote it before loading, of a load that may have failed.
 fn loaded_module() -> Result<String, String> {
-    let folder = std::env::temp_dir().join(format!("garrison-doctor-{}", std::process::id()));
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random)
+        .map_err(|error| format!("no folder name could be drawn ({error})"))?;
+    let name = garrison_core::hex::encode(&random);
+    let folder = std::env::temp_dir().join(format!("garrison-doctor-{name}"));
     fs::DirBuilder::new()
         .mode(0o700)
         .create(&folder)
@@ -322,7 +326,8 @@ pub(super) fn selinux_at(
                  (web.port)"
             );
             // The installer loads nothing while its file is the one it
-            // would write: after a load that failed, only a load by hand.
+            // would write, as an earlier release left it after a load that
+            // failed: then only a load by hand does.
             let written = fs::read_to_string(places.module)
                 .ok()
                 .and_then(|text| module_port(&text));

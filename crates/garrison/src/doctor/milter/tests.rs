@@ -1,4 +1,5 @@
 use std::fs;
+use std::net::ToSocketAddrs;
 
 use serde_json::{Value, json};
 
@@ -24,7 +25,10 @@ fn said(findings: &[Finding]) -> Vec<(Level, &str)> {
         .collect()
 }
 
-const NOTHING: fn(u16) -> bool = |_| false;
+/// Where a milter answers: at the ports of `ports`.
+fn at(ports: &[u16]) -> impl Fn(&Entry) -> bool + '_ {
+    |entry| entry.port().is_some_and(|port| ports.contains(&port))
+}
 
 #[test]
 fn a_filter_that_does_not_answer_fails_with_where_to_look() {
@@ -40,16 +44,14 @@ fn a_filter_that_does_not_answer_fails_with_where_to_look() {
 }
 
 /// What doctor says of `entries` where garrison.toml has the filter on
-/// `port`, deferring mail while it does not answer where `defer`, and
-/// setup's note names `noted`.
+/// `port`, deferring mail while it does not answer where `defer`.
 fn configured_as(
-    (port, defer): (u16, bool),
-    noted: Option<&str>,
+    filter: (u16, bool),
     entries: &[Entry],
-    answers: &dyn Fn(u16) -> bool,
+    listening: &[u16],
+    answers: &dyn Fn(&Entry) -> bool,
 ) -> Vec<Finding> {
-    let note = noted.map_or(Note::Missing, |id| Note::Named(id.to_owned()));
-    judged(Some((port, defer)), &note, entries, &[], answers)
+    judged(Some(filter), entries, listening, answers)
 }
 
 /// Stalwart asks the filter where the configuration has it, as setup
@@ -59,33 +61,37 @@ fn configured_as(
 fn stalwart_is_held_to_the_entry_the_configuration_makes() {
     let entered = read(&json!([row("m", 8096, true)]));
     assert_eq!(
-        said(&configured_as((8096, true), Some("m"), &entered, &NOTHING)),
+        said(&configured_as((8096, true), &entered, &[], &at(&[8096]))),
         [(
             Level::Ok,
             "Stalwart asks the macro milter on 127.0.0.1:8096 about every message and defers \
              mail while it does not answer"
         )]
     );
-    // The port changed without setup: Stalwart asks where nothing answers.
-    let moved = configured_as((8097, true), Some("m"), &entered, &NOTHING);
+    // The port changed without setup while the filter runs at the old one:
+    // Stalwart asks it there, until it moves.
+    let moved = configured_as((8097, true), &entered, &[8096], &at(&[8096]));
     assert_eq!(
         said(&moved),
         [(
             Level::Fail,
             "Stalwart asks the macro milter at 127.0.0.1:8096, but the configuration has it on \
-             127.0.0.1:8097, where nothing answers: Stalwart defers all incoming mail"
+             127.0.0.1:8097"
         )]
     );
     assert_eq!(moved[0].fix.as_deref(), Some(SETUP));
-    // Where something answers there, nothing is said of the mail.
-    let answered = configured_as((8097, true), Some("m"), &entered, &|_| true);
-    assert!(
-        answered[0].what.ends_with("on 127.0.0.1:8097"),
-        "{}",
-        answered[0].what
+    // The filter down: Stalwart asks it where nothing answers.
+    let down = configured_as((8096, true), &entered, &[], &at(&[]));
+    assert_eq!(
+        said(&down),
+        [(
+            Level::Fail,
+            "Stalwart asks the macro milter at 127.0.0.1:8096, where nothing answers: Stalwart \
+             defers all incoming mail"
+        )]
     );
     // when_unreachable changed without setup.
-    let accepting = configured_as((8096, false), Some("m"), &entered, &NOTHING);
+    let accepting = configured_as((8096, false), &entered, &[], &at(&[8096]));
     assert_eq!(
         said(&accepting),
         [(
@@ -94,13 +100,10 @@ fn stalwart_is_held_to_the_entry_the_configuration_makes() {
              when_unreachable is \"accept\""
         )]
     );
-    // No entry at all, or none setup's note names and none at the address,
-    // beside another program's milter that answers.
-    for (noted, list) in [
-        (None, json!([])),
-        (Some("gone"), json!([row("x", 9000, true)])),
-    ] {
-        let none = configured_as((8096, true), noted, &read(&list), &|port| port == 9000);
+    // No entry at the filter's port, beside another program's milter that
+    // answers.
+    for list in [json!([]), json!([row("x", 9000, true)])] {
+        let none = configured_as((8096, true), &read(&list), &[], &at(&[9000]));
         assert_eq!(none.len(), 1, "{:?}", said(&none));
         assert_eq!(none[0].level, Level::Warn);
         assert!(
@@ -109,9 +112,6 @@ fn stalwart_is_held_to_the_entry_the_configuration_makes() {
             none[0].what
         );
     }
-    // Without the note, an entry at the address is the filter's.
-    let unnoted = configured_as((8096, true), None, &entered, &NOTHING);
-    assert_eq!(unnoted[0].level, Level::Ok, "{:?}", said(&unnoted));
 }
 
 #[test]
@@ -133,14 +133,14 @@ fn an_entry_switched_off_asked_too_early_or_twice_is_named() {
             "does not ask the macro milter on 127.0.0.1:8096 once a message's data",
         ),
     ] {
-        let found = configured_as((8096, true), Some("m"), &read(&json!([entry])), &NOTHING);
+        let found = configured_as((8096, true), &read(&json!([entry])), &[], &at(&[8096]));
         assert_eq!(found.len(), 1, "{:?}", said(&found));
         assert_eq!(found[0].level, Level::Warn);
         assert!(found[0].what.contains(words), "{}", found[0].what);
         assert_eq!(found[0].fix.as_deref(), Some(SETUP));
     }
     let twice = read(&json!([row("m", 8096, true), row("n", 8096, true)]));
-    let found = configured_as((8096, true), Some("m"), &twice, &NOTHING);
+    let found = configured_as((8096, true), &twice, &[], &at(&[8096]));
     assert_eq!(
         said(&found),
         [(
@@ -150,14 +150,13 @@ fn an_entry_switched_off_asked_too_early_or_twice_is_named() {
     );
 }
 
-/// With the section gone, what Stalwart still has decides: an entry that
-/// still asks the filter fails, a note of one that is gone, or of none, is
-/// a warning, and a Stalwart that cannot be asked leaves the note's word.
+/// With the section gone, an entry at the port the running filter listens
+/// on still asks it and fails, with what Stalwart then does where the
+/// filter has stopped; a Stalwart that cannot be asked leaves it unknown.
 #[test]
 fn a_filter_the_configuration_dropped_is_judged_by_what_stalwart_holds() {
     let entered = read(&json!([row("m", 8096, true)]));
-    let noted = Note::Named("m".to_owned());
-    let still = judged(None, &noted, &entered, &[], &|_| true);
+    let still = judged(None, &entered, &[8096], &at(&[8096]));
     assert_eq!(
         said(&still),
         [(
@@ -167,8 +166,10 @@ fn a_filter_the_configuration_dropped_is_judged_by_what_stalwart_holds() {
         )]
     );
     assert!(still[0].fix.as_deref().unwrap().starts_with(SETUP));
-    // Once the filter has stopped, what that does to mail.
-    let stopped = judged(None, &noted, &entered, &[], &NOTHING);
+    // The filter stopped: nothing tells the entry for the filter's, and
+    // Stalwart asks it in vain, which setup refuses to leave so.
+    let stopped = judged(None, &entered, &[], &at(&[]));
+    assert_eq!(stopped.len(), 1, "{:?}", said(&stopped));
     assert!(
         stopped[0]
             .what
@@ -176,24 +177,9 @@ fn a_filter_the_configuration_dropped_is_judged_by_what_stalwart_holds() {
         "{}",
         stopped[0].what
     );
-    for note in [noted, Note::Empty] {
-        let stale = judged(None, &note, &[], &[], &NOTHING);
-        assert_eq!(stale.len(), 1, "{:?}", said(&stale));
-        assert_eq!(stale[0].level, Level::Warn, "{}", stale[0].line());
-        assert!(
-            stale[0]
-                .fix
-                .as_deref()
-                .unwrap()
-                .contains("which removes the note")
-        );
-    }
-    let unasked = unasked(
-        None,
-        &Note::Named("m".to_owned()),
-        "Stalwart did not answer",
-    );
-    assert_eq!(unasked.level, Level::Fail);
+    assert_eq!(stopped[0].fix.as_deref(), Some(entries::REMOVE));
+    let unasked = unasked(None, "Stalwart did not answer");
+    assert_eq!(unasked.level, Level::Unknown);
     assert!(
         unasked.what.ends_with(": Stalwart did not answer"),
         "{}",
@@ -201,60 +187,27 @@ fn a_filter_the_configuration_dropped_is_judged_by_what_stalwart_holds() {
     );
 }
 
-/// A note of a run that stopped before Stalwart read its settings again:
-/// Stalwart may ask what it held before, which doctor cannot see, so it
-/// judges no entry by what Stalwart holds and names the setup that ends it.
-#[test]
-fn a_run_that_stopped_before_stalwart_read_it_is_named() {
-    let entered = read(&json!([row("m", 8096, true)]));
-    for filter in [Some((8096, true)), None] {
-        for id in [Some("m".to_owned()), None] {
-            let found = judged(filter, &Note::Pending(id), &entered, &[], &|_| true);
-            assert_eq!(found.len(), 1, "{:?}", said(&found));
-            assert_eq!(found[0].level, Level::Fail);
-            assert!(
-                found[0].what.starts_with("setup's last run changed"),
-                "{}",
-                found[0].what
-            );
-            assert_eq!(found[0].fix.as_deref(), Some(SETUP));
-        }
-    }
-}
-
-/// An entry that asks where the running filter listens is the filter's,
-/// whatever the note says: with the section gone it still asks the filter,
-/// which setup takes out before it stops the filter; with the section on
-/// another port it is the filter's entry at its old port, which setup moves.
-/// Where Stalwart also asks an entry in vain that setup cannot tell for the
-/// filter's, setup refuses, so those lines name setup for afterwards.
+/// An entry that asks where the running filter listens is the filter's:
+/// with the section gone it still asks the filter, which setup takes out
+/// before it stops the filter; with the section on another port it is the
+/// filter's entry at its old port, which setup moves. Where Stalwart also
+/// asks an entry in vain that is not the filter's, setup refuses, so those
+/// lines name setup for afterwards.
 #[test]
 fn an_entry_the_running_filter_answers_is_the_filters() {
     let entered = read(&json!([row("g", 8096, true)]));
-    for note in [Note::Missing, Note::Empty, Note::Named("lost".to_owned())] {
-        let still = judged(None, &note, &entered, &[8096], &|port| port == 8096);
-        assert_eq!(
-            said(&still),
-            [(
-                Level::Fail,
-                "Stalwart still asks the macro milter at 127.0.0.1:8096, which the \
-                 configuration no longer has"
-            )],
-            "{note:?}"
-        );
-        let moving = judged(Some((8097, true)), &note, &entered, &[8096], &|_| true);
-        assert_eq!(moving.len(), 1, "{:?}", said(&moving));
-        assert!(
-            moving[0]
-                .what
-                .starts_with("Stalwart asks the macro milter at 127.0.0.1:8096, but"),
-            "{}",
-            moving[0].what
-        );
-        assert_eq!(moving[0].fix.as_deref(), Some(SETUP));
-    }
+    let moving = judged(Some((8097, true)), &entered, &[8096], &at(&[8096]));
+    assert_eq!(moving.len(), 1, "{:?}", said(&moving));
+    assert!(
+        moving[0]
+            .what
+            .starts_with("Stalwart asks the macro milter at 127.0.0.1:8096, but"),
+        "{}",
+        moving[0].what
+    );
+    assert_eq!(moving[0].fix.as_deref(), Some(SETUP));
     let beside = read(&json!([row("g", 8096, true), row("o", 9000, true)]));
-    let found = judged(None, &Note::Missing, &beside, &[8096], &|port| port == 8096);
+    let found = judged(None, &beside, &[8096], &at(&[8096]));
     assert_eq!(found.len(), 2, "{:?}", said(&found));
     assert!(
         found[0].what.contains("127.0.0.1:9000 (entry o)"),
@@ -267,53 +220,6 @@ fn an_entry_the_running_filter_answers_is_the_filters() {
         "{}",
         found[1].line()
     );
-}
-
-/// doctor asks Stalwart with the collector's key, as the collector does;
-/// without the key it says why it could not ask, never "ok".
-#[test]
-fn stalwart_is_asked_with_the_collectors_key() {
-    let directory = tempfile::tempdir().unwrap();
-    // A port where nothing listens: the filter's own line fails, which is
-    // not what this test is about.
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let stalwart = garrison_testing::http::serve(vec![garrison_testing::http::json(&json!({
-        "methodResponses": [["x:MtaMilter/get", {"list": [row("m", port, true)]}, "0"]]
-    }))]);
-    let text = format!(
-        "{}\n[milter]\nport = {port}\n",
-        garrison_testing::config_text(directory.path(), &stalwart.url)
-    );
-    let config = garrison_core::config::from_text(&text).unwrap();
-    let credentials = Credentials::new(&config.credentials_directory);
-    fs::create_dir_all(credentials.directory()).unwrap();
-    let unkeyed = checks(&config, &credentials);
-    assert_eq!(unkeyed[1].level, Level::Unknown, "{:?}", said(&unkeyed));
-    assert!(
-        unkeyed[1].what.contains("the collector's API key"),
-        "{}",
-        unkeyed[1].what
-    );
-    garrison_testing::write_private(
-        &credentials.path(&config.collector.native_key),
-        garrison_testing::NATIVE_KEY.as_bytes(),
-    );
-    garrison_testing::write_private(
-        &config.credentials_directory.join(units::MILTER_ENTRY),
-        b"m\n",
-    );
-    let found = checks(&config, &credentials);
-    let asked = stalwart.requests().remove(0);
-    assert!(
-        asked.contains(&format!("Bearer {}", garrison_testing::NATIVE_KEY)),
-        "{asked}"
-    );
-    assert!(asked.contains("x:MtaMilter/get"), "{asked}");
-    assert_eq!(found[1].level, Level::Ok, "{:?}", said(&found));
 }
 
 /// A port of this host where a milter answers, served until the test ends.
@@ -342,13 +248,11 @@ fn silent_port() -> u16 {
 }
 
 /// What doctor says of the macro milter where garrison.toml has the filter
-/// on `port`, or has no `[milter]`, setup's note holds `note`, or is
-/// missing, and Stalwart holds `entries`.
-fn doctor_on(port: Option<u16>, note: Option<&str>, entries: &Value) -> Vec<Finding> {
+/// on `port`, or has no `[milter]`, Stalwart answers its milters with
+/// `answer`, and the collector's key is there.
+fn doctor_with(port: Option<u16>, answer: String) -> Vec<Finding> {
     let directory = tempfile::tempdir().unwrap();
-    let stalwart = garrison_testing::http::serve(vec![garrison_testing::http::json(&json!({
-        "methodResponses": [["x:MtaMilter/get", {"list": entries}, "0"]]
-    }))]);
+    let stalwart = garrison_testing::http::serve(vec![answer]);
     let section = port.map_or_else(String::new, |port| format!("\n[milter]\nport = {port}\n"));
     let text = format!(
         "{}{section}",
@@ -361,81 +265,122 @@ fn doctor_on(port: Option<u16>, note: Option<&str>, entries: &Value) -> Vec<Find
         &credentials.path(&config.collector.native_key),
         garrison_testing::NATIVE_KEY.as_bytes(),
     );
-    if let Some(note) = note {
-        garrison_testing::write_private(
-            &config.credentials_directory.join(units::MILTER_ENTRY),
-            note.as_bytes(),
-        );
-    }
     checks(&config, &credentials)
 }
 
-/// Whatever setup's note holds and garrison.toml has, wherever Stalwart's
-/// entries ask, doctor never leaves a filter Stalwart asks in vain unsaid:
-/// an entry switched on that asks 127.0.0.1 where nothing answers gets a
-/// line that names it, with `garrison stalwart setup` where setup takes it
-/// for Garrison's and mends it, and the Stalwart WebUI where setup cannot
-/// tell whose it is. An empty note names no entry.
+/// The same, with Stalwart's milters `entries`.
+fn doctor_on(port: Option<u16>, entries: &Value) -> Vec<Finding> {
+    doctor_with(
+        port,
+        garrison_testing::http::json(&json!({
+            "methodResponses": [["x:MtaMilter/get", {"list": entries}, "0"]]
+        })),
+    )
+}
+
+/// doctor asks Stalwart with the collector's key, as the collector does,
+/// and says the filter's entry is in order where it answers there; a key
+/// Stalwart refuses is named as refused, not as one lacking permissions,
+/// since one it does not know (401) wants a new key, which the key's own
+/// line names.
 #[test]
-fn no_filter_stalwart_asks_in_vain_goes_unsaid() {
+fn stalwart_is_asked_with_the_collectors_key() {
+    let port = answering_milter();
+    let found = doctor_on(Some(port), &json!([row("m", port, true)]));
+    assert_eq!(said(&found)[0].0, Level::Ok, "{:?}", said(&found));
+    assert_eq!(found[1].level, Level::Ok, "{:?}", said(&found));
+    let refused = doctor_with(None, garrison_testing::http::answer(401, ""));
+    assert_eq!(
+        said(&refused),
+        [(
+            Level::Unknown,
+            "whether Stalwart asks a milter where nothing answers: Stalwart refused the \
+             collector's API key"
+        )]
+    );
+}
+
+/// Whether a milter answers at `host` and `port` from this host, as a
+/// connection there finds one: the test's milters listen on 127.0.0.1 at
+/// `milters`.
+fn reached(host: &str, port: u16, milters: &[u16]) -> bool {
+    milters.contains(&port)
+        && format!("{host}:{port}")
+            .to_socket_addrs()
+            .is_ok_and(|mut all| {
+                all.any(|address| std::net::TcpStream::connect_timeout(&address, WITHIN).is_ok())
+            })
+}
+
+/// Whatever garrison.toml has, under whatever name of this host Stalwart's
+/// entries ask, doctor names every entry Stalwart asks in vain: switched
+/// on, where no milter answers. Its fix is `garrison stalwart setup` where
+/// setup takes it for the filter's, as it asks this host at the configured
+/// port, and the Stalwart WebUI where it is another program's.
+#[test]
+fn no_entry_stalwart_asks_in_vain_goes_unsaid() {
     let filter = answering_milter();
     let other = answering_milter();
-    let old = silent_port();
-    let gone = silent_port();
-    let held = [None, Some(""), Some("g\n"), Some("lost\n")];
-    let entries = [
+    let (old, gone, elsewhere) = (silent_port(), silent_port(), silent_port());
+    let named = |id: &str, host: &str, port: u16| {
+        let mut entry = row(id, port, true);
+        entry["host"] = json!(host);
+        entry
+    };
+    let mut sets = vec![
         vec![],
-        vec![row("g", filter, true)],
         vec![row("g", filter, true), row("d", filter, true)],
         vec![row("g", old, true)],
         vec![row("g", filter, true), row("o", other, true)],
-        vec![row("g", filter, true), row("o", gone, true)],
-        vec![row("o", gone, true)],
         vec![row("g", old, true), row("o", other, true)],
     ];
+    for name in [
+        "127.0.0.1",
+        "localhost",
+        "::1",
+        "[::1]",
+        "127.0.0.2",
+        "127.1",
+        "0.0.0.0",
+        "LOCALHOST",
+        "localhost.",
+    ] {
+        sets.push(vec![named("g", name, filter)]);
+        sets.push(vec![row("g", filter, true), named("o", name, gone)]);
+    }
     let mut faults = Vec::new();
-    for configured in [Some(filter), None] {
-        for note in held {
-            for listed in &entries {
-                let found = doctor_on(configured, note, &json!(listed));
-                let shown: Vec<String> = found.iter().map(Finding::line).collect();
-                let state = format!("[milter] {configured:?}, note {note:?}, entries {listed:?}");
-                let noted = note.map(str::trim).filter(|id| !id.is_empty());
-                for entry in listed {
-                    let port = u16::try_from(entry["port"].as_u64().unwrap()).unwrap();
-                    if port != old && port != gone {
-                        continue;
-                    }
-                    // Setup takes the noted entry for Garrison's, and with
-                    // the section there every entry at its port.
-                    let garrisons = noted == entry["id"].as_str();
-                    let address = format!("127.0.0.1:{port}");
-                    let named = found.iter().find(|finding| finding.what.contains(&address));
-                    let fault = match named {
-                        None => Some("no line names it"),
-                        Some(finding) if finding.level == Level::Ok => Some("its line says ok"),
-                        Some(finding) => {
-                            let fix = finding.fix.as_deref().unwrap_or_default();
-                            if garrisons && !fix.contains("garrison stalwart setup") {
-                                Some("setup mends it, and its fix does not name setup")
-                            } else if !garrisons && !fix.contains("Stalwart WebUI") {
-                                Some("setup cannot tell it is Garrison's, and the fix is setup")
-                            } else {
-                                None
-                            }
-                        }
-                    };
-                    if let Some(fault) = fault {
-                        faults.push(format!(
-                            "{state}: the entry at {address}, where nothing answers: {fault}:\n{}",
-                            shown.join("\n")
-                        ));
-                    }
+    for configured in [Some(filter), Some(elsewhere), None] {
+        for listed in &sets {
+            let found = doctor_on(configured, &json!(listed));
+            let shown: Vec<String> = found.iter().map(Finding::line).collect();
+            for entry in listed {
+                let host = entry["host"].as_str().unwrap();
+                let port = u16::try_from(entry["port"].as_u64().unwrap()).unwrap();
+                if reached(host, port, &[filter, other]) {
+                    continue;
                 }
-                if note == Some("") && shown.iter().any(|line| line.contains("no longer has")) {
+                let resolves = format!("{host}:{port}").to_socket_addrs().is_ok();
+                let garrisons = configured == Some(port) && resolves;
+                let address = format!("{host}:{port}");
+                let line = found.iter().find(|finding| finding.what.contains(&address));
+                let fault = match line {
+                    None => Some("no line names it"),
+                    Some(finding) if finding.level == Level::Ok => Some("its line says ok"),
+                    Some(finding) => {
+                        let fix = finding.fix.as_deref().unwrap_or_default();
+                        if garrisons && !fix.contains("garrison stalwart setup") {
+                            Some("setup mends it, and its fix does not name setup")
+                        } else if !garrisons && !fix.contains("Stalwart WebUI") {
+                            Some("it is another program's, and the fix is setup")
+                        } else {
+                            None
+                        }
+                    }
+                };
+                if let Some(fault) = fault {
                     faults.push(format!(
-                        "{state}: an empty note names no entry, but a line says Stalwart no \
-                         longer has it:\n{}",
+                        "[milter] {configured:?}, entries {listed:?}: the entry at {address}, \
+                         where nothing answers: {fault}:\n{}",
                         shown.join("\n")
                     ));
                 }
@@ -455,7 +400,7 @@ fn the_quick_start_looks_for_lines_doctor_says() {
     let entered = read(&json!([row("m", 8096, true)]));
     let mut lines = vec![answering(8096, Ok(())).line()];
     lines.extend(
-        configured_as((8096, true), Some("m"), &entered, &|_| true)
+        configured_as((8096, true), &entered, &[], &at(&[8096]))
             .iter()
             .map(Finding::line),
     );

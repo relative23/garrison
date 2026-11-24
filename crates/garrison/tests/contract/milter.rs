@@ -1,4 +1,4 @@
-//! The macro filter's entry, as `stalwart setup` makes and takes it out.
+//! The macro filter's entry, as `stalwart setup` makes it.
 
 use garrison_testing::lab::Lab;
 use serde_json::json;
@@ -7,8 +7,9 @@ use super::{run, text};
 
 /// The macro filter's entry in Stalwart follows the configuration: none while
 /// the filter does not answer, one while the `[milter]` section is there,
-/// found by its address where setup's note is gone, changed in place, and
-/// none again once the section is gone.
+/// found by the address it asks, and changed in place. Taking it out again
+/// needs to see where the running filter listens, which only root can: the
+/// quick start does it.
 pub(super) fn macro_filter(
     lab: &mut Lab,
     directory: &std::path::Path,
@@ -35,7 +36,6 @@ pub(super) fn macro_filter(
         (output.status.code(), text(&output))
     };
     let before = milters(lab).len();
-    let note = directory.join("credentials/stalwart-milter-id");
 
     // Nothing listens on the filter's port: setup changes nothing at all.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -53,7 +53,6 @@ pub(super) fn macro_filter(
     );
     assert!(!output.contains("- updated"), "{output}");
     assert_eq!(milters(lab).len(), before);
-    assert!(!note.exists());
 
     // The filter runs: Stalwart is told of it, as the configuration has it.
     let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
@@ -72,21 +71,18 @@ pub(super) fn macro_filter(
         output.contains(&format!("- entered the macro milter (127.0.0.1:{port})")),
         "{output}"
     );
-    let id = std::fs::read_to_string(&note).unwrap().trim().to_owned();
+    let entered = at(lab, port);
+    assert_eq!(entered.len(), 1, "{entered:?}");
+    let entry = &entered[0];
+    let id = entry["id"].as_str().unwrap().to_owned();
     lab.created.push(("MtaMilter".into(), id.clone()));
-    let entered = milters(lab);
-    assert_eq!(entered.len(), before + 1);
-    let entry = entered
-        .iter()
-        .find(|entry| entry["id"] == id.as_str())
-        .unwrap();
+    assert_eq!(milters(lab).len(), before + 1);
     assert_eq!(entry["host"], "127.0.0.1");
-    assert_eq!(entry["port"], port);
     assert_eq!(entry["tempFailOnError"], false);
     assert_eq!(entry["enable"], json!({"match": {}, "else": "true"}));
     assert_eq!(entry["stages"], json!({"data": true}));
 
-    let id = found_by_its_address(lab, &setup, &note, id, port, before);
+    let id = found_by_its_address(lab, &setup, id, port, before);
 
     // Once more, with mail deferred while the filter is away: the same entry.
     std::fs::write(
@@ -100,46 +96,30 @@ pub(super) fn macro_filter(
         output.contains("- updated the macro milter's entry"),
         "{output}"
     );
-    let updated = milters(lab);
-    assert_eq!(updated.len(), before + 1);
-    let entry = updated
-        .iter()
-        .find(|entry| entry["id"] == id.as_str())
-        .unwrap();
-    assert_eq!(entry["tempFailOnError"], true);
-
-    // The section is gone: so are the entry, another for the same filter,
-    // and setup's note of it.
-    let more = lab.create(
-        "MtaMilter",
-        &json!({"host": "127.0.0.1", "port": port, "tempFailOnError": true}),
-    );
+    let updated = at(lab, port);
+    assert_eq!(updated.len(), 1, "{updated:?}");
+    assert_eq!(updated[0]["id"], id.as_str());
+    assert_eq!(updated[0]["tempFailOnError"], true);
+    // Stalwart would ask it for the tests after this one.
     std::fs::write(&path, &plain).unwrap();
-    let (code, output) = setup();
-    assert_eq!(code, Some(0), "{output}");
-    assert!(
-        output.contains("- took the macro milter's 2 entries out of Stalwart"),
-        "{output}"
+    lab.call("x:MtaMilter/set", &json!({ "destroy": [id] }));
+    lab.call(
+        "x:Action/set",
+        &json!({"create": {"r": {"@type": "ReloadSettings"}}}),
     );
-    lab.created
-        .retain(|(_, known)| *known != id && *known != more);
-    assert_eq!(milters(lab).len(), before);
-    assert!(!note.exists());
+    lab.created.retain(|(_, known)| *known != id);
 }
 
-/// Setup's note lost, a second entry for the filter beside it, as an
-/// earlier release left one, and the first switched off by hand: setup
-/// finds its entry by the address it asks, leaves one and switches it on.
-/// Its ID, which setup notes again.
+/// A second entry for the filter beside it, as an earlier release left one,
+/// and the first switched off by hand: setup finds both by the address they
+/// ask, leaves one and switches it on. Its ID.
 fn found_by_its_address(
     lab: &mut Lab,
     setup: &impl Fn() -> (Option<i32>, String),
-    note: &std::path::Path,
     id: String,
     port: u16,
     before: usize,
 ) -> String {
-    std::fs::remove_file(note).unwrap();
     let second = lab.create(
         "MtaMilter",
         &json!({"host": "127.0.0.1", "port": port, "tempFailOnError": true}),
@@ -152,23 +132,19 @@ fn found_by_its_address(
     lab.call("x:MtaMilter/set", &json!({ "update": off }));
     let (code, output) = setup();
     assert_eq!(code, Some(0), "{output}");
-    assert!(output.contains("found by its address"), "{output}");
     assert!(
         output.contains("took another entry for it out of Stalwart"),
         "{output}"
     );
-    let kept = std::fs::read_to_string(note).unwrap().trim().to_owned();
+    let left = at(lab, port);
+    assert_eq!(left.len(), 1, "{left:?}");
+    let kept = left[0]["id"].as_str().unwrap().to_owned();
     assert!(kept == id || kept == second, "{kept}");
     let gone = if kept == id { second } else { id };
     lab.created.retain(|(_, known)| *known != gone);
-    let left = milters(lab);
-    assert_eq!(left.len(), before + 1);
-    let entry = left
-        .iter()
-        .find(|entry| entry["id"] == kept.as_str())
-        .unwrap();
-    assert_eq!(entry["enable"], json!({"match": {}, "else": "true"}));
-    assert_eq!(entry["tempFailOnError"], false);
+    assert_eq!(milters(lab).len(), before + 1);
+    assert_eq!(left[0]["enable"], json!({"match": {}, "else": "true"}));
+    assert_eq!(left[0]["tempFailOnError"], false);
     kept
 }
 
@@ -178,4 +154,12 @@ fn milters(lab: &Lab) -> Vec<serde_json::Value> {
         .as_array()
         .unwrap()
         .clone()
+}
+
+/// Those that ask 127.0.0.1 at `port`.
+fn at(lab: &Lab, port: u16) -> Vec<serde_json::Value> {
+    milters(lab)
+        .into_iter()
+        .filter(|entry| entry["host"] == "127.0.0.1" && entry["port"] == port)
+        .collect()
 }

@@ -419,3 +419,40 @@ fn what_the_policy_grants_is_read_as_the_broker_reads_it() {
         assert_eq!(read.is_ok(), what == "a policy", "{what}: {read:?}");
     }
 }
+
+/// A policy behind a linked folder is judged by the folders above where it
+/// lies too: one the broker may not enter fails, as the broker cannot open
+/// the policy.
+#[test]
+fn the_folders_behind_a_linked_folder_are_judged() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let closed = root.join("closed");
+    let inner = closed.join("garrison");
+    fs::create_dir_all(&inner).unwrap();
+    fs::write(inner.join("access-policy.json"), "{}").unwrap();
+    let mode = |path: &Path, mode: u32| {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    };
+    mode(root, 0o755);
+    mode(&inner, 0o755);
+    mode(&closed, 0o700);
+    let link = root.join("etc-garrison");
+    symlink(&inner, &link).unwrap();
+    let path = link.join("access-policy.json");
+    let (names, broker) = accounts(PASSWD, GROUP);
+    let file = Seen {
+        uid: 0,
+        gid: 991,
+        mode: 0o640,
+    };
+    let found = readable(&path, file, &folders(&path), broker.as_ref(), &names);
+    mode(&closed, 0o755);
+    assert_eq!(found.level, Level::Fail, "{}", found.line());
+    assert!(
+        found.what.contains(&closed.display().to_string()),
+        "{}",
+        found.what
+    );
+}

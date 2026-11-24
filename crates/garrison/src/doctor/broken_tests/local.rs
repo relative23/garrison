@@ -160,7 +160,8 @@ pub(super) fn selinux_module_for_another_port() -> Broken {
 }
 
 /// The macro milter moved to another port without setup: Stalwart's entry
-/// still asks the old one, where nothing answers.
+/// still asks the old one, where nothing answers, which is then no entry of
+/// the filter's.
 pub(super) fn milter_on_another_port() -> Broken {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -197,17 +198,13 @@ pub(super) fn milter_on_another_port() -> Broken {
         &credentials.path(&config.collector.native_key),
         garrison_testing::NATIVE_KEY.as_bytes(),
     );
-    garrison_testing::write_private(
-        &config.credentials_directory.join("stalwart-milter-id"),
-        b"m\n",
-    );
     let found = milter::checks(&config, &credentials);
     stalwart.requests();
     Broken {
         host: "the macro milter on another port than Stalwart's entry",
         found,
         said: format!("at 127.0.0.1:{old}"),
-        fix: Some("garrison stalwart setup".into()),
+        fix: Some("Stalwart WebUI".into()),
     }
 }
 

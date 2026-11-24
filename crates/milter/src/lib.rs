@@ -72,7 +72,11 @@ pub fn run(config: &Config) -> Result<(), Error> {
 /// sends, and a filter's answer to it. Setup asks this before it tells
 /// Stalwart of the filter, and `garrison doctor` to see that it runs.
 pub fn answers(port: u16, within: Duration) -> Result<(), String> {
-    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    answers_at(SocketAddr::from((Ipv4Addr::LOCALHOST, port)), within)
+}
+
+/// Whether a milter answers at `address`, as [`answers`] asks it.
+pub fn answers_at(address: SocketAddr, within: Duration) -> Result<(), String> {
     let said = |error: std::io::Error| error.to_string();
     let mut stream = TcpStream::connect_timeout(&address, within).map_err(said)?;
     stream.set_read_timeout(Some(within)).map_err(said)?;
