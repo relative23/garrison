@@ -92,10 +92,10 @@ brokers never repeat a job; pending jobs become "uncertain".
   turn, three encodings deep as archives are opened three deep. Where a part
   begins or ends, how deeply it is nested and how its headers are written are
   never read to decide this, so no boundary trick, depth or header hides a
-  document the scan would otherwise find. It does not decode yEnc, which mail
-  programs do not decode on their own; such a message passes as one without
-  macros. A part that declares a transfer encoding the filter does not decode,
-  and nesting deeper than three, are incomplete, below, not a clean message.
+  document the scan would otherwise find. It does not decode yEnc or BinHex,
+  which a mail program may take from a body: a message that holds a block of
+  either, a part that declares a transfer encoding the filter does not decode,
+  and nesting deeper than three are incomplete, below, not a clean message.
   Anyone who can reach its loopback port can ask it about a message, as with
   any milter.
 - A message the macro filter could not scan completely is taken all the same

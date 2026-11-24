@@ -7,7 +7,8 @@
 //! - the one thing a header may still decide, and only to make the answer
 //!   stricter: a `Content-Transfer-Encoding` line, at any line's start, whose
 //!   value the scan does not decode means the message was not scanned
-//!   completely. No boundary and no part structure is read.
+//!   completely, and so does the first line of a `yEnc` or a `BinHex` block. No
+//!   boundary and no part structure is read.
 //!
 
 use super::unpack::Work;
@@ -40,16 +41,26 @@ impl Work {
     }
 
     /// If any `Content-Transfer-Encoding` line declares a value the scan does
-    /// not decode, the message was not scanned completely.
+    /// not decode, or a block begins in an encoding it does not decode, the
+    /// message was not scanned completely.
     pub(super) fn flag_undecodable_encoding(&mut self, message: &[u8]) {
-        for value in content_transfer_encodings(message) {
-            if !decodable(&value) {
-                self.gap.get_or_insert(Gap::Encoding);
-                return;
-            }
+        let declared = content_transfer_encodings(message)
+            .iter()
+            .any(|value| !decodable(value));
+        let begun = UNREAD.iter().any(|opening| {
+            memchr::memmem::find_iter(message, opening)
+                .any(|at| at == 0 || matches!(message[at - 1], b'\n' | b'\r'))
+        });
+        if declared || begun {
+            self.gap.get_or_insert(Gap::Encoding);
         }
     }
 }
+
+/// What opens a block in an encoding the scan does not decode, at a line's
+/// start: `yEnc` and `BinHex` 4.0. A mail program may take either from a body
+/// that no header describes.
+const UNREAD: [&[u8]; 2] = [b"=ybegin ", b"(This file must be converted with BinHex"];
 
 /// The token of a transfer-encoding value, in lower case.
 fn token(value: &[u8]) -> Vec<u8> {

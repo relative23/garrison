@@ -159,10 +159,20 @@ fn prose_that_resembles_an_encoding_stays_clean() {
 }
 
 #[test]
-fn a_yenc_body_is_a_named_limit() {
-    // yEnc is decoded by no mail program the project knows; a macro document
-    // so encoded passes as clean, a limit named in the documents.
-    let mut message = b"Subject: x\r\nContent-Type: application/octet-stream\r\n\r\n".to_vec();
-    message.extend_from_slice(&yencode(&document()));
-    assert_eq!(macros(&message), Outcome::Clean);
+fn a_block_in_an_encoding_the_scan_does_not_read_is_incomplete() {
+    // A mail program takes a yEnc block from a body no header describes, and
+    // may take a BinHex one: the scan decodes neither, so it did not read
+    // the message completely, whatever the block holds.
+    for body in [document(), plain_document()] {
+        let mut yenc = b"Subject: x\r\n\r\n".to_vec();
+        yenc.extend_from_slice(&yencode(&body));
+        assert_eq!(macros(&yenc), Outcome::Incomplete(Gap::Encoding));
+    }
+    let binhex = b"Subject: x\r\n\r\n(This file must be converted with BinHex 4.0)\r\n\r\n\
+        :$f*TEQKPH#jdH(3!9%9B9&4iG(3!N!3`!!!!!$!!!!!!:\r\n";
+    assert_eq!(macros(binhex), Outcome::Incomplete(Gap::Encoding));
+    // Text that speaks of them holds no block.
+    let prose = b"Subject: x\r\n\r\nA yEnc block starts with =ybegin line=128, and a\r\n\
+        BinHex file says (This file must be converted with BinHex 4.0) first.\r\n";
+    assert_eq!(macros(prose), Outcome::Clean);
 }

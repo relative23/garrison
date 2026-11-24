@@ -382,6 +382,9 @@ impl Work {
         self.encodings -= 1;
         let found = self.decode_encodings(data);
         self.encodings += 1;
+        if found.is_none() {
+            self.flag_undecodable_encoding(data);
+        }
         found
     }
 }

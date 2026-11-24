@@ -306,10 +306,9 @@ message with its own base64 attachment) is read in turn, three encodings deep.
 No boundary, nesting depth or header is read to decide this, so none of them
 hides a document. What it does not see: an archive with a password, other
 archive formats such as 7z and RAR, Excel 4.0 macro sheets in an old `.xls`
-file, the macros of an old `.ppt` file, macros in LibreOffice's own formats, a
-document in the yEnc encoding (which mail programs do not decode on their
-own), and a document behind a link. It complements a virus scanner and does
-not replace one.
+file, the macros of an old `.ppt` file, macros in LibreOffice's own formats,
+and a document behind a link. It complements a virus scanner and does not
+replace one.
 
 A message the filter could not scan completely is never passed as if it were
 clean. That is a message
@@ -322,7 +321,8 @@ clean. That is a message
   Deflate64 and the like),
 - with a part that declares a transfer encoding the filter does not decode
   (any but 7bit, 8bit, binary, base64, quoted-printable and uuencode), that
-  holds a uuencode block begun and not ended, or that nests more than three
+  holds a yEnc or a BinHex block, which the filter does not decode either, or
+  a uuencode block begun and not ended, or that nests more than three
   transfer encodings deep, or
 - whose scan was not done 20 seconds after the message's end, the wait for
   other messages' scans included.
