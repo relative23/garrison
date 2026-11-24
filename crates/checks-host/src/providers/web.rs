@@ -11,6 +11,7 @@ use garrison_core::{hex, json};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use super::hidden::{self, Seen};
 use super::ran::{SECONDS, patience, silent};
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
@@ -77,8 +78,13 @@ impl Bulwark {
     /// The plugins the registry lists, or why it cannot be read by `until`.
     fn registry(&self, until: Instant) -> Result<Vec<Value>, String> {
         let path = self.base.join(REGISTRY);
+        let missing = format!(
+            "there is no {REGISTRY} in {}; set `admin_directory` to Bulwark's administration \
+             folder, which holds it",
+            self.base.display()
+        );
         let data = read(&path, MAX_REGISTRY, until)
-            .map_err(|error| unread(REGISTRY, &path, &error, MAX_REGISTRY, until))?;
+            .map_err(|error| unread(REGISTRY, &path, &error, MAX_REGISTRY, until, &missing))?;
         let registry =
             json::parse(&data, MAX_REGISTRY).map_err(|_| format!("{REGISTRY} is no valid JSON"))?;
         registry
@@ -105,10 +111,16 @@ impl Bulwark {
         };
         let shown = format!("plugins/{name}.js");
         let path = self.base.join(&shown);
+        let missing = format!(
+            "{shown} is not there, though {REGISTRY} lists it; Bulwark writes it when it installs \
+             the plugin"
+        );
         match read(&path, MAX_BUNDLE, until) {
             Ok(code) if hex::encode(&Sha256::digest(&code)) == expected => Integrity::Verified,
             Ok(_) => Integrity::Mismatch,
-            Err(error) => Integrity::Unknown(unread(&shown, &path, &error, MAX_BUNDLE, until)),
+            Err(error) => {
+                Integrity::Unknown(unread(&shown, &path, &error, MAX_BUNDLE, until, &missing))
+            }
         }
     }
 }
@@ -141,9 +153,17 @@ impl Integrity {
 }
 
 /// Why a file below the administration folder could not be read: its file
-/// system gave no answer by `until`, or it is missing, a link, larger than
-/// it may be, kept from the collector, or the error says.
-fn unread(shown: &str, path: &Path, error: &io::Error, limit: usize, until: Instant) -> String {
+/// system gave no answer by `until`, or it is not there, as `missing` says
+/// with what mends it, a link, larger than it may be, kept from the
+/// collector, or the error says.
+fn unread(
+    shown: &str,
+    path: &Path,
+    error: &io::Error,
+    limit: usize,
+    until: Instant,
+    missing: &str,
+) -> String {
     let silence = || format!("the file system of {shown} did not answer within {SECONDS} seconds");
     if silent(error) {
         return silence();
@@ -151,7 +171,7 @@ fn unread(shown: &str, path: &Path, error: &io::Error, limit: usize, until: Inst
     let looked = path.to_path_buf();
     match answered_by(until, move || fs::symlink_metadata(&looked)).and_then(|looked| looked) {
         Err(looked) if silent(&looked) => silence(),
-        Err(_) if error.kind() == io::ErrorKind::NotFound => format!("{shown} is missing"),
+        Err(_) if error.kind() == io::ErrorKind::NotFound => missing.to_owned(),
         Ok(metadata) if metadata.is_symlink() => {
             format!("{shown} is a link, which is not followed")
         }
@@ -191,7 +211,17 @@ impl Bulwark {
     /// The card, with what it reads below the folder read by `until`.
     pub(super) fn card(&self, context: &Context<'_>, until: Instant) -> Collected {
         let registry_path = self.base.join(REGISTRY);
-        let registry = self.registry(until);
+        // What the collector's unit hides is not mended by another folder.
+        let registry = match hidden::seen(&self.base) {
+            Seen::Hidden(place) => Err(format!(
+                "{} lies under {}, which the collector's unit hides from it: show the collector \
+                 that folder at another place and set `admin_directory` to it \
+                 (docs/operator/checks.md, \"Paths the collector cannot see\")",
+                self.base.display(),
+                place.display()
+            )),
+            Seen::Host | Seen::Bound { .. } => self.registry(until),
+        };
         let mut fields = Vec::new();
         let (mut mismatched, mut unknown, mut verified) = (Vec::new(), Vec::new(), 0_usize);
         for name in &self.plugins {

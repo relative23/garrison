@@ -1413,6 +1413,9 @@ Notable changes for operators and users. The format follows
   file existed, and showed the age of the daily one without judging it. A
   daily database older than 48 hours is now a warning, and files without a
   daily database among them are Unknown.
+- **The webmail card names what mends a registry or a bundle that is not
+  there.** A folder without `plugins/registry.json` names `admin_directory`,
+  and a bundle the registry lists says that Bulwark writes it.
 - **A webmail plugin whose bundle cannot be checked is named.** The
   webmail plugins card stayed in order where a plugin's bundle integrity
   was "unknown", as long as no other bundle mismatched: a plugin that

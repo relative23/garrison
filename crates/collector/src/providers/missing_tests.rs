@@ -88,6 +88,14 @@ fn every_card_that_names_a_missing_file_or_credential_says_what_makes_it() {
             )],
         ),
         (
+            "bulwark.plugins".to_owned(),
+            vec![format!(
+                "No bundle's integrity is known: there is no plugins/registry.json in \
+                 {GONE}/admin_directory; set `admin_directory` to Bulwark's administration folder, \
+                 which holds it."
+            )],
+        ),
+        (
             "backup-check.restic".to_owned(),
             vec![format!(
                 "The repository's state is not known: no report at {GONE}/path; `garrison \

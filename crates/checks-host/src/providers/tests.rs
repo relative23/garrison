@@ -252,7 +252,8 @@ fn a_bundle_whose_integrity_is_not_known_is_named_and_not_in_order() {
         (
             json!([recorded("spam", code)]),
             vec![],
-            "plugins/spam.js is missing",
+            "plugins/spam.js is not there, though plugins/registry.json lists it; Bulwark writes \
+             it when it installs the plugin",
         ),
         (
             json!([recorded("spam", &large)]),
@@ -315,16 +316,22 @@ fn a_bundle_whose_integrity_is_not_known_is_named_and_not_in_order() {
     );
 }
 
-/// A registry that cannot be read leaves every bundle unknown, and says why.
+/// A registry that cannot be read leaves every bundle unknown, and says why:
+/// one that is not there names the option that names the folder, which
+/// `admin_directory` may name wrongly, and the folder it names.
 #[test]
 fn a_plugin_registry_that_cannot_be_read_says_why() {
     let missing = tempfile::tempdir().unwrap();
     let card = plugins_card(missing.path(), "\"spam\"");
     assert_eq!(
-        (card.state, card.findings.as_slice()),
+        (card.state, card.findings),
         (
             State::Unknown,
-            &["No bundle's integrity is known: plugins/registry.json is missing.".to_owned()][..]
+            vec![format!(
+                "No bundle's integrity is known: there is no plugins/registry.json in {}; set \
+                 `admin_directory` to Bulwark's administration folder, which holds it.",
+                missing.path().display()
+            )]
         )
     );
     for (text, why) in [
