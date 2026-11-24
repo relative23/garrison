@@ -19,7 +19,7 @@ use crate::models::errors::{
 use crate::models::{DeliveryCause, Destination, DestinationTotals, Destinations, WaitingMessage};
 use crate::security::Visitor;
 
-pub fn routes() -> Router<Arc<App>> {
+pub(crate) fn routes() -> Router<Arc<App>> {
     Router::new().route("/api/destinations", get(destinations))
 }
 

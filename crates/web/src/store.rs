@@ -46,12 +46,12 @@ const MIGRATIONS: [Migration; 1] = [&[
 ]];
 
 /// The stored form of a session or subject: its SHA-256 in hex.
-pub fn digest(value: &str) -> String {
+pub(crate) fn digest(value: &str) -> String {
     hex::encode(&Sha256::digest(value.as_bytes()))
 }
 
 /// `bytes` random bytes as base64url without padding, for cookies and tokens.
-pub fn random_token(bytes: usize) -> Result<String, StoreError> {
+pub(crate) fn random_token(bytes: usize) -> Result<String, StoreError> {
     let mut data = vec![0; bytes];
     getrandom::fill(&mut data).map_err(|_| StoreError::Random)?;
     Ok(URL_SAFE_NO_PAD.encode(data))
@@ -83,14 +83,14 @@ impl From<rusqlite::Error> for StoreError {
 
 #[derive(Clone, PartialEq)]
 pub struct Session {
-    pub id_hash: String,
-    pub subject: String,
-    pub email: String,
-    pub token: String,
+    pub(crate) id_hash: String,
+    pub(crate) subject: String,
+    pub(crate) email: String,
+    pub(crate) token: String,
     pub csrf: String,
-    pub client_ip: Option<String>,
+    pub(crate) client_ip: Option<String>,
     /// The second the session ends, since the epoch.
-    pub expires_at: i64,
+    pub(crate) expires_at: i64,
 }
 
 impl std::fmt::Debug for NewSession<'_> {
@@ -124,7 +124,7 @@ pub struct NewSession<'a> {
 }
 
 /// Stored preferences, as the interface shows them.
-pub fn validated(value: Preferences) -> Option<Preferences> {
+pub(crate) fn validated(value: Preferences) -> Option<Preferences> {
     let mut hidden = value.hidden_modules;
     let count = hidden.len();
     if hidden.iter().any(|name| name.parse::<ModuleId>().is_err())
@@ -234,7 +234,7 @@ impl WebStore {
     }
 
     /// End a session; its token, to revoke it.
-    pub fn delete(&self, id_hash: &str) -> Result<Option<String>, StoreError> {
+    pub(crate) fn delete(&self, id_hash: &str) -> Result<Option<String>, StoreError> {
         let db = self.db();
         Ok(db
             .query_row(
@@ -247,7 +247,7 @@ impl WebStore {
 
     /// End a session now but keep its row, whose token is still to be
     /// revoked: no cookie finds it any more, whatever the clock says.
-    pub fn end(&self, id_hash: &str) -> Result<(), StoreError> {
+    pub(crate) fn end(&self, id_hash: &str) -> Result<(), StoreError> {
         self.db().execute(
             "UPDATE sessions SET expires_at=? WHERE id_hash=?",
             params![ENDED, id_hash],
@@ -260,7 +260,7 @@ impl WebStore {
     /// ended here for good, and so is one dated ahead of the clock, as one
     /// signed in while it ran ahead, which began at a time not known, and
     /// one stored at no time.
-    pub fn ended(&self, limit: u16) -> Result<Vec<(String, String)>, StoreError> {
+    pub(crate) fn ended(&self, limit: u16) -> Result<Vec<(String, String)>, StoreError> {
         let db = self.db();
         db.execute(
             "UPDATE sessions SET expires_at=?1 WHERE expires_at IS NOT ?1 \
@@ -277,7 +277,7 @@ impl WebStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    pub fn preferences(&self, subject: &str) -> Result<Preferences, StoreError> {
+    pub(crate) fn preferences(&self, subject: &str) -> Result<Preferences, StoreError> {
         let text: Option<String> = self
             .db()
             .query_row(
@@ -300,7 +300,7 @@ impl WebStore {
     }
 
     /// Save validated preferences; `None` if they are not valid.
-    pub fn save_preferences(
+    pub(crate) fn save_preferences(
         &self,
         subject: &str,
         value: Preferences,

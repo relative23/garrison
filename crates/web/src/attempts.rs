@@ -31,7 +31,7 @@ pub const MAX_NETWORKS: usize = 4096;
 /// address: nginx names IPv4 clients so where one socket listens for both
 /// (`listen [::]:443 ipv6only=off`), and as an IPv6 /64 all of them would
 /// be one network.
-pub fn network(address: Option<&str>) -> Option<IpAddr> {
+pub(crate) fn network(address: Option<&str>) -> Option<IpAddr> {
     match address?.parse::<IpAddr>().ok()? {
         IpAddr::V4(address) => Some(IpAddr::V4(address)),
         IpAddr::V6(address) => Some(match address.to_ipv4_mapped() {
@@ -43,7 +43,7 @@ pub fn network(address: Option<&str>) -> Option<IpAddr> {
 
 /// Why a code exchange may not start now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Refusal {
+pub(crate) enum Refusal {
     /// This network has used its budget in the current window.
     Network,
     /// The table is full of networks seen within the window, and the networks
@@ -93,13 +93,13 @@ struct Table {
 }
 
 #[derive(Debug, Default)]
-pub struct Attempts {
+pub(crate) struct Attempts {
     table: Mutex<Table>,
 }
 
 impl Attempts {
     /// Whether `network` may start one more code exchange at `now`.
-    pub fn allow(&self, network: Option<IpAddr>, now: Instant) -> Result<(), Refusal> {
+    pub(crate) fn allow(&self, network: Option<IpAddr>, now: Instant) -> Result<(), Refusal> {
         let mut table = self.table.lock().unwrap_or_else(PoisonError::into_inner);
         let Table {
             networks,

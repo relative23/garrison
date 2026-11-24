@@ -55,7 +55,7 @@ fn is_verifier(text: &str) -> bool {
 
 /// A cookie of this host only (`__Host-` needs `Path=/` and no `Domain`),
 /// never readable by scripts.
-pub fn set_cookie(response: &mut Response, name: &str, value: &str, max_age: u64) {
+pub(crate) fn set_cookie(response: &mut Response, name: &str, value: &str, max_age: u64) {
     let cookie =
         format!("{name}={value}; HttpOnly; Max-Age={max_age}; Path=/; SameSite=lax; Secure");
     if let Ok(value) = HeaderValue::from_str(&cookie) {
@@ -65,7 +65,7 @@ pub fn set_cookie(response: &mut Response, name: &str, value: &str, max_age: u64
 
 /// Browsers accept the removal of a `__Host-` cookie only with the same
 /// attributes it was set with.
-pub fn delete_cookie(response: &mut Response, name: &str) {
+pub(crate) fn delete_cookie(response: &mut Response, name: &str) {
     let cookie = format!(
         "{name}=\"\"; expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; \
          SameSite=lax; Secure"
@@ -75,7 +75,7 @@ pub fn delete_cookie(response: &mut Response, name: &str) {
     }
 }
 
-pub fn redirect(location: &str) -> Response {
+pub(crate) fn redirect(location: &str) -> Response {
     let mut response = StatusCode::SEE_OTHER.into_response();
     if let Ok(value) = HeaderValue::from_str(location) {
         response.headers_mut().insert(header::LOCATION, value);
@@ -83,7 +83,7 @@ pub fn redirect(location: &str) -> Response {
     response
 }
 
-pub fn routes() -> Router<Arc<App>> {
+pub(crate) fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/oauth-client.json", get(client_metadata))
         .route("/auth/login", get(login))

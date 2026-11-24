@@ -23,13 +23,13 @@ use crate::models::{
 };
 use crate::security::Visitor;
 
-pub fn routes() -> Router<Arc<App>> {
+pub(crate) fn routes() -> Router<Arc<App>> {
     Router::new().route("/api/attacks", get(attacks))
 }
 
 /// The stretch a summary covers, up to now.
 #[derive(Clone, Copy, Debug, Default, Deserialize, ToSchema)]
-pub enum Period {
+pub(crate) enum Period {
     #[default]
     #[serde(rename = "24h")]
     Day,
@@ -53,7 +53,7 @@ impl Period {
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
-pub struct PeriodQuery {
+pub(crate) struct PeriodQuery {
     #[serde(default)]
     #[param(default = "24h")]
     period: Period,

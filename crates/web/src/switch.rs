@@ -13,10 +13,10 @@ use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha384};
 
 pub const SCRIPT: &str = "stalwart-switch.js";
-pub const SNIPPET: &str = "/etc/nginx/snippets/garrison-stalwart-switch.conf";
+pub(crate) const SNIPPET: &str = "/etc/nginx/snippets/garrison-stalwart-switch.conf";
 
 /// `scheme://host[:port]` of a URL.
-pub fn origin(url: &str) -> String {
+pub(crate) fn origin(url: &str) -> String {
     let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
     let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
     format!("{scheme}://{host}")

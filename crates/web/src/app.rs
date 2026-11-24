@@ -78,16 +78,16 @@ impl Identity for Provider {
 
 /// Shared objects of one web-service process.
 pub struct App {
-    pub config: Config,
+    pub(crate) config: Config,
     pub store: Arc<WebStore>,
-    pub gate: Gate,
-    pub identity: Arc<dyn Identity>,
+    pub(crate) gate: Gate,
+    pub(crate) identity: Arc<dyn Identity>,
     /// The built interface: index.html, assets/, favicon.svg, the switch script.
-    pub static_directory: PathBuf,
+    pub(crate) static_directory: PathBuf,
     /// The turns of the history queries (see `queries`).
     pub queries: Queries,
     /// Code exchanges per client network (see `attempts`).
-    pub sign_ins: Attempts,
+    pub(crate) sign_ins: Attempts,
 }
 
 impl std::fmt::Debug for App {

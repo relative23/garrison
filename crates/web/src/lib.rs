@@ -39,7 +39,7 @@ pub enum Error {
 
 /// The production objects for `config`: the session store, the broker client
 /// and the identity provider.
-pub fn application(config: Config, static_directory: PathBuf) -> Result<Arc<App>, Error> {
+pub(crate) fn application(config: Config, static_directory: PathBuf) -> Result<Arc<App>, Error> {
     let store = Arc::new(WebStore::open(&config.database(Database::Web))?);
     let action_ids: BTreeSet<String> = config
         .broker

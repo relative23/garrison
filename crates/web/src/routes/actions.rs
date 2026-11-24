@@ -26,7 +26,7 @@ use crate::models::{
 };
 use crate::security::Visitor;
 
-pub fn routes() -> Router<Arc<App>> {
+pub(crate) fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/actions", get(catalog).post(submit))
         .route("/api/actions/jobs/{job_id}", get(job))
