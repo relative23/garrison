@@ -15,7 +15,7 @@ fn host() -> tempfile::TempDir {
         "opt/garrison/releases/0.1.0",
         "var/lib/garrison/web",
         "var/backups/garrison/pre-upgrade-20261030T132151",
-        "var/backups/garrison/pre-switch-back-20261030T132152",
+        "var/backups/garrison/pre-restore-20261030T132152",
         "var/backups/garrison/latest",
     ] {
         fs::create_dir_all(root.join(folder)).unwrap();
@@ -97,7 +97,7 @@ fn a_purge_also_takes_data_users_and_the_installers_backups_only() {
         "var/lib/garrison",
         "var/backups/garrison/last-pre-upgrade",
         "var/backups/garrison/pre-upgrade-20261030T132151",
-        "var/backups/garrison/pre-switch-back-20261030T132152",
+        "var/backups/garrison/pre-restore-20261030T132152",
         "etc/sysusers.d/garrison.conf",
     ] {
         assert!(paths.contains(&gone.to_owned()), "{gone}");
