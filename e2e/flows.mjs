@@ -168,6 +168,14 @@ try {
   await page.goto(`${origin}/admin/`);
   expect((await heading()) === "Garrison", "the sign-in page is shown");
   await accessible("sign-in");
+  // Where the web service sends a sign-in back for a fault of its own.
+  await page.goto(`${origin}/admin/?login_error=internal&reference=0123456789ab`);
+  await heading();
+  expect(
+    await page.getByText("Reference 0123456789ab in the journal of garrison-web").isVisible(),
+    "a sign-in that Garrison's own fault ended shows the journal's reference",
+  );
+  await accessible("sign-in after a fault of Garrison's own");
 
   step = "sign in";
   await page.getByRole("link", { name: "Sign in with Stalwart" }).click();
