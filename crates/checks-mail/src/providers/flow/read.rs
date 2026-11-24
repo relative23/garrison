@@ -110,6 +110,14 @@ pub(super) struct Week {
 }
 
 impl Week {
+    /// Whether it has the shape a reading gives it, which the cards rely on:
+    /// a count for each of its days in every kind.
+    pub(super) fn whole(&self) -> bool {
+        self.counts
+            .values()
+            .all(|days| days.len() == self.days.len())
+    }
+
     /// The events of `kind` on each day; zeros where there were none.
     pub(super) fn of(&self, kind: &str) -> Vec<u64> {
         self.counts

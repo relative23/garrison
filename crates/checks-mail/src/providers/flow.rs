@@ -156,9 +156,10 @@ impl Flow {
     }
 
     /// The last reading, or a new one where that is due: every ten minutes,
-    /// at once for one made without the collector's key where this run has
-    /// it, and for one Stalwart did not give the accounts for where it
-    /// answers otherwise now. Setup may change only the key's rights, so
+    /// at once for one of another shape, as a damaged status database holds
+    /// it, for one made without the collector's key where this run has it,
+    /// and for one Stalwart did not give the accounts for where it answers
+    /// otherwise now. Setup may change only the key's rights, so
     /// nothing but asking shows the change: while it lasts, each run asks
     /// Stalwart alone.
     fn known(context: &Context<'_>) -> Kept<Read> {
@@ -170,7 +171,7 @@ impl Flow {
             let answered = asked
                 .as_ref()
                 .is_some_and(|why| read.of_stalwart() && *why != read.domains_unread);
-            if (read.no_native_key && keyed) || answered {
+            if !read.week.whole() || (read.no_native_key && keyed) || answered {
                 0
             } else {
                 EVERY

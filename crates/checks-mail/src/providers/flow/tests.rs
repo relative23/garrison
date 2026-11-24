@@ -405,6 +405,24 @@ fn every_message_one_of_two_milters_deferred_is_a_warning() {
     assert_eq!(milter(&events).state, State::Ok);
 }
 
+/// A kept reading of another shape, as a damaged or hand-edited status
+/// database holds it, is read anew rather than shown.
+#[test]
+fn a_kept_week_whose_counts_miss_days_is_read_anew() {
+    use crate::context::Memory;
+    let ham = [event("message-ingest.ham", 60, json!({"accountId": 1}))];
+    let memory = Remembered::default();
+    observed(&ham, None, &memory, 0);
+    let mut kept: Value = serde_json::from_str(&memory.recall(MEMORY).unwrap()).unwrap();
+    kept["week"]["counts"]["message-ingest.ham"] = json!([1]);
+    memory.keep(MEMORY, &kept.to_string());
+    let again = observed(&ham, None, &memory, 60);
+    assert_eq!(
+        rows(of(&again, "flow.spam"))[..2],
+        ["2026-10-29 | 1 | 0 | 0 %", "2026-10-28 | 0 | 0 | –"]
+    );
+}
+
 #[test]
 fn the_history_is_read_every_ten_minutes_and_its_absence_is_unknown() {
     let memory = Remembered::default();
