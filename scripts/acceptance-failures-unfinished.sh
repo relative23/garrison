@@ -30,12 +30,13 @@ scenario_interrupted() {
 # The installer run as `1` in the background, killed as SIGKILL kills it
 # once its output says `2` and the shell command `3` has returned, before it
 # said `4`, the end of what it was doing. What it started runs on, as it
-# would after a lost terminal; the next run must finish all the same.
+# would after a lost terminal; the next run must finish all the same. It
+# returns once the installer has ended: until then it holds its lock.
 killed_once() {
     if ! inside "umask 077 && rm -f /root/late.log && { $1 > /root/late.log 2>&1 & echo \$! > /root/late.pid; } &&
         for i in \$(seq 1800); do grep -q -F '$2' /root/late.log && break; sleep 0.1; done &&
         grep -q -F '$2' /root/late.log && { $3; } && kill -KILL \$(cat /root/late.pid) &&
-        ! grep -q -F '$4' /root/late.log"; then
+        { wait \$(cat /root/late.pid) 2>/dev/null; true; } && ! grep -q -F '$4' /root/late.log"; then
         inside 'cat /root/late.log' || true
         echo "FAIL  the installer was not killed after it said \"$2\" and before \"$4\""
         exit 1
@@ -98,12 +99,12 @@ scenario_killed_late() {
 # The command `1` run in the background, killed with its children as SIGKILL
 # kills them once the shell condition `2` holds and `3` more seconds have
 # passed, before it said `4`. Its children go too: `garrison upgrade` waits
-# for the installer it started.
+# for the installer it started. It returns once the command has ended.
 killed_at() {
     if ! inside "umask 077 && rm -f /root/late.log && { $1 > /root/late.log 2>&1 & echo \$! > /root/late.pid; } &&
         for i in \$(seq 1800); do { $2; } && break; sleep 0.1; done && { $2; } && sleep $3 &&
         p=\$(cat /root/late.pid) && kill -KILL \$(cat /proc/\$p/task/\$p/children 2>/dev/null) \$p &&
-        ! grep -q -F '$4' /root/late.log"; then
+        { wait \$p 2>/dev/null; true; } && ! grep -q -F '$4' /root/late.log"; then
         inside 'cat /root/late.log' || true
         echo "FAIL  the command was not killed once \"$2\" held and before it said \"$4\""
         exit 1

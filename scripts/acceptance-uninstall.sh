@@ -73,7 +73,8 @@ echo "ok    while a dry run tests nginx, Garrison's snippets stay where they are
 check "and the dry run finds that nginx stays valid without them" \
     'grep -q "Would remove /etc/nginx/snippets/garrison.conf" /root/nginx-test.log'
 while_testing '/opt/garrison/current/bin/garrison uninstall'
-inside 'p=$(cat /root/late.pid) && kill -KILL $(cat /proc/$p/task/$p/children 2>/dev/null) $p'
+inside 'p=$(cat /root/late.pid) && kill -KILL $(cat /proc/$p/task/$p/children 2>/dev/null) $p &&
+    for i in $(seq 300); do test -e /proc/$p || break; sleep 0.1; done'
 check "an uninstallation killed while it tests nginx leaves the snippets as they were" "$kept"
 check "and nothing of Garrison's was removed" 'test -d /opt/garrison && test -L /usr/bin/garrison'
 inside 'rm -r /usr/sbin/nginx /etc/nginx /root/snippets.before /root/nginx-test.log /root/late.pid
