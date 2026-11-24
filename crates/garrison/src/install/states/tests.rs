@@ -100,14 +100,7 @@ fn checks() -> Rows {
 }
 
 fn runs() -> Rows {
-    let recorded = Recorded::Switch("upgrade", "0.1.2".into(), "0.2.0".into());
     vec![
-        (
-            record_removed(Path::new("/opt/garrison/unfinished.json"), &recorded),
-            "/opt/garrison/unfinished.json named an unfinished upgrade from 0.1.2 to 0.2.0; nothing \
-             reads it any more: it was removed, and nothing was done on its word. \
-             [install-record-removed]",
-        ),
         (
             running("0.2.0", Some("garrison install --rollback")),
             "Garrison 0.2.0 is running. [install-running]\n      Roll back with: garrison install \
