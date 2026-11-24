@@ -1858,6 +1858,9 @@ Notable changes for operators and users. The format follows
   it failed; the Stalwart administrator's credential stays out of the output.
 - **The Ansible role unpacks a release again where a play that stopped left
   it unpacked in part.**
+- **The Ansible role runs the installer again until it has finished with the
+  play's release and configuration**, so that the next play starts Garrison
+  where one stopped after the first install or its installer did not finish.
 
 ## [0.1.2] - 2026-11-13
 

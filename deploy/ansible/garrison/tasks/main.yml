@@ -1,6 +1,9 @@
 ---
 # Install, configure and upgrade Garrison; the play needs `become: true`.
-# Every task can run again: a second run changes only what changed.
+# Every task can run again: a second run changes only what changed, and a run
+# that stopped anywhere is finished by the next. What the installer last
+# finished with is kept in /opt/garrison, which goes with an uninstallation;
+# the record is taken away before the installer runs again.
 
 - name: The release and the addresses are named
   ansible.builtin.assert:
@@ -90,7 +93,6 @@
 - name: The release is installed (the first time, it starts nothing)
   ansible.builtin.command:
     cmd: "/root/{{ garrison_name }}/bin/garrison install"
-  register: garrison_first
   when: garrison_installed | length == 0
 
 - name: The configuration
@@ -146,13 +148,38 @@
     cmd: /opt/garrison/current/bin/garrison access init
     creates: /etc/garrison/access-policy.json
 
+- name: What the installer last finished with
+  ansible.builtin.slurp:
+    src: /opt/garrison/ansible-installed
+  register: garrison_finished
+  failed_when: false
+
+- name: Whether the installer is due
+  ansible.builtin.set_fact:
+    garrison_install_due: >-
+      {{ garrison_installed != garrison_version
+      or (garrison_finished.content | default('') | b64decode | trim)
+      != garrison_version ~ ' ' ~ garrison_config.checksum }}
+
+- name: The record of a finished installation goes first
+  ansible.builtin.file:
+    path: /opt/garrison/ansible-installed
+    state: absent
+  when: garrison_install_due | bool
+
 - name: Garrison runs this release with this configuration
   ansible.builtin.command:
     cmd: "/root/{{ garrison_name }}/bin/garrison install"
-  when: >-
-    garrison_installed != garrison_version
-    or garrison_config is changed
-    or garrison_first is changed
+  when: garrison_install_due | bool
+
+- name: The installer finished with this release and this configuration
+  ansible.builtin.copy:
+    content: "{{ garrison_version }} {{ garrison_config.checksum }}\n"
+    dest: /opt/garrison/ansible-installed
+    owner: root
+    group: root
+    mode: "0644"
+  when: garrison_install_due | bool
 
 - name: garrison doctor
   ansible.builtin.command:

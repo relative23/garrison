@@ -217,6 +217,114 @@ scenario_unpack_cut() {
     unchanged "a further run changes nothing" "$older"
 }
 
+# The web service fails to start, as where another program holds its port.
+unstartable() {
+    inside 'mkdir -p /etc/systemd/system/garrison-web.service.d &&
+        printf "[Service]\nExecStartPre=/bin/false\n" > /etc/systemd/system/garrison-web.service.d/acceptance.conf &&
+        systemctl daemon-reload'
+}
+startable() { inside 'rm -r /etc/systemd/system/garrison-web.service.d && systemctl daemon-reload'; }
+
+# The first play stops at access init, which finds no administrator role
+# to bind; the operator binds one as it says, and the next play starts
+# Garrison.
+scenario_unbound() {
+    step "A first play that stopped at access init is finished by the next"
+    fresh
+    stops "$older" "garrison access bind-role" -e acceptance_policy=false
+    inside '/opt/garrison/current/bin/garrison access bind-role e --profile administrator >/dev/null'
+    play "$older" -e acceptance_policy=false
+    services "after a first play that stopped at access init"
+    unchanged "a further run changes nothing" "$older" -e acceptance_policy=false
+}
+
+# The installer refuses the play that changed the configuration for lack of
+# room, before it changes anything; once there is room, the next play brings
+# that configuration into force.
+scenario_no_room() {
+    step "A configuration the installer had no room for is installed by the next play"
+    inside 'cp /etc/systemd/system/acceptance-check.service /etc/systemd/system/acceptance-other.service &&
+        free=$(df --output=avail -B 1 /opt | tail -n 1) && fallocate -l $((free - 31457280)) /root/filled'
+    cat > "$work/other.yml" <<'VARS'
+acceptance_config: |
+  [[actions]]
+  id = "run_other"
+  title = "Run another check"
+  description = "Starts the other test unit."
+  confirmation = "RUN OTHER"
+  unit = "acceptance-other.service"
+  operation = "start"
+  cooldown_seconds = 0
+  timeout_seconds = 30
+VARS
+    stops "$newer" "MiB free and the installation needs" -e "@$work/other.yml"
+    inside 'rm /root/filled'
+    play "$newer" -e "@$work/other.yml"
+    check "the configuration of the play that had no room is in force" \
+        'grep -q acceptance-other.service /etc/polkit-1/rules.d/50-garrison.rules'
+    services "after a play that had no room"
+    unchanged "a further run changes nothing" "$newer" -e "@$work/other.yml"
+}
+
+# An upgrade whose new release does not start, nor the one it switches back
+# to: the installer leaves the links at the new release, and the next play,
+# once the service starts again, finishes the upgrade.
+scenario_upgrade_failed() {
+    step "An upgrade that did not start is finished by the next play"
+    inside '/opt/garrison/current/bin/garrison install --rollback >/dev/null'
+    names "a rollback by hand returned to $older" current "$older"
+    unstartable
+    stops "$newer" "did not start"
+    startable
+    play "$newer"
+    names "the play finished the upgrade to $newer" current "$newer"
+    services "after an upgrade that did not start"
+    unchanged "a further run changes nothing" "$newer"
+}
+
+# The stand-in for Stalwart, which systemd-run started, once the guest
+# restarted.
+stand_in_again() {
+    inside 'if command -v ncat >/dev/null 2>&1; then
+            systemd-run --quiet --unit=acceptance-stalwart ncat -lk 127.0.0.1 8099 --sh-exec "sh /root/stalwart-stub.sh"
+        else
+            systemd-run --quiet --unit=acceptance-stalwart \
+                socat TCP-LISTEN:8099,bind=127.0.0.1,reuseaddr,fork SYSTEM:"sh /root/stalwart-stub.sh"
+        fi'
+}
+
+# The guest restarts at once, as after a power cut, while the play's second
+# install runs: the role's configuration is written and an installer runs.
+scenario_restart() {
+    step "A play cut by a restart is finished by the next"
+    fresh
+    ANSIBLE_ROLES_PATH=$roles ANSIBLE_HOST_KEY_CHECKING=False timeout 900 \
+        "$ansible" -i "$work/inventory" "$work/site.yml" -e "garrison_version=$older" > "$work/cut.log" 2>&1 &
+    cut=$!
+    attempt=0
+    until inside 'grep -qs "Written by the Ansible role" /etc/garrison/garrison.toml &&
+        pgrep -f "bin/garrison[ ]install" >/dev/null'; do
+        attempt=$((attempt + 1))
+        if [ "$attempt" -ge 600 ] || ! kill -0 "$cut" 2>/dev/null; then
+            tail -n 40 "$work/cut.log"
+            echo "FAIL  the play's second install is caught running"
+            exit 1
+        fi
+        sleep 0.2
+    done
+    inside 'nohup systemctl reboot --force --force >/dev/null 2>&1 &' || true
+    sleep 10
+    vm_wait || exit 1
+    # Its connection went with the guest.
+    kill "$cut" 2>/dev/null || true
+    wait "$cut" || true
+    echo "ok    the guest restarted while the play's second install ran"
+    stand_in_again
+    play "$older"
+    services "after a play cut by a restart"
+    unchanged "a further run changes nothing" "$older"
+}
+
 step "The play and the role are valid"
 if ! ANSIBLE_ROLES_PATH=$roles "$ansible" --syntax-check -i "$work/inventory" "$work/site.yml" > "$work/syntax.log" 2>&1; then
     cat "$work/syntax.log"
@@ -238,7 +346,7 @@ play "$newer"
 check "the role upgraded to $newer" "test \"\$(cat /opt/garrison/current/VERSION)\" = '$newer'"
 services "upgraded by the role"
 
-for scenario in ${SCENARIOS:-setup_refused unpack_cut}; do
+for scenario in ${SCENARIOS:-setup_refused no_room upgrade_failed unbound unpack_cut restart}; do
     "scenario_$scenario"
 done
 
