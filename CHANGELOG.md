@@ -1027,6 +1027,8 @@ Notable changes for operators and users. The format follows
   domains however many Stalwart has, and count the rest.**
 - **The mailbox storage card reads Stalwart's accounts up to `max_accounts`
   and says how many it leaves.** Raise `max_accounts` where it names some.
+- **The TLS check probes a listener Stalwart binds to one address on that
+  address.**
 - **A blocklist that gives no verdict keeps the Blocklists card from being
   OK.** A list that refused this resolver, as Spamhaus refuses public ones,
   answered with an error or did not answer at all, showed only in its row:

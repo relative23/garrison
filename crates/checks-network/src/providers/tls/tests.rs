@@ -26,16 +26,22 @@ fn trusted(certificates: &Certificates) -> Arc<RootCertStore> {
 /// A TLS listener for `localhost` that serves one connection; with
 /// `smtp`, it first speaks SMTP up to STARTTLS (or refuses it).
 pub(crate) fn listener(certificates: &Certificates, smtp: Option<&'static str>) -> u16 {
-    listener_with(certificates, smtp, rustls::DEFAULT_VERSIONS)
+    listener_with(certificates, smtp, rustls::DEFAULT_VERSIONS, "127.0.0.1")
+}
+
+/// A TLS listener for `localhost` bound to `address` alone.
+pub(crate) fn listener_on(certificates: &Certificates, address: &str) -> u16 {
+    listener_with(certificates, None, rustls::DEFAULT_VERSIONS, address)
 }
 
 fn listener_with(
     certificates: &Certificates,
     smtp: Option<&'static str>,
     versions: &'static [&'static rustls::SupportedProtocolVersion],
+    address: &str,
 ) -> u16 {
     let (server, key) = (certificates.server.clone(), certificates.key.clone_key());
-    let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+    let socket = TcpListener::bind((address, 0)).unwrap();
     let port = socket.local_addr().unwrap().port();
     thread::spawn(move || {
         let (mut stream, _) = socket.accept().unwrap();
@@ -97,7 +103,7 @@ static TLS12_ONLY: [&rustls::SupportedProtocolVersion; 1] = [&rustls::version::T
 #[test]
 fn tls_1_2_is_named_as_such() {
     let certificates = certificates();
-    let port = listener_with(&certificates, None, &TLS12_ONLY);
+    let port = listener_with(&certificates, None, &TLS12_ONLY, "127.0.0.1");
     let found = probe(
         "localhost",
         port,

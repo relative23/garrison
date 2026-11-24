@@ -158,8 +158,10 @@ server would send it. The certificate must be trusted by the system's
 authorities and valid for that name; one that expires within 14 days is a
 warning. Without `endpoints` the check asks Stalwart what to probe: every
 listener that speaks TLS (25 with STARTTLS, 465, 993, 443 and whatever else
-is set up), once under the name of each mail host of Stalwart's domains, of
-the first `max_domains` of them; the card says when Stalwart has more. It
+is set up), on the address it is bound to, or on 127.0.0.1 where it listens
+on every address, once under the name of each mail host of Stalwart's
+domains, of the first `max_domains` of them; the card says when Stalwart has
+more. It
 probes 24 such endpoints at the most; where there are more, the card says how
 many and is Partial where it would be OK. A listener added later is then
 checked without a change here, and a certificate that does not cover a mail
