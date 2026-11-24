@@ -125,17 +125,7 @@ impl Scene {
                 "permissions": {"@type": "Inherit"},
             }),
         );
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
-            garrison_milter::server::serve(
-                &listener,
-                garrison_milter::Settings {
-                    max_bytes: 1024,
-                    ..Default::default()
-                },
-            );
-        });
+        let port = super::entries::filter();
         Scene {
             first: json!({"username": user, "secret": secret}).to_string(),
             second: json!({"username": name, "secret": password}).to_string(),
