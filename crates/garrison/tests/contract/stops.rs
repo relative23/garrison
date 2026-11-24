@@ -16,10 +16,15 @@
 //! anew, and a service whose restart it names finds a secret in its file
 //! that it can start with and that Stalwart takes. A run that ends by
 //! itself leaves the broker with a key Stalwart takes, or says that the
-//! broker goes without one until setup makes it.
+//! broker goes without one until setup makes it. A run that was interrupted
+//! restarts nothing: there the next run's look at the copies systemd keeps,
+//! which only root makes, restarts each service whose file it wrote anew,
+//! which the test takes as done, for those files alone and onto a secret it
+//! can use as well.
 //!
-//! Not held here: what root alone does (the restart itself, and the look at
-//! the copies systemd keeps, which a user cannot read); whether Stalwart
+//! Not held here: what root alone does (the restart itself, and how it
+//! looks at the copies systemd keeps, which a user cannot read; a unit test
+//! of `setup/restart.rs` holds the look); whether Stalwart
 //! still signs with the running receiver's key between a stopped run and
 //! the next, as after a lost answer to the reload, which only a delivery
 //! shows (the next run mends it, and Stalwart sends a refused batch again
@@ -56,10 +61,39 @@ fn names_the_restart(said: &str, unit: &str) -> bool {
     })
 }
 
-/// For each service whose restart a run named: whether its file holds a
+/// The service at `index` of `HELD` started again: whether its file holds a
 /// secret it can start with that Stalwart takes (the broker's key opens a
 /// session, Stalwart signs with the receiver's key), what is wrong where
 /// not; from then on it holds what its file holds.
+fn restart_onto(
+    lab: &Lab,
+    credentials: &Path,
+    capture: &Capture,
+    index: usize,
+    held: &mut Option<[String; 2]>,
+    context: &str,
+) -> Option<String> {
+    let secret = fs::read_to_string(credentials.join(HELD[index])).unwrap_or_default();
+    let usable = if secret.trim().len() < 16 {
+        Err("a file that holds no key")
+    } else if index == 0 {
+        let taken = key_status(&lab.url, &secret) == 200;
+        taken.then_some(()).ok_or("a key Stalwart does not take")
+    } else {
+        let signs = || assert_webhook_held(lab, credentials, capture, context);
+        std::panic::catch_unwind(AssertUnwindSafe(signs))
+            .map_err(|_| "a signature key Stalwart does not sign with")
+    };
+    if let Some(held) = held {
+        held[index] = secret;
+    }
+    let unit = UNITS[index];
+    usable
+        .err()
+        .map(|onto| format!("{unit} was restarted onto {onto}"))
+}
+
+/// Each service whose restart a run named, started again.
 fn restarted(
     lab: &Lab,
     credentials: &Path,
@@ -68,30 +102,10 @@ fn restarted(
     held: &mut Option<[String; 2]>,
     context: &str,
 ) -> Vec<String> {
-    let mut faults = Vec::new();
-    for (index, unit) in UNITS.iter().enumerate() {
-        if !names_the_restart(said, unit) {
-            continue;
-        }
-        let secret = fs::read_to_string(credentials.join(HELD[index])).unwrap_or_default();
-        let usable = if secret.trim().len() < 16 {
-            Err("a file that holds no key")
-        } else if index == 0 {
-            let taken = key_status(&lab.url, &secret) == 200;
-            taken.then_some(()).ok_or("a key Stalwart does not take")
-        } else {
-            let signs = || assert_webhook_held(lab, credentials, capture, context);
-            std::panic::catch_unwind(AssertUnwindSafe(signs))
-                .map_err(|_| "a signature key Stalwart does not sign with")
-        };
-        if let Err(onto) = usable {
-            faults.push(format!("{unit} was restarted onto {onto}"));
-        }
-        if let Some(held) = held {
-            held[index] = secret;
-        }
-    }
-    faults
+    (0..UNITS.len())
+        .filter(|&index| names_the_restart(said, UNITS[index]))
+        .filter_map(|index| restart_onto(lab, credentials, capture, index, held, context))
+        .collect()
 }
 
 /// After a run that ended by itself: the running broker holds a key
@@ -147,6 +161,49 @@ enum Outcome {
     Unready(String),
 }
 
+/// What is wrong after the run that was to mend a stop of `kind`: both
+/// places agree (`together`), and each running service holds what its file
+/// holds.
+fn agree(
+    scene: &Scene,
+    setup: &Setup,
+    lab: &Lab,
+    capture: &Capture,
+    kind: Kind,
+    held: Option<&[String; 2]>,
+    context: &str,
+) -> Vec<String> {
+    let credentials = setup.directory.join("credentials");
+    let accounts = scene.accounts(kind);
+    let milter = || {
+        if kind.about_the_milter() {
+            assert_milter_held(lab, &credentials, scene.port, kind.milter(), context);
+        }
+    };
+    // Each check on its own, so that every fault of a stop is named.
+    let checks: [&dyn Fn(); 4] = [
+        &|| assert_keys_held_in(lab, &accounts, &credentials, &setup.gateway, context),
+        &|| assert_webhook_held(lab, &credentials, capture, context),
+        &|| assert_exporter_held(lab, &credentials, context),
+        &milter,
+    ];
+    let mut faults = Vec::new();
+    for check in checks {
+        if let Err(panic) = std::panic::catch_unwind(AssertUnwindSafe(check)) {
+            faults.push(said_by(&*panic));
+        }
+    }
+    let files = holding(&credentials);
+    for (index, unit) in UNITS.iter().enumerate() {
+        if held.is_some_and(|held| held[index] != files[index]) {
+            faults.push(format!(
+                "{unit} holds a replaced secret, and no run named its restart"
+            ));
+        }
+    }
+    faults
+}
+
 /// One stop and the run after it.
 fn mended(
     scene: &Scene,
@@ -187,10 +244,21 @@ fn mended(
         &mut held,
         &context,
     ));
-    // An interrupted run says nothing more; the next run mends what it left.
-    if stop != Stop::Interrupted {
-        faults.extend(broker_unsaid(lab, held.as_ref(), &said));
-    }
+    // An interrupted run says nothing more; the next run mends what it left,
+    // where it wrote a file anew through root's look at systemd's copies.
+    let written: Vec<usize> = match (&held, stop) {
+        (Some(held), Stop::Interrupted) => {
+            let files = holding(&credentials);
+            (0..HELD.len())
+                .filter(|&index| held[index] != files[index])
+                .collect()
+        }
+        (_, Stop::Interrupted) => Vec::new(),
+        _ => {
+            faults.extend(broker_unsaid(lab, held.as_ref(), &said));
+            Vec::new()
+        }
+    };
     let next_run = setup.run(next);
     let said_next = text(&next_run);
     let shown = format!("stopped run: {said}\nasked: {asked:?}\nnext run: {said_next}");
@@ -206,34 +274,31 @@ fn mended(
         &mut held,
         &context,
     ));
-    let accounts = scene.accounts(kind);
-    let milter = || {
-        if kind.about_the_milter() {
-            assert_milter_held(lab, &credentials, scene.port, kind.milter(), &context);
-        }
-    };
-    // Each check on its own, so that every fault of a stop is named.
-    let checks: [&dyn Fn(); 4] = [
-        &|| assert_keys_held_in(lab, &accounts, &credentials, &setup.gateway, &context),
-        &|| assert_webhook_held(lab, &credentials, capture, &context),
-        &|| assert_exporter_held(lab, &credentials, &context),
-        &milter,
-    ];
-    for check in checks {
-        if let Err(panic) = std::panic::catch_unwind(AssertUnwindSafe(check)) {
-            faults.push(said_by(&*panic));
+    let files = holding(&credentials);
+    for index in written {
+        if held
+            .as_ref()
+            .is_some_and(|held| held[index] != files[index])
+        {
+            faults.extend(restart_onto(
+                lab,
+                &credentials,
+                capture,
+                index,
+                &mut held,
+                &context,
+            ));
         }
     }
-    if let Some(held) = &held {
-        let files = holding(&credentials);
-        for (index, unit) in UNITS.iter().enumerate() {
-            if held[index] != files[index] {
-                faults.push(format!(
-                    "{unit} holds a replaced secret, and no run named its restart"
-                ));
-            }
-        }
-    }
+    faults.extend(agree(
+        scene,
+        setup,
+        lab,
+        capture,
+        kind,
+        held.as_ref(),
+        &context,
+    ));
     if !faults.is_empty() {
         return Outcome::Done(Err(format!("{context}: {}\n{shown}", faults.join("; "))));
     }
