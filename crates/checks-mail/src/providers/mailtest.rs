@@ -407,6 +407,8 @@ impl Provider for MailTest {
 #[cfg(test)]
 mod kept_tests;
 #[cfg(test)]
+mod macro_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod time_tests;
