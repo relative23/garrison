@@ -142,6 +142,10 @@ fn text(output: &Output) -> String {
     )
 }
 
+/// What a write that was interrupted leaves beside the files, which the
+/// next run removes.
+const PENDING: &str = ".pending-of-an-interrupted-write";
+
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn setup_is_idempotent_and_access_init_finds_the_administrators() {
@@ -209,6 +213,7 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
     ] {
         assert!(credentials.join(name).is_file(), "{name}");
     }
+    write_private(&credentials.join(PENDING), b"part of a key");
     let again = run(
         directory.path(),
         &[
@@ -224,6 +229,7 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
         ],
     );
     assert_eq!(again.status.code(), Some(0), "{}", text(&again));
+    assert!(!credentials.join(PENDING).exists(), "{PENDING} was left");
     assert!(text(&again).contains("- updated API key 'garrison broker' (secret unchanged)"));
     assert!(text(&again).contains("- updated webhook"));
     assert!(text(&again).contains(&format!("- updated OAuth client {client}")));

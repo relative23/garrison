@@ -434,6 +434,7 @@ pub(crate) fn run(config: &Config, command: &Command) -> u8 {
         crate::complain(&message);
         return code;
     }
+    folder::sweep(&config.credentials_directory);
     let asked = Asked {
         skip_metrics: *skip_metrics,
         webhook_url: webhook_url.as_deref(),
