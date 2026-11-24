@@ -1,6 +1,7 @@
 //! Why a receipt that the card cannot read is not read, and what mends it.
 
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 

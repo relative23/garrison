@@ -61,7 +61,7 @@ fn no_check_waits_for_a_file_that_another_user_may_replace() {
             "the receipt, through core",
         ),
         (
-            "providers/receipt.rs",
+            "providers/receipt/unread.rs",
             "open_regular_file(",
             "the receipt again, to say why it was not read, through core",
         ),
