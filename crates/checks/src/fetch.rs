@@ -132,7 +132,9 @@ fn split(url: &str) -> Result<(bool, String, u16, String), String> {
 
 /// The addresses of `host`, asked of the system on a thread of its own: the
 /// system's lookup has no time limit, and a resolver that does not answer
-/// would hold the caller for as long as its own configuration says.
+/// would hold the caller for as long as its own configuration says. A
+/// lookup that failed keeps the system's words, which tell a name that does
+/// not exist from one that could not be looked up now.
 fn resolve(host: &str, port: u16, until: Instant) -> Result<Vec<SocketAddr>, String> {
     let (answer, asked) = mpsc::channel();
     let name = host.to_owned();
@@ -146,7 +148,7 @@ fn resolve(host: &str, port: u16, until: Instant) -> Result<Vec<SocketAddr>, Str
     let patience = until.saturating_duration_since(Instant::now()).min(TIMEOUT);
     match asked.recv_timeout(patience) {
         Ok(Ok(addresses)) => Ok(addresses),
-        Ok(Err(_)) => Err(format!("{host} does not resolve")),
+        Ok(Err(error)) => Err(format!("{host} could not be looked up: {error}")),
         Err(_) => Err(format!(
             "{host}: the name lookup gave no answer within {} s",
             patience.as_secs()
@@ -419,5 +421,7 @@ fn send_at(
     Ok(answer)
 }
 
+#[cfg(test)]
+mod lookup_tests;
 #[cfg(test)]
 mod tests;
