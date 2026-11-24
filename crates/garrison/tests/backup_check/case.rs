@@ -19,7 +19,9 @@ pub(super) fn id(id: &'static str) -> [(&'static str, &'static str); 1] {
     [("REPO_ID", id)]
 }
 
-/// One tool's runs against one report, with stand-ins of their own.
+/// One tool's runs against one report, with stand-ins of their own, in a
+/// folder that also holds the folders `srv/repo`, `mnt/copy` and `mnt/repo`
+/// and `link`, a link to `srv`.
 pub(super) struct Case {
     pub(super) tools: Tools,
     pub(super) tool: &'static str,
@@ -30,6 +32,11 @@ impl Case {
     pub(super) fn new(tool: &'static str) -> Case {
         let tools = Tools::new();
         let report = tools.report("report");
+        let folder = tools.directory.path();
+        for place in ["srv/repo", "mnt/copy", "mnt/repo"] {
+            std::fs::create_dir_all(folder.join(place)).unwrap();
+        }
+        std::os::unix::fs::symlink(folder.join("srv"), folder.join("link")).unwrap();
         Case {
             tools,
             tool,

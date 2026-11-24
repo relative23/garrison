@@ -7,7 +7,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use garrison_collector::backups::{MAX_REPORT, Report, Tool};
+use garrison_collector::backups::{MAX_REPORT, Report, Tool, named};
 use garrison_core::files::{changed_only_by_trusted, read_json_with_metadata};
 use garrison_core::json;
 
@@ -48,12 +48,12 @@ pub(super) fn last_report(path: &Path) -> Option<Report> {
 /// The most of the file `RESTIC_REPOSITORY_FILE` that is read as a place.
 const MAX_PLACE: usize = 4096;
 
-/// Where the repository is, as the tool takes it: `--repo`, else its
+/// Where the repository is, as the tool is told: `--repo`, else its
 /// variable where that is not empty, else for restic what the file
 /// `RESTIC_REPOSITORY_FILE` names holds, without the spaces and line ends
 /// around it (measured on restic 0.19.1). Where nothing says where it is,
 /// how the report names it instead.
-pub(super) fn place(asked: &Asked, tool: Tool) -> Result<String, String> {
+pub(super) fn given(asked: &Asked, tool: Tool) -> Result<String, String> {
     let variable = if tool == Tool::Restic {
         "RESTIC_REPOSITORY"
     } else {
@@ -83,12 +83,68 @@ pub(super) fn place(asked: &Asked, tool: Tool) -> Result<String, String> {
     }
 }
 
+/// The folder on this host that a place names, where it names one: for
+/// restic a name with `local:`, one that starts with a slash or one with no
+/// colon at all, as restic 0.19.1 reads them (measured; any other name is
+/// one of its backends or refused); for borg one with `file://` or neither
+/// `ssh://` nor the `[user@]host:` of a repository elsewhere.
+fn folder(tool: Tool, place: &str) -> Option<&str> {
+    let (scheme, elsewhere) = match tool {
+        Tool::Restic => ("local:", place.contains(':') && !place.starts_with('/')),
+        Tool::Borg => (
+            "file://",
+            place.starts_with("ssh://")
+                || place
+                    .split_once(':')
+                    .is_some_and(|(host, _)| !host.is_empty() && !host.contains('/')),
+        ),
+    };
+    place.strip_prefix(scheme).or((!elsewhere).then_some(place))
+}
+
+/// The place in the form that every name of it reaches, which runs compare:
+/// a folder on this host as the kernel resolves it, which is the folder the
+/// tool opens, whatever slashes, dots, links or relative name lead there;
+/// any other place, and a folder that is not there, as named, without a
+/// password and without the slashes at its end, which neither tool reads.
+fn reached(tool: Tool, place: &str) -> String {
+    let folder = folder(tool, place);
+    let real = folder
+        .and_then(|folder| fs::canonicalize(folder).ok())
+        .and_then(|real| real.into_os_string().into_string().ok());
+    if let Some(real) = real {
+        return real;
+    }
+    let named = named(folder.unwrap_or(place));
+    match named.trim_end_matches('/') {
+        "" => named,
+        trimmed => trimmed.to_owned(),
+    }
+}
+
+/// Where the repository is, in the form runs compare: borg's own location
+/// of it where its listing gave one, which writes every name of a
+/// repository elsewhere alike, else where the tool was told it is. `Err`
+/// says how the report names a repository that nothing places.
+pub(super) fn place(
+    tool: Tool,
+    given: Result<String, String>,
+    location: Option<&str>,
+) -> Result<String, String> {
+    let place = match location {
+        Some(location) => location.to_owned(),
+        None => given?,
+    };
+    Ok(reached(tool, &place))
+}
+
 /// The last report where it is one of the repository this run asks: of the
-/// same tool, under the same name and with the same ID as the tool gives
-/// it. Of another repository, or of one this run cannot tell from another,
-/// nothing is kept, since the card would show it as this repository's;
-/// that is said where the report held a check or a restore. `name` is
-/// `None` where nothing says where the repository is.
+/// same tool, at the same place, as [`place`] writes it, and with the same
+/// ID as the tool gives it. A byte copy has the ID too, so the place tells
+/// a copy elsewhere from this repository. Of another repository, or of one
+/// this run cannot tell from another, nothing is kept, since the card would
+/// show it as this repository's; that is said where the report held a
+/// check or a restore. `name` is `None` where nothing places the repository.
 pub(super) fn kept(
     path: &Path,
     before: Report,
@@ -97,6 +153,7 @@ pub(super) fn kept(
     id: Option<&str>,
 ) -> Option<Report> {
     let unknown = "is not known to be of this repository, since";
+    let mut fix = "";
     let why = match (name, id, before.repository_id.as_deref()) {
         (None, _, _) => format!("{unknown} the command is not told where this one is"),
         (_, None, _) => format!("{unknown} {} gave no ID for it", tool.name()),
@@ -104,6 +161,10 @@ pub(super) fn kept(
         (Some(name), Some(id), Some(theirs)) => {
             if before.tool == tool && before.repository == name && theirs == id {
                 return Some(before);
+            }
+            if before.tool == tool && theirs == id {
+                fix = " The same ID at another place is a copy, which needs a --report of its \
+                       own; name one repository alike in every run.";
             }
             format!(
                 "is of the {} repository {} (ID {theirs}), and this run asks the {} repository \
@@ -116,7 +177,8 @@ pub(super) fn kept(
     };
     if before.verify.is_some() || before.restore.is_some() {
         complain(&format!(
-            "The last report, {}, {why}: its last integrity check and test restore are not kept.",
+            "The last report, {}, {why}: its last integrity check and test restore are not \
+             kept.{fix}",
             path.display()
         ));
     }

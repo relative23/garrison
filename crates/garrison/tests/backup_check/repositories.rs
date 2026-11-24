@@ -9,6 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 use serde_json::{Map, Value, json};
 
 use super::case::{Case, HERE, NEW, OLD, Way, id, way};
+use super::spellings;
 use super::stand_in::read;
 use super::support::text;
 
@@ -222,7 +223,13 @@ fn parts(tool: &'static str) -> Vec<Way> {
 fn no_check_or_restore_of_another_repository_or_of_none_known_reaches_the_card() {
     let mut wrong = Vec::new();
     for tool in ["restic", "borg"] {
-        let ways = [places(tool), reports(tool), runs(tool), parts(tool)];
+        let ways = [
+            places(tool),
+            spellings::ways(tool),
+            reports(tool),
+            runs(tool),
+            parts(tool),
+        ];
         for (name, kept, steps) in ways.into_iter().flatten() {
             let case = Case::new(tool);
             let last = steps(&case);
@@ -270,7 +277,9 @@ fn a_run_says_why_it_keeps_nothing_and_names_what_the_file_names() {
         after(&["--repo", "/mnt/copy"], &id(OLD)),
         format!(
             "The last report, {to}, is of the restic repository /srv/repo (ID {OLD}), and this \
-             run asks the restic repository /mnt/copy (ID {OLD}): {lost}"
+             run asks the restic repository /mnt/copy (ID {OLD}): its last integrity check and \
+             test restore are not kept. The same ID at another place is a copy, which needs a \
+             --report of its own; name one repository alike in every run.\n"
         )
     );
     assert_eq!(

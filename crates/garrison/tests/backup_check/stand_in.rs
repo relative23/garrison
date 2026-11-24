@@ -12,6 +12,9 @@ use super::support::finished;
 /// restic and borg as far as the command asks them. `BROKEN` names a step
 /// that fails; every call is noted in `CALLS` with borg's time zone.
 /// `REPO_ID` is the ID the repository has, whatever its name; empty, none.
+/// borg's listing reports the repository's location in borg's own form,
+/// as its documentation of `--json` gives it: `user@host:repo` and
+/// `ssh://user@host/./repo` alike.
 pub(super) const STAND_IN: &str = r#"#!/bin/sh
 tool=$(basename "$0")
 echo "$tool TZ=${TZ-unset} $*" >> "$CALLS"
@@ -38,8 +41,20 @@ case $tool-$verb in
         done
         mkdir -p "$target$(dirname "$path")" && printf 'restored' > "$target$path" ;;
     borg-list)
+        repo=${BORG_REPO-}
+        for word in "$@"; do case $word in list | --json) ;; *) repo=$word ;; esac; done
+        # The location borg reports: a folder here as given, one elsewhere as ssh://.
+        case $repo in
+            ssh://* | /*) location=$repo ;;
+            file://*) location=${repo#file://} ;;
+            *:*) path=${repo#*:}
+                 case $path in /*) ;; "~"*) path=/$path ;; *) path=/./$path ;; esac
+                 location=ssh://${repo%%:*}$path ;;
+            *) location=$repo ;;
+        esac
+        where=${location:+,\"location\":\"$location\"}
         printf '{"archives":[{"name":"host-2026-11-11","time":"2026-11-11T02:00:04.000000"},
-            {"name":"host-2026-11-10","time":"2026-11-10T02:00:03.000000"}],"repository":{"id":"%s"}}' "$id" ;;
+            {"name":"host-2026-11-10","time":"2026-11-10T02:00:03.000000"}],"repository":{"id":"%s"%s}}' "$id" "$where" ;;
     borg-info) printf '{"cache":{"stats":{"unique_csize":4096,"total_size":9000}}}' ;;
     borg-check) ;;
     borg-extract) mkdir -p "$(dirname "$3")" && printf 'restored' > "$3" ;;
@@ -80,6 +95,11 @@ impl Tools {
     /// One run of the command with `arguments` in an environment that holds
     /// `environment` besides the stand-ins, as a backup job's unit gives it.
     pub(super) fn run_with(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
+        finished(&mut self.command(arguments, environment))
+    }
+
+    /// The command that `run_with` runs, for a run that needs more of it.
+    pub(super) fn command(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Command {
         let path = format!(
             "{}:{}",
             self.directory.path().display(),
@@ -96,7 +116,7 @@ impl Tools {
             .env_remove("BORG_REPO")
             .env_remove("TZ")
             .envs(environment.iter().copied());
-        finished(&mut command)
+        command
     }
 
     /// How the stand-ins were called since the last look.

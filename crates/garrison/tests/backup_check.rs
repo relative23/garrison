@@ -13,6 +13,8 @@ mod support;
 mod case;
 #[path = "backup_check/repositories.rs"]
 mod repositories;
+#[path = "backup_check/spellings.rs"]
+mod spellings;
 #[path = "backup_check/stand_in.rs"]
 mod stand_in;
 

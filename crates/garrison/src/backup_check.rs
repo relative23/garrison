@@ -15,14 +15,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use garrison_collector::backups::{
-    Report, Run, Snapshots, Tool, borg_archives, borg_id, borg_size, named, restic_id, restic_size,
-    restic_snapshots,
+    Report, Run, Snapshots, Tool, borg_archives, borg_id, borg_location, borg_size, restic_id,
+    restic_size, restic_snapshots,
 };
 use garrison_core::files::atomic_write;
 use garrison_core::time;
 
 use crate::{complain, say};
-use report::{kept, last_report, place};
+use report::{given, kept, last_report, place};
 
 mod report;
 mod restore;
@@ -105,11 +105,13 @@ fn now() -> String {
 }
 
 /// What a listing gave: the snapshots, the repository's own ID where the
-/// tool gave one, and for borg the newest archive's name.
+/// tool gave one, and for borg the newest archive's name and where borg
+/// says the repository is.
 struct Listed {
     snapshots: Snapshots,
     id: Option<String>,
     newest: Option<String>,
+    location: Option<String>,
 }
 
 /// One tool's way of being asked.
@@ -162,6 +164,7 @@ impl Repository {
                     },
                     id: config.ok.then(|| restic_id(&config.stdout)).flatten(),
                     newest: None,
+                    location: None,
                 })
             }
             Tool::Borg => {
@@ -184,6 +187,7 @@ impl Repository {
                     },
                     id: borg_id(&listed.stdout),
                     newest: name,
+                    location: borg_location(&listed.stdout),
                 })
             }
         }
@@ -246,12 +250,16 @@ pub(crate) fn run_check(asked: &Asked) -> u8 {
         tool,
         given: asked.repo.clone(),
     };
-    let (name, placed) = match place(asked, tool) {
-        Ok(place) => (named(&place), true),
-        Err(unplaced) => (unplaced, false),
-    };
     let listed = repository.snapshots();
     let id = listed.as_ref().ok().and_then(|listed| listed.id.clone());
+    let location = listed
+        .as_ref()
+        .ok()
+        .and_then(|listed| listed.location.as_deref());
+    let (name, placed) = match place(tool, given(asked, tool), location) {
+        Ok(place) => (place, true),
+        Err(unplaced) => (unplaced, false),
+    };
     // What the last run wrote of this repository stays, where this one does
     // not run that part.
     let before = last_report(&path).and_then(|before| {

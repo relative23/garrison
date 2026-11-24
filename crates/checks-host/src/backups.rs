@@ -63,16 +63,17 @@ pub struct Run {
 pub const MAX_REPORT: usize = 256 * 1024;
 
 /// The report of one repository. A part that was not run this time keeps
-/// what the run before wrote of the same repository: the same tool, name
+/// what the run before wrote of the same repository: the same tool, place
 /// and ID.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
     pub tool: Tool,
-    /// The repository as the tool was given it, without a password in it.
+    /// Where the repository is, in the form every name of that place
+    /// reaches, without a password in it.
     pub repository: String,
     /// The repository's own ID, as the tool gives it: what tells one
-    /// repository from another under the same name. None where the tool
+    /// repository from another at the same place. None where the tool
     /// gave none; a report that an earlier release wrote has no such key.
     pub repository_id: Option<String>,
     pub snapshots: Option<Snapshots>,
@@ -83,7 +84,9 @@ pub struct Report {
 }
 
 /// A repository's name without what may sign in to it: of
-/// `rest:https://user:secret@host/path` the `user:secret@` goes.
+/// `rest:https://user:secret@host/path` the `user:secret@` goes. The login
+/// of `ssh://` and `sftp://` stays, without a password, since two users'
+/// homes on one host are two places.
 #[must_use]
 pub fn named(repository: &str) -> String {
     match repository.split_once("://") {
@@ -91,7 +94,14 @@ pub fn named(repository: &str) -> String {
             let (host, path) = rest
                 .split_once('/')
                 .map_or((rest, ""), |(host, path)| (host, path));
-            let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
+            let (user, host) = host
+                .rsplit_once('@')
+                .map_or((None, host), |(user, host)| (Some(user), host));
+            let login = user
+                .filter(|_| matches!(scheme, "ssh" | "sftp"))
+                .map(|user| user.split_once(':').map_or(user, |(user, _)| user))
+                .filter(|user| !user.is_empty());
+            let host = login.map_or_else(|| host.to_owned(), |user| format!("{user}@{host}"));
             let slash = if rest.contains('/') { "/" } else { "" };
             format!("{scheme}://{host}{slash}{path}")
         }
@@ -131,6 +141,17 @@ pub fn restic_id(output: &str) -> Option<String> {
 #[must_use]
 pub fn borg_id(output: &str) -> Option<String> {
     repository_id(serde_json::from_str::<Value>(output).ok()?["repository"]["id"].as_str())
+}
+
+/// `borg list --json`: where the repository is, in the form borg writes
+/// every name of it in ("Canonicalized repository path", its documentation
+/// of `--json` says).
+#[must_use]
+pub fn borg_location(output: &str) -> Option<String> {
+    serde_json::from_str::<Value>(output).ok()?["repository"]["location"]
+        .as_str()
+        .filter(|location| (1..=4096).contains(&location.len()))
+        .map(str::to_owned)
 }
 
 /// `restic stats --json --mode raw-data`: the stored size.
@@ -242,18 +263,46 @@ mod tests {
             named("rest:https://backup:s3cret@host.example:8000/mail"),
             "rest:https://host.example:8000/mail"
         );
+        // A login stays, its password does not.
+        assert_eq!(
+            named("sftp://alice:s3cret@host.example//srv/restic"),
+            "sftp://alice@host.example//srv/restic"
+        );
+        assert_eq!(
+            named("sftp://:s3cret@host.example/restic"),
+            "sftp://host.example/restic"
+        );
         assert_eq!(
             named("sftp:backup@host.example:/srv/restic"),
             "sftp:backup@host.example:/srv/restic"
         );
         assert_eq!(
             named("ssh://backup@host.example/srv/borg"),
-            "ssh://host.example/srv/borg"
+            "ssh://backup@host.example/srv/borg"
         );
         assert_eq!(
             named("s3:https://s3.example.org/bucket"),
             "s3:https://s3.example.org/bucket"
         );
+    }
+
+    /// Where borg says its repository is.
+    #[test]
+    fn borg_names_where_its_repository_is() {
+        assert_eq!(borg_location(BORG).as_deref(), Some("/srv/borg"));
+        for unread in [
+            r#"{"archives": [], "repository": {"id": "477c"}}"#,
+            r#"{"repository": {"location": ""}}"#,
+            r#"{"repository": {"location": 7}}"#,
+            "Error: Repository does not exist",
+        ] {
+            assert_eq!(borg_location(unread), None, "{unread}");
+        }
+        let long = format!(
+            r#"{{"repository": {{"location": "/{}"}}}}"#,
+            "a".repeat(4096)
+        );
+        assert_eq!(borg_location(&long), None);
     }
 
     #[test]

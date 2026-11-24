@@ -658,8 +658,10 @@ Notable changes for operators and users. The format follows
   says, which also says what `init --force` drops and how the policy file
   is written.
 - **A backup's card shows only that repository's own integrity check and
-  test restore.** After the upgrade, a card that expects them warns until
-  the next `garrison backup-check` run with `--verify` or `--restore`.
+  test restore**, whichever way each run names its place. After the upgrade,
+  a card with `verify_days` warns until the next `garrison backup-check` run
+  with `--verify`, and one with `restore_days` until the next with
+  `--restore`.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year
