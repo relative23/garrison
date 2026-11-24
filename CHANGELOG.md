@@ -477,18 +477,11 @@ Notable changes for operators and users. The format follows
   Each answer in it now also says what it means, as OpenAPI 3.1 requires
   of every answer: the successful ones said nothing, so a strict reader of
   the document refused it.
-- **Rotating the API keys no longer interrupts the checks of users'
-  rights.** `garrison stalwart setup --rotate` removed the broker's old key
-  in Stalwart as soon as it had written the new one, while the running
-  broker held the old one until the command restarted it at its end: for
-  that time every check of a signed-in user's rights answered "Garrison is
-  not set up to check access rights", the broker's journal logged an error,
-  and nobody could sign in. The old keys now go only after the services
-  that hold them have restarted with the new ones; where Stalwart's limit
-  of five API keys an account leaves no room, the broker's goes first, and
-  setup restarts the broker as soon as its new key is written. If the
-  command stops with an error after it made new keys, they are removed all
-  the same, and it says to restart the services.
+- **Rotating the API keys no longer interrupts sign-in or the checks of
+  users' rights.** `garrison stalwart setup --rotate` makes each new key,
+  writes it and has its service take it up before the old one goes; where
+  the account has no room for one more, it changes nothing and names the
+  account's keys, of which one is to be removed.
 - **`check-config` and the installer say why on standard error.**
   `check-config` printed an access policy it could not use on standard
   output, and the installer printed there what a failed `check-config` had
@@ -734,15 +727,9 @@ Notable changes for operators and users. The format follows
   `check-config`, and with it the installer, now refuse both and give the
   name to use; `garrison doctor` reports them, and `notify-test` sends
   nothing on a channel whose secret the collector would not have.
-- **Setup restarts the services that still hold replaced secrets.** After
-  a rotation that stopped with an error once it had made the new keys, the
-  old keys are gone, but a plain `garrison stalwart setup` restarted
-  neither the receiver nor the broker, which went on with the old
-  signature key and API key: no event batch was taken and no rights could
-  be checked until someone restarted them. The same happened where setup
-  made a key anew because Stalwart no longer had it. Setup now compares
-  what each running service was handed with its file and restarts the
-  service where they differ.
+- **Setup restarts the services that hold another secret than their
+  file,** as after a run that was interrupted: it compares what systemd
+  handed each running service with its file.
 - **The installer says which file it could not write from the
   configuration.** Where `garrison.toml` was there but did not load, the
   installer left the polkit rule and the switch row's include as they were
@@ -1648,15 +1635,10 @@ Notable changes for operators and users. The format follows
   run it as root and exits with 2. An error writing one of its files names
   the file, and a new key whose file cannot be written, as on a full disk,
   is taken out of Stalwart again.
-- **Setup gives Stalwart's exporter the credential its file holds.** Where
-  a run of `garrison stalwart setup` stopped after Stalwart's exporter took
-  a new scrape credential and before its file did, as when the run was
-  interrupted or Stalwart's answer was lost, every later run said
-  "Prometheus exporter already configured" and left the two apart: Stalwart
-  refused the collector's scrape until a `--rotate`. Setup now gives
-  Stalwart the file's credential on every run where the exporter is
-  Garrison's or off, as it gives the webhook its file's key, and says
-  "updated Prometheus exporter (credential unchanged)".
+- **A stopped `garrison stalwart setup` no longer leaves Stalwart a
+  signature key or scrape credential that no file holds.** Setup writes a
+  new one to its file before Stalwart is given it, and gives Stalwart the
+  file's on every run, so the next run mends whatever a stop left apart.
 - **Setup makes new keys where Stalwart no longer knows those of the
   files.** Where `/etc/garrison/credentials` was put back from a copy older
   than the last `--rotate`, as after a restore onto a new host, or
@@ -1670,22 +1652,10 @@ Notable changes for operators and users. The format follows
   held and has the broker read the new one; the advice about a bridge
   network comes for 403 alone.
 - **A plain setup replaces the keys that a stopped rotation left side by
-  side.** A `garrison stalwart setup --rotate` interrupted after it made a
-  new key, or whose removal of the old keys failed too, left two keys of
-  one description in Stalwart. A plain run then updated the first one
-  listed, said "secret unchanged" and kept the other valid for good, and
-  where the old key was listed first, it gave a new permission or network
-  to that key and not to the file's. Stalwart holds at most five API keys
-  for the administrator's account, so such keys piled up until a rotation
-  could make none ("You have exceeded your quota of 5 API keys."), the next
-  run included. Stalwart shows no key's secret, so no run can tell which
-  key a file holds: where Stalwart has more than one key of a description,
-  a plain run now makes one anew and removes them all, and where the quota
-  leaves the new key no room beside the old ones, these go first.
-- **A failed `garrison stalwart setup` names the run that mends it.** Where
-  Stalwart's limit of five API keys an account made an old key go before
-  the new one could be made, it also says what goes without a key until
-  then.
+  side.** No run can tell which of them a file holds, so it makes one anew
+  and removes them all.
+- **A failed `garrison stalwart setup` names the run that mends it,** and
+  what may go without a new secret until then.
 - **A `garrison stalwart setup` that fails no longer takes the receiver
   down.** It restarts a service only for a secret it wrote anew, and never
   onto a key file that holds no key.

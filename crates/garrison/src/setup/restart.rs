@@ -5,7 +5,6 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use garrison_core::files::{self, Form, Holds};
 use garrison_core::systemd::SYSTEMCTL;
 
 use crate::units;
@@ -39,28 +38,20 @@ fn stale_in(directory: &Path, loaded: &Path) -> BTreeSet<&'static str> {
         .collect()
 }
 
-/// The units whose secret's file is one of `files` and holds a secret
-/// they can start with. Started again onto a file without one, a service
-/// would not start, while the copy it runs with may still work.
-fn units(directory: &Path, files: &BTreeSet<&str>) -> Vec<&'static str> {
-    HELD.iter()
-        .filter(|(_, name)| {
-            files.contains(name)
-                && files::holds(&directory.join(name), Form::Token)
-                    .is_ok_and(|held| held == Holds::Secret)
-        })
-        .map(|(unit, _)| *unit)
-        .collect()
-}
-
 /// Start the services whose secret's file is one of `files` again, so that
 /// they read the new secrets, and say so; the collector starts anew for
 /// every run. Services that are not running read the new secrets when they
-/// start, as on a first setup before Garrison runs.
-pub(super) fn restart(directory: &Path, files: &BTreeSet<&str>) -> Option<String> {
-    let units = units(directory, files);
+/// start, as on a first setup before Garrison runs. Where root's restart
+/// fails, what is said is an error: the service may still hold its old
+/// secret.
+pub(super) fn restart(files: &BTreeSet<&str>) -> Result<Option<String>, String> {
+    let units: Vec<&str> = HELD
+        .iter()
+        .filter(|(_, name)| files.contains(name))
+        .map(|(unit, _)| *unit)
+        .collect();
     if units.is_empty() {
-        return None;
+        return Ok(None);
     }
     let one = units.len() == 1;
     let named = units
@@ -81,7 +72,7 @@ pub(super) fn restart(directory: &Path, files: &BTreeSet<&str>) -> Option<String
     } else {
         format!("Restart {named} so they read the new secrets.")
     };
-    Some(if !rustix::process::geteuid().is_root() {
+    Ok(Some(if !rustix::process::geteuid().is_root() {
         asked
     } else if !systemctl(&["is-active", "--quiet"]) {
         if one {
@@ -93,8 +84,8 @@ pub(super) fn restart(directory: &Path, files: &BTreeSet<&str>) -> Option<String
         let secrets = if one { "secret" } else { "secrets" };
         format!("{named} restarted with the new {secrets}.")
     } else {
-        asked
-    })
+        return Err(asked);
+    }))
 }
 
 #[cfg(test)]
@@ -129,35 +120,29 @@ mod tests {
         );
     }
 
-    /// Only the services whose own secret's file was written anew start
-    /// again, each only onto a file that holds a secret it can start with:
-    /// a receiver started onto an empty file would not start, while the key
-    /// it runs with still works.
+    /// The services whose secret's file is named start again, and only
+    /// those; without root setup asks for it.
     #[test]
-    fn only_the_services_whose_file_was_written_anew_start_again_onto_a_key() {
+    fn the_services_whose_file_is_named_start_again() {
         if rustix::process::geteuid().is_root() {
             return; // Root would ask systemd.
         }
-        let directory = tempfile::tempdir().unwrap();
-        let key = "a-key-of-sixteen-characters-or-more";
-        fs::write(directory.path().join("broker-native-key"), key).unwrap();
-        fs::write(directory.path().join("webhook-signature-key"), "").unwrap();
         let both = BTreeSet::from(["broker-native-key", "webhook-signature-key"]);
-        let restarted = |files: &BTreeSet<&str>| restart(directory.path(), files);
         assert_eq!(
-            restarted(&both).as_deref(),
-            Some("Restart garrison-broker so it reads the new secret.")
-        );
-        assert_eq!(restarted(&BTreeSet::from(["webhook-signature-key"])), None);
-        assert_eq!(restarted(&BTreeSet::new()), None);
-        fs::write(directory.path().join("webhook-signature-key"), key).unwrap();
-        assert_eq!(
-            restarted(&both).as_deref(),
-            Some("Restart garrison-ingest and garrison-broker so they read the new secrets.")
+            restart(&both),
+            Ok(Some(
+                "Restart garrison-ingest and garrison-broker so they read the new secrets."
+                    .to_owned()
+            ))
         );
         assert_eq!(
-            restarted(&BTreeSet::from(["webhook-signature-key"])).as_deref(),
-            Some("Restart garrison-ingest so it reads the new secret.")
+            restart(&BTreeSet::from(["broker-native-key"])),
+            Ok(Some(
+                "Restart garrison-broker so it reads the new secret.".to_owned()
+            ))
         );
+        for none in [BTreeSet::new(), BTreeSet::from(["collector-native-key"])] {
+            assert_eq!(restart(&none), Ok(None));
+        }
     }
 }

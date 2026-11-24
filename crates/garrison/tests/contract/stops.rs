@@ -1,28 +1,27 @@
-//! Wherever `garrison stalwart setup` stops, the next run brings Stalwart and
-//! the credentials directory together. The test stops it at each of its
+//! Wherever `garrison stalwart setup` stops, each service holds a secret
+//! that Stalwart takes, and the next run brings Stalwart and the
+//! credentials directory together. The test stops setup at each of its
 //! requests to Stalwart in turn, in three ways (interrupted, the answer
 //! lost, Stalwart unreachable from there on), in each kind of run that
 //! `scene::Kind` names: a first setup, also one with the macro filter, a
-//! rotation, also one where the administrator's account holds as many API
-//! keys as Stalwart takes, a plain run after the key files were emptied,
-//! one as a second administrator, and one after the filter's section was
-//! taken out. From each stop, the next plain run and, from the same stop
-//! again, the next `--rotate` must succeed and leave both places agreeing
-//! (`together`).
+//! rotation, also one after which Stalwart reloads its settings on its own
+//! and one where the administrator's account holds as many API keys as
+//! Stalwart takes, a plain run after the key files were emptied, and runs
+//! as a second administrator, also one whose own account is full.
 //!
-//! The running services are the broker and the receiver, each holding what
-//! its file held when it last started. A run that fails names the run that
-//! mends it. A run names the restart of each service whose file it wrote
-//! anew, and a service whose restart it names finds a secret in its file
-//! that it can start with and that Stalwart takes. A run that ends by
-//! itself leaves the broker with a key Stalwart takes, or says that the
-//! broker goes without one until setup makes it; stopped at the reload,
-//! which alone can part them, it leaves the receiver with the key Stalwart
-//! signs with, or says that the receiver refuses Stalwart's batches until
-//! setup runs again. A run that was interrupted restarts nothing: there the
-//! next run's look at the copies systemd keeps, which only root makes,
-//! restarts each service whose file it wrote anew, which the test takes as
-//! done, for those files alone and onto a secret it can use as well.
+//! The running services are the broker and the receiver (`held`). Right
+//! after each stop, with the restarts the stopped run named made at the
+//! point where it named them, the running broker must hold a key Stalwart
+//! takes and the running receiver the key Stalwart signs with, but at the
+//! reload, after which only a restart can give the receiver Stalwart's new
+//! key. Where Stalwart reloads its settings on its own after the stop, it
+//! signs with a key that a file or the running receiver holds. A run that
+//! fails names the run that mends it. From each stop, the next plain run
+//! and, from the same stop again, the next `--rotate` must succeed, but a
+//! rotation in an account without room for another key, which must change
+//! nothing and say which keys to remove; then both places agree
+//! (`together`), with each service started again where root's look at the
+//! copies systemd keeps finds it holding another secret than its file.
 //!
 //! Not held here: what root alone does (the restart itself, and how it
 //! looks at the copies systemd keeps, which a user cannot read; a unit test
@@ -34,115 +33,23 @@
 use std::any::Any;
 use std::fs;
 use std::panic::AssertUnwindSafe;
-use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::Instant;
 
 use garrison_testing::lab::Lab;
 use serde_json::json;
 
-use super::keys::key_status;
-use super::scene::{HELD, KINDS, Kind, Scene, holding};
+use super::held::{Stopped, apart, looked, reloaded, restarted};
+use super::scene::{KINDS, Kind, Scene};
 use super::stopper::{Stop, Stopper};
 use super::together::{
     Capture, assert_exporter_held, assert_keys_held_in, assert_milter_held, assert_webhook_held,
 };
 use super::{Setup, lab, text};
 
-/// The units of the services that hold the secrets of `HELD`, as setup
-/// names their restarts.
-const UNITS: [&str; 2] = ["garrison-broker", "garrison-ingest"];
-
-/// Whether a run restarted `unit` or said to restart it.
-fn names_the_restart(said: &str, unit: &str) -> bool {
-    said.lines().any(|line| {
-        (line.contains("Restart ") || line.contains(" restarted")) && line.contains(unit)
-    })
-}
-
-/// The service at `index` of `HELD` started again: whether its file holds a
-/// secret it can start with that Stalwart takes (the broker's key opens a
-/// session, Stalwart signs with the receiver's key), what is wrong where
-/// not; from then on it holds what its file holds.
-fn restart_onto(
-    lab: &Lab,
-    credentials: &Path,
-    capture: &Capture,
-    index: usize,
-    held: &mut Option<[String; 2]>,
-    context: &str,
-) -> Option<String> {
-    let secret = fs::read_to_string(credentials.join(HELD[index])).unwrap_or_default();
-    let usable = if secret.trim().len() < 16 {
-        Err("a file that holds no key")
-    } else if index == 0 {
-        let taken = key_status(&lab.url, &secret) == 200;
-        taken.then_some(()).ok_or("a key Stalwart does not take")
-    } else {
-        let signs = || assert_webhook_held(lab, credentials, capture, context);
-        std::panic::catch_unwind(AssertUnwindSafe(signs))
-            .map_err(|_| "a signature key Stalwart does not sign with")
-    };
-    if let Some(held) = held {
-        held[index] = secret;
-    }
-    let unit = UNITS[index];
-    usable
-        .err()
-        .map(|onto| format!("{unit} was restarted onto {onto}"))
-}
-
-/// Each service whose restart a run named, started again.
-fn restarted(
-    lab: &Lab,
-    credentials: &Path,
-    capture: &Capture,
-    said: &str,
-    held: &mut Option<[String; 2]>,
-    context: &str,
-) -> Vec<String> {
-    (0..UNITS.len())
-        .filter(|&index| names_the_restart(said, UNITS[index]))
-        .filter_map(|index| restart_onto(lab, credentials, capture, index, held, context))
-        .collect()
-}
-
-/// After a run that ended by itself: the running broker holds a key
-/// Stalwart takes, or the run said that it goes without one.
-fn broker_unsaid(lab: &Lab, held: Option<&[String; 2]>, said: &str) -> Option<String> {
-    let held = held?;
-    let told = said.contains("the broker checks no user's rights until setup makes its key");
-    let taken = key_status(&lab.url, &held[0]) == 200;
-    (!taken && !told).then(|| {
-        "the broker holds a key Stalwart no longer takes, and the run did not say so".to_owned()
-    })
-}
-
-/// After a run that ended by itself at the reload, which Stalwart may have
-/// made without its answer coming back: Stalwart signs with the running
-/// receiver's key, or the run said that the receiver refuses Stalwart's
-/// batches until setup runs again. Only a delivery shows which key Stalwart
-/// signs with, and only the reload can part the two.
-fn receiver_unsaid(
-    lab: &Lab,
-    capture: &Capture,
-    setup: &Setup,
-    held: Option<&[String; 2]>,
-    said: &str,
-    context: &str,
-) -> Option<String> {
-    let held = held?;
-    let copy = setup.directory.join("held");
-    fs::create_dir_all(&copy).unwrap();
-    fs::write(copy.join(HELD[1]), &held[1]).unwrap();
-    let signs = || assert_webhook_held(lab, &copy, capture, context);
-    let signed = std::panic::catch_unwind(AssertUnwindSafe(signs)).is_ok();
-    let told = said.contains("the receiver refuses Stalwart's batches until setup runs again");
-    (!signed && !told).then(|| {
-        "Stalwart signs with another key than the running receiver's, and the run did not say so"
-            .to_owned()
-    })
-}
+/// What setup says where the account it makes its keys in has no room for
+/// another one.
+const FULL_TOLD: &str = "Stalwart takes no more API keys in the administrator's account";
 
 /// A setup run of `kind` through a relay that stops it at request `at`:
 /// the request it stopped at, if it got so far, what it said, and what it
@@ -187,15 +94,13 @@ enum Outcome {
 }
 
 /// What is wrong after the run that was to mend a stop of `kind`: both
-/// places agree (`together`), and each running service holds what its file
-/// holds.
+/// places agree (`together`).
 fn agree(
     scene: &Scene,
     setup: &Setup,
     lab: &Lab,
     capture: &Capture,
     kind: Kind,
-    held: Option<&[String; 2]>,
     context: &str,
 ) -> Vec<String> {
     let credentials = setup.directory.join("credentials");
@@ -212,21 +117,11 @@ fn agree(
         &|| assert_exporter_held(lab, &credentials, context),
         &milter,
     ];
-    let mut faults = Vec::new();
-    for check in checks {
-        if let Err(panic) = std::panic::catch_unwind(AssertUnwindSafe(check)) {
-            faults.push(said_by(&*panic));
-        }
-    }
-    let files = holding(&credentials);
-    for (index, unit) in UNITS.iter().enumerate() {
-        if held.is_some_and(|held| held[index] != files[index]) {
-            faults.push(format!(
-                "{unit} holds a replaced secret, and no run named its restart"
-            ));
-        }
-    }
-    faults
+    checks
+        .into_iter()
+        .filter_map(|check| std::panic::catch_unwind(AssertUnwindSafe(check)).err())
+        .map(|panic| said_by(&*panic))
+        .collect()
 }
 
 /// One stop and the run after it.
@@ -269,29 +164,26 @@ fn mended(
         &mut held,
         &context,
     ));
-    // An interrupted run says nothing more; the next run mends what it left,
-    // where it wrote a file anew through root's look at systemd's copies.
-    let written: Vec<usize> = match (&held, stop) {
-        (Some(held), Stop::Interrupted) => {
-            let files = holding(&credentials);
-            (0..HELD.len())
-                .filter(|&index| held[index] != files[index])
-                .collect()
-        }
-        (_, Stop::Interrupted) => Vec::new(),
-        _ => {
-            faults.extend(broker_unsaid(lab, held.as_ref(), &said));
-            if request == "x:Action/set create" {
-                let unsaid = receiver_unsaid(lab, capture, setup, held.as_ref(), &said, &context);
-                faults.extend(unsaid);
-            }
-            Vec::new()
-        }
+    let run = Stopped {
+        request: &request,
+        stop,
+        asked: &asked,
+        said: &said,
     };
+    faults.extend(apart(lab, capture, held.as_ref(), &run));
+    if kind == Kind::Reloaded {
+        faults.extend(reloaded(lab, capture, &credentials, held.as_ref(), &said));
+    }
     let next_run = setup.run(next);
     let said_next = text(&next_run);
     let shown = format!("stopped run: {said}\nasked: {asked:?}\nnext run: {said_next}");
-    if next_run.status.code() != Some(0) {
+    // A rotation in an account without room for another key changes
+    // nothing and says which keys to remove.
+    let refused = kind.full() && !next.is_empty();
+    let code = next_run.status.code();
+    if refused && (code != Some(1) || !said_next.contains(FULL_TOLD)) {
+        faults.push("the next --rotate was not refused for the account's full quota".to_owned());
+    } else if !refused && code != Some(0) {
         faults.push("the next run failed".to_owned());
         return Outcome::Done(Err(format!("{context}: {}\n{shown}", faults.join("; "))));
     }
@@ -303,35 +195,36 @@ fn mended(
         &mut held,
         &context,
     ));
-    let files = holding(&credentials);
-    for index in written {
-        if held
-            .as_ref()
-            .is_some_and(|held| held[index] != files[index])
-        {
-            faults.extend(restart_onto(
-                lab,
-                &credentials,
-                capture,
-                index,
-                &mut held,
-                &context,
-            ));
-        }
+    if code == Some(0) {
+        faults.extend(looked(lab, &credentials, capture, &mut held, &context));
     }
-    faults.extend(agree(
-        scene,
-        setup,
-        lab,
-        capture,
-        kind,
-        held.as_ref(),
-        &context,
-    ));
+    faults.extend(agree(scene, setup, lab, capture, kind, &context));
     if !faults.is_empty() {
         return Outcome::Done(Err(format!("{context}: {}\n{shown}", faults.join("; "))));
     }
     Outcome::Done(Ok(()))
+}
+
+/// Once the full account of `kind` has room for one more key, a rotation
+/// goes through.
+fn with_room(
+    scene: &mut Scene,
+    setup: &Setup,
+    lab: &mut Lab,
+    capture: &Capture,
+    kind: Kind,
+) -> Option<String> {
+    if let Err(why) = scene.start(kind, setup, lab) {
+        return Some(format!("{kind:?} with room: {why}"));
+    }
+    scene.make_room(lab, kind);
+    let rotated = setup.run(&["--rotate"]);
+    let context = format!("{kind:?} with room for one more key, then --rotate");
+    if rotated.status.code() != Some(0) {
+        return Some(format!("{context}: {}", text(&rotated)));
+    }
+    let faults = agree(scene, setup, lab, capture, kind, &context);
+    (!faults.is_empty()).then(|| format!("{context}: {}", faults.join("; ")))
 }
 
 /// What a panic said.
@@ -434,6 +327,9 @@ fn every_stop_of_setup_is_mended_by_the_next_run() {
             }
         }
         println!("{kind:?}: {} stops from request {from}", stops - before);
+        if kind.full() {
+            failures.extend(with_room(&mut scene, &setup, &mut lab, &capture, kind));
+        }
         scene.leave(&mut lab);
     }
     scene.forget(&lab, &credentials);

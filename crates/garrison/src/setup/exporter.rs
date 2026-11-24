@@ -13,12 +13,18 @@ use super::{Admin, random};
 /// The credential's file, as the collector reads it.
 pub(super) const FILE: &str = "metrics-credential";
 
-/// What `ensure_metrics` did, and a new credential for its file.
-pub(super) struct Exported {
-    pub(super) step: String,
-    /// For its file once Stalwart has reloaded its settings (`keep`), which
-    /// is when it takes it.
-    pub(super) new_credential: Option<String>,
+/// Stalwart's exporter as setup finds it: switched on, and whether with
+/// Garrison's user.
+pub(super) struct Found {
+    enabled: bool,
+    ours: bool,
+}
+
+/// The credential Stalwart is to take, as its file holds it, and whether
+/// this run made it.
+pub(super) struct Scrape {
+    secret: String,
+    pub(super) new: bool,
 }
 
 /// The credential the file at `path` holds, as the collector reads it, in
@@ -31,12 +37,7 @@ pub(super) fn read(path: &Path) -> Option<ScrapeCredential> {
         .and_then(|data| ScrapeCredential::read(&data))
 }
 
-pub(super) fn ensure_metrics(
-    admin: &Admin,
-    directory: &Path,
-    rotate: bool,
-) -> Result<Exported, String> {
-    let target = directory.join(FILE);
+pub(super) fn find(admin: &Admin) -> Result<Found, String> {
     let singleton = Get {
         ids: Some(&["singleton"]),
         properties: None,
@@ -46,57 +47,78 @@ pub(super) fn ensure_metrics(
     let current = current.prometheus.unwrap_or_default();
     let enabled = current.kind.as_deref() == Some("Enabled");
     let ours = enabled && current.auth_username.as_deref() == Some("garrison");
-    if enabled && !ours {
-        return Ok(Exported {
-            step: format!(
-                "Prometheus exporter is enabled by someone else; not changed: for the \
-                 collector, write its user name and password into {} as configuration.md says \
-                 (collector.metrics_credential)",
-                target.display()
-            ),
-            new_credential: None,
-        });
+    Ok(Found { enabled, ours })
+}
+
+/// Where the exporter is Garrison's or off: the file's credential, or where
+/// it holds none or a rotation asks for one, a new one, written to the file
+/// before Stalwart is given it, which takes it once it reloads its settings.
+pub(super) fn credential(
+    directory: &Path,
+    found: &Found,
+    rotate: bool,
+) -> Result<Option<Scrape>, String> {
+    if found.enabled && !found.ours {
+        return Ok(None);
     }
-    // Where the file holds Garrison's credential, Stalwart is given it on
-    // every run, as the webhook is given its file's key: a run stopped after
-    // Stalwart took a new one and before the file did leaves the two apart.
+    let target = directory.join(FILE);
     let kept = read(&target).filter(|credential| !rotate && credential.username == "garrison");
-    let (secret, new) = match kept {
-        Some(credential) => (credential.secret, false),
-        None => (random(36)?, true),
+    if let Some(credential) = kept {
+        return Ok(Some(Scrape {
+            secret: credential.secret,
+            new: false,
+        }));
+    }
+    let credential = ScrapeCredential {
+        username: "garrison".to_owned(),
+        secret: random(36)?,
+    };
+    let document = serde_json::to_string(&credential).map_err(|error| error.to_string())?;
+    atomic_write(&target, document.as_bytes(), 0o600)
+        .map_err(|error| format!("Could not write {}: {error}", target.display()))?;
+    Ok(Some(Scrape {
+        secret: credential.secret,
+        new: true,
+    }))
+}
+
+/// Stalwart is given the file's credential on every run where the exporter
+/// is Garrison's or off, as the webhook is given its file's key, so that a
+/// run stopped before Stalwart took a new one leaves nothing apart that the
+/// next run does not mend; an exporter of someone else's is left as it is.
+pub(super) fn ensure(
+    admin: &Admin,
+    directory: &Path,
+    found: &Found,
+    scrape: Option<&Scrape>,
+) -> Result<String, String> {
+    let target = directory.join(FILE);
+    let Some(scrape) = scrape else {
+        return Ok(format!(
+            "Prometheus exporter is enabled by someone else; not changed: for the collector, \
+             write its user name and password into {} as configuration.md says \
+             (collector.metrics_credential)",
+            target.display()
+        ));
     };
     let exporter = Exporter::Enabled {
         auth_username: "garrison",
-        auth_secret: Secret::Value { secret: &secret },
+        auth_secret: Secret::Value {
+            secret: &scrape.secret,
+        },
     };
     let metrics = Metrics {
         prometheus: exporter,
     };
     admin.set("x:Metrics/set", &Set::update("singleton", metrics))?;
-    let step = match (new, ours) {
+    Ok(match (scrape.new, found.ours) {
         (false, true) => "updated Prometheus exporter (credential unchanged)".to_owned(),
         (false, false) => format!(
             "enabled Prometheus exporter with the credential in {}",
             target.display()
         ),
         (true, _) => format!("enabled Prometheus exporter -> {}", target.display()),
-    };
-    let credential = ScrapeCredential {
-        username: "garrison".to_owned(),
-        secret,
-    };
-    let document = serde_json::to_string(&credential).map_err(|error| error.to_string())?;
-    Ok(Exported {
-        step,
-        new_credential: new.then_some(document),
     })
-}
-
-/// Write a new credential to its file, once Stalwart takes it.
-pub(super) fn keep(directory: &Path, document: &str) -> Result<(), String> {
-    let target = directory.join(FILE);
-    atomic_write(&target, document.as_bytes(), 0o600)
-        .map_err(|error| format!("Could not write {}: {error}", target.display()))
 }
 
 #[cfg(test)]
@@ -132,49 +154,66 @@ mod tests {
         assert!(read(&path).is_some());
     }
 
-    /// What `ensure_metrics` does where Stalwart's exporter is Garrison's and
-    /// the file holds `written` at `mode`: the step, the secret Stalwart was
-    /// given, and the new credential for the file, if any; the file itself
-    /// is left to `keep`.
-    fn exported(written: &str, mode: u32, rotate: bool) -> (String, String, Option<Value>) {
+    /// What setup does where Stalwart's exporter is Garrison's, the file
+    /// holds `written` at `mode` and Stalwart answers the credential's set
+    /// with `answered`: the step or the error, the secret Stalwart was given,
+    /// and what the file holds after.
+    fn exported(
+        written: &str,
+        mode: u32,
+        rotate: bool,
+        answered: String,
+    ) -> (Result<String, String>, String, Value) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join(FILE);
         garrison_testing::write_private(&path, written.as_bytes());
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
         let stored = json(&json!({"methodResponses": [["x:Metrics/get", {"list": [{
             "id": "singleton", "prometheus": {"@type": "Enabled", "authUsername": "garrison"}}]}, "0"]]}));
-        let set = json(&json!({"methodResponses": [["x:Metrics/set",
-            {"updated": {"singleton": null}}, "0"]]}));
-        let server = serve(vec![stored, set]);
+        let server = serve(vec![stored, answered]);
         let admin = Admin {
             url: format!("{}/jmap/", server.url),
             authorization: "Bearer admin".to_owned(),
         };
-        let done = ensure_metrics(&admin, directory.path(), rotate).unwrap();
+        let found = find(&admin).unwrap();
+        let scrape = credential(directory.path(), &found, rotate).unwrap();
+        let done = ensure(&admin, directory.path(), &found, scrape.as_ref());
         let requests = server.requests();
         let (_, body) = requests[1].split_once("\r\n\r\n").unwrap();
         let call: Value = serde_json::from_str(body).unwrap();
         let secret = &call["methodCalls"][0][1]["update"]["singleton"]["prometheus"]["authSecret"];
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), written);
-        let step = done
-            .step
-            .replace(&directory.path().display().to_string(), "DIR");
-        let new = done
-            .new_credential
-            .map(|text| serde_json::from_str(&text).unwrap());
-        (step, secret["secret"].as_str().unwrap().to_owned(), new)
+        let shown = |text: String| text.replace(&directory.path().display().to_string(), "DIR");
+        let held: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let secret = secret["secret"].as_str().unwrap().to_owned();
+        (done.map(shown).map_err(shown), secret, held)
     }
 
-    /// Where the file holds no credential, setup makes one, which Stalwart is
-    /// given and the file is to take.
+    fn set() -> String {
+        json(
+            &json!({"methodResponses": [["x:Metrics/set", {"updated": {"singleton": null}}, "0"]]}),
+        )
+    }
+
+    /// Where the file holds no credential, setup makes one, which is in the
+    /// file before Stalwart is given it, also where Stalwart then refuses it.
     #[test]
-    fn a_credential_file_that_holds_none_gets_one_where_the_exporter_is_garrisons() {
-        let (step, secret, new) = exported("\n", 0o600, false);
-        assert_eq!(
-            step,
-            "enabled Prometheus exporter -> DIR/metrics-credential"
-        );
-        assert_eq!(new, Some(json!({"username": "garrison", "secret": secret})));
+    fn a_new_credential_is_in_its_file_before_stalwart_gets_it() {
+        for (answered, took) in [
+            (set(), true),
+            (garrison_testing::http::answer(503, "{}"), false),
+        ] {
+            let (step, secret, held) = exported("\n", 0o600, false, answered);
+            assert_eq!(step.is_ok(), took);
+            if took {
+                assert_eq!(
+                    step.unwrap(),
+                    "enabled Prometheus exporter -> DIR/metrics-credential"
+                );
+            }
+            assert_eq!(held, json!({"username": "garrison", "secret": secret}));
+        }
     }
 
     /// Where the file holds Garrison's credential, Stalwart is given it, so
@@ -182,39 +221,36 @@ mod tests {
     /// rotation makes a new one.
     #[test]
     fn stalwart_is_given_the_credential_its_file_holds() {
-        let held = r#"{"username": "garrison", "secret": "the-scrape-secret"}"#;
+        let written = r#"{"username": "garrison", "secret": "the-scrape-secret"}"#;
+        let (step, secret, held) = exported(written, 0o600, false, set());
         assert_eq!(
-            exported(held, 0o600, false),
+            (step, secret.as_str()),
             (
-                "updated Prometheus exporter (credential unchanged)".to_owned(),
-                "the-scrape-secret".to_owned(),
-                None
+                Ok("updated Prometheus exporter (credential unchanged)".to_owned()),
+                "the-scrape-secret"
             )
         );
-        let (step, secret, new) = exported(held, 0o600, true);
+        assert_eq!(held["secret"], "the-scrape-secret");
+        let (step, secret, held) = exported(written, 0o600, true, set());
         assert_eq!(
             step,
-            "enabled Prometheus exporter -> DIR/metrics-credential"
+            Ok("enabled Prometheus exporter -> DIR/metrics-credential".to_owned())
         );
         assert_ne!(secret, "the-scrape-secret");
-        assert_eq!(new, Some(json!({"username": "garrison", "secret": secret})));
+        assert_eq!(held, json!({"username": "garrison", "secret": secret}));
     }
 
     /// A credential whose file other users may read may have been seen:
-    /// Stalwart is given a new one, which `keep` writes for this user alone.
+    /// Stalwart is given a new one, which its file holds for this user alone.
     #[test]
     fn a_credential_file_others_may_read_gets_a_new_one() {
-        let held = r#"{"username": "garrison", "secret": "the-scrape-secret"}"#;
-        let (step, secret, new) = exported(held, 0o644, false);
+        let written = r#"{"username": "garrison", "secret": "the-scrape-secret"}"#;
+        let (step, secret, held) = exported(written, 0o644, false, set());
         assert_eq!(
             step,
-            "enabled Prometheus exporter -> DIR/metrics-credential"
+            Ok("enabled Prometheus exporter -> DIR/metrics-credential".to_owned())
         );
         assert_ne!(secret, "the-scrape-secret");
-        assert_eq!(new, Some(json!({"username": "garrison", "secret": secret})));
-        let directory = tempfile::tempdir().unwrap();
-        keep(directory.path(), held).unwrap();
-        let mode = std::fs::metadata(directory.path().join(FILE)).unwrap();
-        assert_eq!(mode.permissions().mode() & 0o777, 0o600);
+        assert_eq!(held, json!({"username": "garrison", "secret": secret}));
     }
 }

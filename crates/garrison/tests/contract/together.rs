@@ -144,21 +144,27 @@ pub(super) fn assert_webhook_held(lab: &Lab, credentials: &Path, capture: &Captu
         .filter(|hook| hook["httpHeaders"]["X-Garrison"] == "events")
         .count();
     assert_eq!(ours, 1, "{context}: Garrison's webhooks");
+    let key = fs::read_to_string(credentials.join("webhook-signature-key")).unwrap();
+    assert_eq!(
+        signed_with(capture, &[&key]),
+        Some(0),
+        "{context}: the webhook signs with another key than its file's"
+    );
+}
+
+/// Which of `keys` the next batch Stalwart delivers is signed with.
+pub(super) fn signed_with(capture: &Capture, keys: &[&str]) -> Option<usize> {
     let name = format!("{}.stop.example.net", unique());
     let mut session = Smtp::connect(&std::env::var("GARRISON_LAB_SMTP").unwrap());
     session.command(&format!("EHLO {name}"));
     session.command("QUIT");
     let (signature, body) = capture.naming(&name);
-    let key = fs::read_to_string(credentials.join("webhook-signature-key")).unwrap();
-    assert_eq!(
-        signature,
-        garrison_ingest::app::signature(key.trim().as_bytes(), &body),
-        "{context}: the webhook signs with another key than its file's"
-    );
+    keys.iter()
+        .position(|key| signature == garrison_ingest::app::signature(key.trim().as_bytes(), &body))
 }
 
-/// Stalwart's exporter takes the credential of its file.
-pub(super) fn assert_exporter_held(lab: &Lab, credentials: &Path, context: &str) {
+/// Whether Stalwart's exporter takes the credential of its file.
+pub(super) fn exporter_takes(lab: &Lab, credentials: &Path) -> bool {
     let file = fs::read(credentials.join("metrics-credential")).unwrap();
     let credential: Value = serde_json::from_slice(&file).unwrap();
     let user = format!(
@@ -173,9 +179,13 @@ pub(super) fn assert_exporter_held(lab: &Lab, credentials: &Path, context: &str)
         .build()
         .call()
         .unwrap();
-    assert_eq!(
-        answer.status(),
-        200,
+    answer.status() == 200
+}
+
+/// Stalwart's exporter takes the credential of its file.
+pub(super) fn assert_exporter_held(lab: &Lab, credentials: &Path, context: &str) {
+    assert!(
+        exporter_takes(lab, credentials),
         "{context}: the exporter refuses its file's credential"
     );
 }

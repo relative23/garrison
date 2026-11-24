@@ -114,31 +114,19 @@ fn a_failure_names_the_run_that_mends_it() {
     );
 }
 
-/// Where the answer to the reload is lost, Stalwart may have reloaded all
-/// the same and taken the new secrets: setup says what goes without them
-/// until it runs again.
+/// Where a run fails once a new signature key or scrape credential is in
+/// its file and before Stalwart has surely reloaded its settings, setup says
+/// what may go without it until it runs again.
 #[test]
-fn a_reload_without_an_answer_says_what_goes_without_the_new_secrets() {
-    let server = serve(vec![answer(503, "{}"), answer(503, "{}")]);
-    let admin = Admin {
-        url: format!("{}/jmap/", server.url),
-        authorization: "Bearer key".to_owned(),
-    };
+fn a_failure_after_a_new_secret_says_what_may_go_without_it() {
+    let error = || "x:Action/set: Stalwart answered HTTP 503".to_owned();
+    assert_eq!(until(error(), false, false), error());
     assert_eq!(
-        reload(&admin, false, false),
-        Err("x:Action/set: Stalwart answered HTTP 503".to_owned())
+        until(error(), true, true),
+        "x:Action/set: Stalwart answered HTTP 503; the receiver may refuse Stalwart's batches \
+         until setup runs again, and Stalwart sends them again for an hour; the exporter may \
+         refuse the collector's scrape until setup runs again"
     );
-    assert_eq!(
-        reload(&admin, true, true),
-        Err(
-            "x:Action/set: Stalwart answered HTTP 503; where Stalwart reloaded its settings all \
-             the same, the receiver refuses Stalwart's batches until setup runs again, and \
-             Stalwart sends them again for an hour; the exporter refuses the collector's scrape \
-             until setup runs again"
-                .to_owned()
-        )
-    );
-    server.requests();
 }
 
 /// Stalwart refuses a request for its rate limit with 429, as where it sees

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::os::unix::fs::PermissionsExt;
 
 use garrison_testing::http::{answer, json, serve};
@@ -12,7 +13,6 @@ pub(super) const COLLECTOR: Key = Key {
     description: "garrison collector",
     permissions: &["authenticate"],
     held: false,
-    without: "the cards that need the collector's key cannot read Stalwart",
 };
 
 /// Stalwart's list of an account's keys of the collector's description.
@@ -31,66 +31,134 @@ pub(super) fn session(account: &str) -> String {
         "primaryAccounts": {"urn:stalwart:jmap": account}}))
 }
 
-/// What `ensure` does for the collector's key with the file holding
-/// `written`, while Stalwart has the keys `listed` of that description in
-/// the administrator's own account, which the file's key belongs to: the
-/// step, the keys it replaces, what the file holds after, and whether it
-/// asked Stalwart for a new key.
-fn ensured(written: &str, ids: &[&str]) -> (String, Vec<String>, String, bool) {
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join(COLLECTOR.file);
+/// Stalwart's answer to a new key.
+pub(super) fn made() -> String {
+    json(&json!({"methodResponses": [["x:ApiKey/set",
+        {"created": {"new": {"id": "fresh", "secret": NEW}}}, "0"]]}))
+}
+
+/// Stalwart's answer to a change of a key or its removal.
+pub(super) fn done(method: &str) -> String {
+    json(&json!({"methodResponses": [[method, {"updated": null, "destroyed": null}, "0"]]}))
+}
+
+/// The collector's key file in the credentials folder of the test
+/// configuration in `directory`.
+pub(super) fn key_file(directory: &Path) -> std::path::PathBuf {
+    directory.join("credentials").join(COLLECTOR.file)
+}
+
+/// What one key's run does with the collector's file holding `written` at
+/// `mode`, while Stalwart answers `answers`: the error, if any, and the
+/// requests. The key's service takes up a new key as `take_up` says.
+pub(super) fn settled(
+    directory: &Path,
+    (written, mode): (&str, u32),
+    answers: Vec<String>,
+    rotate: bool,
+    take_up: &dyn Fn(&Key) -> Result<(), String>,
+) -> (Result<(), String>, Vec<String>) {
+    let file = key_file(directory);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     garrison_testing::write_private(&file, written.as_bytes());
-    let set = json(&json!({"methodResponses": [["x:ApiKey/set",
-        {"created": {"new": {"id": "fresh", "secret": NEW}}, "updated": {"old": null}}, "0"]]}));
-    let mut answers = vec![listed("b", ids)];
-    // The file's key is asked whose it is only where it holds one.
-    if holds_key(&file) {
-        answers.push(session("b"));
-    }
-    answers.push(set);
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
     let server = serve(answers);
+    let config = garrison_testing::config(directory, &server.url);
     let admin = Admin {
         url: format!("{}/jmap/", server.url),
         authorization: "Bearer admin".to_owned(),
     };
     let networks = Enabled::of(["127.0.0.1/32"]);
-    let done = ensure(&admin, directory.path(), &COLLECTOR, &networks, false).unwrap();
-    let requests = server.requests();
-    let step = done
-        .step
-        .replace(&directory.path().display().to_string(), "DIR");
-    let held = std::fs::read_to_string(&file).unwrap();
-    assert_eq!(done.made, requests.last().unwrap().contains("\"create\""));
-    let replaced = done.replaced.iter().map(|key| key.id.clone()).collect();
-    (step, replaced, held, done.made)
+    let credentials = &config.credentials_directory;
+    let outcome = find(&admin, credentials, &[&COLLECTOR], rotate).and_then(|found| {
+        let found = found.into_iter().next().unwrap();
+        settle(&admin, &config, &COLLECTOR, found, &networks, take_up)
+    });
+    (outcome, server.requests())
+}
+
+/// A service that takes up its new key.
+pub(super) const TAKEN: fn(&Key) -> Result<(), String> = |_| Ok(());
+
+/// Requests in short: the method and what it does, or the request line.
+fn named(requests: &[String]) -> Vec<String> {
+    requests
+        .iter()
+        .map(|request| {
+            let (head, body) = request.split_once("\r\n\r\n").unwrap();
+            let Ok(call) = serde_json::from_str::<serde_json::Value>(body) else {
+                return head
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .split(' ')
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+            };
+            let call = &call["methodCalls"][0];
+            let what = ["create", "update", "destroy"]
+                .into_iter()
+                .find(|what| call[1].get(*what).is_some());
+            format!("{} {}", call[0].as_str().unwrap(), what.unwrap_or(""))
+                .trim_end()
+                .to_owned()
+        })
+        .collect()
 }
 
 /// A key file that holds no key, as an empty one, gets a new key, as a
-/// missing one does, and the key it replaces goes: kept, the collector
-/// would have no key while setup said "secret unchanged". A file that
-/// holds a key keeps it.
+/// missing one does, and the key it replaces goes once the new one is
+/// tried. A file that holds a key keeps it.
 #[test]
 fn a_key_file_that_holds_no_key_gets_a_new_one() {
     for written in ["", "\n", " \r\n", "short\n"] {
+        let directory = tempfile::tempdir().unwrap();
+        let answers = vec![
+            listed("b", &["old"]),
+            made(),
+            answer(200, "{}"),
+            done("x:ApiKey/set"),
+        ];
+        let (outcome, requests) =
+            settled(directory.path(), (written, 0o600), answers, false, &TAKEN);
+        assert_eq!(outcome, Ok(()), "{written:?}");
         assert_eq!(
-            ensured(written, &["old"]),
-            (
-                "created API key 'garrison collector' -> DIR/collector-native-key".to_owned(),
-                vec!["old".to_owned()],
-                format!("{NEW}\n"),
-                true
-            ),
+            named(&requests),
+            [
+                "x:ApiKey/get",
+                "x:ApiKey/set create",
+                "GET /jmap/session",
+                "x:ApiKey/set destroy"
+            ],
             "{written:?}"
         );
+        assert!(
+            requests[2].contains(&format!("Bearer {NEW}")),
+            "{written:?}"
+        );
+        assert!(requests[3].contains(r#""destroy":["old"]"#), "{written:?}");
+        let held = std::fs::read_to_string(key_file(directory.path())).unwrap();
+        assert_eq!(held, format!("{NEW}\n"), "{written:?}");
     }
+    let directory = tempfile::tempdir().unwrap();
+    let answers = vec![
+        listed("b", &["old"]),
+        session("b"),
+        done("x:ApiKey/set"),
+        answer(200, "{}"),
+    ];
+    let written = format!("{OLD}\n");
+    let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
+    assert_eq!(outcome, Ok(()));
     assert_eq!(
-        ensured(&format!("{OLD}\n"), &["old"]),
-        (
-            "updated API key 'garrison collector' (secret unchanged)".to_owned(),
-            Vec::new(),
-            format!("{OLD}\n"),
-            false
-        )
+        named(&requests),
+        [
+            "x:ApiKey/get",
+            "GET /jmap/session",
+            "x:ApiKey/set update",
+            "GET /jmap/session"
+        ]
     );
 }
 
@@ -100,142 +168,134 @@ fn a_key_file_that_holds_no_key_gets_a_new_one() {
 #[test]
 fn a_key_file_others_may_read_gets_a_new_key() {
     let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join(COLLECTOR.file);
-    garrison_testing::write_private(&file, format!("{OLD}\n").as_bytes());
-    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
-    let set = json(&json!({"methodResponses": [["x:ApiKey/set",
-        {"created": {"new": {"id": "fresh", "secret": NEW}}, "updated": {"old": null}}, "0"]]}));
-    let server = serve(vec![listed("b", &["old"]), set]);
-    let admin = Admin {
-        url: format!("{}/jmap/", server.url),
-        authorization: "Bearer admin".to_owned(),
-    };
-    let networks = Enabled::of(["127.0.0.1/32"]);
-    let done = ensure(&admin, directory.path(), &COLLECTOR, &networks, false).unwrap();
-    server.requests();
-    let step = done
-        .step
-        .replace(&directory.path().display().to_string(), "DIR");
-    let replaced: Vec<String> = done.replaced.iter().map(|key| key.id.clone()).collect();
-    assert_eq!(
-        (step.as_str(), replaced, done.made),
-        (
-            "created API key 'garrison collector' -> DIR/collector-native-key",
-            vec!["old".to_owned()],
-            true
-        )
+    let answers = vec![
+        listed("b", &["old"]),
+        session("b"),
+        made(),
+        answer(200, "{}"),
+        done("x:ApiKey/set"),
+    ];
+    let written = format!("{OLD}\n");
+    let (outcome, requests) = settled(directory.path(), (&written, 0o644), answers, false, &TAKEN);
+    assert_eq!(outcome, Ok(()));
+    assert!(
+        requests[4].contains(r#""destroy":["old"]"#),
+        "{}",
+        requests[4]
     );
-    let written = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+    let file = key_file(directory.path());
+    let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
     assert_eq!(
-        (std::fs::read_to_string(&file).unwrap(), written),
+        (std::fs::read_to_string(&file).unwrap(), mode),
         (format!("{NEW}\n"), 0o600)
     );
 }
 
-/// Where Stalwart has two keys of the description, as after a rotation
-/// that was stopped before it removed the old one, no run can tell which
-/// the file holds: a plain run makes one anew and replaces both, where
-/// it once updated the first and kept the other for good.
+/// Where Stalwart has two keys of the description, as after a run that
+/// stopped before the old one went, no run can tell which the file holds: a
+/// plain run makes one anew and replaces both.
 #[test]
 fn two_keys_of_one_description_are_replaced_by_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let answers = vec![
+        listed("b", &["old", "older"]),
+        session("b"),
+        made(),
+        answer(200, "{}"),
+        done("x:ApiKey/set"),
+        done("x:ApiKey/set"),
+    ];
+    let written = format!("{OLD}\n");
+    let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
+    assert_eq!(outcome, Ok(()));
+    assert!(requests[4].contains(r#""destroy":["old"]"#));
+    assert!(requests[5].contains(r#""destroy":["older"]"#));
+}
+
+/// The service that holds a key takes up the new one before the keys it
+/// replaces go: where it cannot, they stay, and the run says why, so that
+/// it never holds a key Stalwart no longer takes.
+#[test]
+fn a_new_key_is_taken_up_before_the_old_one_goes() {
+    let directory = tempfile::tempdir().unwrap();
+    let taken = RefCell::new(Vec::new());
+    let take_up = |key: &Key| {
+        let file = directory.path().join("credentials").join(key.file);
+        taken
+            .borrow_mut()
+            .push(std::fs::read_to_string(file).unwrap());
+        Ok(())
+    };
+    let answers = vec![
+        listed("b", &["old"]),
+        session("b"),
+        made(),
+        answer(200, "{}"),
+        answer(503, "{}"),
+    ];
+    let written = format!("{OLD}\n");
+    let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, true, &take_up);
+    // The removal failed, after the service took up the new key.
+    assert_eq!(*taken.borrow(), [format!("{NEW}\n")]);
     assert_eq!(
-        ensured(&format!("{OLD}\n"), &["old", "older"]),
-        (
-            "replaced the 2 API keys 'garrison collector' with one -> \
-             DIR/collector-native-key"
-                .to_owned(),
-            vec!["old".to_owned(), "older".to_owned()],
-            format!("{NEW}\n"),
-            true
+        outcome,
+        Err(
+            "x:ApiKey/set: Stalwart answered HTTP 503; the API key 'garrison collector' that the \
+             new one replaced stays"
+                .to_owned()
         )
     );
+    assert_eq!(requests.len(), 5);
+    let refused =
+        |_: &Key| Err("Restart garrison-collector so it reads the new secret.".to_owned());
+    let answers = vec![
+        listed("b", &["old"]),
+        session("b"),
+        made(),
+        answer(200, "{}"),
+    ];
+    let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, true, &refused);
+    assert_eq!(
+        outcome,
+        Err("Restart garrison-collector so it reads the new secret.".to_owned())
+    );
+    // No removal was asked for.
+    assert_eq!(requests.len(), 4);
 }
 
 /// Stalwart holds at most five keys for an account. Where a new key finds
-/// no room beside the old ones, these go first and the new one is made
-/// then, so that a rotation stopped after it made its keys does not
-/// leave every later run refused.
+/// no room, nothing of that key changes, none goes first, and setup names
+/// the keys of the account, of which one is to be removed.
 #[test]
-fn a_full_quota_lets_the_old_keys_go_first() {
+fn a_full_quota_changes_nothing_and_names_the_keys() {
     let directory = tempfile::tempdir().unwrap();
-    let listed = listed("b", &["old", "older"]);
+    let own = json(
+        &json!({"methodResponses": [["x:ApiKey/get", {"accountId": "b", "list": [
+        {"id": "old", "description": "garrison collector"},
+        {"id": "o1", "description": "backup"},
+        {"id": "o2", "description": null}]}, "0"]]}),
+    );
     let full = json(
         &json!({"methodResponses": [["x:ApiKey/set", {"notCreated": {"new": {
         "type": "overQuota", "description": "You have exceeded your quota of 5 API keys."}}},
         "0"]]}),
     );
-    let gone =
-        |id: &str| json(&json!({"methodResponses": [["x:ApiKey/set", {"destroyed": [id]}, "0"]]}));
-    let made = json(&json!({"methodResponses": [["x:ApiKey/set",
-        {"created": {"new": {"id": "fresh", "secret": NEW}}}, "0"]]}));
-    let server = serve(vec![listed, full, gone("old"), gone("older"), made]);
-    let admin = Admin {
-        url: format!("{}/jmap/", server.url),
-        authorization: "Bearer admin".to_owned(),
-    };
-    let networks = Enabled::of(["127.0.0.1/32"]);
-    let done = ensure(&admin, directory.path(), &COLLECTOR, &networks, true).unwrap();
-    let requests = server.requests();
-    assert!(requests[2].contains(r#""destroy":["old"]"#));
-    assert!(requests[3].contains(r#""destroy":["older"]"#));
+    let written = format!("{OLD}\n");
+    let answers = vec![own, session("b"), full];
+    let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, true, &TAKEN);
     assert_eq!(
-        done.step
-            .replace(&directory.path().display().to_string(), "DIR"),
-        "replaced API key 'garrison collector' -> DIR/collector-native-key (the old ones \
-         went first: Stalwart's quota of API keys left no room)"
+        outcome,
+        Err(
+            "Stalwart takes no more API keys in the administrator's account, which holds \
+             'garrison collector', 'backup', one without a description (o2): setup makes a new \
+             key before it removes the one it replaces. Remove a key the account no longer needs \
+             in the Stalwart WebUI; setup made no new key 'garrison collector' and removed none"
+                .to_owned()
+        )
     );
-    assert_eq!(
-        (done.replaced, done.made, done.gone_first),
-        (Vec::<Replaced>::new(), true, true)
-    );
-    let held = std::fs::read_to_string(directory.path().join(COLLECTOR.file)).unwrap();
-    assert_eq!(held, format!("{NEW}\n"));
-}
-
-/// Where the old keys went for the quota and the new one cannot be made,
-/// or where their removal failed, the error says what goes without a key
-/// Stalwart takes until a run of setup makes one.
-#[test]
-fn a_new_key_that_finds_no_room_says_what_goes_without_one() {
-    let full = json(
-        &json!({"methodResponses": [["x:ApiKey/set", {"notCreated": {"new": {
-        "type": "overQuota", "description": "You have exceeded your quota of 5 API keys."}}},
-        "0"]]}),
-    );
-    let gone = json(&json!({"methodResponses": [["x:ApiKey/set", {"destroyed": ["old"]}, "0"]]}));
-    let quota = "Stalwart's quota of API keys left the new key no room";
-    let without =
-        "the cards that need the collector's key cannot read Stalwart until setup makes its key";
-    let cases = [
-        (
-            vec![listed("b", &["old"]), full.clone(), gone, answer(503, "{}")],
-            format!(
-                "x:ApiKey/set: Stalwart answered HTTP 503 (Stalwart did not return the new API \
-                 key secret); {quota}, so the old ones went first: {without}"
-            ),
-        ),
-        (
-            vec![listed("b", &["old"]), full, answer(503, "{}")],
-            format!(
-                "x:ApiKey/set: Stalwart answered HTTP 503; {quota}, so setup was removing the \
-                 old ones first: where they are gone, {without}"
-            ),
-        ),
-    ];
-    for (answers, said) in cases {
-        let directory = tempfile::tempdir().unwrap();
-        let server = serve(answers);
-        let admin = Admin {
-            url: format!("{}/jmap/", server.url),
-            authorization: "Bearer admin".to_owned(),
-        };
-        let networks = Enabled::of(["127.0.0.1/32"]);
-        let error = ensure(&admin, directory.path(), &COLLECTOR, &networks, true)
-            .err()
-            .unwrap();
-        server.requests();
-        assert_eq!(error, said);
-    }
+    assert_eq!(requests.len(), 3);
+    let held = std::fs::read_to_string(key_file(directory.path())).unwrap();
+    assert_eq!(held, written);
 }
 
 /// A key whose file cannot be written goes again, so that Stalwart keeps
@@ -249,56 +309,61 @@ fn a_new_key_whose_file_cannot_be_written_goes_again() {
     let folder = directory.path().join("credentials");
     std::fs::create_dir(&folder).unwrap();
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o500)).unwrap();
-    let listed = listed("b", &[]);
-    let made = json(&json!({"methodResponses": [["x:ApiKey/set",
-        {"created": {"new": {"id": "fresh", "secret": NEW}}}, "0"]]}));
     let gone = json(&json!({"methodResponses": [["x:ApiKey/set",
         {"destroyed": ["fresh"]}, "0"]]}));
-    let server = serve(vec![listed, made, gone]);
+    let server = serve(vec![made(), gone]);
     let admin = Admin {
         url: format!("{}/jmap/", server.url),
         authorization: "Bearer admin".to_owned(),
     };
+    let target = folder.join(COLLECTOR.file);
     let networks = Enabled::of(["127.0.0.1/32"]);
-    let error = ensure(&admin, &folder, &COLLECTOR, &networks, false)
-        .err()
-        .unwrap();
+    let rights = KeyRights {
+        permissions: KeyPermissions::Replace {
+            permissions: Enabled::of(["authenticate"]),
+        },
+        allowed_ips: &networks,
+    };
+    let error = make(&admin, &target, COLLECTOR.description, rights).unwrap_err();
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
     let requests = server.requests();
-    let target = folder.join(COLLECTOR.file);
     assert!(
         error.starts_with(&format!("Could not write {}: ", target.display()))
             && error.ends_with("; the new API key was taken out of Stalwart again"),
         "{error}"
     );
     assert!(
-        requests[2].contains(r#""destroy":["fresh"]"#),
+        requests[1].contains(r#""destroy":["fresh"]"#),
         "{}",
-        requests[2]
+        requests[1]
     );
 }
 
-/// What `verify` makes of Stalwart's answer to the collector's key.
-fn tried(status: u16) -> Result<Vec<&'static str>, String> {
+/// What a try of the collector's key makes of Stalwart's answer `status`.
+fn tried_with(status: u16) -> Result<(), String> {
     let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join(COLLECTOR.file);
+    let file = key_file(directory.path());
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     garrison_testing::write_private(&file, format!("{OLD}\n").as_bytes());
     let server = serve(vec![answer(status, "{}")]);
     let config = garrison_testing::config(directory.path(), &server.url);
-    let tried = verify(&config, directory.path(), &[&COLLECTOR]);
+    let outcome = tried(&config, &COLLECTOR);
     let requests = server.requests();
     assert!(requests[0].contains(&format!("Bearer {OLD}")));
-    tried.map(|unknown| unknown.iter().map(|key| key.file).collect())
+    outcome
 }
 
 /// Stalwart answers a key it does not know 401 and one it knows from an
-/// address the key does not allow 403 (measured): the first is a key to
-/// make anew, the second a bridge network.
+/// address the key does not allow 403 (measured): the second is a bridge
+/// network.
 #[test]
-fn a_key_stalwart_does_not_know_is_told_from_one_it_refuses_here() {
-    assert_eq!(tried(200), Ok(Vec::new()));
-    assert_eq!(tried(401), Ok(vec!["collector-native-key"]));
-    let bridge = tried(403).unwrap_err();
+fn a_key_stalwart_does_not_take_is_told_from_one_it_refuses_here() {
+    assert_eq!(tried_with(200), Ok(()));
+    assert_eq!(
+        tried_with(401),
+        Err("Stalwart does not take the API key in collector-native-key (HTTP 401)".to_owned())
+    );
+    let bridge = tried_with(403).unwrap_err();
     assert!(
         bridge.starts_with(
             "Stalwart refuses the API key in collector-native-key from this host (HTTP \
@@ -307,7 +372,7 @@ fn a_key_stalwart_does_not_know_is_told_from_one_it_refuses_here() {
         "{bridge}"
     );
     assert_eq!(
-        tried(404),
+        tried_with(404),
         Err(
             "Trying collector-native-key: Stalwart answered HTTP 404 for its JMAP session"
                 .to_owned()

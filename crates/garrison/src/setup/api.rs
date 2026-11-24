@@ -6,7 +6,7 @@ use std::time::Duration;
 use garrison_core::config::Config;
 use garrison_core::json;
 use garrison_stalwart::http::Request;
-use garrison_stalwart::jmap::{Answers, Calls, Get, Got, Problem};
+use garrison_stalwart::jmap::{Answers, Calls, Get, Problem};
 use garrison_stalwart::{Error, SUPPORTED};
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
@@ -145,12 +145,7 @@ impl Admin {
 
     /// Every object of a kind, read as far as `T` names its fields.
     pub(super) fn list<T: DeserializeOwned>(&self, kind: &str) -> Result<Vec<T>, String> {
-        let all = Get {
-            ids: None,
-            properties: None,
-        };
-        let got: Got<T> = self.call(&format!("x:{kind}/get"), &all)?;
-        Ok(got.list)
+        self.list_in(kind, None).map(|listed| listed.list)
     }
 }
 
