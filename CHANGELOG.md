@@ -1683,12 +1683,13 @@ Notable changes for operators and users. The format follows
 - **An upgrade that was interrupted, also once `current` named the new
   release, is finished by running it again**, with the same installer or
   `garrison upgrade` and the same archive; it switches back where the new
-  release does not start.
+  release did not start, and puts no copy back once Garrison ran since.
 - **A rollback that was interrupted is finished by running it again**; where
   it returned to a release from before this one, run the command its first
   line names.
 - **A restore that was interrupted is finished by running it again**, and
-  names the copy of the state its first run made.
+  names the copy of the state its first run made; where Garrison ran since,
+  it copies the state as it is first.
 - **A stale event history no longer reads as a quiet mail server.** The
   mail-flow summaries and the sending accounts counted whatever the event
   history held and called it in order, also when the event receiver had not

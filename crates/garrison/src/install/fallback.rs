@@ -14,7 +14,7 @@
 //! --rollback --restore-state` is the second attempt.
 //!
 //! An upgrade that an earlier run did not finish (`unfinished.rs`) goes on
-//! here, or is switched back before anything else.
+//! here, or is switched back before anything else, while its record holds.
 
 use std::path::{Path, PathBuf};
 
@@ -22,7 +22,7 @@ use garrison_core::config;
 
 use super::files::{Step, announce, switch};
 use super::system::install_system_files;
-use super::unfinished::{self, Unfinished, name};
+use super::unfinished::{self, Seen, Unfinished, name};
 use super::{BASE, CONFIG, cli, command, start, state, stop_services};
 
 /// An upgrade an earlier run began, which this run of its release goes on with.
@@ -40,19 +40,18 @@ pub(super) struct Resumed {
 /// again and `current` already names it, since its state may already be the
 /// new release's; any other run first switches back to the release that
 /// ran, as after a failed start. Another unfinished command is to be
-/// finished first.
+/// finished first. A record that no longer holds is not acted on: the run
+/// goes on from the release that runs.
 pub(super) fn before_install(version: &str) -> Step<Option<Resumed>> {
-    let Some(record) = unfinished::read()? else {
-        return Ok(None);
-    };
-    let (from, to, previous, backup) = match record {
-        Unfinished::Upgrade {
+    let (from, to, previous, backup) = match unfinished::read()? {
+        Seen::Holds(Unfinished::Upgrade {
             from,
             to,
             previous,
             backup,
-        } => (from, to, previous, backup),
-        other => return Err(other.finish_first()),
+        }) => (from, to, previous, backup),
+        Seen::Holds(other) => return Err(other.finish_first()),
+        Seen::Nothing | Seen::Stale(_) => return Ok(None),
     };
     let current = std::fs::canonicalize(Path::new(BASE).join("current")).ok();
     if current.as_deref() == Some(to.as_path()) && name(&to) == version {
@@ -94,8 +93,20 @@ pub(super) fn switch_back(
     attempted: &Path,
     backup: Option<&Path>,
 ) -> Step {
-    switched_back(old, earlier, backup).map_err(|error| {
+    let record = backup.map(|backup| Unfinished::Upgrade {
+        from: old.to_owned(),
+        to: attempted.to_owned(),
+        previous: earlier.map(Path::to_owned),
+        backup: backup.to_owned(),
+    });
+    switched_back(old, earlier, backup, record.as_ref()).map_err(|error| {
         stop_services();
+        // Stopped again, the record holds for the second attempt; one that
+        // cannot be written is stale for the next run, which then acts on
+        // nothing it says.
+        if let Some(record) = &record {
+            let _ = unfinished::write(record);
+        }
         let kept = switch(&Path::new(BASE).join("current"), attempted)
             .and_then(|()| switch(&Path::new(BASE).join("previous"), old));
         let again = format!(
@@ -115,10 +126,20 @@ pub(super) fn switch_back(
 
 /// Return what the new release migrated, then start `old` and see that it
 /// reads the state and stays up.
-fn switched_back(old: &Path, earlier: Option<&Path>, backup: Option<&Path>) -> Step {
+fn switched_back(
+    old: &Path,
+    earlier: Option<&Path>,
+    backup: Option<&Path>,
+    record: Option<&Unfinished>,
+) -> Step {
     // A service of the new release that still runs, or a collection run its
     // timer started, would write into a database that is being replaced.
     stop_services();
+    // Everything is stopped again: written anew, the record holds until
+    // `old` starts, though the new release started since it was first.
+    if let Some(record) = record {
+        unfinished::write(record)?;
+    }
     if let Some(backup) = backup {
         let settings = Path::new(CONFIG).join("garrison.toml");
         let config = config::load(&settings)

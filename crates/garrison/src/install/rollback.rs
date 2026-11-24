@@ -15,7 +15,7 @@ use rustix::fs::{Gid, Uid};
 
 use super::files::{Step, announce, io, lock, switch};
 use super::system::install_system_files;
-use super::unfinished::{self, Unfinished};
+use super::unfinished::{self, Seen, Unfinished};
 use super::{
     BACKUPS, BASE, CONFIG, LAST, LOCK, cli, precheck, preflight, start, state, stop_services,
 };
@@ -107,11 +107,13 @@ fn roll_back_to(
 }
 
 /// Where a rollback goes: to `target`, leaving `left`, and what `previous`
-/// names once it is done.
+/// names once it is done. `started` where an earlier run of this rollback
+/// had started its target, and its state went back before that.
 struct Plan {
     target: PathBuf,
     left: PathBuf,
     after: Option<PathBuf>,
+    started: bool,
 }
 
 /// What the rollback returns to: an unfinished upgrade is undone, an
@@ -122,18 +124,26 @@ fn plan(base: &Path) -> Step<Plan> {
         &base.join("current"),
     )?;
     match unfinished::read()? {
-        Some(Unfinished::Upgrade { from, previous, .. }) => Ok(Plan {
+        Seen::Holds(Unfinished::Upgrade { from, previous, .. }) => Ok(Plan {
             target: from,
             left: current,
             after: previous,
+            started: false,
         }),
-        Some(Unfinished::Rollback { from, to, previous }) => Ok(Plan {
+        Seen::Holds(Unfinished::Rollback { from, to, previous }) => Ok(Plan {
             target: to,
             left: from,
             after: previous,
+            started: false,
         }),
-        Some(record @ Unfinished::Restore { .. }) => Err(record.finish_first()),
-        None => {
+        Seen::Holds(record @ Unfinished::Restore { .. }) => Err(record.finish_first()),
+        Seen::Stale(Unfinished::Rollback { from, to, previous }) if to == current => Ok(Plan {
+            target: to,
+            left: from,
+            after: previous,
+            started: true,
+        }),
+        Seen::Stale(_) | Seen::Nothing => {
             let Ok(target) = fs::canonicalize(base.join("previous")) else {
                 return Err("There is no previous release to return to.".into());
             };
@@ -147,6 +157,7 @@ fn plan(base: &Path) -> Step<Plan> {
                 target,
                 after: Some(current.clone()),
                 left: current,
+                started: false,
             })
         }
     }
@@ -160,8 +171,18 @@ pub(super) fn rollback(with_state: bool) -> Step {
         target,
         left: current,
         after,
+        started,
     } = plan(base)?;
     let name = target.file_name().unwrap_or_default().to_string_lossy();
+    // The target ran on the state that went back: what it recorded since
+    // stays, and the rollback finishes with links, system files and a start.
+    if started && with_state {
+        announce(&format!(
+            "The state from before the upgrade went back before {name} was started; it does \
+             not go back again over what was recorded since."
+        ));
+    }
+    let with_state = with_state && !started;
     let source = if with_state {
         Some(restore_source(&name)?)
     } else {

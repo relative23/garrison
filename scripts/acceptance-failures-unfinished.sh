@@ -199,6 +199,82 @@ scenario_restore_killed() {
     inside 'rm -r /root/kept-for-restore'
 }
 
+# A copy of the release under test under another version, which comes up.
+another_release() {
+    inside 'rm -rf /root/again && cp -a /root/release /root/again && cd /root/again &&
+        printf "%s+again\n" "$(cat VERSION)" > VERSION &&
+        find . -type f ! -name SHA256SUMS | sed "s|^\./||" | sort | xargs sha256sum > SHA256SUMS'
+    inside 'cat /root/again/VERSION'
+}
+
+scenario_upgrade_came_up() {
+    step "An upgrade killed once its new release came up, which then records, then another release's installer"
+    upgraded
+    # The upgrade's backup lists the status database as absent.
+    inside 'systemctl stop garrison-collect.timer garrison-collect.service &&
+        mv /var/lib/garrison/collector/status.sqlite /root/status.away'
+    again=$(another_release)
+    killed_at '/root/again/bin/garrison install' \
+        "$(current_is "$again") && systemctl is-active --quiet garrison-web.service" 0 ' is running. Roll back with'
+    check "the release of the killed upgrade runs and collects" \
+        'systemctl is-active --quiet garrison-collect.timer && systemctl start garrison-collect.service &&
+            systemctl start garrison-collect.service'
+    first=$(inside 'sqlite3 -readonly /var/lib/garrison/collector/status.sqlite "SELECT min(collected_at) FROM snapshots"')
+    if ! installer '/root/release/bin/garrison install > /root/came-up.log 2>&1'; then
+        inside 'cat /root/came-up.log' || true
+        echo "FAIL  the next installer after the upgrade that came up succeeds"
+        exit 1
+    fi
+    check "what the release of the killed upgrade recorded stays" \
+        "test \"\$(sqlite3 -readonly /var/lib/garrison/collector/status.sqlite 'SELECT min(collected_at) FROM snapshots')\" = '$first' ||
+            { cat /root/came-up.log; false; }"
+    check "the next installer says that it acts on nothing of that upgrade" \
+        'grep -q "but Garrison was started since" /root/came-up.log && ! grep -q "Switching back" /root/came-up.log'
+    names "it upgraded from the release that came up" previous "$again"
+    running "after the upgrade that came up" "$new"
+    # The links as the other scenarios take them: the release before, then this one.
+    inside 'rm -r /root/status.away /root/again'
+    installer '/root/previous/bin/garrison install'
+    upgraded
+}
+
+# A signed batch of one event whose id is `1`, stored by the receiver.
+stored_event() {
+    inside_input 'cat > /usr/local/bin/acceptance-event && chmod 755 /usr/local/bin/acceptance-event' <<'EVENT'
+#!/bin/sh
+key=$(cat /etc/garrison/credentials/webhook-signature-key)
+body="{\"events\": [{\"id\": \"$1\", \"createdAt\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"type\": \"auth.failed\", \"data\": {}}]}"
+signature=$(printf %s "$body" | openssl dgst -sha256 -hmac "$key" -binary | base64)
+curl -s -H "Content-Type: application/json" -H "X-Signature: $signature" \
+    --data-binary "$body" http://127.0.0.1:8094/webhook | grep -q "\"stored\":1"
+EVENT
+    check "the receiver stores the event $1" "/usr/local/bin/acceptance-event $1"
+}
+
+scenario_restore_came_up() {
+    step "A restore killed once Garrison came up on the state it put back, which then records, then the same restore again"
+    upgraded
+    installer '/opt/garrison/current/bin/garrison backup --to /root/came-up-state' >/dev/null
+    killed_at '/opt/garrison/current/bin/garrison restore --from /root/came-up-state' \
+        'grep -q -F "Restoring Garrison state from" /root/late.log && systemctl is-active --quiet garrison-web.service' \
+        0 'Restored the state'
+    # Garrison runs on the state that went back and records what no copy holds.
+    stored_event came-up-event
+    if ! installer '/opt/garrison/current/bin/garrison restore --from /root/came-up-state > /root/came-up.log 2>&1'; then
+        inside 'cat /root/came-up.log' || true
+        echo "FAIL  the same restore again finishes"
+        exit 1
+    fi
+    echo "ok    the same restore again finishes"
+    check "and keeps a copy of what was recorded since the first run" \
+        'newest=$(ls -d /var/backups/garrison/pre-restore-* | sort | tail -n 1) &&
+            test "$(sqlite3 -readonly "$newest/ingest/events.sqlite" \
+                "SELECT count(*) FROM events WHERE event_id = '"'came-up-event'"'")" -ge 1 ||
+                { cat /root/came-up.log; false; }'
+    running "after the restore that came up" "$new"
+    inside 'rm -r /root/came-up-state'
+}
+
 # The web service's process, to show that a refusal stopped nothing.
 web_pid() { inside 'systemctl show -p MainPID --value garrison-web.service'; }
 

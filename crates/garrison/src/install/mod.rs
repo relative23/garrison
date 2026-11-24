@@ -26,6 +26,7 @@ mod rollback;
 mod selinux;
 mod services;
 mod settle;
+mod stale;
 #[cfg(test)]
 mod stand_in;
 mod state;
@@ -48,7 +49,7 @@ use requirements::{preflight, room, size, state_size};
 pub(crate) use restore::run_restore;
 use services::{check_config, start, stop_services};
 use system::{install_system_files, protect_policy};
-use unfinished::Unfinished;
+use unfinished::{Seen, Unfinished};
 pub(crate) use uninstall::run_uninstall;
 
 pub(crate) const BASE: &str = "/opt/garrison";
@@ -384,7 +385,7 @@ fn install() -> Step {
 pub(crate) fn start_installed() -> Step {
     preflight()?;
     let _held = lock(Path::new(LOCK))?;
-    if let Some(record) = unfinished::read()? {
+    if let Seen::Holds(record) = unfinished::read()? {
         return Err(record.finish_first());
     }
     let current = io(

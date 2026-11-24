@@ -100,7 +100,8 @@ database that did not exist when the backup was made, and starts the
 services. What was recorded since the backup is in the `pre-restore-*` copy
 and no longer in Garrison; restore that copy to take the restore back.
 Run again after it was interrupted, a restore finishes and names its first
-run's copy as the state from before.
+run's copy as the state from before; where Garrison was started since, it
+copies the state as it is first, as a new restore does.
 
 A backup holds neither sessions nor credentials. After a restore everyone
 signs in again. On a new host, restore `/etc/garrison` from your host backup
@@ -187,7 +188,10 @@ restore count among the installer's own.
 While one installer runs, a second one is refused. An upgrade that was
 interrupted, even killed, is finished by running its installer again, or
 `garrison upgrade` with the same archive; `/opt/garrison/unfinished.json`
-notes what the installer began until a release runs again. A rollback is
+notes what the installer began until a release runs again. Once a service of
+Garrison's was started after that note, by the interrupted run itself, a
+reboot or by hand, the next run removes it and puts nothing back on its
+word, since the databases may hold what was recorded since. A rollback is
 finished by running it again; one that went back to a release from before this
 one is finished by the release it left, as its first line says: `sudo
 /opt/garrison/releases/<release>/bin/garrison install --rollback`.
