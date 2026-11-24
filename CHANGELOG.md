@@ -598,11 +598,20 @@ Notable changes for operators and users. The format follows
   says on standard error what the administrator profile requires and, for
   each of Stalwart's default administrator roles, which of those rights it
   lacks, that Stalwart's administrator gives them to the role, and which
-  profiles it meets as it is. `garrison access bind-role` says the same of
-  a role it binds to a profile whose rights the role lacks, whose users
-  would get nothing of it. Where a policy that reads is there, `init
-  --force` keeps it in that case, since a new one would bind nobody and sign
-  everyone out.
+  profiles it meets as it is, or why it leaves the role out. `garrison
+  access bind-role` says the same of a role it binds to a profile whose
+  rights the role lacks, whose users would get nothing of it. Where a policy
+  that reads is there, `init --force` keeps it in that case, since a new one
+  would bind nobody and sign everyone out, and says what keeps the kept one
+  from working.
+- **`garrison access init` and `bind-role` work on a Stalwart with more than
+  64 roles, and `bind-role` names why a role's rights cannot be evaluated.**
+- **A `garrison access` command no longer waits without a word for a lock
+  that another process holds.** Where no command runs, remove
+  `access-policy.json.lock`, which an earlier release made readable for
+  others.
+- **No `garrison access` command writes a policy larger than the broker
+  reads (64 KiB), which the broker and every command then refused.**
 - **An action added after `garrison access init` reaches its users.**
   `init` gives the `administrator` profile every action of `[[actions]]`
   and the `operator` profile those marked `operator = true`, as
@@ -619,25 +628,9 @@ Notable changes for operators and users. The format follows
   the broker, as [access](docs/operator/access.md#when-the-actions-change)
   says, which also says what `init --force` drops and how the policy file
   is written.
-- **A backup's card shows that repository's check and restore alone.**
-  `garrison backup-check` kept the last integrity check and test restore of
-  the report before it, whatever repository or tool that report was of: a
-  run for another repository under the same report, as with a changed
-  `RESTIC_REPOSITORY` or `--repo`, another disk mounted at the
-  repository's place or a `RESTIC_REPOSITORY_FILE` that now names another
-  one, or with borg under restic's `--report`, showed the old repository's
-  check and restore as the new one's, and the card was in order on their
-  times. The report now holds the repository's own ID, which restic gives
-  with `restic cat config` (one more call a run) and borg with its listing,
-  and the two are kept only from a report of the same tool and the same ID,
-  whatever the repository's name. Otherwise the run starts without them and
-  says why, and so does a run for which the tool gives no ID; the card then
-  says that none has been reported where one is expected. A report that an
-  earlier release wrote holds no ID: its check and restore are kept once
-  where tool and name are the same, and the ID is recorded with them. The
-  report names a repository that restic reads from the file
-  `RESTIC_REPOSITORY_FILE` names by that file, also beside an empty
-  `RESTIC_REPOSITORY`, which restic takes for none.
+- **A backup's card shows only that repository's own integrity check and
+  test restore.** After the upgrade, a card that expects them warns until
+  the next `garrison backup-check` run with `--verify` or `--restore`.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year

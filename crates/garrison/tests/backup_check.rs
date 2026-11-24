@@ -21,14 +21,14 @@ use support::{finished, text};
 
 /// restic and borg as far as the command asks them. `BROKEN` names a step
 /// that fails; every call is noted in `CALLS` with borg's time zone.
-/// `REPO_ID` is the ID the repository has, whatever its name.
+/// `REPO_ID` is the ID the repository has, whatever its name; empty, none.
 const STAND_IN: &str = r#"#!/bin/sh
 tool=$(basename "$0")
 echo "$tool TZ=${TZ-unset} $*" >> "$CALLS"
 for word in "$@"; do
     case $word in snapshots | stats | check | restore | list | info | extract | cat) verb=$word; break ;; esac
 done
-id=${REPO_ID:-5e1f0c3a9b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f}
+id=${REPO_ID-5e1f0c3a9b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f}
 if [ "${BROKEN-}" = "$verb" ]; then
     echo "progress that is not the last word"
     echo "Fatal: the repository is locked by another process" >&2

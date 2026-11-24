@@ -11,10 +11,14 @@ mod support;
 mod actions;
 #[path = "access/folder.rs"]
 mod folder;
+#[path = "access/graph.rs"]
+mod graph;
 #[path = "access/links.rs"]
 mod links;
 #[path = "access/roles.rs"]
 mod roles;
+#[path = "access/size.rs"]
+mod size;
 
 use std::collections::BTreeSet;
 
@@ -44,14 +48,18 @@ fn init_binds_only_roles_with_every_administrator_right() {
     let all = ADMINISTRATOR_RIGHTS;
     let authentication = json!({"id": "singleton", "defaultAdminRoleIds": names(&["admin", "partial"]),
                                 "defaultUserRoleIds": names(&["user"])});
-    let roles = json!([
-        role("admin", &all, "Administrators"),
-        role("partial", &all[..4], "Almost administrators"),
-        role("user", &["authenticate"], "Users"),
-    ]);
+    // Each of the default administrator roles that is not also the users'
+    // is read by its ID.
     let server = serve(vec![
         respond("x:Authentication/get", &json!([authentication])),
-        respond("x:Role/get", &roles),
+        respond(
+            "x:Role/get",
+            &json!([role("admin", &all, "Administrators")]),
+        ),
+        respond(
+            "x:Role/get",
+            &json!([role("partial", &all[..4], "Almost administrators")]),
+        ),
     ]);
     let directory = against(&server.url);
     let init = run(directory.path(), &["access", "init"]);
@@ -107,15 +115,21 @@ fn init_binds_only_roles_with_every_administrator_right() {
 fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
     let authentication = json!({"id": "singleton", "defaultAdminRoleIds": names(&["weak"]),
                                 "defaultUserRoleIds": {}});
-    let roles = json!([
-        role("weak", &["authenticate"], "Weak"),
-        role("admins", &ADMINISTRATOR_RIGHTS, "Administrators of our own")
-    ]);
     let server = serve(vec![
         respond("x:Authentication/get", &json!([authentication])),
-        respond("x:Role/get", &roles),
+        respond(
+            "x:Role/get",
+            &json!([role("weak", &["authenticate"], "Weak")]),
+        ),
         respond("x:Authentication/get", &json!([authentication])),
-        respond("x:Role/get", &roles),
+        respond(
+            "x:Role/get",
+            &json!([role(
+                "admins",
+                &ADMINISTRATOR_RIGHTS,
+                "Administrators of our own"
+            )]),
+        ),
     ]);
     let directory = against(&server.url);
     let init = run(directory.path(), &["access", "init"]);
@@ -124,9 +138,9 @@ fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
         text(&init.stderr),
         "No native administrator role with full administrative rights was found, so the \
          policy binds no role and nobody can sign in yet. The administrator profile requires \
-         authenticate, sysAccountUpdate, sysDomainUpdate, sysRoleUpdate and sysActionCreate.\n\
+         authenticate, sysAccountUpdate, sysActionCreate, sysDomainUpdate and sysRoleUpdate.\n\
          Stalwart's default administrator role weak (Weak) lacks sysAccountUpdate, \
-         sysDomainUpdate, sysRoleUpdate and sysActionCreate: give the role those rights in the \
+         sysActionCreate, sysDomainUpdate and sysRoleUpdate: give the role those rights in the \
          native administration (Roles), then run garrison access bind-role weak --profile \
          administrator. As it is, it meets none of the profiles.\n"
     );

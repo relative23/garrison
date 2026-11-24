@@ -63,7 +63,8 @@ pub struct Run {
 pub const MAX_REPORT: usize = 256 * 1024;
 
 /// The report of one repository. A part that was not run this time keeps
-/// what the run before wrote of the same repository.
+/// what the run before wrote of the same repository: the same tool, name
+/// and ID.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
@@ -72,7 +73,7 @@ pub struct Report {
     pub repository: String,
     /// The repository's own ID, as the tool gives it: what tells one
     /// repository from another under the same name. None where the tool
-    /// gave none, and in a report that an earlier release wrote.
+    /// gave none; a report that an earlier release wrote has no such key.
     pub repository_id: Option<String>,
     pub snapshots: Option<Snapshots>,
     /// Why the snapshots could not be listed, where they could not.

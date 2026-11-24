@@ -42,14 +42,18 @@ Where no role of Stalwart's has all five rights, as where its administrator
 role was changed or your administrators have a role of their own, `init`
 writes the profiles without a binding, says so and ends with 1. It names,
 for each of Stalwart's default administrator roles, the rights it lacks and
-the profiles it meets as it is. Nobody can sign in until a role is bound to
-a profile whose rights it holds: give the role what it lacks in the native
-administration (Roles), then bind it with
+the profiles it meets as it is, or why it leaves the role out, as one that
+is every user's default role too. Nobody can sign in until a role is bound
+to a profile whose rights it holds: give the role what it lacks in the
+native administration (Roles), then bind it with
 `garrison access bind-role <role-id> --profile administrator`, or bind it to
 a profile it meets. `bind-role` says so where it binds a role that lacks a
-right its profile requires. Where a policy that reads is there already,
-`init --force` keeps it then, since a new one would bind nobody and sign
-everyone out.
+right its profile requires, and why where the role's rights cannot be
+evaluated, as for a tenant's role. Both judge a role by the roles it
+inherits from alone, however many roles Stalwart holds. Where a policy that
+reads is there already, `init --force` keeps it then, since a new one would
+bind nobody and sign everyone out, and says what keeps the kept one from
+working, if anything.
 
 An account that belongs to a tenant, a tenant's administrator's too
 (Stalwart's tenants are an Enterprise feature), and a group are refused
@@ -90,8 +94,10 @@ policy's folder and write over nothing there: a lock at
 `access-policy.json.lock` that is a link, no file, another user's file or a
 second name of another file (a hard link) is refused and left as it is, and
 so is a policy that is a link or no file; a policy larger than the broker
-reads (64 KiB) is no policy, and `init --force` leaves it as it is too.
-There is deliberately no web page that edits the policy.
+reads (64 KiB) is no policy, no command writes one, and `init --force`
+leaves it as it is too. A lock that another process holds is not waited
+for: the command says so and ends. There is deliberately no web page that
+edits the policy.
 
 ## When the actions change
 

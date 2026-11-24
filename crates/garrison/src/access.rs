@@ -4,7 +4,7 @@
 //! keeps the previous file as a timestamped backup, so a mistake can be undone
 //! with `cp`. The files beside the policy are reached as `folder` says.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -13,7 +13,7 @@ use clap::Subcommand;
 use garrison_authz::policy::{Policy, is_profile_name, parse_policy};
 use garrison_authz::{Authority, Error, SUPPORTED};
 use garrison_core::config::Config;
-use garrison_core::files::read_protected;
+use garrison_core::files::{ProtectedFileError, read_protected};
 use garrison_stalwart::jmap::JmapClient;
 use garrison_stalwart::oidc::is_subject;
 use garrison_stalwart::permissions::native_rights;
@@ -24,7 +24,7 @@ use crate::{complain, credentials, say};
 mod defaults;
 mod folder;
 
-use defaults::{Roles, administrator_roles, default_profiles};
+use defaults::{Candidate, administrator_roles, default_profiles};
 use folder::{Current, Folder, MAX_POLICY};
 
 const POLICY_GROUP: &str = "garrison-broker";
@@ -41,7 +41,7 @@ fn profile_name(value: &str) -> Result<String, String> {
 pub(crate) enum Command {
     /// Create the policy and bind native administrator roles.
     Init {
-        /// Replace an existing policy with the default one (a backup of it is kept).
+        /// Start over with the default policy, keeping a backup; where no role qualifies, a policy that reads stays.
         #[arg(long)]
         force: bool,
     },
@@ -97,12 +97,21 @@ fn save(config: &Config, folder: &Folder, policy: &Policy) -> Result<(), String>
     // Never write an invalid policy.
     parse_policy(&document, &action_ids(config)).map_err(|error| error.to_string())?;
     let path = &config.broker.policy;
+    let text = format!("{}\n", pretty(&document));
+    // Nor one larger than the broker reads, which would be none.
+    if text.len() > MAX_POLICY {
+        return Err(format!(
+            "The policy would be larger than the broker reads ({} KiB): the change is not saved, \
+             and {} stays as it is.",
+            MAX_POLICY / 1024,
+            path.display()
+        ));
+    }
     let kept = match folder.current()? {
         Current::File => Some(folder.back_up(&folder.content()?)?),
         Current::Missing => None,
         Current::Other => return Err(not_a_file(path)),
     };
-    let text = format!("{}\n", pretty(&document));
     let group = group_id(POLICY_GROUP).map(rustix::fs::Gid::from_raw);
     if let Some(note) = folder.replace(text.as_bytes(), group)? {
         say(&note);
@@ -183,14 +192,20 @@ fn load(config: &Config) -> Result<Policy, String> {
         if gone.is_empty() {
             return said(error);
         }
-        format!(
-            "The access policy {} names {}, which garrison.toml no longer has: run `garrison \
-             access update`, which takes {} out of the profiles.",
-            path.display(),
-            gone.join(", "),
-            if gone.len() == 1 { "it" } else { "them" }
-        )
+        removed(path, &gone)
     })
+}
+
+/// What to say of the policy at `path`, which names the actions `gone` that
+/// garrison.toml no longer has.
+fn removed(path: &Path, gone: &[String]) -> String {
+    format!(
+        "The access policy {} names {}, which garrison.toml no longer has: run `garrison access \
+         update`, which takes {} out of the profiles.",
+        path.display(),
+        gone.join(", "),
+        if gone.len() == 1 { "it" } else { "them" }
+    )
 }
 
 /// The actions the policy's profiles name, as it is written; none where it
@@ -231,8 +246,16 @@ fn action_ids(config: &Config) -> BTreeSet<&str> {
 fn written(config: &Config) -> Result<Policy, String> {
     let path = &config.broker.policy;
     there(path)?;
-    let raw = read_protected(path, MAX_POLICY)
-        .map_err(|error| format!("Garrison access policy: {error}"))?;
+    let raw = read_protected(path, MAX_POLICY).map_err(|error| match error {
+        ProtectedFileError::TooLarge(_) => format!(
+            "The access policy {} is larger than the broker reads ({} KiB), so it is no policy: \
+             copy back the last backup beside it ({}.<time>.bak) with sudo cp.",
+            path.display(),
+            MAX_POLICY / 1024,
+            path.display()
+        ),
+        error => format!("Garrison access policy: {error}"),
+    })?;
     let named = named(config);
     let mut known = action_ids(config);
     known.extend(named.iter().map(String::as_str));
@@ -291,54 +314,69 @@ fn init(config: &Config, force: bool) -> Result<u8, String> {
             return Ok(None);
         }
         let candidates = administrator_roles(config)?;
-        let qualified: Vec<&String> = candidates
-            .iter()
-            .filter(|(_, candidate)| candidate.lacks.is_empty())
-            .map(|(identifier, _)| identifier)
-            .collect();
+        let bound = defaults::qualified(&candidates);
         // A new policy would bind nobody and sign everyone out: one that
         // reads stays, whatever --force says.
-        if qualified.is_empty() && there && written(config).is_ok() {
-            return Ok(Some((candidates, false)));
+        let kept = (bound.is_empty() && there)
+            .then(|| written(config).ok())
+            .flatten();
+        if kept.is_none() {
+            let policy = Policy {
+                profiles: default_profiles(config),
+                role_bindings: bound
+                    .iter()
+                    .map(|role| (role.clone(), "administrator".to_owned()))
+                    .collect(),
+                ..Policy::default()
+            };
+            save(config, folder, &policy)?;
         }
-        let policy = Policy {
-            profiles: default_profiles(config),
-            role_bindings: qualified
-                .iter()
-                .map(|role| ((*role).clone(), "administrator".to_owned()))
-                .collect(),
-            ..Policy::default()
-        };
-        save(config, folder, &policy)?;
-        Ok(Some((candidates, true)))
+        Ok(Some((candidates, bound, kept)))
     })?;
-    let Some((candidates, saved)) = done else {
+    let Some((candidates, bound, kept)) = done else {
         return exists();
     };
-    let bound: Vec<(&String, &String)> = candidates
-        .iter()
-        .filter(|(_, candidate)| candidate.lacks.is_empty())
-        .map(|(identifier, candidate)| (identifier, &candidate.description))
-        .collect();
     if bound.is_empty() {
-        let kept = if saved {
-            String::new()
-        } else {
-            format!(
-                "\nWith no role to bind, a new default policy would bind no role and sign \
-                 everyone out: {} is kept as it is.",
-                path.display()
-            )
-        };
-        complain(&format!("{}{kept}", defaults::unbound(&candidates)));
+        complain(&match kept {
+            None => defaults::unbound(&candidates),
+            Some(policy) => kept_said(config, &policy, &candidates),
+        });
         return Ok(1);
     }
-    for (identifier, description) in bound {
+    for role in &bound {
+        let named = candidates.get(role).map_or_else(
+            || role.clone(),
+            |candidate| defaults::named(role, candidate),
+        );
         say(&format!(
-            "Bound native role {identifier} ({description}) to profile administrator."
+            "Bound native role {named} to profile administrator."
         ));
     }
     Ok(0)
+}
+
+/// What `init --force` says where it keeps `policy`, since no role
+/// qualifies: what keeps that policy from working, if anything, and what to
+/// do then.
+fn kept_said(config: &Config, policy: &Policy, candidates: &BTreeMap<String, Candidate>) -> String {
+    let path = &config.broker.policy;
+    let mut lines = vec![format!(
+        "No native administrator role with full administrative rights was found, and a new \
+         default policy would bind no role and sign everyone out: {} is kept as it is.",
+        path.display()
+    )];
+    let gone = gone(config);
+    if !gone.is_empty() {
+        lines.push(removed(path, &gone));
+    }
+    if policy.role_bindings.is_empty() && policy.subjects.is_empty() {
+        lines.push(format!(
+            "It binds no role or account either, so nobody can sign in yet. {}",
+            defaults::requires()
+        ));
+        lines.extend(defaults::candidates_said(candidates));
+    }
+    lines.join("\n")
 }
 
 /// What the broker would grant `subject` now, as it decides it.
@@ -380,17 +418,17 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
                 return Ok(1);
             }
             // The role must exist; what it lacks for the profile is said.
-            let roles = Roles::read(config)?;
-            if !roles.exists(role) {
+            let client = native(config)?;
+            let authentication = defaults::authentication(&client)?;
+            let Some(judged) = defaults::judged(&client, &authentication, role)? else {
                 return Err(format!(
                     "Stalwart has no role {role}: bind one of the roles the native \
                      administration shows (Roles)."
                 ));
-            }
-            let rights = roles.rights(role)?;
+            };
             policy.role_bindings.insert(role.clone(), profile.clone());
             save(config, folder, &policy)?;
-            if let Some(note) = defaults::fit(&policy, profile, role, rights.as_ref()) {
+            if let Some(note) = defaults::fit(&policy, profile, role, judged.rights.as_ref()) {
                 say(&note);
             }
             Ok(0)

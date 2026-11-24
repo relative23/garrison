@@ -103,3 +103,35 @@ fn an_error_of_a_file_beside_the_policy_names_that_file() {
     named(&["access", "deny", "5"], &pending.display().to_string());
     std::fs::remove_dir(&pending).unwrap();
 }
+
+/// A lock that another process holds, as one an earlier release made
+/// readable for others that a user opened then, is said at once and not
+/// waited for, and the policy stays as it was.
+#[test]
+fn a_lock_another_process_holds_is_said_and_not_waited_for() {
+    let directory = prepared();
+    let lock = directory.path().join("policy.json.lock");
+    std::fs::write(&lock, b"").unwrap();
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let holder = std::fs::File::open(&lock).unwrap();
+    rustix::fs::flock(&holder, rustix::fs::FlockOperation::LockExclusive).unwrap();
+    let policy = directory.path().join("policy.json");
+    let before = std::fs::read(&policy).unwrap();
+    let denied = run(directory.path(), &["access", "deny", "5"]);
+    assert_eq!(
+        (denied.status.code(), text(&denied.stderr)),
+        (
+            Some(1),
+            format!(
+                "{} is held by another process, as another `garrison access` command: try \
+                 again once it has ended. Where none runs, remove the file, which an earlier \
+                 release made readable for others, and run the command again.\n",
+                lock.display()
+            )
+        )
+    );
+    assert_eq!(std::fs::read(&policy).unwrap(), before);
+    drop(holder);
+    let again = run(directory.path(), &["access", "deny", "5"]);
+    assert_eq!(again.status.code(), Some(0), "{}", text(&again.stderr));
+}

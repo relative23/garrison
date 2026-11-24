@@ -88,10 +88,17 @@ impl BackupCheck {
                 "users other than root can change the report; it is not trusted".to_owned(),
             );
         }
-        let report: Backup =
+        // An earlier release wrote no repository ID, and kept a check and a
+        // restore whatever repository they were of: neither is shown.
+        let earlier = value.get("repositoryId").is_none();
+        let mut report: Backup =
             json::object(value).map_err(|_| "the file is no report of backup-check")?;
         if report.tool != self.tool {
             return Err(format!("the report is one of {}", report.tool.name()));
+        }
+        if earlier {
+            report.verify = None;
+            report.restore = None;
         }
         Ok(report)
     }
