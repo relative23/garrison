@@ -77,7 +77,28 @@ describe("sign-in", () => {
     expect(await screen.findByText(/may not have Garrison access, .* Ask your administrator if you need access\.$/)).toBeTruthy();
   });
 
+  it("says that a fault of Garrison's own ended the sign-in, with the journal's reference", async () => {
+    serve({ "GET session": { body: { session: null } } });
+    openApp("/admin/?login_error=internal&reference=0123456789ab");
+    expect(await screen.findByText(/because of a fault of its own\. Try again in a few minutes\./)).toBeTruthy();
+    expect(screen.getByText("Reference 0123456789ab in the journal of garrison-web")).toBeTruthy();
+  });
+
   it.each([
+    ["no reference", "internal"],
+    ["one that is no reference", "internal&reference=%3Cscript%3E"],
+    ["one of another length", "internal&reference=0123456789abc"],
+    ["one after another reason", "rate&reference=0123456789ab"],
+  ])("shows no reference for %s", async (_, query) => {
+    serve({ "GET session": { body: { session: null } } });
+    openApp(`/admin/?login_error=${query}`);
+    expect(await screen.findByText(/Try again|try again/)).toBeTruthy();
+    expect(screen.queryByText(/Reference/)).toBeNull();
+    expect(screen.queryByText(/script/)).toBeNull();
+  });
+
+  it.each([
+    ["internal", /because of a fault of its own/],
     ["unavailable", /Stalwart did not answer/],
     ["limited", /Stalwart is busy/],
     ["unchecked", /Your access could not be checked just now/],

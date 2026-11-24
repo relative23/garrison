@@ -1792,9 +1792,9 @@ Notable changes for operators and users. The format follows
   error, its database locked beyond five seconds) or had no random numbers
   for a sign-in, the browser was left at `/auth/callback` or `/auth/login`
   with the API's `{"detail":"Internal error"}` and the login cookie kept.
-  It now goes back to the sign-in page with the reason `internal` and the
-  reference under which the web service's journal names the cause, and the
-  login cookie goes.
+  It now goes back to the sign-in page, which says that a fault of
+  Garrison's own ended the sign-in and shows the reference under which the
+  web service's journal names the cause, and the login cookie goes.
 - **A sign-in refused at its callback says why in the journal.** A
   callback that named another issuer than `deployment.issuer`, as where
   Stalwart names itself under another URL than garrison.toml, or none, or
