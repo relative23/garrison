@@ -3,6 +3,7 @@
 //! supported Stalwart releases are named.
 
 use garrison_testing::http::{answer, serve};
+use serde::de::IgnoredAny;
 use serde_json::json;
 
 use super::*;
