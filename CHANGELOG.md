@@ -1975,8 +1975,8 @@ Notable changes for operators and users. The format follows
   asks it at the new port.
 - **`garrison doctor` judges the access policy exactly as the broker's own
   reading takes it**: one the broker owns is a warning, no longer a failure,
-  one it does not take is named with why, and a closed `/etc/garrison` with
-  the `chmod` that opens it.
+  one it does not take is named with why, and a closed folder on the way,
+  also behind a link, with what opens it.
 - **`garrison doctor` tries the broker's and the collector's API keys with
   Stalwart**, the broker's with what the broker reads, and fails one Stalwart
   no longer knows or lets read it, with which nobody can sign in, with the
