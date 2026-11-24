@@ -171,9 +171,9 @@ fn changed_at(file: &Path) -> Option<u64> {
 
 /// `shown`, what `systemctl show` says of the units, as `start` leaves them:
 /// every unit in `shipped` enabled and active, the web service, the receiver
-/// and the broker up without a restart and started since the configuration
-/// `changed`, which they read as they start, and the macro filter active
-/// exactly where `milter` says.
+/// and the broker up without a restart, and the macro filter active exactly
+/// where `milter` says; each of those that runs started since the
+/// configuration `changed`, which it reads as it starts.
 fn installed(shown: &str, shipped: &[&str], milter: bool, changed: Option<u64>) -> bool {
     let unit = |id: &str| {
         shown
@@ -206,7 +206,7 @@ fn installed(shown: &str, shipped: &[&str], milter: bool, changed: Option<u64>) 
         .into_iter()
         .all(|id| settle::unsettled(unit(id)).is_none() && since(id));
     let filter = value(unit(units::MILTER), "ActiveState") == "active";
-    enabled && steady && filter == milter
+    enabled && steady && filter == milter && (!milter || since(units::MILTER))
 }
 
 #[cfg(test)]
@@ -282,6 +282,17 @@ mod tests {
         assert!(installed(&steady, &ENABLE, false, Some(5_000_000)));
         assert!(!installed(&steady, &ENABLE, false, Some(5_000_001)));
         assert!(!installed(&steady, &ENABLE, false, None));
+        // So does the filter, where it runs.
+        let filter = shown(("enabled", "active", 0), "active");
+        assert!(installed(&filter, &ENABLE, true, Some(5_000_000)));
+        let older = filter.replace(
+            "Id=garrison-milter.service\nUnitFileState=disabled\nActiveState=active\nNRestarts=0\n\
+             ExecMainStartTimestampMonotonic=5000000",
+            "Id=garrison-milter.service\nUnitFileState=disabled\nActiveState=active\nNRestarts=0\n\
+             ExecMainStartTimestampMonotonic=1000000",
+        );
+        assert_ne!(older, filter);
+        assert!(!installed(&older, &ENABLE, true, Some(4_000_000)));
     }
 
     /// A file changed just now is dated now on the clock systemd times a
