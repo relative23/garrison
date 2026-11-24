@@ -79,11 +79,11 @@ pub(crate) type Rule = fn(&str, &str) -> Result<String, ConfigError>;
 pub struct Address {
     /// Where messages go: as the configuration writes it, or as its file
     /// holds it.
-    pub url: String,
+    pub(crate) url: String,
     /// The file the address is kept in, where it is kept in one.
-    pub file: Option<SecretSource>,
+    pub(crate) file: Option<SecretSource>,
     /// Why the address cannot be used as its file stands; never what it holds.
-    pub unusable: Option<String>,
+    pub(crate) unusable: Option<String>,
     /// Read from its credential, never kept with the address.
     pub token: Secret,
 }
@@ -104,7 +104,7 @@ impl Address {
     /// [`Channels::located`](crate::notify::Channels::located); until then
     /// it cannot be used.
     #[must_use]
-    pub fn configured(endpoint: &Endpoint) -> Self {
+    pub(crate) fn configured(endpoint: &Endpoint) -> Self {
         match endpoint {
             Endpoint::Written(url) => Address {
                 url: url.clone(),
@@ -203,8 +203,8 @@ impl<'de> Deserialize<'de> for Address {
 /// What the channels need beside their addresses.
 #[derive(Clone, Default)]
 pub struct Secrets {
-    pub ntfy: Secret,
-    pub webhook: Secret,
+    pub(crate) ntfy: Secret,
+    pub(crate) webhook: Secret,
     pub mail: Secret,
 }
 

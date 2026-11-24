@@ -21,10 +21,10 @@ use crate::fetch::{self, Needs, Request};
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Channels {
     /// This installation's own host name, which every message carries.
-    pub host: String,
+    pub(crate) host: String,
     pub ntfy: Option<Address>,
     pub webhook: Option<Address>,
-    pub mail: Option<Mail>,
+    pub(crate) mail: Option<Mail>,
 }
 
 /// How a message is marked.
@@ -38,18 +38,18 @@ pub enum Level {
 /// One message, in the form every channel can carry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Note {
-    pub title: String,
-    pub text: String,
-    pub level: Level,
-    pub failed: Vec<String>,
-    pub warnings: Vec<String>,
-    pub recovered: Vec<String>,
+    pub(crate) title: String,
+    pub(crate) text: String,
+    pub(crate) level: Level,
+    pub(crate) failed: Vec<String>,
+    pub(crate) warnings: Vec<String>,
+    pub(crate) recovered: Vec<String>,
 }
 
 impl Note {
     /// A message that lists no checks.
     #[must_use]
-    pub fn plain(title: String, text: String, level: Level) -> Self {
+    pub(crate) fn plain(title: String, text: String, level: Level) -> Self {
         Note {
             title,
             text,
@@ -146,7 +146,7 @@ impl Channels {
 
     /// These channels with their secrets, which the stored form leaves out.
     #[must_use]
-    pub fn with(mut self, secrets: Secrets) -> Self {
+    pub(crate) fn with(mut self, secrets: Secrets) -> Self {
         if let Some(ntfy) = &mut self.ntfy {
             ntfy.token = secrets.ntfy;
         }
@@ -213,7 +213,7 @@ impl Channels {
 
     /// The same, each with its kind, as [`Channels::send`] names it.
     #[must_use]
-    pub fn named(&self) -> Vec<(&'static str, String)> {
+    pub(crate) fn named(&self) -> Vec<(&'static str, String)> {
         let mut named = Vec::new();
         for (channel, address) in [("ntfy", &self.ntfy), ("webhook", &self.webhook)] {
             if let Some(address) = address {
@@ -232,7 +232,7 @@ impl Channels {
 
     /// Send `note` on every channel and say how each one took it.
     #[must_use]
-    pub fn send(
+    pub(crate) fn send(
         &self,
         note: &Note,
         now: time::Timestamp,

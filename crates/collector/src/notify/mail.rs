@@ -16,7 +16,7 @@ use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
 
 use super::secrets::Secret;
-use crate::fetch::{WITHIN, secure_stream_until, tls_error};
+use crate::fetch::{secure_stream_until, tls_error};
 
 /// Where the mail goes and who submits it.
 #[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -163,8 +163,9 @@ pub fn message(mail: &Mail, name: &str, subject: &str, text: &str, now: time::Ti
     )
 }
 
-/// Submit one message. `name` is this installation's own host name.
-pub fn submit(
+/// Submit one message within the usual time, as the tests do.
+#[cfg(test)]
+pub(crate) fn submit(
     mail: &Mail,
     name: &str,
     subject: &str,
@@ -172,12 +173,13 @@ pub fn submit(
     now: time::Timestamp,
     roots: &Arc<RootCertStore>,
 ) -> Result<(), String> {
-    let until = Instant::now() + WITHIN;
+    let until = Instant::now() + crate::fetch::WITHIN;
     submit_until(mail, name, subject, text, now, roots, until)
 }
 
-/// The same, with the whole session done by `until`.
-pub fn submit_until(
+/// Submit one message, the whole session done by `until`. `name` is this
+/// installation's own host name.
+pub(crate) fn submit_until(
     mail: &Mail,
     name: &str,
     subject: &str,
