@@ -17,6 +17,9 @@ pub use version::VersionCommand;
 pub use web::{Bulwark, Http};
 
 #[cfg(test)]
+mod cuts_tests;
+
+#[cfg(test)]
 mod kinds_tests;
 
 #[cfg(test)]
