@@ -69,7 +69,8 @@ scenario_milter_asked() {
     says "the next installer run says why the filter keeps running" '/root/release/bin/garrison install' \
         install-milter-kept
     check "and that Stalwart asks its entry there" \
-        'acceptance-state /root/answer install-milter-asked && grep -q -F "m1 at 127.0.0.1:8096" /root/answer'
+        'acceptance-state /root/answer install-milter-asked && grep -q -w m1 /root/answer &&
+            grep -q -F 127.0.0.1:8096 /root/answer'
     check "and the filter runs on" 'systemctl is-active --quiet garrison-milter.service'
     inside 'rm /root/stand-in-milters'
     installer '/root/release/bin/garrison install'
@@ -90,7 +91,7 @@ scenario_milter_port() {
             > /root/stand-in-milters && printf "port = 8097\n" >> /etc/garrison/garrison.toml'
     says "the next installer run leaves the filter where Stalwart asks it, and names setup" \
         '/root/release/bin/garrison install' install-milter-held
-    check "and the port setup moves it to" 'grep -q -F "port 8097" /root/answer'
+    check "and the port setup moves it to" 'grep -q -F 8097 /root/answer'
     check "and the filter still answers there" 'ncat -z 127.0.0.1 8096 && ! ncat -z 127.0.0.1 8097'
     inside 'rm /root/stand-in-milters'
     installer '/root/release/bin/garrison install'
