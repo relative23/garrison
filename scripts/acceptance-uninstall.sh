@@ -103,7 +103,10 @@ check "the event history survived the uninstallation" \
     "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -ge $before"
 
 step "A purge leaves nothing of Garrison behind"
-inside 'mkdir -p /var/backups/garrison/latest && echo mine > /var/backups/garrison/latest/note'
+# The operator's own backups, one under a name of the installer's kind.
+inside 'for name in latest pre-upgrade-before-migration; do
+        mkdir -p /var/backups/garrison/$name && echo mine > /var/backups/garrison/$name/note || exit 1
+    done'
 installer 'garrison uninstall --purge'
 none_active purged
 check "the command's link is gone again" 'test ! -L /usr/bin/garrison'
@@ -113,8 +116,10 @@ check "program, configuration and data are gone" \
 check "the users and the group are gone" \
     'for user in garrison garrison-ingest garrison-collector garrison-broker garrison-milter; do
         ! getent passwd "$user" >/dev/null || exit 1; done; ! getent group garrison'
-check "the installer's backups are gone" '! ls /var/backups/garrison | grep -q "^pre-\|^last-pre-upgrade$"'
-check "a backup of the operator's own stays" 'test -f /var/backups/garrison/latest/note'
+check "the installer's backups are gone" \
+    '! ls /var/backups/garrison | grep -q "^pre-[a-z]*-[0-9]\{8\}T[0-9]\{6\}$\|^last-pre-upgrade$"'
+check "the backups of the operator's own stay" \
+    'test -f /var/backups/garrison/latest/note && test -f /var/backups/garrison/pre-upgrade-before-migration/note'
 check "systemd knows no Garrison unit" '! systemctl list-unit-files "garrison*" --no-legend | grep -q .'
 if [ -n "$selinux" ]; then
     check "the SELinux module stays gone" '! semodule -l | grep -qw garrison'

@@ -76,18 +76,24 @@ fn old_releases(base: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The stamp of a backup folder the installer made, `<kind>-<stamp>` as
+/// `fresh_folder` names it. A folder of one of these kinds under any other
+/// name, such as a target of `garrison backup --to`, is the operator's own.
+pub(super) fn installers_stamp(name: &str) -> Option<&str> {
+    let stamp = name
+        .strip_prefix("pre-upgrade-")
+        .or_else(|| name.strip_prefix("pre-reinstall-"))
+        .or_else(|| name.strip_prefix("pre-restore-"))?;
+    let digits = stamp.chars().filter(char::is_ascii_digit).count();
+    (stamp.len() == 15 && digits == 14 && stamp.as_bytes()[8] == b'T').then_some(stamp)
+}
+
 /// The installer's backups beyond the newest BACKUPS, never the one `last`
 /// points to. `garrison backup --to` targets of the operator's own are kept.
 fn old_backups(backups: &Path, last: &Path) -> Vec<PathBuf> {
     let restore = fs::canonicalize(last).ok();
     let stamp = |path: &PathBuf| -> Option<String> {
-        let name = path.file_name()?.to_str()?;
-        let stamp = name
-            .strip_prefix("pre-upgrade-")
-            .or_else(|| name.strip_prefix("pre-reinstall-"))
-            .or_else(|| name.strip_prefix("pre-restore-"))?;
-        let digits = stamp.chars().filter(char::is_ascii_digit).count();
-        (stamp.len() == 15 && digits == 14 && stamp.as_bytes()[8] == b'T').then(|| stamp.to_owned())
+        installers_stamp(path.file_name()?.to_str()?).map(str::to_owned)
     };
     let mut ours: Vec<(String, PathBuf)> = directories(backups)
         .into_iter()
