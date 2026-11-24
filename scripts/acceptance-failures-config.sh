@@ -83,6 +83,22 @@ scenario_policy_elsewhere() {
     running "after the policy elsewhere" "$new"
 }
 
+scenario_policy_foreign() {
+    step "A policy file of another user is never made the broker's"
+    upgraded
+    # As a user who may write the policy's folder would put one there.
+    inside 'chown nobody /etc/garrison/access-policy.json'
+    pid=$(web_pid)
+    refused "the installer refuses a policy of another user" '/root/release/bin/garrison install' \
+        "not to root: the installer makes no other user's file the policy"
+    check "and leaves it that user's, and nothing stopped" "
+        test \"\$(stat -c %U /etc/garrison/access-policy.json)\" = nobody &&
+            test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
+    inside 'chown root /etc/garrison/access-policy.json'
+    installer '/root/release/bin/garrison install'
+    running "after the policy of another user" "$new"
+}
+
 scenario_unwritten() {
     step "A file the installer could not write from the configuration is named"
     upgraded

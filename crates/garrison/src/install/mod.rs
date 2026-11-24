@@ -317,7 +317,8 @@ fn install() -> Step {
     if old.is_some() && configured {
         // The installer sets the policy's owner and mode anyway; the check must
         // not refuse what it is about to correct.
-        protect_policy()?;
+        protect_policy()
+            .map_err(|error| format!("{error}; the running release was not touched"))?;
         // A configuration the new release refuses leaves the running one
         // alone. Its warnings follow as it starts.
         check_config(&release, false).map_err(|error| match &resumed {

@@ -141,7 +141,8 @@ JSON with these five keys, all of them required:
 `id`s of `[[actions]]`; a profile with actions also needs the module
 `actions` and the rights `authenticate` and `sysActionCreate`. After editing
 it, `garrison check-config` says whether it reads, and the installer run
-again makes it root's and readable for the broker's group.
+again makes it readable for the broker's group; it takes only a file that
+root owns.
 
 ## Accounts with permissions of their own
 

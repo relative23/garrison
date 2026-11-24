@@ -1695,6 +1695,9 @@ Notable changes for operators and users. The format follows
 - **A restore that was interrupted is finished by running it again**, and
   names the copy of the state its first run made; where Garrison ran since,
   it copies the state as it is first.
+- **The installer no longer makes a policy file of another user the one the
+  broker grants by**: it refuses such a file before anything stops and names
+  the command that makes it root's.
 - **`garrison.toml` put back from the copy in a backup before an upgrade is
   read by the services again**, also where it was moved or copied with its
   mode: the copy keeps the file's mode.

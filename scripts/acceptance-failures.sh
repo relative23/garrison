@@ -417,7 +417,8 @@ for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check base_hidden fai
     restore_refused restore_refused_config restore_policy \
     restore_policy_link restore_room rollback_after_restore elsewhere_unloadable elsewhere_purge rollback_refused \
     rollback_refused_config rollback_room \
-    interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere unwritten \
+    interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere \
+    policy_foreign unwritten \
     rotation collect_beside restore_leftovers access_links access_folder access_actions}; do
     "scenario_$scenario"
 done

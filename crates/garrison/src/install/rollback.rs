@@ -248,6 +248,8 @@ pub(super) fn rollback(with_state: bool) -> Step {
          --rollback{}",
         if with_state { " --restore-state" } else { "" }
     ));
+    // The system files of the target protect the policy as it is.
+    super::system::protect_policy().map_err(|error| format!("{error}. Nothing was changed."))?;
     unfinished::write(&Unfinished::Rollback {
         from: current.clone(),
         to: target.clone(),
