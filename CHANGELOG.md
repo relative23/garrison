@@ -1858,6 +1858,10 @@ Notable changes for operators and users. The format follows
   milter on this host where nothing answers, and `garrison doctor` names every
   such entry**, also without setup's note of the macro filter's. Remove one
   that setup cannot tell for the filter's in the Stalwart WebUI.
+- **`garrison doctor` judges the access policy exactly as the broker's own
+  reading takes it**: one the broker owns is a warning, no longer a failure,
+  one it does not take is named with why, and a closed `/etc/garrison` with
+  the `chmod` that opens it.
 
 ## [0.1.2] - 2026-11-13
 

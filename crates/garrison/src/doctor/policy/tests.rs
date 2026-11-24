@@ -47,10 +47,11 @@ fn the_broker_is_who_the_hosts_accounts_say() {
 }
 
 /// The broker reads the policy as its own user and takes it only where
-/// root owns it, its group may not change it and others may not read it:
-/// a policy root's alone, or of another group, it may not read; one others
-/// may read, its group change, or another owns, it does not take. Each
-/// fails with the command that gives it to root and the broker's group.
+/// root or the broker owns it, its group may not change it and others may
+/// neither read nor change it: a policy root's alone, or of another group,
+/// it may not read; one others may read or change, its group change, or
+/// another owns, it does not take. Each fails with why and the command that
+/// gives it to root and the broker's group.
 #[test]
 fn the_policy_is_judged_as_the_broker_meets_it() {
     let kept = judged(0, 991, 0o640);
@@ -76,18 +77,36 @@ fn the_policy_is_judged_as_the_broker_meets_it() {
         );
         assert_eq!(found.fix.as_deref(), Some(fix.as_str()));
     }
-    for (uid, mode) in [(0, 0o644), (0, 0o660), (990, 0o600), (1000, 0o640)] {
+    // One the broker does not take is named with why.
+    for (uid, mode, why) in [
+        (0, 0o644, "others may read it"),
+        (0, 0o646, "others may change it"),
+        (0, 0o660, "its group may change it"),
+        (1000, 0o640, "a user other than root and the broker owns it"),
+    ] {
         let found = judged(uid, 991, mode);
         assert_eq!(found.level, Level::Fail, "{}", found.line());
         assert!(
             found
                 .what
-                .starts_with("the broker takes only an access policy"),
+                .starts_with("the broker does not take the access policy ("),
             "{}",
             found.what
         );
+        assert!(found.what.contains(why), "{}", found.what);
         assert_eq!(found.fix.as_deref(), Some(fix.as_str()));
     }
+    // One the broker owns it takes, as read_protected does: a warning.
+    let owned = judged(990, 991, 0o600);
+    assert_eq!(owned.level, Level::Warn, "{}", owned.line());
+    assert!(
+        owned
+            .what
+            .starts_with("garrison-broker owns the access policy (garrison-broker:garrison-broker"),
+        "{}",
+        owned.what
+    );
+    assert_eq!(owned.fix.as_deref(), Some(fix.as_str()));
 }
 
 /// A folder above the policy that the broker may not enter hides it as a
@@ -216,4 +235,85 @@ fn the_policy_grants_what_the_broker_reads() {
         unread.what,
         "the access policy does not read (schemaVersion must be 1), so nobody can sign in"
     );
+}
+
+/// doctor takes a policy exactly where the broker's own reading takes it:
+/// over every mode of the file and of the folder above it, with the test's
+/// user standing for the broker, `read_protected` reading as that user and
+/// `readable` judging for it agree. A policy the broker owns is taken, with
+/// a warning.
+#[test]
+fn doctor_takes_the_policy_where_read_protected_takes_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let me = Reader {
+        uid: rustix::process::geteuid().as_raw(),
+        groups: vec![rustix::process::getegid().as_raw()],
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let folder = directory.path().join("garrison");
+    fs::create_dir(&folder).unwrap();
+    let path = folder.join("access-policy.json");
+    fs::write(&path, garrison_testing::policy_document().to_string()).unwrap();
+    let mode = |path: &Path, mode: u32| {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    };
+    let mut disagree = Vec::new();
+    for bits in 0..=0o777 {
+        mode(&path, bits);
+        let taken = garrison_core::files::read_protected(&path, LIMIT).is_ok();
+        let seen = Seen::of(&fs::metadata(&path).unwrap());
+        let found = readable(&path, seen, &folders(&path), Some(&me), &Names::default());
+        if taken != matches!(found.level, Level::Ok | Level::Warn) {
+            disagree.push(format!("file {bits:o}: taken {taken}: {}", found.line()));
+        }
+    }
+    mode(&path, 0o600);
+    let file = Seen::of(&fs::metadata(&path).unwrap());
+    for bits in 0..=0o777 {
+        mode(&folder, bits);
+        let taken = garrison_core::files::read_protected(&path, LIMIT).is_ok();
+        let found = readable(&path, file, &folders(&path), Some(&me), &Names::default());
+        if taken != matches!(found.level, Level::Ok | Level::Warn) {
+            disagree.push(format!("folder {bits:o}: taken {taken}: {}", found.line()));
+        }
+    }
+    mode(&folder, 0o700);
+    assert_eq!(disagree, Vec::<String>::new(), "{}", disagree.join("\n"));
+}
+
+/// A folder the broker may not enter on the way to the default place is
+/// mended by the mode the installer gives it, not by a move to where the
+/// policy already is.
+#[test]
+fn a_closed_folder_on_the_way_to_the_default_place_is_opened() {
+    let (names, broker) = accounts(PASSWD, GROUP);
+    let file = Seen {
+        uid: 0,
+        gid: 991,
+        mode: 0o640,
+    };
+    let closed = Seen {
+        uid: 0,
+        gid: 0,
+        mode: 0o700,
+    };
+    for (folder, fix) in [
+        ("/etc/garrison", "chmod 755 /etc/garrison"),
+        ("/etc", "chmod 755 /etc"),
+        (
+            "/srv/private",
+            "Move the policy to /etc/garrison/access-policy.json and set broker.policy to it.",
+        ),
+    ] {
+        let path = Path::new(folder).join("access-policy.json");
+        let found = readable(
+            &path,
+            file,
+            &[(PathBuf::from(folder), closed)],
+            broker.as_ref(),
+            &names,
+        );
+        assert_eq!(found.level, Level::Fail, "{}", found.line());
+        assert_eq!(found.fix.as_deref(), Some(fix), "{folder}");
+    }
 }

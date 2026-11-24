@@ -1,11 +1,11 @@
 //! The access policy, as the broker meets it. The broker reads it for each
 //! request as its own user, garrison-broker, in its own group and those
 //! /etc/group lists it in (its unit's `User=` and `Group=`), and takes it
-//! only where root owns it, its group may not change it and others may not
-//! read it (`garrison_core::files::read_protected`). doctor reads as root,
-//! who may read more, so it judges owner, group and mode, and the folders
-//! above, for the broker; and what the policy grants, as the broker reads
-//! it.
+//! only where root or the broker owns it, its group may not change it and
+//! others may neither read nor change it
+//! (`garrison_core::files::read_protected`). doctor reads as root, who may
+//! read more, so it judges owner, group and mode, and the folders above, for
+//! the broker; and what the policy grants, as the broker reads it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -25,6 +25,8 @@ use crate::units;
 const BROKER: &str = "garrison-broker";
 /// As much of the policy as the broker reads.
 const LIMIT: usize = 64 * 1024;
+/// Where the installer and `garrison access init` keep the policy.
+const DEFAULT: &str = "/etc/garrison/access-policy.json";
 
 /// Who the broker is on this host: its user and the groups systemd gives it.
 #[derive(Clone, Debug)]
@@ -109,10 +111,13 @@ pub(super) fn accounts(passwd: &str, group: &str) -> (Names, Option<Reader>) {
 }
 
 /// Whether `reader` may do `bits` (4 to read, 1 to enter a folder) with
-/// what is seen so, as the kernel decides it: by the owner's bits for its
-/// owner, the group's for a member of its group, the others' for anybody
-/// else.
+/// what is seen so, as the kernel decides it: root always, and otherwise by
+/// the owner's bits for its owner, the group's for a member of its group,
+/// the others' for anybody else.
 fn may(seen: Seen, reader: &Reader, bits: u32) -> bool {
+    if reader.uid == 0 {
+        return true;
+    }
     let class = if seen.uid == reader.uid {
         seen.mode >> 6
     } else if reader.groups.contains(&seen.gid) {
@@ -123,13 +128,45 @@ fn may(seen: Seen, reader: &Reader, bits: u32) -> bool {
     class & bits == bits
 }
 
+/// Why `read_protected`, reading as `reader`, does not take a policy seen
+/// so: it takes one that root or its reader owns, whose group may not
+/// change it and that others may neither read nor change. `None` for the
+/// reader where the host has no broker, which leaves only the mode to judge.
+fn refusals(file: Seen, reader: Option<&Reader>) -> Vec<&'static str> {
+    let mut why = Vec::new();
+    if reader.is_some_and(|reader| file.uid != 0 && file.uid != reader.uid) {
+        why.push("a user other than root and the broker owns it");
+    }
+    if file.mode & 0o020 != 0 {
+        why.push("its group may change it");
+    }
+    match file.mode & 0o006 {
+        0 => {}
+        0o004 => why.push("others may read it"),
+        _ => why.push("others may change it"),
+    }
+    why
+}
+
 /// Whether the broker takes a policy seen so, as `read_protected` does.
-fn taken(file: Seen) -> bool {
-    file.uid == 0 && file.mode & 0o026 == 0
+fn taken(file: Seen, broker: Option<&Reader>) -> bool {
+    refusals(file, broker).is_empty() && (file.uid == 0 || broker.is_some())
+}
+
+/// What mends a folder above the policy that the broker may not enter: the
+/// mode the installer gives `/etc/garrison` where it lies on the way there,
+/// and the default place elsewhere.
+fn entered(folder: &Path) -> String {
+    if Path::new(DEFAULT).starts_with(folder) {
+        format!("chmod 755 {}", folder.display())
+    } else {
+        format!("Move the policy to {DEFAULT} and set broker.policy to it.")
+    }
 }
 
 /// What the broker meets at the policy at `path`, seen so, in the folders
-/// above it, seen so.
+/// above it, seen so: as `read_protected` takes it when the broker reads it,
+/// which enters every folder above and opens the file as the broker.
 pub(super) fn readable(
     path: &Path,
     file: Seen,
@@ -139,30 +176,26 @@ pub(super) fn readable(
 ) -> Finding {
     let shown = format!("{}, mode {:o}", names.of(file), file.mode);
     let fix = format!("chown root:{BROKER} {0} && chmod 640 {0}", path.display());
-    if !taken(file) {
-        return Finding::fail(
+    let refused = |why: &[&str]| {
+        Finding::fail(
             format!(
-                "the broker takes only an access policy that root owns and others may not read \
-                 ({shown}), so nobody can sign in: {}",
+                "the broker does not take the access policy ({shown}): {}, so nobody can sign \
+                 in: {}",
+                why.join(", and "),
                 path.display()
             ),
-            fix,
-        );
-    }
+            fix.clone(),
+        )
+    };
     let Some(broker) = broker else {
+        let why = refusals(file, None);
+        if !why.is_empty() {
+            return refused(&why);
+        }
         return Finding::unknown(format!(
             "whether the broker can read the access policy: this host has no user {BROKER}"
         ));
     };
-    if !may(file, broker, 0o4) {
-        return Finding::fail(
-            format!(
-                "{BROKER} may not read the access policy ({shown}), so nobody can sign in: {}",
-                path.display()
-            ),
-            fix,
-        );
-    }
     if let Some((folder, seen)) = folders.iter().find(|(_, seen)| !may(*seen, broker, 0o1)) {
         return Finding::fail(
             format!(
@@ -172,7 +205,29 @@ pub(super) fn readable(
                 names.of(*seen),
                 seen.mode
             ),
-            "Move the policy to /etc/garrison/access-policy.json and set broker.policy to it.",
+            entered(folder),
+        );
+    }
+    if !may(file, broker, 0o4) {
+        return Finding::fail(
+            format!(
+                "{BROKER} may not read the access policy ({shown}), so nobody can sign in: {}",
+                path.display()
+            ),
+            fix,
+        );
+    }
+    let why = refusals(file, Some(broker));
+    if !why.is_empty() {
+        return refused(&why);
+    }
+    if file.uid == broker.uid && broker.uid != 0 {
+        return Finding::warn(
+            format!(
+                "{BROKER} owns the access policy ({shown}), which the installer keeps root's, so \
+                 that only root may change what it grants"
+            ),
+            fix,
         );
     }
     Finding::ok(format!(
@@ -291,7 +346,7 @@ pub(super) fn checks(config: &Config) -> Vec<Finding> {
             ));
             // Root reads what the broker would take; one it does not take
             // grants nothing to judge.
-            if taken(file) {
+            if taken(file, broker.as_ref()) {
                 findings.push(content(config));
             }
         }
