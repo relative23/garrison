@@ -3,6 +3,9 @@
 
 use minisign_verify::{PublicKey, Signature};
 
+use super::states;
+use crate::state::State;
+
 /// The minisign public keys this release accepts for the next one. They are
 /// compiled in: an archive is never trusted to name its own keys.
 const TRUSTED: &str = include_str!("../../../../deploy/signing/keys.txt");
@@ -36,19 +39,16 @@ pub(super) fn announced(file_name: &str) -> Option<Release> {
 }
 
 /// The compiled-in keys.
-pub(super) fn trusted() -> Result<Vec<PublicKey>, String> {
+pub(super) fn trusted() -> Result<Vec<PublicKey>, State> {
     keys(TRUSTED)
 }
 
 /// One base64 public key per line; empty lines and `#` comments are skipped.
-fn keys(text: &str) -> Result<Vec<PublicKey>, String> {
+fn keys(text: &str) -> Result<Vec<PublicKey>, State> {
     text.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| {
-            PublicKey::from_base64(line)
-                .map_err(|_| format!("{line:?} is not a minisign public key."))
-        })
+        .map(|line| PublicKey::from_base64(line).map_err(|_| states::bad_key(line)))
         .collect()
 }
 
@@ -60,23 +60,19 @@ pub(super) fn check(
     archive: &[u8],
     signature: &str,
     release: &Release,
-) -> Result<(), String> {
-    let signature = Signature::decode(signature)
-        .map_err(|_| "The signature file is not a minisign signature.".to_owned())?;
+) -> Result<(), State> {
+    let signature = Signature::decode(signature).map_err(|_| states::not_a_signature())?;
     if !keys
         .iter()
         .any(|key| key.verify(archive, &signature, false).is_ok())
     {
-        return Err(
-            "The archive does not match its signature, or no key this release trusts made it."
-                .into(),
-        );
+        return Err(states::signature_mismatch());
     }
     let expected = release.comment();
     if signature.trusted_comment() != expected {
-        return Err(format!(
-            "The signature is for {:?}, not for {expected:?}.",
-            signature.trusted_comment()
+        return Err(states::other_release(
+            signature.trusted_comment(),
+            &expected,
         ));
     }
     Ok(())
@@ -114,8 +110,7 @@ mod tests {
         let good = include_str!("fixtures/good.minisig");
         let mut changed = ARCHIVE.to_vec();
         changed[0] ^= 1;
-        let mismatch =
-            "The archive does not match its signature, or no key this release trusts made it.";
+        let mismatch = states::signature_mismatch();
         assert_eq!(
             check(&keys, &changed, good, &release("0.2.0")).unwrap_err(),
             mismatch
@@ -139,11 +134,11 @@ mod tests {
         let older = include_str!("fixtures/older.minisig");
         assert_eq!(
             check(&keys, ARCHIVE, older, &release("0.2.0")).unwrap_err(),
-            "The signature is for \"garrison 0.1.0 x86_64\", not for \"garrison 0.2.0 x86_64\"."
+            states::other_release("garrison 0.1.0 x86_64", "garrison 0.2.0 x86_64")
         );
         assert_eq!(
             check(&keys, ARCHIVE, "no signature", &release("0.2.0")).unwrap_err(),
-            "The signature file is not a minisign signature."
+            states::not_a_signature()
         );
     }
 
@@ -151,7 +146,7 @@ mod tests {
     fn the_compiled_in_keys_are_all_public_keys() {
         trusted().unwrap();
         assert_eq!(keys("# a comment\n\n").unwrap().len(), 0);
-        assert!(keys("not a key").is_err());
+        assert_eq!(keys("not a key").unwrap_err(), states::bad_key("not a key"));
     }
 
     /// Operators check a first installation with the key the README shows,

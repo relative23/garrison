@@ -7,6 +7,7 @@
 //! the new release's installer, which checks every file against SHA256SUMS.
 
 mod signature;
+mod states;
 
 use std::fs;
 use std::io::Write;
@@ -15,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::install::BASE;
+use crate::state::State;
 use crate::{complain, say};
 use signature::{announced, check, trusted};
 
@@ -23,48 +25,42 @@ const TAR: [&str; 2] = ["/usr/bin/tar", "/bin/tar"];
 pub(crate) fn run(archive: &Path, signature: Option<&Path>) -> u8 {
     match upgrade(archive, signature) {
         Ok(code) => code,
-        Err(message) => {
-            complain(&format!("{message} Nothing was installed."));
+        Err(refusal) => {
+            complain(&states::nothing_installed(refusal).to_string());
             1
         }
     }
 }
 
-fn upgrade(archive: &Path, signature: Option<&Path>) -> Result<u8, String> {
+fn upgrade(archive: &Path, signature: Option<&Path>) -> Result<u8, State> {
     if !rustix::process::geteuid().is_root() {
-        return Err("Run as root.".into());
+        return Err(states::not_root());
     }
     let name = archive
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    let release = announced(name).ok_or_else(|| {
-        format!(
-            "{} is not named like a release archive, garrison-<version>-<arch>.tar.gz.",
-            archive.display()
-        )
-    })?;
+    let release = announced(name).ok_or_else(|| states::not_an_archive(archive))?;
     let host = std::env::consts::ARCH;
     if release.architecture != host {
-        return Err(format!(
-            "{name} is built for {}, this host is {host}.",
-            release.architecture
+        return Err(states::other_architecture(
+            name,
+            &release.architecture,
+            host,
         ));
     }
     admitted(&release.version, &running_version()?)?;
     let keys = trusted()?;
     if keys.is_empty() {
-        return Err("This release trusts no signing key yet, so it cannot check an archive. \
-                    Check the archive by hand (docs/operator/installation.md) and run its own installer."
-            .into());
+        return Err(states::no_keys());
     }
     let signature_path = signature.map_or_else(
         || PathBuf::from(format!("{}.minisig", archive.display())),
         Path::to_owned,
     );
     let signature_text = fs::read_to_string(&signature_path)
-        .map_err(|error| format!("{}: {error}.", signature_path.display()))?;
-    let bytes = fs::read(archive).map_err(|error| format!("{}: {error}.", archive.display()))?;
+        .map_err(|error| states::io(signature_path.display(), error))?;
+    let bytes = fs::read(archive).map_err(|error| states::io(archive.display(), error))?;
     check(&keys, &bytes, &signature_text, &release)?;
     say(&format!(
         "==> {name} carries a valid signature for {}",
@@ -82,7 +78,7 @@ fn upgrade(archive: &Path, signature: Option<&Path>) -> Result<u8, String> {
         Command::new(&installer)
             .arg("install")
             .status()
-            .map_err(|error| format!("{}: {error}.", installer.display()))
+            .map_err(|error| states::io(installer.display(), error))
     });
     // The installer copied the release into place; the unpacked tree goes.
     let _ = fs::remove_dir_all(&staging);
@@ -96,33 +92,27 @@ fn upgrade(archive: &Path, signature: Option<&Path>) -> Result<u8, String> {
 /// Whether an archive of `version` is installed over the `running` release:
 /// a newer one, and the same one, whose installer finishes what an
 /// installation cut short left or changes nothing where it runs.
-fn admitted(version: &str, running: &str) -> Result<(), String> {
+fn admitted(version: &str, running: &str) -> Result<(), State> {
     match garrison_core::version::newer(running, version) {
         Some(false) => Ok(()),
-        Some(true) => Err(format!(
-            "{version} is older than the running {running}; go back with `garrison install \
-             --rollback` instead."
-        )),
-        None => Err(format!("{version} or {running} is no semantic version.")),
+        Some(true) => Err(states::older_archive(version, running)),
+        None => Err(states::no_version(version, running)),
     }
 }
 
 /// The version of the installed release that this binary belongs to. Only an
 /// installed release upgrades: its compiled-in keys are the ones to trust.
-fn running_version() -> Result<String, String> {
+fn running_version() -> Result<String, State> {
     let binary =
-        std::env::current_exe().map_err(|error| format!("Cannot find this binary: {error}."))?;
-    let release = installed_release(&binary, Path::new(BASE)).ok_or_else(|| {
-        format!("Run the installed release: {BASE}/current/bin/garrison upgrade <archive>.")
-    })?;
+        std::env::current_exe().map_err(|error| states::io("Cannot find this binary", error))?;
+    let release = installed_release(&binary, Path::new(BASE)).ok_or_else(states::not_installed)?;
     version_of(release)
 }
 
 /// The version an installed release names in its `VERSION`.
-fn version_of(release: &Path) -> Result<String, String> {
+fn version_of(release: &Path) -> Result<String, State> {
     let path = release.join("VERSION");
-    let text =
-        fs::read_to_string(&path).map_err(|error| format!("{}: {error}.", path.display()))?;
+    let text = fs::read_to_string(&path).map_err(|error| states::io(path.display(), error))?;
     Ok(text.trim().to_owned())
 }
 
@@ -141,7 +131,7 @@ fn installed_release<'a>(binary: &'a Path, base: &Path) -> Option<&'a Path> {
 /// A fresh directory only root can enter, next to the releases rather than in
 /// /tmp, which may forbid running programs. Trees of upgrades whose process
 /// has ended are removed first; a running upgrade keeps its own.
-fn staging(base: &Path) -> Result<PathBuf, String> {
+fn staging(base: &Path) -> Result<PathBuf, State> {
     for entry in fs::read_dir(base).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(pid) = name.strip_prefix("upgrade.") else {
@@ -155,17 +145,17 @@ fn staging(base: &Path) -> Result<PathBuf, String> {
     fs::DirBuilder::new()
         .mode(0o700)
         .create(&path)
-        .map_err(|error| format!("{}: {error}.", path.display()))?;
+        .map_err(|error| states::io(path.display(), error))?;
     Ok(path)
 }
 
 /// Unpack the checked bytes with the system's tar, which refuses absolute
 /// names and `..`; files belong to root whatever the archive says.
-fn unpack(bytes: &[u8], into: &Path) -> Result<(), String> {
+fn unpack(bytes: &[u8], into: &Path) -> Result<(), State> {
     let tar = TAR
         .iter()
         .find(|path| Path::new(path).exists())
-        .ok_or("tar is required.")?;
+        .ok_or_else(states::no_tar)?;
     let mut child = Command::new(tar)
         .args(["-xz", "--no-same-owner", "-C"])
         .arg(into)
@@ -173,21 +163,19 @@ fn unpack(bytes: &[u8], into: &Path) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("{tar}: {error}."))?;
+        .map_err(|error| states::io(tar, error))?;
     if let Some(mut input) = child.stdin.take() {
         // A closed pipe means tar stopped early; its status says why.
         let _ = input.write_all(bytes);
     }
     let output = child
         .wait_with_output()
-        .map_err(|error| format!("{tar}: {error}."))?;
+        .map_err(|error| states::io(tar, error))?;
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "The archive cannot be unpacked: {}.",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
+        let said = String::from_utf8_lossy(&output.stderr);
+        Err(states::unpack_failed(said.trim()))
     }
 }
 
@@ -210,16 +198,17 @@ mod tests {
                 "{version} over {running}"
             );
         }
-        let refused = admitted("0.1.2", "0.2.0").unwrap_err();
-        assert!(
-            refused.starts_with("0.1.2 is older than the running 0.2.0;"),
-            "{refused}"
+        assert_eq!(
+            admitted("0.1.2", "0.2.0"),
+            Err(states::older_archive("0.1.2", "0.2.0"))
         );
-        assert!(admitted("0.2.0-rc.1", "0.2.0").is_err());
-        assert!(
-            admitted("latest", "0.2.0")
-                .unwrap_err()
-                .contains("no semantic version")
+        assert_eq!(
+            admitted("0.2.0-rc.1", "0.2.0"),
+            Err(states::older_archive("0.2.0-rc.1", "0.2.0"))
+        );
+        assert_eq!(
+            admitted("latest", "0.2.0"),
+            Err(states::no_version("latest", "0.2.0"))
         );
     }
 
@@ -279,9 +268,6 @@ mod tests {
             "binary"
         );
         let refused = unpack(b"not an archive", &staging).unwrap_err();
-        assert!(
-            refused.starts_with("The archive cannot be unpacked:"),
-            "{refused}"
-        );
+        assert_eq!(refused.name, "upgrade-unpack-failed");
     }
 }
