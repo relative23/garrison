@@ -1,6 +1,10 @@
 //! Why a receipt that the card cannot read is not read, and what mends it.
 
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
+
+use rustix::fs::{CWD, Mode, OFlags, RenameFlags};
 
 use super::*;
 use crate::testing::{Canned, config, context, table};
@@ -100,4 +104,66 @@ fn an_unreadable_receipt_says_why_and_what_mends_it() {
             "The receipt at {shown} is no plain file: let the job write it there as one."
         )]
     );
+}
+
+/// A user who may write the receipt's folder can put a FIFO in its place at
+/// any moment, also between two looks of the card at it: no collect waits
+/// for a writer, which would hold up every check after it until systemd
+/// ends the run. One thread swaps the receipt, which holds no JSON, with a
+/// FIFO as fast as it can while another collects.
+#[test]
+fn a_fifo_swapped_in_for_the_receipt_never_holds_up_a_collect() {
+    const COLLECTS: usize = 2000;
+    let directory = tempfile::tempdir().unwrap();
+    let (path, fifo) = (
+        directory.path().join("receipt.json"),
+        directory.path().join("fifo"),
+    );
+    write(&path, "the job's log, which is no JSON");
+    rustix::fs::mkfifoat(CWD, &fifo, Mode::from_raw_mode(0o644)).unwrap();
+    let receipt = Receipt::new(&table(&format!(
+        "type = \"receipt\"\nid = \"r\"\ntitle = \"R\"\npath = \"{}\"\nmodules = [\"backups\"]",
+        path.display()
+    )))
+    .unwrap();
+    let (config, runner) = (config(directory.path()), Canned(String::new()));
+    let (stop, done) = (AtomicBool::new(false), AtomicUsize::new(0));
+    let held_up = std::thread::scope(|scope| {
+        let swapper = scope.spawn(|| {
+            while !stop.load(Ordering::Relaxed) {
+                rustix::fs::renameat_with(CWD, &path, CWD, &fifo, RenameFlags::EXCHANGE).unwrap();
+            }
+        });
+        scope.spawn(|| {
+            for _ in 0..COLLECTS {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                receipt.collect(&context(&config, &runner)).unwrap();
+                done.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        let mut seen = (0, Instant::now());
+        let held_up = loop {
+            std::thread::sleep(Duration::from_millis(10));
+            let count = done.load(Ordering::Relaxed);
+            if count == COLLECTS {
+                break None;
+            }
+            if count != seen.0 {
+                seen = (count, Instant::now());
+            } else if seen.1.elapsed() > Duration::from_secs(5) {
+                break Some(count + 1);
+            }
+        };
+        stop.store(true, Ordering::Relaxed);
+        swapper.join().unwrap();
+        // A collect that waits goes on once the FIFO, at one of the two
+        // names now, has a writer, so that the threads end.
+        for name in [&path, &fifo] {
+            let _ = rustix::fs::open(name, OFlags::WRONLY | OFlags::NONBLOCK, Mode::empty());
+        }
+        held_up
+    });
+    assert_eq!(held_up, None, "the collect that waited for a writer");
 }

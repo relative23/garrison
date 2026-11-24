@@ -21,7 +21,7 @@ use std::collections::BTreeSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
-use garrison_core::files::{changed_only_by_trusted, read_json_with_metadata};
+use garrison_core::files::{changed_only_by_trusted, open_regular_file, read_json_with_metadata};
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Observation, Required, State};
 use garrison_core::time::Written;
@@ -304,7 +304,9 @@ impl Receipt {
             Ok(metadata) if !metadata.is_file() => format!(
                 "The receipt at {path} is no plain file: let the job write it there as one."
             ),
-            Ok(_) if std::fs::File::open(&self.path).is_err_and(|error| denied(&error)) => format!(
+            // Opened as the read was, so that a FIFO put here since the
+            // look above is not waited for.
+            Ok(_) if open_regular_file(&self.path).is_err_and(|error| denied(&error)) => format!(
                 "The receipt at {path} is there, but the collector's user may not open it: let \
                  the job write it with mode 0644 (chmod 0644 {path})."
             ),

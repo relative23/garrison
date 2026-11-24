@@ -59,6 +59,14 @@ fn read_limited(file: File, limit: usize) -> io::Result<Option<Vec<u8>>> {
     Ok((data.len() <= limit).then_some(data))
 }
 
+/// Open a file for reading as the readers here do: never through a link,
+/// never waiting for a FIFO's writer, and an error for what is no regular
+/// file. For a second look at a file that another user may have replaced
+/// since the first.
+pub fn open_regular_file(path: &Path) -> io::Result<File> {
+    open_regular(path)
+}
+
 /// Read a regular file of at most `limit` bytes, never following symbolic links.
 pub fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
     read_limited(open_regular(path)?, limit)?
