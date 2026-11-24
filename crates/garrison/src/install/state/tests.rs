@@ -58,8 +58,12 @@ fn only_what_the_new_release_changed_goes_back_after_a_failed_upgrade() {
     let journal = status.with_file_name("status.sqlite-journal");
     fs::write(&journal, "stale").unwrap();
 
-    let returned = restore_migrated(&backup, &config).unwrap();
-    assert_eq!(returned, ["collector", "broker"]);
+    let mut returned = Returned::default();
+    restore_migrated(&backup, &config, &mut returned).unwrap();
+    assert_eq!(
+        (returned.back, returned.removed),
+        (vec!["collector"], vec!["broker"])
+    );
     // The schema that rose is the one from before again, with its data.
     assert_eq!(crate::ops::stored_version(&status), Some(1));
     assert_eq!(note(&status), "before the upgrade");
@@ -71,7 +75,9 @@ fn only_what_the_new_release_changed_goes_back_after_a_failed_upgrade() {
     // that could not read it.
     assert!(!config.database(Database::Jobs).exists());
     // A second time there is nothing left to return.
-    assert_eq!(restore_migrated(&backup, &config).unwrap(), [""; 0]);
+    let mut again = Returned::default();
+    restore_migrated(&backup, &config, &mut again).unwrap();
+    assert_eq!(again, Returned::default());
 }
 
 #[test]
@@ -80,9 +86,50 @@ fn a_database_that_can_no_longer_be_read_goes_back_too() {
     let (config, backup) = failed_upgrade(directory.path());
     let events = config.database(Database::Events);
     fs::write(&events, "not a database").unwrap();
-    let returned = restore_migrated(&backup, &config).unwrap();
-    assert_eq!(returned, ["ingest", "collector", "broker"]);
+    let mut returned = Returned::default();
+    restore_migrated(&backup, &config, &mut returned).unwrap();
+    assert_eq!(returned.back, ["ingest", "collector"]);
     assert_eq!(note(&events), "before the upgrade");
+}
+
+/// A copy larger than the room beside its database is refused before any
+/// goes back, without a margin; a sparse file stands in for a large copy.
+/// Where they fit, the sentence names what went back and what was removed
+/// apart.
+#[test]
+fn a_switch_back_puts_nothing_back_where_a_copy_does_not_fit() {
+    let directory = tempfile::tempdir().unwrap();
+    let (config, backup) = failed_upgrade(directory.path());
+    let copy = fs::OpenOptions::new()
+        .write(true)
+        .open(copy_of(&backup, Database::Status))
+        .unwrap();
+    let stat = rustix::fs::statvfs(directory.path()).unwrap();
+    copy.set_len(stat.f_bavail * stat.f_frsize + (1 << 20))
+        .unwrap();
+    let mut returned = Returned::default();
+    let refused = restore_migrated(&backup, &config, &mut returned).unwrap_err();
+    assert!(
+        refused.contains("the copies from before the upgrade need"),
+        "{refused}"
+    );
+    assert_eq!(returned, Returned::default());
+    let status = config.database(Database::Status);
+    assert_eq!(crate::ops::stored_version(&status), Some(2));
+    assert!(config.database(Database::Jobs).exists());
+    let said = Returned {
+        back: vec!["collector"],
+        removed: vec!["broker"],
+    }
+    .said(&backup);
+    assert_eq!(
+        said,
+        format!(
+            " These went back to their copies in {}: collector. Removed, as they did not exist \
+             then: broker.",
+            backup.display()
+        )
+    );
 }
 
 #[test]

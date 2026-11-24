@@ -123,6 +123,36 @@ fn existing(path: &Path) -> &Path {
 /// Every `(directory, bytes)` must fit on its filesystem, with a tenth more and
 /// some space to spare; needs on one filesystem add up.
 pub(super) fn room(needs: &[(&Path, u64)]) -> Step {
+    match lacking(needs, true)? {
+        Some((directory, free, wanted)) => Err(format!(
+            "{} has {} MiB free and the installation needs {} MiB; nothing was changed.",
+            directory.display(),
+            free >> 20,
+            wanted >> 20
+        )),
+        None => Ok(()),
+    }
+}
+
+/// Every `(directory, bytes)` must fit on its filesystem as it is, for the
+/// copies from before an upgrade that a switch back puts back: a way back
+/// needs no room to spare.
+pub(super) fn exact_room(needs: &[(&Path, u64)]) -> Step {
+    match lacking(needs, false)? {
+        Some((directory, free, wanted)) => Err(format!(
+            "{} has {} MiB free and the copies from before the upgrade need {} MiB there; free \
+             space there",
+            directory.display(),
+            free >> 20,
+            wanted.div_ceil(1 << 20)
+        )),
+        None => Ok(()),
+    }
+}
+
+/// The first filesystem that lacks room for what `needs` puts on it, with
+/// what it has free and what it needs, with the margin of `room` or none.
+fn lacking(needs: &[(&Path, u64)], spare: bool) -> Step<Option<(PathBuf, u64, u64)>> {
     let mut filesystems: Vec<(u64, &Path, u64)> = Vec::new();
     for (path, bytes) in needs {
         let directory = existing(path);
@@ -136,17 +166,16 @@ pub(super) fn room(needs: &[(&Path, u64)]) -> Step {
         let stat = rustix::fs::statvfs(directory)
             .map_err(|error| format!("{}: {error}", directory.display()))?;
         let free = stat.f_bavail.saturating_mul(stat.f_frsize);
-        let wanted = bytes + bytes / 10 + SPARE;
+        let wanted = if spare {
+            bytes + bytes / 10 + SPARE
+        } else {
+            bytes
+        };
         if free < wanted {
-            return Err(format!(
-                "{} has {} MiB free and the installation needs {} MiB; nothing was changed.",
-                directory.display(),
-                free >> 20,
-                wanted >> 20
-            ));
+            return Ok(Some((directory.to_owned(), free, wanted)));
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]

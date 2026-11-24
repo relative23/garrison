@@ -156,7 +156,9 @@ stopped, the installer switches back by itself:
    whose schema rose goes back to its copy in `pre-upgrade-*`, and one that
    did not exist before the upgrade is removed; the installer names them.
    What they recorded between the backup and the stop, seconds as a rule, is
-   lost. Every other database keeps its data.
+   lost. Every other database keeps its data. Where a copy does not fit
+   beside its database, none goes back and the installer says where to free
+   space.
 3. It checks with the old release's own `self-check` that it reads every
    database, starts it and waits until it stays up. Only then does the
    installer say `the previous release is running`, and `previous` is again

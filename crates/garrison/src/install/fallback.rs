@@ -89,8 +89,7 @@ pub(super) fn before_install(version: &str) -> Step<Option<Resumed>> {
     ));
     switch_back(&from, previous.as_deref(), &to, Some(&backup)).map_err(|failure| {
         format!(
-            "Switching back to {} from the unfinished upgrade to {} failed: {failure}.",
-            name(&from),
+            "An earlier run did not finish the upgrade to {}, and {failure}.",
             name(&to)
         )
     })?;
@@ -133,7 +132,8 @@ pub(super) fn switch_back(
         previous: earlier.map(Path::to_owned),
         backup: backup.to_owned(),
     });
-    switched_back(old, earlier, backup, record.as_ref()).map_err(|error| {
+    let mut returned = state::Returned::default();
+    switched_back(old, earlier, backup, record.as_ref(), &mut returned).map_err(|failure| {
         stop_services();
         // Stopped again, the record holds for the second attempt; one that
         // cannot be written is stale for the next run, which then acts on
@@ -143,19 +143,27 @@ pub(super) fn switch_back(
         }
         let kept = switch(&Path::new(BASE).join("current"), attempted)
             .and_then(|()| switch(&Path::new(BASE).join("previous"), old));
-        let again = format!(
-            "`{} install --rollback --restore-state` returns to it with the state from before \
-             the upgrade",
-            command::name()
-        );
+        let what = match failure {
+            Failure::Before(error) => format!("switching back to {} failed ({error})", name(old)),
+            Failure::Start(error) => format!("the previous release did not start either ({error})"),
+        };
+        let went = backup.map_or_else(String::new, |backup| returned.said(backup));
         match kept {
-            Ok(()) => format!("the previous release did not start either ({error}); {again}"),
-            Err(links) => format!(
-                "the previous release did not start either ({error}), and the links could not \
-                 be set back ({links})"
+            Ok(()) => format!(
+                "{what}.{went} `{} install --rollback --restore-state` returns to it with the state \
+                 from before the upgrade",
+                command::name()
             ),
+            Err(links) => format!("{what}, and the links could not be set back ({links}).{went}"),
         }
     })
+}
+
+/// Why a switch back failed: before the release that ran started again,
+/// or as it started.
+enum Failure {
+    Before(String),
+    Start(String),
 }
 
 /// Return what the new release migrated, then start `old` and see that it
@@ -165,43 +173,48 @@ fn switched_back(
     earlier: Option<&Path>,
     backup: Option<&Path>,
     record: Option<&Unfinished>,
-) -> Step {
+    returned: &mut state::Returned,
+) -> Result<(), Failure> {
     // A service of the new release that still runs, or a collection run its
     // timer started, would write into a database that is being replaced.
     stop_services();
     // Everything is stopped again: written anew, the record holds until
     // `old` starts, though the new release started since it was first.
     if let Some(record) = record {
-        unfinished::write(record)?;
+        unfinished::write(record).map_err(Failure::Before)?;
     }
     if let Some(backup) = backup {
         let settings = Path::new(CONFIG).join("garrison.toml");
-        let config = config::load(&settings)
-            .map_err(|error| format!("cannot load {}: {error}", settings.display()))?;
-        let returned = state::restore_migrated(backup, &config)?;
-        if !returned.is_empty() {
+        let config = config::load(&settings).map_err(|error| {
+            Failure::Before(format!("cannot load {}: {error}", settings.display()))
+        })?;
+        state::restore_migrated(backup, &config, returned).map_err(Failure::Before)?;
+        let went = returned.said(backup);
+        if !went.is_empty() {
             announce(&format!(
-                "The new release had changed the schema of: {}. Returned to the copy from \
-                 before the upgrade in {}; the other databases keep their data.",
-                returned.join(", "),
-                backup.display()
+                "The new release had changed what the release that ran cannot read.{went} The \
+                 other databases keep their data."
             ));
         }
     }
     let base = Path::new(BASE);
-    switch(&base.join("current"), old)?;
-    install_system_files(old)?;
+    switch(&base.join("current"), old).map_err(Failure::Before)?;
+    install_system_files(old).map_err(Failure::Before)?;
     // Only the release itself knows which schemas it reads. The collector
     // opens its database when its timer runs, after this installer is gone:
     // a database it cannot read must be found now.
-    if !cli(old, &["self-check"])?.status.success() {
-        return Err("it cannot read the current state".to_owned());
+    let checked = cli(old, &["self-check"]).map_err(Failure::Before)?;
+    if !checked.status.success() {
+        return Err(Failure::Before(format!(
+            "{} cannot read the current state",
+            name(old)
+        )));
     }
-    start(old)?;
+    start(old).map_err(Failure::Start)?;
     // `previous` as it was before the upgrade.
     let previous = base.join("previous");
     if let Some(earlier) = earlier {
-        return switch(&previous, earlier);
+        return switch(&previous, earlier).map_err(Failure::Before);
     }
     let _ = std::fs::remove_file(&previous);
     Ok(())

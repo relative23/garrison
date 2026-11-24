@@ -157,22 +157,26 @@ scenario_crash_loop() {
 # The schema of the status database, which a migration raises.
 status_schema() { inside 'sqlite3 /var/lib/garrison/collector/status.sqlite "PRAGMA user_version"'; }
 
-scenario_migrated_then_failed() {
-    step "A release that migrated a database and then failed is switched back with the state from before"
-    # What a release with a migration does when it first opens a database:
-    # it raises the schema, and the release before cannot read it any more.
+# What a release with a migration does when it first opens a database: it
+# raises the schema, and the release before cannot read it any more. The web
+# service of this copy, /root/migrating, migrates before it starts, as root,
+# and systemd ends it after three seconds every time: started, then failed.
+migrating_release() {
     inside_input 'cat > /usr/local/bin/acceptance-migrate && chmod 755 /usr/local/bin/acceptance-migrate' <<'MIGRATE'
 #!/bin/sh
 exec sqlite3 /var/lib/garrison/collector/status.sqlite 'PRAGMA user_version = 99'
 MIGRATE
-    # The web service of this copy migrates before it starts, as root, and
-    # systemd ends it after three seconds every time: started, then failed.
-    inside 'cp -a /root/release /root/migrating && cd /root/migrating &&
+    inside 'rm -rf /root/migrating && cp -a /root/release /root/migrating && cd /root/migrating &&
         printf "%s+migrating\n" "$(cat VERSION)" > VERSION &&
         sed -i "s|^\[Service\]$|[Service]\nRuntimeMaxSec=3s\nExecStartPre=+/usr/local/bin/acceptance-migrate|" \
             deploy/systemd/garrison-web.service &&
         grep -q "^ExecStartPre=+/usr/local/bin/acceptance-migrate$" deploy/systemd/garrison-web.service &&
         find . -type f ! -name SHA256SUMS | sed "s|^\./||" | sort | xargs sha256sum > SHA256SUMS'
+}
+
+scenario_migrated_then_failed() {
+    step "A release that migrated a database and then failed is switched back with the state from before"
+    migrating_release
     check "a collection run wrote the status database" 'systemctl start garrison-collect.service'
     current=$(inside 'basename "$(readlink -f /opt/garrison/current)"')
     earlier=$(inside 'readlink -f /opt/garrison/previous 2>/dev/null || true')
@@ -208,6 +212,38 @@ MIGRATE
         rmdir /etc/systemd/system/garrison-web.service.d && systemctl daemon-reload'
     installer '/opt/garrison/current/bin/garrison install --rollback --restore-state'
     running "after the second attempt" "$current"
+}
+
+scenario_switch_back_room() {
+    step "A switch back whose copy does not fit beside its database puts none back and says why"
+    upgraded
+    migrating_release
+    # The status database grows to some 5 MiB on a file system of 8 MiB:
+    # its copy from before the upgrade does not fit beside it.
+    inside 'systemctl stop garrison-collect.timer garrison-collect.service &&
+        sqlite3 /var/lib/garrison/collector/status.sqlite "CREATE TABLE IF NOT EXISTS padding(x);
+            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+            INSERT INTO padding SELECT randomblob(1000) FROM n;" &&
+        cp -a /var/lib/garrison/collector /root/collector-room &&
+        mount -t tmpfs -o size=8m garrison-room /var/lib/garrison/collector &&
+        cp -a /root/collector-room/. /var/lib/garrison/collector/ && rm -r /root/collector-room &&
+        systemctl start garrison-collect.timer'
+    if inside 'umask 077 && /root/migrating/bin/garrison install > /root/switch-room.log 2>&1'; then
+        inside 'cat /root/switch-room.log' || true
+        echo "FAIL  the upgrade to a release that migrated and fell over fails"
+        exit 1
+    fi
+    check "the switch back says where a copy does not fit, not that the old release failed" \
+        '{ grep -q "the copies from before the upgrade need" /root/switch-room.log &&
+            ! grep -q "did not start either" /root/switch-room.log; } || { cat /root/switch-room.log; false; }'
+    check "and puts nothing back" \
+        "test \"\$(sqlite3 -readonly /var/lib/garrison/collector/status.sqlite 'PRAGMA user_version')\" = 99"
+    # With room again, what the answer names returns to the release that ran.
+    inside 'systemctl stop garrison-collect.timer garrison-collect.service;
+        cp -a /var/lib/garrison/collector /root/collector-room && umount /var/lib/garrison/collector &&
+        cp -a /root/collector-room/. /var/lib/garrison/collector/ && rm -r /root/collector-room /root/switch-room.log'
+    installer '/opt/garrison/current/bin/garrison install --rollback --restore-state'
+    running "after the switch back that had no room" "$new"
 }
 
 scenario_concurrent() {
@@ -353,7 +389,8 @@ install_previous
 old=$(inside 'cat /root/previous/VERSION')
 new=$(inside 'cat /root/release/VERSION')
 running "installed" "$old"
-for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check failed_start crash_loop migrated_then_failed concurrent \
+for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check failed_start crash_loop migrated_then_failed \
+    switch_back_room concurrent \
     upgrade_killed upgrade_resumed rollback_killed restore_killed upgrade_came_up restore_came_up \
     rollback_state_killed rollback_came_up \
     restore_refused restore_refused_config restore_policy \

@@ -1691,6 +1691,10 @@ Notable changes for operators and users. The format follows
 - **A restore that was interrupted is finished by running it again**, and
   names the copy of the state its first run made; where Garrison ran since,
   it copies the state as it is first.
+- **A switch back after a failed upgrade that finds no room for a database's
+  copy says so and puts nothing back**, where it said that the previous
+  release did not start either; it also names what went back and what was
+  removed.
 - **An installer run right after one that was killed while it backed up no
   longer fails with "backup failed: … disk I/O error".** Each run backs up
   into a folder of its own, also two restores within one second.

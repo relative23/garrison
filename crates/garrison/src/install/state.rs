@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::files::{Step, announce, relabel, replace_in};
+use super::requirements::{exact_room, size};
 
 /// What a backup says of itself in `backup.json`.
 #[derive(Debug, Default, Deserialize)]
@@ -184,32 +185,79 @@ fn put_policy_back(copy: &Path, target: &Path, owner: (Uid, Gid)) -> Step {
     Ok(())
 }
 
+/// What a switch back did: the services whose database went back to its
+/// copy, and those whose database was removed, as it did not exist then.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct Returned {
+    pub(super) back: Vec<&'static str>,
+    pub(super) removed: Vec<&'static str>,
+}
+
+impl Returned {
+    /// As a sentence to append to a message: nothing where nothing changed.
+    pub(super) fn said(&self, source: &Path) -> String {
+        let back = (!self.back.is_empty()).then(|| {
+            format!(
+                " These went back to their copies in {}: {}.",
+                source.display(),
+                self.back.join(", ")
+            )
+        });
+        let removed = (!self.removed.is_empty()).then(|| {
+            format!(
+                " Removed, as they did not exist then: {}.",
+                self.removed.join(", ")
+            )
+        });
+        format!(
+            "{}{}",
+            back.unwrap_or_default(),
+            removed.unwrap_or_default()
+        )
+    }
+}
+
 /// Put back only the databases whose schema has risen since `source` was
 /// made, and remove one that was made since: what a new release changed
 /// before its start failed, and the release that ran cannot read. Every
-/// other database keeps its data. Returns the services whose database went
-/// back.
-pub(super) fn restore_migrated(source: &Path, config: &Config) -> Step<Vec<&'static str>> {
+/// other database keeps its data. Every copy must fit beside the database
+/// it replaces before any goes back. What was done is in `returned`, also
+/// where a later step failed.
+pub(super) fn restore_migrated(source: &Path, config: &Config, returned: &mut Returned) -> Step {
     let manifest = manifest(source);
-    let mut returned = Vec::new();
+    let (mut back, mut gone) = (Vec::new(), Vec::new());
     for database in Database::ALL {
         let copy = copy_of(source, database);
         let live = crate::ops::stored_version(&config.database(database));
         match crate::ops::stored_version(&copy) {
             // Also a live file that can no longer be read as a database.
-            Some(before) if live.is_none_or(|now| now > before) => {
-                put_back(config, database, &copy)?;
-                returned.push(database.writer());
-            }
-            None if absent_before(&manifest, database) && live.is_some() => {
-                take_away(config, database)?;
-                returned.push(database.writer());
-            }
+            Some(before) if live.is_none_or(|now| now > before) => back.push(database),
+            None if absent_before(&manifest, database) && live.is_some() => gone.push(database),
             // As it was before, or never copied: it keeps its data.
             Some(_) | None => {}
         }
     }
-    Ok(returned)
+    let folders: Vec<(std::path::PathBuf, u64)> = back
+        .iter()
+        .filter_map(|database| {
+            let folder = config.database(*database).parent()?.to_owned();
+            Some((folder, size(&copy_of(source, *database))))
+        })
+        .collect();
+    let needs: Vec<(&Path, u64)> = folders
+        .iter()
+        .map(|(folder, bytes)| (folder.as_path(), *bytes))
+        .collect();
+    exact_room(&needs)?;
+    for database in back {
+        put_back(config, database, &copy_of(source, database))?;
+        returned.back.push(database.writer());
+    }
+    for database in gone {
+        take_away(config, database)?;
+        returned.removed.push(database.writer());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
