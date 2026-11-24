@@ -380,6 +380,12 @@ fn install() -> Step {
     for line in housekeeping::prune(base, backups, &backups.join(LAST)) {
         announce(&line);
     }
+    // Only where `previous` names another release is there one to return to.
+    let previous = fs::canonicalize(base.join("previous")).ok();
+    if previous.is_none_or(|previous| previous == release) {
+        announce(&format!("Garrison {version} is running."));
+        return Ok(());
+    }
     // The release before cannot read a database this one migrates. Name the
     // rollback that works now, not only when a plain `--rollback` refuses.
     announce(&format!(

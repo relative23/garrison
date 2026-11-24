@@ -284,6 +284,13 @@ scenario_reinstall() {
     check "a reinstall keeps last-pre-upgrade" \
         'test "$(readlink /var/backups/garrison/last-pre-upgrade)" = "$(cat /root/last-before)"'
     names "a reinstall keeps the previous release" previous "$old"
+    # Without a previous release there is no rollback to name.
+    inside 'mv /opt/garrison/previous /root/previous.link'
+    installer '/root/release/bin/garrison install > /root/reinstall.log 2>&1'
+    check "a reinstall without a previous release names no rollback" \
+        "{ ! grep -q 'Roll back with' /root/reinstall.log && grep -q -F 'Garrison $new is running.' /root/reinstall.log; } ||
+            { cat /root/reinstall.log; false; }"
+    inside 'mv /root/previous.link /opt/garrison/previous && rm /root/reinstall.log'
     running "after the reinstall" "$new"
 }
 
