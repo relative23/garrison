@@ -107,6 +107,20 @@ must_use_candidate = "allow"
 # Permission checks read better as octal masks (mode & 0o077 == 0).
 verbose_bit_mask = "allow"
 
+# The tests put megabytes through these four, which unoptimized take twelve
+# times as long as they need: the macro scan of an archive that unpacks to
+# 320 MiB took 3.5 seconds of a test build with them as they come and 0.3
+# with them optimized, and under coverage on a slower machine it missed the
+# 20 seconds its test holds it to.
+[profile.dev.package.base64]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.memchr]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = "thin"
