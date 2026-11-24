@@ -300,13 +300,20 @@ mod tests {
     }
 
     /// The filter moves only to a port it can have: one another program
-    /// holds refuses the run before anything changes.
+    /// holds refuses the run before anything changes, and one that is free
+    /// is taken. No socket can hold that port for the second look, since the
+    /// filter's listener does not share it: between the two lines the system
+    /// may give it to another socket of this host, which is rare.
     #[test]
     fn the_filter_moves_only_to_a_port_it_can_have() {
-        let held = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = held.local_addr().unwrap().port();
-        assert!(free(port).is_err_and(|refusal| refusal.name == "setup-milter-port-taken"));
+        let (held, port) = crate::doctor::silent_port();
+        assert_eq!(free(port), Err(states::milter_port_taken(port, in_use())));
         drop(held);
         assert_eq!(free(port), Ok(()));
+    }
+
+    /// What the system says of a port another socket holds.
+    fn in_use() -> std::io::Error {
+        std::io::Error::from_raw_os_error(rustix::io::Errno::ADDRINUSE.raw_os_error())
     }
 }

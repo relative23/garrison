@@ -172,7 +172,7 @@ pub(crate) fn run(config: &Config) -> u8 {
 /// connection, and the system gives the port to no listener started
 /// meanwhile, as it would give one dropped.
 #[cfg(test)]
-fn silent_port() -> (std::os::fd::OwnedFd, u16) {
+pub(crate) fn silent_port() -> (std::os::fd::OwnedFd, u16) {
     use rustix::net::{AddressFamily, SocketType, bind, getsockname, socket};
     use std::net::{Ipv4Addr, SocketAddrV4};
     let held = socket(AddressFamily::INET, SocketType::STREAM, None).unwrap();
