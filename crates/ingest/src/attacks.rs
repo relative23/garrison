@@ -270,6 +270,17 @@ impl Sums {
         for kind in SIGN_INS {
             sums.read(db, kind, stretch, Sums::failed_sign_in)?;
         }
+        // A sign-in refused because its session failed too often before
+        // names no account: it counts to its address alone.
+        sums.read(
+            db,
+            EventType::AuthTooManyAttempts,
+            stretch,
+            |sums, _, address, _| {
+                sums.totals.failed_sign_ins += 1;
+                sums.source(address).source.failed_sign_ins += 1;
+            },
+        )?;
         sums.read(
             db,
             EventType::TlsHandshakeError,

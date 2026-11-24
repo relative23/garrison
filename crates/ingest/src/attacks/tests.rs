@@ -228,6 +228,33 @@ fn sign_ins_refused_for_a_second_factor_or_an_address_are_failed_sign_ins() {
     assert_eq!(addresses, ["198.51.100.77", "198.51.100.120"]);
 }
 
+/// Stalwart ends a mail session after three failed sign-ins and refuses the
+/// fourth with an event of its own and no account (measured on 1.2.0 over
+/// IMAP and SMTP submission): a failed sign-in of its address, of no
+/// account, and of none that would be unknown.
+#[test]
+fn a_sign_in_refused_for_too_many_attempts_is_a_failed_sign_in() {
+    let events = [
+        failed(1, "10:00:00", "192.0.2.10", None),
+        event(
+            2,
+            "auth.too-many-attempts",
+            &format!("{DAY}10:00:01Z"),
+            &json!({"remoteIp": "192.0.2.10", "listenerId": "imaps"}),
+        ),
+    ];
+    let day = summary(&events, MIDNIGHT, MIDNIGHT + 86_399);
+    assert_eq!(
+        (
+            json!(day.totals)["failedSignIns"].clone(),
+            json!(day.totals)["unknownAccounts"].clone()
+        ),
+        (json!(2), json!(1))
+    );
+    assert_eq!(json!(day.sources[0])["failedSignIns"], json!(2));
+    assert_eq!(day.sources[0].listeners, ["imaps", "submission"]);
+}
+
 #[test]
 fn a_name_that_is_no_account_is_never_stored_or_shown() {
     let directory = tempfile::tempdir().unwrap();

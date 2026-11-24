@@ -7,6 +7,10 @@
   "label": "Missing MFA token for authentication",
   "explanation": "MFA token is required for authentication but was not provided"
  },
+ "auth.too-many-attempts": {
+  "label": "Too many authentication attempts",
+  "explanation": "The client has exceeded the configured limit for failed login attempts in a rolling window; further attempts may be blocked."
+ },
  "delivery.attempt-end": {
   "label": "Delivery attempt ended",
   "explanation": "The outbound delivery attempt has finished, either successfully or with a temporary/permanent failure recorded."

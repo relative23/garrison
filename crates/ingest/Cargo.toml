@@ -25,6 +25,8 @@ tokio.workspace = true
 [dev-dependencies]
 divan.workspace = true
 garrison-testing.workspace = true
+# The contract test signs in to the lab's IMAP listener, which takes TLS only.
+rustls.workspace = true
 tempfile.workspace = true
 # A paused clock for the maintenance schedule.
 tokio = { workspace = true, features = ["test-util"] }

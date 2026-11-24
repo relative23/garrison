@@ -157,6 +157,7 @@ event_types! {
     Other {
         AuthFailed => "auth.failed",
         AuthMfaRequired => "auth.mfa-required",
+        AuthTooManyAttempts => "auth.too-many-attempts",
         SecurityAbuseBan => "security.abuse-ban",
         SecurityAuthenticationBan => "security.authentication-ban",
         SecurityLoiterBan => "security.loiter-ban",

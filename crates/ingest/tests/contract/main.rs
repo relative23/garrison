@@ -26,6 +26,7 @@ use garrison_testing::lab::{Lab, random_hex};
 use garrison_testing::smtp::Smtp;
 use serde_json::{Value, json};
 
+mod attempts;
 mod bans;
 mod refusals;
 

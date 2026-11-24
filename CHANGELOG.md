@@ -137,9 +137,9 @@ Notable changes for operators and users. The format follows
   several domains, too many messages and a command out of order or not
   offered.
 - **Attacks & bans counts a sign-in that Stalwart refused for a missing
-  second factor, or from an address its credential does not allow, as a
-  failed sign-in.** It counts to its address, and to its account where
-  Stalwart names one.
+  second factor, from an address its credential does not allow, or after
+  too many in one mail session, as a failed sign-in.** It counts to its
+  address, and to its account where Stalwart names one.
 - **Attacks & bans counts the connections Stalwart refused from an address
   it blocks.** They are counted by address and network, beside the bans.
 - **Attacks & bans names the /64 that Stalwart 1.2.0 blocks with a banned
