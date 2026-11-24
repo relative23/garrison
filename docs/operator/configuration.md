@@ -293,9 +293,10 @@ key, reports a filter that Stalwart asks in vain, also at an old `port`.
 What the filter finds: a VBA project in Word, Excel and PowerPoint files of
 the newer format (`.docm`, `.xlsm`, `.pptm`, also under another name such as
 `.docx`) and in Word and Excel files of the old one (`.doc`, `.xls`), Excel
-4.0 macro sheets in the newer format, and Word's single-file web pages with
-an embedded macro store, each also inside zip archives up to three levels
-deep. A file counts as soon as it has a macro project, also an empty one. The
+4.0 macro sheets in the newer format, and Word's single-file web pages and
+XML files (Word 2003 XML, and the newer format saved as one XML file) with an
+embedded macro store, each also inside zip archives up to three levels deep.
+A file counts as soon as it has a macro project, also an empty one. The
 filter finds the document however the message wraps it, without reading the
 message's structure: it reads the message as it stands, decodes the base64 of
 the whole message (ignoring any byte outside the alphabet, so folding, odd

@@ -119,6 +119,23 @@ fn active_mime(data: &[u8]) -> bool {
     })
 }
 
+/// Whether `data` holds an element that Office's XML formats fill with
+/// base64: `binData` of a Word 2003 XML file, where its macros are, and
+/// `binaryData` of a flat OPC file, where each part of the package is. No
+/// header says that base64 is there. The names are sought as the file's
+/// encoding writes them, one byte a character or two, under any prefix.
+pub(super) fn office_xml(data: &[u8]) -> bool {
+    const ELEMENTS: [&[u8]; 6] = [
+        b"binData",
+        b"b\0i\0n\0D\0a\0t\0a\0",
+        b"\0b\0i\0n\0D\0a\0t\0a",
+        b"binaryData",
+        b"b\0i\0n\0a\0r\0y\0D\0a\0t\0a\0",
+        b"\0b\0i\0n\0a\0r\0y\0D\0a\0t\0a",
+    ];
+    ELEMENTS.iter().any(|name| contains(data, name))
+}
+
 /// What `data` shows without unpacking anything.
 pub(super) fn plain(data: &[u8]) -> Option<Found> {
     if contains(data, OLE) && position_lowercase(data, VBA_STORAGE).is_some() {

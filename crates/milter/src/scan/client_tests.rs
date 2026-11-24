@@ -348,3 +348,84 @@ fn text_that_says_begin_is_no_uuencode_block() {
     let declared = format!("{DECLARED}\r\n\r\nbegin the work\r\nThis line is no data.\r\n");
     assert_eq!(macros(declared.as_bytes()), Outcome::Clean);
 }
+
+/// Bytes that are no text.
+fn noise(count: u8) -> Vec<u8> {
+    (0..count)
+        .cycle()
+        .take(usize::from(count) * 4)
+        .map(|byte| byte.wrapping_mul(167) ^ 0x5a)
+        .collect()
+}
+
+/// `text` with `data` in base64 where `{}` stands.
+fn xml_with(text: &str, data: &[u8]) -> Vec<u8> {
+    text.replace("{}", &STANDARD.encode(data)).into_bytes()
+}
+
+/// `text` in UTF-16, low byte first, with its mark.
+fn utf16(text: &[u8]) -> Vec<u8> {
+    let mut out = vec![0xff, 0xfe];
+    for &byte in text {
+        out.extend_from_slice(&[byte, 0]);
+    }
+    out
+}
+
+const WORD_2003: &str = "<?xml version=\"1.0\"?><?mso-application progid=\"Word.Document\"?>\
+    <w:wordDocument><w:docSuppData><w:binData w:name=\"editdata.mso\">{}</w:binData>\
+    </w:docSuppData></w:wordDocument>";
+const WORD_2003_OTHER_PREFIX: &str = "<?xml version=\"1.0\"?><o:wordDocument><o:docSuppData>\
+    <o:binData o:name=\"a\">{}</o:binData></o:docSuppData></o:wordDocument>";
+const FLAT_OPC: &str = "<?xml version=\"1.0\"?><pkg:package><pkg:part \
+    pkg:name=\"/word/vbaProject.bin\"><pkg:binaryData>{}</pkg:binaryData></pkg:part></pkg:package>";
+
+// Word's XML formats carry a file's parts as base64 in an element, with no
+// header to say so: the macros of a Word 2003 XML file as an ActiveMime file
+// in `binData`, those of a flat OPC file as `vbaProject.bin` in `binaryData`.
+// A mail program hands the file over, and Word decodes the element.
+#[test]
+fn macros_in_the_base64_of_an_office_xml_file_are_found() {
+    let mut active_mime = b"ActiveMime\0\0\x01\xf0\x04\0\0\0\xff\xff\xff\xff".to_vec();
+    active_mime.extend(noise(150));
+    let project = compound(&["VBA", "_VBA_PROJECT", "dir"]);
+    let files = [
+        (
+            "Word 2003 XML",
+            xml_with(WORD_2003, &active_mime),
+            Found::ActiveMime,
+        ),
+        (
+            "another prefix",
+            xml_with(WORD_2003_OTHER_PREFIX, &active_mime),
+            Found::ActiveMime,
+        ),
+        ("flat OPC", xml_with(FLAT_OPC, &project), Found::Compound),
+    ];
+    for (name, file, found) in &files {
+        for (how, file) in [("as it is", file.clone()), ("in UTF-16", utf16(file))] {
+            let mut clear = b"Subject: x\r\nContent-Type: text/xml\r\n\r\n".to_vec();
+            clear.extend_from_slice(&file);
+            assert_eq!(
+                macros(&clear),
+                Outcome::Macros(*found),
+                "{name} {how}, in the clear"
+            );
+            let attached = part("base64", STANDARD.encode(&file).as_bytes());
+            assert_eq!(
+                macros(&attached),
+                Outcome::Macros(*found),
+                "{name} {how}, attached"
+            );
+        }
+    }
+    // A picture in the same element is no macro.
+    let picture = noise(225);
+    for text in [WORD_2003, FLAT_OPC] {
+        let file = xml_with(text, &picture);
+        assert_eq!(
+            macros(&part("base64", STANDARD.encode(&file).as_bytes())),
+            Outcome::Clean
+        );
+    }
+}

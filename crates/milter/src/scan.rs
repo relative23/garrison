@@ -389,9 +389,10 @@ impl Work {
     }
 }
 
-/// Whether `data` is a message that names a transfer encoding of its own: the
-/// header name in the clear (the only way a client would read it, any case),
-/// or a uuencode block's `begin` line.
+/// Whether `data` says of itself that it holds an encoding: a message that
+/// names a transfer encoding (the header name in the clear, the only way a
+/// client would read it, any case), a uuencode block's `begin` line, or an
+/// element that Office's XML formats fill with base64.
 fn declares_encoding(data: &[u8]) -> bool {
     const NAME: &[u8] = b"content-transfer-encoding";
     // Found by its first `-`, which decoded noise holds far less often than
@@ -403,6 +404,7 @@ fn declares_encoding(data: &[u8]) -> bool {
                 .get(dash - DASH..dash - DASH + NAME.len())
                 .is_some_and(|name| name.eq_ignore_ascii_case(NAME))
     }) || uu::next_begin(data, 0, false).is_some()
+        || marks::office_xml(data)
 }
 
 #[cfg(test)]
