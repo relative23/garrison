@@ -36,11 +36,13 @@ pub(super) enum Unfinished {
         backup: PathBuf,
     },
     /// A rollback that leaves `from` for `to`; `previous` is what that link
-    /// names once it is done.
+    /// names once it is done, `state` the copies it puts back, if any.
     Rollback {
         from: PathBuf,
         to: PathBuf,
         previous: Option<PathBuf>,
+        #[serde(default)]
+        state: Option<PathBuf>,
     },
     /// A restore of the state in `source`; `kept` holds the state from
     /// before it.
@@ -214,6 +216,7 @@ impl Unfinished {
                 from,
                 to,
                 previous: after,
+                ..
             } => {
                 to.is_dir()
                     && (current == Some(from.as_path()) || current == Some(to.as_path()))
@@ -231,9 +234,18 @@ impl Unfinished {
             Self::Upgrade { from, to, .. } => {
                 format!("an upgrade from {} to {}", name(from), name(to))
             }
-            Self::Rollback { from, to, .. } => {
-                format!("a rollback from {} to {}", name(from), name(to))
-            }
+            Self::Rollback {
+                from, to, state, ..
+            } => format!(
+                "a rollback from {} to {}{}",
+                name(from),
+                name(to),
+                if state.is_some() {
+                    " with the state from before the upgrade"
+                } else {
+                    ""
+                }
+            ),
             Self::Restore { source, .. } => format!("a restore from {}", source.display()),
         }
     }
@@ -242,9 +254,14 @@ impl Unfinished {
     pub(super) fn finish_first(&self) -> String {
         let how = match self {
             Self::Upgrade { to, .. } => format!("run the installer of {} again", name(to)),
-            Self::Rollback { from, .. } => format!(
-                "run `{} install --rollback`",
-                from.join("bin/garrison").display()
+            Self::Rollback { from, state, .. } => format!(
+                "run `{} install --rollback{}`",
+                from.join("bin/garrison").display(),
+                if state.is_some() {
+                    " --restore-state"
+                } else {
+                    ""
+                }
             ),
             Self::Restore { source, .. } => format!(
                 "run `{} restore --from {}`",

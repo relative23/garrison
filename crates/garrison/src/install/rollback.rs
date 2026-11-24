@@ -107,12 +107,14 @@ fn roll_back_to(
 }
 
 /// Where a rollback goes: to `target`, leaving `left`, and what `previous`
-/// names once it is done. `started` where an earlier run of this rollback
-/// had started its target, and its state went back before that.
+/// names once it is done. `state` where an earlier run of this rollback put
+/// the state from before the upgrade back, `started` where it had started
+/// its target, and its state went back before that.
 struct Plan {
     target: PathBuf,
     left: PathBuf,
     after: Option<PathBuf>,
+    state: bool,
     started: bool,
 }
 
@@ -129,21 +131,31 @@ fn plan(base: &Path) -> Step<Plan> {
             target: from,
             left: current,
             after: previous,
+            state: false,
             started: false,
         }),
-        Seen::Holds(Unfinished::Rollback { from, to, previous }) => Ok(Plan {
+        Seen::Holds(Unfinished::Rollback {
+            from,
+            to,
+            previous,
+            state,
+        }) => Ok(Plan {
             target: to,
             left: from,
             after: previous,
+            state: state.is_some(),
             started: false,
         }),
         Seen::Holds(record @ Unfinished::Restore { .. }) | Seen::Failed(record) => {
             Err(record.finish_first())
         }
-        Seen::Stale(Unfinished::Rollback { from, to, previous }) if to == current => Ok(Plan {
+        Seen::Stale(Unfinished::Rollback {
+            from, to, previous, ..
+        }) if to == current => Ok(Plan {
             target: to,
             left: from,
             after: previous,
+            state: false,
             started: true,
         }),
         Seen::Stale(_) | Seen::Nothing => {
@@ -160,6 +172,7 @@ fn plan(base: &Path) -> Step<Plan> {
                 target,
                 after: Some(current.clone()),
                 left: current,
+                state: false,
                 started: false,
             })
         }
@@ -174,6 +187,7 @@ pub(super) fn rollback(with_state: bool) -> Step {
         target,
         left: current,
         after,
+        state,
         started,
     } = plan(base)?;
     let name = target.file_name().unwrap_or_default().to_string_lossy();
@@ -185,7 +199,10 @@ pub(super) fn rollback(with_state: bool) -> Step {
              not go back again over what was recorded since."
         ));
     }
-    let with_state = with_state && !started;
+    if state && !with_state {
+        announce("The rollback began with --restore-state and goes on with it.");
+    }
+    let with_state = (with_state || state) && !started;
     let source = if with_state {
         Some(restore_source(&name)?)
     } else {
@@ -230,6 +247,7 @@ pub(super) fn rollback(with_state: bool) -> Step {
         from: current.clone(),
         to: target.clone(),
         previous: after.clone(),
+        state: source.as_ref().map(|(source, _)| source.clone()),
     })?;
     stop_services();
     let restoring = source

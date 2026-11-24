@@ -32,11 +32,12 @@ fn upgrade(base: &Path) -> Unfinished {
     }
 }
 
-fn rollback(base: &Path) -> Unfinished {
+fn rollback(base: &Path, state: bool) -> Unfinished {
     Unfinished::Rollback {
         from: release(base, "0.2"),
         to: release(base, "0.1"),
         previous: Some(release(base, "0.2")),
+        state: state.then(|| fs::canonicalize(base.join("backup")).unwrap()),
     }
 }
 
@@ -114,9 +115,13 @@ fn a_rollback_is_known_on_both_sides_of_its_switch() {
     for (current, previous) in [("0.2", "0.1"), ("0.1", "0.1"), ("0.1", "0.2")] {
         let directory = host(&["0.1", "0.2"], current, Some(previous));
         let base = directory.path();
-        write_in(base, &rollback(base), Some(written())).unwrap();
+        write_in(base, &rollback(base, true), Some(written())).unwrap();
         let seen = read_in(base, Some(&written()), || true).unwrap();
-        assert_eq!(seen, Seen::Holds(rollback(base)), "{current} {previous}");
+        assert_eq!(
+            seen,
+            Seen::Holds(rollback(base, true)),
+            "{current} {previous}"
+        );
     }
 }
 
@@ -144,9 +149,9 @@ fn every_kind(base: &Path) -> Vec<(Unfinished, &'static str, &'static str, Optio
         (upgrade(base), "0.1", "0.0", Some("0.0")),
         (upgrade(base), "0.1", "0.1", Some("0.0")),
         (upgrade(base), "0.2", "0.1", Some("0.1")),
-        (rollback(base), "0.1", "0.2", Some("0.2")),
-        (rollback(base), "0.1", "0.1", Some("0.2")),
-        (rollback(base), "0.2", "0.1", Some("0.1")),
+        (rollback(base, false), "0.1", "0.2", Some("0.2")),
+        (rollback(base, true), "0.1", "0.1", Some("0.2")),
+        (rollback(base, true), "0.2", "0.1", Some("0.1")),
         (restore(base), "0.1", "0.0", Some("0.0")),
     ];
     for (record, ..) in &all {
@@ -213,8 +218,9 @@ fn no_record_holds_once_garrison_started_since_it_was_written() {
     }
 }
 
-/// A record of the format before the stamp is read; as nobody knows when
-/// it was written, it holds only while nothing has started in this boot.
+/// A record of the format before the stamp, without the rollback's state,
+/// is read; as nobody knows when it was written, it holds only while
+/// nothing has started in this boot.
 #[test]
 fn a_record_without_a_stamp_holds_only_until_anything_starts() {
     let directory = host(&["0.1", "0.2"], "0.1", Some("0.1"));
@@ -229,11 +235,11 @@ fn a_record_without_a_stamp_holds_only_until_anything_starts() {
     let nothing = Stamp::of("boot", &[(units::WEB, 0)]);
     assert_eq!(
         read_in(base, Some(&nothing), || true).unwrap(),
-        Seen::Holds(rollback(base))
+        Seen::Holds(rollback(base, false))
     );
     assert_eq!(
         read_in(base, Some(&written()), || true).unwrap(),
-        Seen::Stale(rollback(base))
+        Seen::Stale(rollback(base, false))
     );
 }
 
@@ -249,5 +255,21 @@ fn the_record_is_roots_alone_and_says_what_finishes_it() {
         upgrade(base).finish_first(),
         "An earlier run left an upgrade from 0.1 to 0.2 unfinished; run the installer of 0.2 \
          again to finish it. Nothing was changed."
+    );
+    // A rollback that puts the state back is finished with the state.
+    let finish = rollback(base, true).finish_first();
+    let command = format!(
+        "run `{} install --rollback --restore-state` to finish it",
+        release(base, "0.2").join("bin/garrison").display()
+    );
+    assert!(finish.contains(&command), "{finish}");
+    assert!(
+        finish.contains("with the state from before the upgrade unfinished"),
+        "{finish}"
+    );
+    assert!(
+        !rollback(base, false)
+            .finish_first()
+            .contains("--restore-state")
     );
 }

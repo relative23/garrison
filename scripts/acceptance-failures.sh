@@ -355,6 +355,7 @@ new=$(inside 'cat /root/release/VERSION')
 running "installed" "$old"
 for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check failed_start crash_loop migrated_then_failed concurrent \
     upgrade_killed upgrade_resumed rollback_killed restore_killed upgrade_came_up restore_came_up \
+    rollback_state_killed rollback_came_up \
     restore_refused restore_refused_config restore_policy \
     restore_policy_link restore_room rollback_after_restore elsewhere_unloadable elsewhere_purge rollback_refused \
     interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere unwritten \

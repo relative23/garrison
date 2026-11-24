@@ -1684,8 +1684,9 @@ Notable changes for operators and users. The format follows
   release, is finished by running it again**, with the same installer or
   `garrison upgrade` and the same archive; it switches back where the new
   release did not start, and puts no copy back once Garrison ran since.
-- **A rollback that was interrupted is finished by running it again**; where
-  it returned to a release from before this one, run the command its first
+- **A rollback that was interrupted is finished by running it again**, also
+  with the state from before the upgrade where it began with it; where it
+  returned to a release from before this one, run the command its first
   line names.
 - **A restore that was interrupted is finished by running it again**, and
   names the copy of the state its first run made; where Garrison ran since,

@@ -194,7 +194,8 @@ reboot or by hand, the next run removes it and puts nothing back on its
 word, since the databases may hold what was recorded since; only where the
 new release is current and does not run does it still switch back, once it
 has copied the state as it is to `pre-switch-back-*`. A rollback is
-finished by running it again; one that went back to a release from before this
+finished by running it again, with the state from before the upgrade where it
+began with `--restore-state`; one that went back to a release from before this
 one is finished by the release it left, as its first line says: `sudo
 /opt/garrison/releases/<release>/bin/garrison install --rollback`.
 

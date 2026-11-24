@@ -259,6 +259,42 @@ EVENT
     check "the receiver stores the event $1" "/usr/local/bin/acceptance-event $1"
 }
 
+# Whether the event history holds the event `1` as often as `2` says.
+event_count() {
+    printf '%s' "test \"\$(sqlite3 -readonly /var/lib/garrison/ingest/events.sqlite \
+        \"SELECT count(*) FROM events WHERE event_id = '$1'\")\" $2"
+}
+
+scenario_rollback_state_killed() {
+    step "A rollback with the state from before the upgrade killed as it puts it back, then what the next command names"
+    upgraded
+    # Recorded since the upgrade: the state from before it does not hold it.
+    stored_event rolled-away-event
+    killed_at '/opt/garrison/current/bin/garrison install --rollback --restore-state' \
+        'grep -q -F "Restoring Garrison state from" /root/late.log' 0 'Rolled back to'
+    refused "the next command names the rollback with the state" '/root/release/bin/garrison install' \
+        "install --rollback --restore-state\` to finish it"
+    says "the command it names finishes the rollback with the state" \
+        "/opt/garrison/releases/$new/bin/garrison install --rollback --restore-state" "Rolled back to $old."
+    check "the state from before the upgrade is back in full" "$(event_count rolled-away-event '= 0')"
+    running "after the rollback killed as it put the state back" "$old"
+    upgraded
+}
+
+scenario_rollback_came_up() {
+    step "A rollback with the state from before the upgrade killed once its release came up, then its first line's command"
+    upgraded
+    killed_at '/opt/garrison/current/bin/garrison install --rollback --restore-state' \
+        "$(current_is "$old") && systemctl is-active --quiet garrison-web.service" 0 'Rolled back to'
+    # The release it went back to runs and records on the state that went back.
+    stored_event rolled-back-event
+    says "the command of its first line finishes the rollback" \
+        "/opt/garrison/releases/$new/bin/garrison install --rollback --restore-state" "Rolled back to $old."
+    check "what was recorded once it came up stays" "$(event_count rolled-back-event '-ge 1')"
+    running "after the rollback that came up" "$old"
+    upgraded
+}
+
 scenario_restore_came_up() {
     step "A restore killed once Garrison came up on the state it put back, which then records, then the same restore again"
     upgraded

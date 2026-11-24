@@ -158,7 +158,7 @@ pub(super) fn resolve(record: &Unfinished, base: &Path, file: &Path) -> Step<Str
         }
     }
     let named = |release: Option<&Path>| release.map_or_else(|| "none".to_owned(), name);
-    Ok(format!(
+    let mut said = format!(
         "{} named {}, but Garrison was started since, so the databases may hold what no copy \
          holds: the record was removed, and nothing goes back on its word. current names {}, \
          previous {}.",
@@ -166,7 +166,19 @@ pub(super) fn resolve(record: &Unfinished, base: &Path, file: &Path) -> Step<Str
         record.describe(),
         named(current.as_deref()),
         named(previous.as_deref())
-    ))
+    );
+    // Its state goes back before its target becomes current.
+    if let Unfinished::Rollback {
+        to, state: Some(_), ..
+    } = record
+        && !at(to)
+    {
+        said.push_str(
+            " The state from before the upgrade may have gone back in part; `install \
+             --rollback --restore-state` puts all of it back.",
+        );
+    }
+    Ok(said)
 }
 
 #[cfg(test)]
