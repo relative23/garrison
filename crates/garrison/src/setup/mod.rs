@@ -33,8 +33,9 @@ use garrison_collector::providers::stalwart::REQUIRED_PERMISSIONS as COLLECTOR_P
 use garrison_core::config::Config;
 
 use crate::say;
+use crate::state::State;
 use administrator::Source;
-use api::{Admin, limited, unreadable};
+use api::Admin;
 use folder::{writable, write_secret};
 use keys::Key;
 use objects::{Action, Enabled, Set};
@@ -48,6 +49,7 @@ mod keys;
 mod milter;
 mod objects;
 mod restart;
+mod states;
 mod webhook;
 
 const BROKER_PERMISSIONS: [&str; 4] = [
@@ -99,9 +101,9 @@ pub(crate) enum Command {
     },
 }
 
-fn random(bytes: usize) -> Result<String, String> {
+fn random(bytes: usize) -> Result<String, State> {
     let mut data = vec![0; bytes];
-    getrandom::fill(&mut data).map_err(|error| error.to_string())?;
+    getrandom::fill(&mut data).map_err(states::no_random)?;
     Ok(URL_SAFE_NO_PAD.encode(data))
 }
 
@@ -115,29 +117,19 @@ struct Asked<'a> {
     again: &'a str,
 }
 
-fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), String> {
-    let mended = |error: String| {
-        let again = asked.again;
-        format!(
-            "{}. Run `{again}` again once this is mended.",
-            error.trim_end_matches('.')
-        )
-    };
-    let admin = Admin::new(config, source.authorization().map_err(mended)?);
+fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), State> {
+    let again = |state| states::again(state, asked.again);
+    let admin = Admin::new(config, source.authorization().map_err(again)?);
     // Keys work only from these networks: loopback, and for test setups such as
     // the contract lab's Docker bridge whatever --allow-network adds.
     let mut networks = Enabled::of(LOOPBACK);
     for text in asked.allowed {
-        networks.insert(keys::network(text).map_err(mended)?);
+        networks.insert(keys::network(text).map_err(again)?);
     }
-    configure(&admin, config, asked, &networks).map_err(mended)?;
+    configure(&admin, config, asked, &networks).map_err(again)?;
     source.finish();
     Ok(())
 }
-
-/// What setup says, and nothing else on standard output, where it finds
-/// everything as asked.
-const UNCHANGED: &str = "Stalwart is set up as asked; nothing was changed.";
 
 /// Everything setup makes in Stalwart and here, each step said once it is
 /// done. What Stalwart holds is read first, so that what refuses refuses
@@ -153,7 +145,7 @@ fn configure(
     config: &Config,
     asked: &Asked<'_>,
     networks: &Enabled,
-) -> Result<(), String> {
+) -> Result<(), State> {
     let (directory, rotate) = (&config.credentials_directory, asked.rotate);
     let started = milter::prepare(admin, config)?;
     if let Some(step) = &started {
@@ -180,17 +172,17 @@ fn configure(
     let signing = webhook::key(directory, rotate)?;
     let url = asked.webhook_url;
     let hooked = webhook::ensure(admin, config, url, hook.as_ref(), &signing);
-    steps.push(hooked.map_err(|error| until(error, signing.new, false))?);
+    steps.push(hooked.map_err(|error| states::until(error, signing.new, false))?);
     let scraping = match &metrics {
         Some(found) => exporter::credential(directory, found, rotate)
-            .map_err(|error| until(error, signing.new, false))?,
+            .map_err(|error| states::until(error, signing.new, false))?,
         None => None,
     };
     let new_scrape = scraping.as_ref().is_some_and(|scrape| scrape.new);
     match (&metrics, &scraping) {
         (Some(found), Some(scrape)) => steps.push(
             exporter::ensure(admin, config, found, scrape)
-                .map_err(|error| until(error, signing.new, new_scrape))?,
+                .map_err(|error| states::until(error, signing.new, new_scrape))?,
         ),
         (Some(_), None) => say(&format!("- {}", exporter::theirs(directory))),
         (None, _) => {}
@@ -205,7 +197,7 @@ fn configure(
     // between a change and the reload, only a reload makes it take what it
     // holds, so every run asks for one.
     let reload = admin.set("x:Action/set", &Set::create(Action::ReloadSettings));
-    reload.map_err(|error| until(error, signing.new, new_scrape))?;
+    reload.map_err(|error| states::until(error, signing.new, new_scrape))?;
     // Stalwart signs with the receiver's new key from now on, so the
     // receiver starts again to read it.
     let mut stale = restart::stale(directory);
@@ -218,36 +210,16 @@ fn configure(
     };
     let retired = milter::retire(config)?;
     let changed = started.is_some() || keys_changed || !steps.is_empty();
+    // Where it finds everything as asked, the one line on standard output.
     if !changed && stale.is_empty() && retired.is_empty() {
-        say(UNCHANGED);
+        say(&states::as_asked().to_string());
         return Ok(());
     }
-    match restarted {
-        None => say("Settings reloaded."),
-        Some(line) => say(&format!("Settings reloaded. {line}")),
-    }
+    say(&states::reloaded(restarted.as_ref()).to_string());
     for step in &retired {
         say(&format!("- {step}"));
     }
     Ok(())
-}
-
-/// What goes without a new signature key or scrape credential, in its file
-/// by now, where a run fails before Stalwart has surely reloaded its
-/// settings: Stalwart takes them at a reload, and may have taken them
-/// already or take them later, as at its own restart.
-fn until(error: String, signature: bool, scrape: bool) -> String {
-    let mut said = error;
-    if signature {
-        said.push_str(
-            "; the receiver may refuse Stalwart's batches until setup runs again, and Stalwart \
-             sends them again for an hour",
-        );
-    }
-    if scrape {
-        said.push_str("; the exporter may refuse the collector's scrape until setup runs again");
-    }
-    said
 }
 
 pub(crate) fn run(config: &Config, command: &Command) -> u8 {
@@ -275,13 +247,13 @@ fn run_as(config: &Config, command: &Command, again: Option<&str>) -> u8 {
     });
     let source = match Source::of(admin_credential.as_deref()) {
         Ok(source) => source,
-        Err(message) => {
-            crate::complain(&message);
+        Err(state) => {
+            crate::complain(&state.to_string());
             return 2;
         }
     };
-    if let Err((code, message)) = writable(&config.credentials_directory, again) {
-        crate::complain(&message);
+    if let Err((code, state)) = writable(&config.credentials_directory, again) {
+        crate::complain(&state.to_string());
         return code;
     }
     folder::sweep(&config.credentials_directory);
@@ -294,8 +266,8 @@ fn run_as(config: &Config, command: &Command, again: Option<&str>) -> u8 {
     };
     match setup(config, &source, &asked) {
         Ok(()) => 0,
-        Err(error) => {
-            crate::complain(&error);
+        Err(state) => {
+            crate::complain(&state.to_string());
             1
         }
     }

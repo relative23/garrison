@@ -5,6 +5,7 @@ use garrison_testing::http::{answer, json, serve};
 use serde_json::json;
 
 use super::*;
+use crate::state::State;
 
 pub(super) const OLD: &str = "the-key-stalwart-has-0123456789";
 pub(super) const NEW: &str = "the-key-stalwart-made-0123456789";
@@ -56,8 +57,8 @@ pub(super) fn settled(
     (written, mode): (&str, u32),
     answers: Vec<String>,
     rotate: bool,
-    take_up: &dyn Fn(&Key) -> Result<(), String>,
-) -> (Result<bool, String>, Vec<String>) {
+    take_up: &dyn Fn(&Key) -> Result<(), State>,
+) -> (Result<bool, State>, Vec<String>) {
     let file = key_file(directory);
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     garrison_testing::write_private(&file, written.as_bytes());
@@ -78,7 +79,7 @@ pub(super) fn settled(
 }
 
 /// A service that takes up its new key.
-pub(super) const TAKEN: fn(&Key) -> Result<(), String> = |_| Ok(());
+pub(super) const TAKEN: fn(&Key) -> Result<(), State> = |_| Ok(());
 
 /// Requests in short: the method and what it does, or the request line.
 fn named(requests: &[String]) -> Vec<String> {
@@ -278,17 +279,14 @@ fn a_new_key_is_taken_up_before_the_old_one_goes() {
     let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, true, &take_up);
     // The removal failed, after the service took up the new key.
     assert_eq!(*taken.borrow(), [format!("{NEW}\n")]);
+    let unavailable = states::call_failed("x:ApiKey/set", "Stalwart answered HTTP 503");
     assert_eq!(
         outcome,
-        Err(
-            "x:ApiKey/set: Stalwart answered HTTP 503; the API key 'garrison collector' that the \
-             new one replaced stays"
-                .to_owned()
-        )
+        Err(states::replaced_stays(unavailable, "garrison collector"))
     );
     assert_eq!(requests.len(), 5);
-    let refused =
-        |_: &Key| Err("Restart garrison-collector so it reads the new secret.".to_owned());
+    let asked = || states::old_key_kept(&states::restart_asked("garrison-collector", true));
+    let refused = |_: &Key| Err(asked());
     let answers = vec![
         listed("b", &["old"]),
         session("b"),
@@ -296,10 +294,7 @@ fn a_new_key_is_taken_up_before_the_old_one_goes() {
         answer(200, "{}"),
     ];
     let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, true, &refused);
-    assert_eq!(
-        outcome,
-        Err("Restart garrison-collector so it reads the new secret.".to_owned())
-    );
+    assert_eq!(outcome, Err(asked()));
     // No removal was asked for.
     assert_eq!(requests.len(), 4);
 }
@@ -324,15 +319,10 @@ fn a_full_quota_changes_nothing_and_names_the_keys() {
     let written = format!("{OLD}\n");
     let answers = vec![own, session("b"), full];
     let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, true, &TAKEN);
+    let held = "'garrison collector', 'backup', one without a description (o2)";
     assert_eq!(
         outcome,
-        Err(
-            "Stalwart takes no more API keys in the administrator's account, which holds \
-             'garrison collector', 'backup', one without a description (o2): setup makes a new \
-             key before it removes the one it replaces. Remove a key the account no longer needs \
-             in the Stalwart WebUI; setup made no new key 'garrison collector' and removed none"
-                .to_owned()
-        )
+        Err(states::account_full(held, "garrison collector"))
     );
     assert_eq!(requests.len(), 3);
     let held = std::fs::read_to_string(key_file(directory.path())).unwrap();
@@ -368,10 +358,16 @@ fn a_new_key_whose_file_cannot_be_written_goes_again() {
     let error = make(&admin, &target, COLLECTOR.description, rights).unwrap_err();
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
     let requests = server.requests();
+    // The system's words name a file of a random name beside the target.
+    let unwritten = || states::unwritten(&target, "");
+    let clause = states::taken_out(unwritten()).text;
+    let clause = clause.strip_prefix(&unwritten().text).unwrap();
+    let state = &error.state;
     assert!(
-        error.starts_with(&format!("Could not write {}: ", target.display()))
-            && error.ends_with("; the new API key was taken out of Stalwart again"),
-        "{error}"
+        state.name == unwritten().name
+            && state.text.starts_with(&unwritten().text)
+            && state.text.ends_with(clause),
+        "{state}"
     );
     assert!(
         requests[1].contains(r#""destroy":["fresh"]"#),
@@ -381,7 +377,7 @@ fn a_new_key_whose_file_cannot_be_written_goes_again() {
 }
 
 /// What a try of the collector's key makes of Stalwart's answer `status`.
-fn tried_with(status: u16) -> Result<(), String> {
+fn tried_with(status: u16) -> Result<(), State> {
     let directory = tempfile::tempdir().unwrap();
     let file = key_file(directory.path());
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -399,25 +395,16 @@ fn tried_with(status: u16) -> Result<(), String> {
 /// network.
 #[test]
 fn a_key_stalwart_does_not_take_is_told_from_one_it_refuses_here() {
+    let file = COLLECTOR.file;
     assert_eq!(tried_with(200), Ok(()));
-    assert_eq!(
-        tried_with(401),
-        Err("Stalwart does not take the API key in collector-native-key (HTTP 401)".to_owned())
-    );
-    let bridge = tried_with(403).unwrap_err();
-    assert!(
-        bridge.starts_with(
-            "Stalwart refuses the API key in collector-native-key from this host (HTTP \
-             403): it sees this host at an address the key does not allow."
-        ),
-        "{bridge}"
-    );
+    assert_eq!(tried_with(401), Err(states::key_untaken(file)));
+    assert_eq!(tried_with(403), Err(states::key_refused_here(file)));
     assert_eq!(
         tried_with(404),
-        Err(
-            "Trying collector-native-key: Stalwart answered HTTP 404 for its JMAP session"
-                .to_owned()
-        )
+        Err(states::key_untried(
+            file,
+            "Stalwart answered HTTP 404 for its JMAP session"
+        ))
     );
 }
 
@@ -425,15 +412,25 @@ fn a_key_stalwart_does_not_take_is_told_from_one_it_refuses_here() {
 /// not make Garrison's: setup says to run it as an administrator.
 #[test]
 fn an_account_that_may_not_grant_the_permissions_is_told_so() {
-    let refusal = r#"x:ApiKey/set: {"new":{"description":"You are not authorized to grant permissions: sysRoleGet","type":"forbidden"}}"#;
-    assert!(refused(refusal, "garrison broker").starts_with(
-        "Stalwart refused the administrator the API key 'garrison broker', since it may \
-             not grant the key's permissions: run setup as an administrator who holds them"
-    ));
-    assert_eq!(
-        refused("x:ApiKey/set: Stalwart is unavailable", "garrison broker"),
-        "x:ApiKey/set: Stalwart is unavailable (Stalwart did not return the new API key secret)"
+    let refusal = r#"{"new":{"description":"You are not authorized to grant permissions: sysRoleGet","type":"forbidden"}}"#;
+    let forbidden = || states::stalwart_refused("x:ApiKey/set", refusal);
+    let said = refused(
+        Failed {
+            state: forbidden(),
+            kind: Some("forbidden".to_owned()),
+        },
+        "garrison broker",
     );
+    assert_eq!(
+        (said.state, said.kind.as_deref()),
+        (
+            states::key_not_granted("garrison broker", &forbidden()),
+            Some("forbidden")
+        )
+    );
+    let unavailable = || states::call_failed("x:ApiKey/set", "Stalwart is unavailable");
+    let said = refused(unavailable().into(), "garrison broker");
+    assert_eq!(said.state, states::unreturned(unavailable()));
 }
 
 #[test]
@@ -441,6 +438,11 @@ fn networks_are_written_in_canonical_form() {
     assert_eq!(network("172.17.0.0/16").unwrap(), "172.17.0.0/16");
     assert_eq!(network("10.1.2.3").unwrap(), "10.1.2.3/32");
     assert_eq!(network("fd00::/8").unwrap(), "fd00::/8");
-    assert!(network("172.17.0.1/16").is_err());
-    assert!(network("nonsense").is_err());
+    assert_eq!(
+        network("172.17.0.1/16"),
+        Err(states::network_host_bits("172.17.0.1/16"))
+    );
+    for invalid in ["nonsense", "10.1.2.3/x"] {
+        assert_eq!(network(invalid), Err(states::network_invalid(invalid)));
+    }
 }

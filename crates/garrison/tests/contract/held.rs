@@ -12,8 +12,10 @@ use garrison_testing::lab::Lab;
 use serde_json::json;
 
 use super::keys::key_status;
+use super::names_the_restart;
 use super::scene::{HELD, holding};
 use super::stopper::Stop;
+use super::support;
 use super::together::{Capture, assert_webhook_held, exporter_takes, signed_with};
 
 /// The units of the services that hold the secrets of `HELD`, as setup
@@ -22,16 +24,14 @@ const UNITS: [&str; 2] = ["garrison-broker", "garrison-ingest"];
 /// The request with which Stalwart reloads its settings, and takes a new
 /// signature key and scrape credential.
 pub(super) const RELOAD: &str = "x:Action/set create";
-/// What a run that stops says where the receiver may refuse Stalwart's
-/// batches, or the exporter the collector's scrape, until setup runs again.
-const RECEIVER_TOLD: &str = "Stalwart's batches until setup runs again";
-const EXPORTER_TOLD: &str = "the collector's scrape until setup runs again";
 
-/// Whether a run restarted `unit` or said to restart it.
-fn names_the_restart(said: &str, unit: &str) -> bool {
-    said.lines().any(|line| {
-        (line.contains("Restart ") || line.contains(" restarted")) && line.contains(unit)
-    })
+/// Whether a run that stops says that the receiver may refuse Stalwart's
+/// batches (`setup-signature-pending`), or the exporter the collector's
+/// scrape (`setup-scrape-pending`), until setup runs again.
+fn tells(said: &str, pending: &str) -> bool {
+    support::states(said.as_bytes())
+        .iter()
+        .any(|name| name == pending)
 }
 
 /// The service at `index` of `HELD` started again: whether its file holds a
@@ -137,7 +137,7 @@ pub(super) fn apart(
     let given = |asked: &String| asked == RELOAD || asked.starts_with("x:WebHook/set");
     let changed = run.asked.iter().any(given) || names_the_restart(run.said, UNITS[1]);
     let window = run.request == RELOAD
-        && (run.stop == Stop::Interrupted || run.said.contains(RECEIVER_TOLD));
+        && (run.stop == Stop::Interrupted || tells(run.said, "setup-signature-pending"));
     if changed && !window && signed_with(capture, &[&held[1]]) != Some(0) {
         faults.push("Stalwart signs with another key than the running receiver's".to_owned());
     }
@@ -169,7 +169,7 @@ pub(super) fn reloaded(
                 .to_owned(),
         );
     }
-    if !exporter_takes(lab, credentials) && !said.contains(EXPORTER_TOLD) {
+    if !exporter_takes(lab, credentials) && !tells(said, "setup-scrape-pending") {
         faults.push(
             "once Stalwart reloaded its settings, its exporter refuses the file's credential, \
              and the run did not say so"

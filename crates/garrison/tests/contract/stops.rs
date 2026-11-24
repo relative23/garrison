@@ -45,11 +45,7 @@ use super::stopper::{Stop, Stopper};
 use super::together::{
     Capture, assert_exporter_held, assert_keys_held_in, assert_milter_held, assert_webhook_held,
 };
-use super::{Setup, lab, text};
-
-/// What setup says where the account it makes its keys in has no room for
-/// another one.
-const FULL_TOLD: &str = "Stalwart takes no more API keys in the administrator's account";
+use super::{Setup, lab, names_its_mend, support, text};
 
 /// A setup run of `kind` through a relay that stops it at request `at`:
 /// the request it stopped at, if it got so far, what it said, and what it
@@ -153,7 +149,7 @@ fn mended(
     let mut faults = Vec::new();
     // A run that fails names the run that mends it; one may go on past a
     // lost answer.
-    if output.status.code() == Some(1) && !said.contains("Run `garrison stalwart setup") {
+    if output.status.code() == Some(1) && !names_its_mend(&said) {
         faults.push("the failed run names no run that mends it".to_owned());
     }
     faults.extend(restarted(
@@ -181,7 +177,8 @@ fn mended(
     // nothing and says which keys to remove.
     let refused = kind.full() && !next.is_empty();
     let code = next_run.status.code();
-    if refused && (code != Some(1) || !said_next.contains(FULL_TOLD)) {
+    let full = support::states(&next_run.stderr).contains(&"setup-account-full".to_owned());
+    if refused && (code != Some(1) || !full) {
         faults.push("the next --rotate was not refused for the account's full quota".to_owned());
     } else if !refused && code != Some(0) {
         faults.push("the next run failed".to_owned());

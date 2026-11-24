@@ -1,7 +1,7 @@
-//! Every state's name that an acceptance script looks for is one the
-//! product makes: a script that looks for a name no state has fails for no
-//! reason where it looks for it, and passes for none where it looks for its
-//! absence.
+//! Every state's name that an acceptance script or the Ansible role looks
+//! for is one the product makes: a script that looks for a name no state has
+//! fails for no reason where it looks for it, and passes for none where it
+//! looks for its absence; the role would call every play changed.
 
 // Helpers fail the test by panicking, like the tests themselves.
 #![allow(clippy::unwrap_used)]
@@ -91,10 +91,15 @@ fn every_state_a_script_looks_for_is_one_the_product_makes() {
     let mut names = BTreeSet::new();
     made(&crate_folder.join("src"), &mut names);
     assert!(names.contains("install-running"), "{names:?}");
+    assert!(names.contains("setup-as-asked"), "{names:?}");
     let scripts = crate_folder.join("../../scripts");
+    let mut readers: Vec<_> = std::fs::read_dir(&scripts)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    readers.push(crate_folder.join("../../deploy/ansible/garrison/tasks/main.yml"));
     let mut unknown = Vec::new();
-    for entry in std::fs::read_dir(&scripts).unwrap() {
-        let path = entry.unwrap().path();
+    for path in readers {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };

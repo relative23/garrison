@@ -148,8 +148,8 @@ asked:
 - where the configuration has a `[milter]` section, the macro filter's entry
   among Stalwart's milters (step 10).
 
-A run that finds all of it as asked changes nothing and says "Stalwart is set
-up as asked; nothing was changed."
+A run that finds all of it as asked changes nothing and says `Stalwart is set
+up as asked; nothing was changed. [setup-as-asked]`.
 
 All secrets go to `/etc/garrison/credentials/` (mode 0600), which is root's:
 run setup as root. A file there that other users may read gets a new

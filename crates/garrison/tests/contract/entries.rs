@@ -21,7 +21,7 @@ use garrison_testing::lab::Lab;
 use serde_json::{Value, json};
 
 use super::stopper::{Stop, Stopper};
-use super::{Setup, forget, lab, text};
+use super::{Setup, forget, lab, names_its_mend, text};
 
 /// The name setup writes.
 pub(super) const LOOPBACK: &str = "127.0.0.1";
@@ -310,7 +310,7 @@ pub(super) fn faults(
                 faults.push(format!("the refusal does not name {address}"));
             }
         }
-        if !said.contains("Run `garrison stalwart setup") {
+        if !names_its_mend(said) {
             faults.push("the refusal names no run that mends it".to_owned());
         }
         if before != after {

@@ -23,9 +23,9 @@ scenario_rotation() {
         exit 1
     fi
     check "a rotation restarts the broker with its new key" \
-        'grep -q -F "garrison-broker restarted with the new secret." /root/rotation.log'
+        'grep -F "[setup-restarted]" /root/rotation.log | grep -q -F garrison-broker'
     check "a rotation restarts the receiver with its new key" \
-        'grep -q -F "garrison-ingest restarted with the new secret." /root/rotation.log'
+        'grep -F "[setup-restarted]" /root/rotation.log | grep -q -F garrison-ingest'
     inside 'cp /root/stand-in-keys /root/keys-before-rotation &&
         cp /etc/garrison/credentials/broker-native-key /root/broker-key-before && touch /root/stand-in-refuses'
     if inside "umask 077 && $setup --rotate > /root/rotation.log 2>&1"; then
@@ -39,9 +39,10 @@ scenario_rotation() {
     check "the failed rotation keeps the keys the services hold" \
         'for id in $(cut -d " " -f 1 /root/keys-before-rotation); do grep -q "^$id " /root/stand-in-keys || exit 1; done'
     check "the failed rotation names the run that finishes it" \
-        'grep -q -F "Run \`garrison stalwart setup --rotate\` again once this is mended." /root/rotation.log'
+        'acceptance-state /root/rotation.log setup-key-untaken &&
+            grep -q -F "\`garrison stalwart setup --rotate\`" /root/rotation.log'
     inside 'rm /root/stand-in-refuses /root/keys-before-rotation /root/broker-key-before /root/rotation.log'
-    says_words "setup again once Stalwart takes the keys" "$setup" "Settings reloaded."
+    says "setup again once Stalwart takes the keys" "$setup" setup-reloaded
     check "the receiver holds the signature key of its file" \
         'test "$(cat /run/credentials/garrison-ingest.service/webhook-signature-key)" = \
             "$(cat /etc/garrison/credentials/webhook-signature-key)"'

@@ -10,6 +10,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::states;
+use crate::state::State;
+
 /// A native `{"name": true}` map with every name switched on.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
@@ -21,13 +24,9 @@ pub(super) struct Enabled(BTreeMap<String, bool>);
 pub(super) fn webhook_events(
     recorded: Vec<&'static str>,
     forbidden: &[&str],
-) -> Result<Vec<&'static str>, String> {
+) -> Result<Vec<&'static str>, State> {
     match recorded.iter().find(|kind| forbidden.contains(kind)) {
-        Some(kind) => Err(format!(
-            "This build of Garrison would ask Stalwart for the event {kind}, which Garrison \
-             must never record, so the webhook was not changed. Install Garrison again from \
-             its release archive."
-        )),
+        Some(kind) => Err(states::event_forbidden(kind)),
         None => Ok(recorded),
     }
 }
@@ -107,15 +106,21 @@ pub(super) struct Refused {
 }
 
 impl Refused {
-    /// The first refusal as Stalwart worded it, shortened.
-    pub(super) fn first(self) -> Option<String> {
+    /// The first refusal: JMAP's error type of its first object, where
+    /// Stalwart names one, and the refusal as Stalwart worded it, shortened.
+    pub(super) fn first(self) -> Option<(Option<String>, String)> {
         [self.created, self.updated, self.destroyed]
             .into_iter()
             .flatten()
             .find(|refused| !refused.is_empty())
             .map(|refused| {
+                let kind = refused
+                    .values()
+                    .next()
+                    .and_then(|object| object.get("type"));
+                let kind = kind.and_then(serde_json::Value::as_str).map(str::to_owned);
                 let text = serde_json::Value::Object(refused).to_string();
-                text.chars().take(400).collect()
+                (kind, text.chars().take(400).collect())
             })
     }
 }
@@ -459,13 +464,17 @@ mod tests {
         .unwrap();
         assert_eq!(
             refused.first().unwrap(),
-            r#"{"c7":{"type":"invalidProperties","properties":["scopes"]}}"#
+            (
+                Some("invalidProperties".to_owned()),
+                r#"{"c7":{"type":"invalidProperties","properties":["scopes"]}}"#.to_owned()
+            )
         );
         let long: Refused = serde_json::from_value(json!({
             "notDestroyed": {"k": {"description": "x".repeat(1000)}},
         }))
         .unwrap();
-        assert_eq!(long.first().unwrap().chars().count(), 400);
+        let (kind, text) = long.first().unwrap();
+        assert_eq!((kind, text.chars().count()), (None, 400));
     }
 
     /// Garrison records no event it must never record, so the webhook asks
@@ -478,14 +487,6 @@ mod tests {
         assert_eq!(asked, event_types());
         assert_eq!(asked.len(), 127);
         let broken = webhook_events(vec!["smtp.ehlo", "smtp.raw-input"], &FORBIDDEN_EVENTS);
-        assert_eq!(
-            broken,
-            Err(
-                "This build of Garrison would ask Stalwart for the event smtp.raw-input, which \
-                 Garrison must never record, so the webhook was not changed. Install Garrison \
-                 again from its release archive."
-                    .to_owned()
-            )
-        );
+        assert_eq!(broken, Err(states::event_forbidden("smtp.raw-input")));
     }
 }

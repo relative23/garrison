@@ -14,6 +14,7 @@ use garrison_stalwart::jmap::JmapClient;
 
 use super::Finding;
 use super::states::milter as states;
+use crate::state::State;
 use entries::Entry;
 
 pub(crate) mod entries;
@@ -56,6 +57,11 @@ fn stranded(entry: &Entry) -> Finding {
     } else {
         Finding::fail(states::stranded(entry))
     }
+}
+
+/// What doctor says of such an entry, as setup says it where it refuses.
+pub(crate) fn stray(entry: &Entry) -> State {
+    stranded(entry).state
 }
 
 /// Stalwart's side of a filter the configuration has on `port`, deferring

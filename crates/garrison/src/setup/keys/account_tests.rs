@@ -14,12 +14,10 @@ use super::*;
 /// leave that one valid for good.
 #[test]
 fn a_key_whose_account_is_not_known_stops_the_run_before_anything_changes() {
-    let limited = "Stalwart refused the request for its limit of requests (HTTP 429), whose window \
-                   is a minute unless it was set otherwise";
     for (status, said) in [
-        (429, limited.to_owned()),
-        (503, "Stalwart answered HTTP 503".to_owned()),
-        (404, "Stalwart answered HTTP 404".to_owned()),
+        (429, states::LIMITED),
+        (503, "Stalwart answered HTTP 503"),
+        (404, "Stalwart answered HTTP 404"),
     ] {
         let directory = tempfile::tempdir().unwrap();
         let answers = vec![listed("b", &[]), answer(status, "{}")];
@@ -27,13 +25,7 @@ fn a_key_whose_account_is_not_known_stops_the_run_before_anything_changes() {
         let (outcome, requests) =
             settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
         let path = directory.path().join("credentials/collector-native-key");
-        assert_eq!(
-            outcome,
-            Err(format!(
-                "Asking Stalwart whose API key {} holds: {said}",
-                path.display()
-            ))
-        );
+        assert_eq!(outcome, Err(states::owner_unknown(&path, said)));
         assert_eq!(requests.len(), 2, "{status}");
     }
 }
@@ -75,16 +67,12 @@ fn an_account_the_administrator_may_not_see_is_said_as_such() {
     let written = format!("{OLD}\n");
     let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
     let path = directory.path().join("credentials/collector-native-key");
-    assert_eq!(
-        outcome,
-        Err(format!(
-            "Stalwart does not show the administrator the account that the API key in {} \
-             belongs to: run setup as an administrator who holds the keys' permissions, as one \
-             with Stalwart's administrator role (x:ApiKey/get: accountNotFound The accountId \
-             does not correspond to a valid account)",
-            path.display()
-        ))
+    let missing = states::stalwart_error(
+        "x:ApiKey/get",
+        "accountNotFound",
+        "The accountId does not correspond to a valid account",
     );
+    assert_eq!(outcome, Err(states::account_unseen(&path, &missing)));
     assert!(
         requests[2].contains(r#""accountId":"c""#),
         "{}",
