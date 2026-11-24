@@ -317,10 +317,10 @@ Notable changes for operators and users. The format follows
   sending addresses.** Its time or fields of another type made all their
   cards Unknown; such an event is now left out, and the cards say how many
   were.
-- **The Test messages card is no longer in order where the server refuses
-  every message.** A refusal counts only where the server takes a harmless
-  message sent after it, which lands in the test mailbox once a day by
-  default.
+- **The Test messages card is in order only where the server refused each
+  test twice and then took a harmless message, and is a warning where it
+  refuses that too.** A harmless message lands in the test mailbox once a
+  day by default.
 - **The milter verdicts card counts a milter's own replies apart, and
   warns where a milter judged nothing.** It counted a reply of the milter's
   own as deferred, though such a reply refuses a message as well: Garrison's

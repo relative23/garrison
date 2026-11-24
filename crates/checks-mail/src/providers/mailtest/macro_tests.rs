@@ -17,16 +17,21 @@ fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
     let refusal = "550 5.7.1 Message refused: an attached Office document contains macros.";
     let (port, handle) = server([
         "550 virus",
+        "550 virus",
+        "550 spam",
         "550 spam",
         refusal,
+        refusal,
         "250 2.0.0 Message queued with id c.",
+        "250 2.0.0 Message queued with id d.",
     ]);
     let memory = Remembered::default();
     let refused = collected(&with_macros(port), &memory, 0, &[]);
     assert_eq!(refused.state, State::Ok, "{:?}", refused.findings);
     assert_eq!(results(&refused)[2], format!("refused: {refusal}"));
+    assert_eq!(&results(&refused)[3..], ["accepted", "accepted"]);
     let sessions = handle.join().unwrap();
-    let message = &sessions[2];
+    let message = &sessions[4];
     assert!(
         message.contains(
             "Subject: Garrison mail test: Office document with macros (test document)\r\n"
@@ -43,11 +48,23 @@ fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
     ));
     // No line near the 998 bytes a mail's line may have.
     assert!(body.lines().all(|line| line.len() <= 100), "{body}");
+    // Beside it a harmless document of the same build, in which the scan
+    // finds nothing.
+    let harmless = &sessions[7];
+    assert!(harmless.contains("Subject: Garrison mail test: Harmless document (control)\r\n"));
+    assert!(harmless.contains("filename=\"garrison-harmless-test.docx\"\r\n"));
+    let body = harmless.split_once("\r\nDATA\r\n").unwrap().1;
+    assert!(matches!(
+        garrison_milter::scan::macros(body.as_bytes()),
+        garrison_milter::scan::Outcome::Clean
+    ));
 
     // The result was kept with the macro test: switched off, the provider
     // tests anew, without the document; and on again likewise.
     let (port, handle) = server([
         "550 virus",
+        "550 virus",
+        "550 spam",
         "550 spam",
         "250 2.0.0 Message queued with id d.",
     ]);
@@ -56,11 +73,13 @@ fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
         results(&without),
         ["refused: 550 virus", "refused: 550 spam", "accepted"]
     );
-    assert_eq!(handle.join().unwrap().len(), 3);
+    assert_eq!(handle.join().unwrap().len(), 5);
 
     // A document that is taken means nothing filters macros.
     let (port, handle) = server([
         "550 virus",
+        "550 virus",
+        "550 spam",
         "550 spam",
         "250 2.0.0 Message queued with id a.",
         "250 2.0.0 Message queued with id e.",

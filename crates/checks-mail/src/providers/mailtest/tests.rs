@@ -122,14 +122,16 @@ pub(super) fn results(observation: &Observation) -> Vec<&str> {
 fn a_refused_test_file_and_spam_text_filed_as_spam_are_in_order() {
     let (port, handle) = server([
         "550 5.7.1 Virus found: Eicar-Signature",
+        "550 5.7.1 Virus found: Eicar-Signature",
         "250 2.0.0 Message queued with id 4b786a6d0a00200.",
         "250 2.0.0 Message queued with id 4b786a6d0a00300.",
     ]);
     let provider = provider(port);
     let memory = Remembered::default();
     // Right after the session nothing is known of the accepted message yet.
-    // The harmless message after the refusal was taken, so the refusal is
-    // the scanner's.
+    // The test file was refused again when it was sent a second time, and
+    // the harmless message after it was taken, so the refusal is the
+    // scanner's.
     let first = collected(&provider, &memory, 0, &[]);
     assert_eq!(first.state, State::Unknown);
     assert_eq!(
@@ -159,7 +161,9 @@ fn a_refused_test_file_and_spam_text_filed_as_spam_are_in_order() {
     assert_dated(&filed, 0, 86_400);
     assert_eq!(filed.modules, [ModuleId::Antivirus, ModuleId::Spam].into());
     let sessions = handle.join().unwrap();
-    assert_eq!(sessions.len(), 3);
+    assert_eq!(sessions.len(), 4);
+    // The copy sent again is the same message under an ID of its own.
+    assert_eq!(sessions[1].replace(".eicar.again@", ".eicar@"), sessions[0]);
     // A stranger's session: no sign-in, the null sender, the named recipient.
     assert!(
         sessions[0].contains("MAIL FROM:<>\r\nRCPT TO:<garrison-test@example.test>\r\nDATA\r\n"),
@@ -171,8 +175,8 @@ fn a_refused_test_file_and_spam_text_filed_as_spam_are_in_order() {
     assert!(sessions[0].contains("EICAR-STANDARD-ANTIVIRUS-TEST-FILE"));
     // Stalwart takes the spam text for the test only as the whole subject.
     let text = "XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X";
-    assert!(sessions[1].contains(&format!("Subject: {text}\r\n")));
-    assert!(sessions[1].contains(&format!("\r\n\r\n{text}\r\n.\r\n")));
+    assert!(sessions[2].contains(&format!("Subject: {text}\r\n")));
+    assert!(sessions[2].contains(&format!("\r\n\r\n{text}\r\n.\r\n")));
     assert!(sessions[0].contains("Date: Thu, 29 Oct 2026 12:00:00 +0000\r\n"));
 }
 
@@ -232,9 +236,13 @@ fn a_message_the_server_defers_is_not_tested_and_is_tried_again_within_the_hour(
         DEFERRED,
         DEFERRED,
         "550 virus",
+        "550 virus",
+        "550 spam",
         "550 spam",
         "550 macro",
+        "550 macro",
         "250 2.0.0 Message queued with id c.",
+        "250 2.0.0 Message queued with id d.",
     ]);
     let memory = Remembered::default();
     let deferred = collected(&with_macros(port), &memory, 0, &[]);
@@ -257,7 +265,7 @@ fn a_message_the_server_defers_is_not_tested_and_is_tried_again_within_the_hour(
     assert_dated(&deferred, 0, AGAIN);
     let again = collected(&with_macros(port), &memory, AGAIN, &[]);
     assert_eq!(again.state, State::Ok, "{:?}", again.findings);
-    assert_eq!(handle.join().unwrap().len(), 7);
+    assert_eq!(handle.join().unwrap().len(), 11);
 }
 
 /// What a server answers that refuses every message at its end: a scanner
@@ -266,15 +274,17 @@ fn a_message_the_server_defers_is_not_tested_and_is_tried_again_within_the_hour(
 const REFUSING: &str = "550 5.7.1 Service unavailable";
 
 #[test]
-fn a_refusal_where_the_server_refuses_a_harmless_message_too_is_not_tested() {
-    let (port, handle) = server([REFUSING; 3]);
+fn a_refusal_where_the_server_refuses_a_harmless_message_too_is_not_tested_and_a_warning() {
+    let (port, handle) = server([REFUSING; 5]);
     let memory = Remembered::default();
     let refused = collected(&provider(port), &memory, 0, &[]);
     let like = format!("not tested: refused like a harmless message: {REFUSING}");
+    // A server that takes no mail is told of: a warning, whose finding
+    // comes first, as a notification carries the first.
     assert_eq!(
         (refused.state, results(&refused)),
         (
-            State::Unknown,
+            State::Warning,
             vec![
                 like.as_str(),
                 like.as_str(),
@@ -283,19 +293,20 @@ fn a_refusal_where_the_server_refuses_a_harmless_message_too_is_not_tested() {
         )
     );
     assert_eq!(
-        refused.findings.last().map(String::as_str),
+        refused.findings.first().map(String::as_str),
         Some(
             "Harmless message (control): refused: 550 5.7.1 Service unavailable. The server \
              refuses mail that carries nothing to refuse, as clamav-milter does with `OnFail \
-             Reject` while clamd is down, so no refusal of a test counts."
+             Reject` while clamd is down, or a policy that refuses the tests' sender, which \
+             `sender` changes; no refusal of a test counts."
         )
     );
     // Not a result to keep for a day.
     assert_dated(&refused, 0, AGAIN);
     let sessions = handle.join().unwrap();
-    assert_eq!(sessions.len(), 3);
-    // The third message carries nothing that a scanner or a filter refuses.
-    let harmless = &sessions[2];
+    assert_eq!(sessions.len(), 5);
+    // The last message carries nothing that a scanner or a filter refuses.
+    let harmless = &sessions[4];
     assert!(
         harmless.contains("Subject: Garrison mail test: Harmless message (control)\r\n"),
         "{harmless}"
@@ -309,6 +320,8 @@ fn a_refusal_where_the_server_refuses_a_harmless_message_too_is_not_tested() {
     // and their refusals count.
     let (port, handle) = server([
         "550 virus",
+        "550 virus",
+        "550 spam",
         "550 spam",
         "250 2.0.0 Message queued with id c.",
     ]);
@@ -320,13 +333,19 @@ fn a_refusal_where_the_server_refuses_a_harmless_message_too_is_not_tested() {
             vec!["refused: 550 virus", "refused: 550 spam", "accepted"]
         )
     );
-    assert_eq!(handle.join().unwrap().len(), 3);
+    assert_eq!(handle.join().unwrap().len(), 5);
 }
 
 #[test]
 fn a_refusal_without_a_harmless_message_taken_beside_it_is_not_tested() {
     // The harmless message did not get through: nothing to compare with.
-    let (port, handle) = server(["550 virus", "550 spam", "at RCPT: 451 4.7.1 not now"]);
+    let (port, handle) = server([
+        "550 virus",
+        "550 virus",
+        "550 spam",
+        "550 spam",
+        "at RCPT: 451 4.7.1 not now",
+    ]);
     let card = collected(&provider(port), &Remembered::default(), 0, &[]);
     assert_eq!(
         (card.state, results(&card)),
@@ -340,7 +359,7 @@ fn a_refusal_without_a_harmless_message_taken_beside_it_is_not_tested() {
         )
     );
     assert_dated(&card, 0, AGAIN);
-    assert_eq!(handle.join().unwrap().len(), 3);
+    assert_eq!(handle.join().unwrap().len(), 5);
 }
 
 #[test]

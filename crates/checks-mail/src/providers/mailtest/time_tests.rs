@@ -45,6 +45,7 @@ fn a_server_that_never_greets_costs_one_wait_and_the_next_run_sends_the_rest() {
     let (port, handle) = server([
         SILENT,
         "550 5.7.1 Message rejected as spam",
+        "550 5.7.1 Message rejected as spam",
         "250 2.0.0 Message queued with id c.",
     ]);
     let provider = provider(port);
@@ -63,9 +64,10 @@ fn a_server_that_never_greets_costs_one_wait_and_the_next_run_sends_the_rest() {
     );
     assert_eq!(first.state, State::Unknown);
     // The next run, a minute later, sends what this one had no time for,
-    // and the harmless message after its refusal: three sessions in all.
+    // twice where it is refused, and the harmless message after it: four
+    // sessions in all.
     let (next, _) = collected(&provider, &memory, 60, Deadline::NONE);
-    assert_eq!(handle.join().unwrap().len(), 3);
+    assert_eq!(handle.join().unwrap().len(), 4);
     assert_eq!(
         results(&next),
         [
@@ -77,12 +79,15 @@ fn a_server_that_never_greets_costs_one_wait_and_the_next_run_sends_the_rest() {
 }
 
 #[test]
-fn a_harmless_message_the_run_had_no_time_for_is_sent_in_the_next_run_alone() {
-    // The spam text's session uses up the run's time, so the harmless
-    // message after the test file's refusal is not sent.
+fn a_refusal_the_run_had_no_time_to_compare_is_sent_again_with_its_harmless_message() {
+    // The spam text's session uses up the run's time, so no harmless
+    // message follows the test file's refusals.
     let (port, handle) = server([
         "550 5.7.1 Virus found",
+        "550 5.7.1 Virus found",
         SILENT,
+        "550 5.7.1 Virus found",
+        "550 5.7.1 Virus found",
         "250 2.0.0 Message queued with id c.",
     ]);
     let provider = provider(port).within(Duration::from_secs(1));
@@ -100,18 +105,20 @@ fn a_harmless_message_the_run_had_no_time_for_is_sent_in_the_next_run_alone() {
         (first.state, results(&first)),
         (State::Unknown, vec![unsure, late, NOT_SENT])
     );
-    // The next run sends it alone, and the refusal counts.
+    // The next run sends the test file again with a harmless message of its
+    // own, and the refusal counts.
     let (next, _) = collected(&provider, &memory, 60, Deadline::NONE);
     assert_eq!(
         results(&next),
         ["refused: 550 5.7.1 Virus found", late, "accepted"]
     );
     let sessions = handle.join().unwrap();
-    assert_eq!(sessions.len(), 3);
+    assert_eq!(sessions.len(), 6);
+    assert!(sessions[3].contains("EICAR"), "{}", sessions[3]);
     assert!(
-        sessions[2].contains("Harmless message (control)"),
+        sessions[5].contains("Harmless message (control)"),
         "{}",
-        sessions[2]
+        sessions[5]
     );
 }
 

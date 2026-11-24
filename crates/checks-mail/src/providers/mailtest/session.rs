@@ -67,9 +67,9 @@ pub(super) fn queue_id(reply: &str) -> Option<String> {
 }
 
 impl MailTest {
-    /// One session that hands `test` to the server, all of it within the
-    /// session's time.
-    pub(super) fn send(&self, context: &Context<'_>, test: Test) -> Sent {
+    /// One session that hands `test` to the server, or its copy sent again
+    /// where `again`, all of it within the session's time.
+    pub(super) fn send(&self, context: &Context<'_>, test: Test, again: bool) -> Sent {
         let failed = |reply: String| Sent {
             reply,
             ..Sent::default()
@@ -100,6 +100,7 @@ impl MailTest {
             date: time::mail_date(context.now),
             stamp: context.now.as_second(),
             host: name,
+            again,
         });
         let steps = [
             (None, 220),
@@ -123,8 +124,7 @@ impl MailTest {
                         reply: said,
                         code,
                         at_data: index == 5,
-                        at: None,
-                        cut: false,
+                        ..Sent::default()
                     };
                     if code != *expected {
                         break;

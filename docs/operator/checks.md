@@ -491,19 +491,26 @@ The collector hands two messages to the local SMTP listener without signing
 in: the antivirus test file (EICAR), which a scanner must refuse, and the spam
 test text (GTUBE), which must be refused or filed as spam. The event history
 shows how an accepted one was filed. The check runs only where you name a
-`recipient`. Make a mailbox of its own for it: it receives a harmless message
-in each round in which a test is refused, a day by default, and one from a
-test that goes wrong.
+`recipient`. Make a mailbox of its own for it: it receives a harmless message,
+with `macro_document` a harmless document too, in each round in which the
+server refuses a test, one round a day by default and two where a test was
+tried again an hour later, and one from a test that goes wrong.
 
 Each test is sent again `every_hours` after it was sent. One that did not
 happen, because no session came about, the server turned it away before
 the message or it deferred the message with a temporary reply (4xx), is
 "not tested": it alone is tried again after an hour, and the table says when
-each test was sent. A refusal counts only where the server takes the
-harmless message the collector sends after it in the same run ("Garrison
-mail test: Harmless message (control)"); where the server refuses that one
-too, as clamav-milter does with `OnFail Reject` while clamd is down, or it
-does not get through, the refused tests are "not tested" as well. A
+each test was sent. A refused test is sent again at once, and its refusal
+counts only where the server refuses that copy too and takes the harmless
+message of the same build that the collector sends after the run's tests
+("Garrison mail test: Harmless message (control)", beside the test document
+a harmless document): a server that refuses by turns takes one of the
+copies, which counts as taken, and a policy on attachments refuses the
+harmless document. Where the server refuses the harmless message, as
+clamav-milter does with `OnFail Reject` while clamd is down, or a policy
+that refuses the tests' sender, the card is a warning, of which an operator
+is told; where it does not get through, the refused tests are "not tested".
+A refusal that an earlier release kept is sent again in the first run. A
 deferral is no verdict: Stalwart defers a message
 where a milter defers it, as a scanner that cannot scan does
 (clamav-milter's `OnFail Defer` while clamd is down), and where it cannot
