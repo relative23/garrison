@@ -22,11 +22,14 @@ pub(crate) fn bind_role(lab: &Lab, directory: &Path) {
         directory,
         &["access", "bind-role", &role, "--profile", "administrator"],
     );
-    assert_eq!(bound.status.code(), Some(0), "{}", text(&bound));
+    let said = text(&bound);
+    assert_eq!(bound.status.code(), Some(0), "{said}");
+    // A note that the broker cannot read the file is this host's, not the role's.
     assert!(
-        text(&bound).contains("Saved ") && !text(&bound).contains("Note:"),
-        "{}",
-        text(&bound)
+        said.contains("Saved ")
+            && !said.contains("Note: role")
+            && !said.contains("cannot be evaluated"),
+        "{said}"
     );
     for unknown in ["zzzzzzzz", "no-such-role"] {
         let refused = run(
