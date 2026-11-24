@@ -5,8 +5,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use rusqlite::Connection;
+use rusqlite::types::ValueRef;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::providers::history;
 
 pub(super) const DAY: i64 = 86_400;
 pub(super) const DAYS: i64 = 7;
@@ -66,12 +69,18 @@ const VERDICTS: [&str; 4] = [
     "milter.action-reply-code",
 ];
 
-/// Mail that came in on port 25 in the week, whose first second is `?1`:
-/// the port is a field of the event, and a row whose fields are no JSON is
-/// none of it.
-const INBOUND: &str = "m.type = 'smtp.mail-from' AND m.created_at >= ?1 AND CASE WHEN \
-                       typeof(m.fields) = 'text' AND json_valid(m.fields) THEN \
-                       json_extract(m.fields, '$.localPort') END = 25";
+/// Whether an event's time and fields are as the receiver writes them: a
+/// whole second and a JSON object in text. `json_type` fails on text that
+/// is no JSON, so it is asked only of valid JSON.
+const READABLE: &str = "typeof(m.created_at) = 'integer' AND CASE WHEN typeof(m.fields) = 'text' \
+                        AND json_valid(m.fields) THEN json_type(m.fields) = 'object' ELSE 0 END";
+/// Mail that came in on port 25, of the week's MAIL FROMs: the port is a
+/// field of the event.
+const PORT_25: &str = "CASE WHEN typeof(m.created_at) = 'integer' AND typeof(m.fields) = 'text' \
+                       AND json_valid(m.fields) THEN CASE WHEN json_type(m.fields) = 'object' THEN \
+                       json_extract(m.fields, '$.localPort') END END = 25";
+/// The MAIL FROMs of the week, whose first second is `?1`.
+const MAIL_FROM: &str = "m.type = 'smtp.mail-from' AND m.created_at >= ?1";
 /// Whether the session of such mail said STARTTLS in the week, as one that
 /// did before its MAIL FROM had TLS.
 const SECURED: &str = "EXISTS (SELECT 1 FROM events s WHERE s.span_id = m.span_id AND \
@@ -103,6 +112,11 @@ pub(super) struct Week {
     /// more than it shows.
     #[serde(default)]
     pub(super) listed: BTreeMap<String, usize>,
+    /// Events left out of the counts and lists, as a value in them is of
+    /// another type than the receiver writes: a time that is no whole
+    /// second, fields that are no JSON object.
+    #[serde(default)]
+    pub(super) unreadable: u64,
     /// Whether a milter deferred every message that the milters answered
     /// since yesterday (UTC), and there was one.
     #[serde(default)]
@@ -165,17 +179,20 @@ fn ranked<T: Clone>(
     rows
 }
 
-/// The fields of the newest events of `kind` since `since`, with their span,
-/// as many as `limits` take; `kind` goes to `cut` where there are more.
+/// The fields of the newest events of `kind` since `since`, as many as
+/// `limits` take; `kind` goes to the week's cuts where there are more. An
+/// event whose fields cannot be read is counted as left out, one whose time
+/// is no whole second is left out here as `counted` counts it.
 fn events(
     db: &Connection,
     kind: &str,
     since: i64,
     limits: &Limits,
-    cut: &mut BTreeSet<String>,
-) -> rusqlite::Result<Vec<(Option<String>, Value)>> {
+    week: &mut Week,
+) -> rusqlite::Result<Vec<Value>> {
     let mut statement = db.prepare_cached(
-        "SELECT span_id,fields FROM events WHERE type=?1 AND created_at>=?2 ORDER BY seq DESC LIMIT ?3",
+        "SELECT created_at,fields FROM events WHERE type=?1 AND created_at>=?2 ORDER BY seq DESC \
+         LIMIT ?3",
     )?;
     let limit = i64::try_from(limits.events + 1).unwrap_or(i64::MAX);
     let mut rows = statement.query((kind, since, limit))?;
@@ -183,13 +200,16 @@ fn events(
     let mut read = 0;
     while let Some(row) = rows.next()? {
         if read == limits.events {
-            cut.insert(kind.to_owned());
+            week.cut.insert(kind.to_owned());
             break;
         }
         read += 1;
-        let text: String = row.get(1)?;
-        if let Ok(fields) = serde_json::from_str::<Value>(&text) {
-            found.push((row.get(0)?, fields));
+        if !matches!(row.get_ref(0)?, ValueRef::Integer(_)) {
+            continue;
+        }
+        match history::fields(row.get_ref(1)?) {
+            Some(fields) => found.push(fields),
+            None => week.unreadable += 1,
         }
     }
     Ok(found)
@@ -205,19 +225,25 @@ fn failed(fields: &Value) -> bool {
 }
 
 /// How many events of each counted type each day had, and the last
-/// training run.
+/// training run; an event whose time is no whole second is counted as left
+/// out.
 fn counted(db: &Connection, week: &mut Week, since: i64) -> rusqlite::Result<()> {
     // The index holds type and time, so the counts need no event's fields.
     let marks = vec!["?"; COUNTED.len()].join(",");
     let mut statement = db.prepare(&format!(
-        "SELECT type,(created_at-?1)/{DAY},count(*) FROM events WHERE created_at>=?1 \
-         AND type IN ({marks}) GROUP BY 1,2"
+        "SELECT type,CASE WHEN typeof(created_at)='integer' THEN (created_at-?1)/{DAY} END,\
+         count(*) FROM events WHERE created_at>=?1 AND type IN ({marks}) GROUP BY 1,2"
     ))?;
     let mut values: Vec<rusqlite::types::Value> = vec![since.into()];
     values.extend(COUNTED.iter().map(|kind| (*kind).to_owned().into()));
     let mut rows = statement.query(rusqlite::params_from_iter(values))?;
     while let Some(row) = rows.next()? {
-        let (kind, day, count): (String, i64, i64) = (row.get(0)?, row.get(1)?, row.get(2)?);
+        let (kind, day, count): (String, Option<i64>, i64) =
+            (row.get(0)?, row.get(1)?, row.get(2)?);
+        let Some(day) = day else {
+            week.unreadable += u64::try_from(count).unwrap_or(0);
+            continue;
+        };
         let slots = week
             .counts
             .entry(kind)
@@ -229,7 +255,8 @@ fn counted(db: &Connection, week: &mut Week, since: i64) -> rusqlite::Result<()>
     drop(rows);
     drop(statement);
     week.last_training = db.query_row(
-        "SELECT MAX(created_at) FROM events WHERE type='spam.train-completed'",
+        "SELECT MAX(created_at) FROM events WHERE type='spam.train-completed' AND \
+         typeof(created_at)='integer'",
         [],
         |row| row.get(0),
     )?;
@@ -244,9 +271,10 @@ fn counted(db: &Connection, week: &mut Week, since: i64) -> rusqlite::Result<()>
 fn deferred_all(db: &Connection, since: i64) -> rusqlite::Result<bool> {
     db.query_row(
         "SELECT EXISTS (SELECT 1 FROM events WHERE type = 'milter.action-temp-fail' AND \
-         created_at >= ?1) AND NOT EXISTS (SELECT 1 FROM events a WHERE a.type IN \
-         (?2, ?3, ?4, ?5) AND a.created_at >= ?1 AND (a.span_id IS NULL OR NOT EXISTS (SELECT \
-         1 FROM events d WHERE d.span_id = a.span_id AND d.type = 'milter.action-temp-fail')))",
+         created_at >= ?1 AND typeof(created_at) = 'integer') AND NOT EXISTS (SELECT 1 FROM \
+         events a WHERE a.type IN (?2, ?3, ?4, ?5) AND a.created_at >= ?1 AND \
+         typeof(a.created_at) = 'integer' AND (a.span_id IS NULL OR NOT EXISTS (SELECT 1 FROM \
+         events d WHERE d.span_id = a.span_id AND d.type = 'milter.action-temp-fail')))",
         (since, VERDICTS[0], VERDICTS[1], VERDICTS[2], VERDICTS[3]),
         |row| row.get(0),
     )
@@ -256,19 +284,24 @@ fn deferred_all(db: &Connection, since: i64) -> rusqlite::Result<bool> {
 fn transit(db: &Connection, week: &mut Week, since: i64, limits: &Limits) -> rusqlite::Result<()> {
     // Both numbers of incoming mail count all of it in one query, so that
     // they are of one and the same stretch of time.
-    let (secured, all): (i64, i64) = db.query_row(
-        &format!("SELECT coalesce(sum({SECURED}), 0), count(*) FROM events m WHERE {INBOUND}"),
+    let (secured, all, unreadable): (i64, i64, i64) = db.query_row(
+        &format!(
+            "SELECT coalesce(sum(CASE WHEN {PORT_25} THEN {SECURED} END), 0), \
+             coalesce(sum({PORT_25}), 0), coalesce(sum(NOT ({READABLE})), 0) FROM events m \
+             WHERE {MAIL_FROM}"
+        ),
         [since],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?;
     week.inbound = (
         u64::try_from(secured).unwrap_or(0),
         u64::try_from(all - secured).unwrap_or(0),
     );
+    week.unreadable += u64::try_from(unreadable).unwrap_or(0);
     // The sender domains of the newest of what came in without TLS.
     let mut statement = db.prepare(&format!(
-        "SELECT m.fields FROM events m WHERE {INBOUND} AND NOT {SECURED} ORDER BY m.seq DESC \
-         LIMIT ?2"
+        "SELECT m.fields FROM events m WHERE {MAIL_FROM} AND {PORT_25} AND NOT {SECURED} \
+         ORDER BY m.seq DESC LIMIT ?2"
     ))?;
     let limit = i64::try_from(limits.events + 1).unwrap_or(i64::MAX);
     let mut rows = statement.query((since, limit))?;
@@ -299,7 +332,7 @@ fn transit(db: &Connection, week: &mut Week, since: i64, limits: &Limits) -> rus
     );
     let mut plain_out: HashMap<String, u64> = HashMap::new();
     for kind in ["delivery.start-tls-unavailable", "delivery.start-tls-error"] {
-        for (_, fields) in events(db, kind, since, limits, &mut week.cut)? {
+        for fields in events(db, kind, since, limits, week)? {
             let host = fields["hostname"]
                 .as_str()
                 .or_else(|| fields["domain"].as_str());
@@ -339,7 +372,7 @@ pub(super) fn week(
 
     let mut filed: HashMap<String, (u64, u64)> = HashMap::new();
     for (kind, spam) in [("message-ingest.ham", false), ("message-ingest.spam", true)] {
-        for (_, fields) in events(db, kind, since, limits, &mut week.cut)? {
+        for fields in events(db, kind, since, limits, &mut week)? {
             let domain = fields["accountId"]
                 .as_i64()
                 .and_then(|id| accounts.get(&id))
@@ -364,7 +397,7 @@ pub(super) fn week(
     .collect();
 
     let mut failing: HashMap<String, (u64, u64)> = HashMap::new();
-    for (_, fields) in events(db, "smtp.spf-from-fail", since, limits, &mut week.cut)? {
+    for fields in events(db, "smtp.spf-from-fail", since, limits, &mut week)? {
         if let Some(domain) = fields["from"]
             .as_str()
             .and_then(domain)
@@ -373,7 +406,7 @@ pub(super) fn week(
             failing.entry(domain).or_default().0 += 1;
         }
     }
-    for (_, fields) in events(db, "smtp.dmarc-fail", since, limits, &mut week.cut)? {
+    for fields in events(db, "smtp.dmarc-fail", since, limits, &mut week)? {
         if let Some(domain) = fields["domain"].as_str().filter(|_| failed(&fields)) {
             failing.entry(domain.to_lowercase()).or_default().1 += 1;
         }

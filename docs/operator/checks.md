@@ -149,7 +149,9 @@ bounces. Where there are more, the usual number is that of the whole days
 before the last one that were read, none is named where fewer than three
 were, and the card says so; where the last day itself was not read whole,
 or bounces were left, its figures are a part, and the card is Partial where
-it would be OK.
+it would be OK. An event whose time or fields are not what the event
+receiver writes, as in a history damaged or edited by hand, is left out:
+the card says how many were, and is Partial where it would be OK.
 
 ## `tls`
 
@@ -209,7 +211,10 @@ without TLS, are made from the newest 50 000 events of each kind in the
 seven days, and show the 20 busiest rows. A card whose list read only the
 newest events says so and is Partial where it would be OK; one that shows
 the 20 busiest of more says how many there are. The counts by day and the
-numbers of mail with and without TLS count every event of the week.
+numbers of mail with and without TLS count every event of the week. An event
+whose time or fields are not what the event receiver writes, as in a history
+damaged or edited by hand, is left out: every card says how many were, and
+is Partial where it would be OK.
 
 A summary is in order only over a history that holds the week. While the
 event receiver has not reported for five minutes or runs without storing

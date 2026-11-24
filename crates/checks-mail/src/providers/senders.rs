@@ -87,6 +87,10 @@ struct Read {
     /// Why no usual volume is named, where the days before have a gap.
     #[serde(default)]
     unusual_unknown: Option<String>,
+    /// Events left out, as a value in them is of another type than the
+    /// receiver writes.
+    #[serde(default)]
+    unreadable: u64,
 }
 
 #[derive(Debug)]
@@ -290,7 +294,9 @@ impl Provider for Senders {
             (None, true) if read.uncovered.is_some() => State::Unknown,
             // Nor over a day that was read in part.
             (None, true)
-                if read.bounces_cut || read.cut.as_ref().is_some_and(|cut| !cut.last_day) =>
+                if read.bounces_cut
+                    || read.cut.as_ref().is_some_and(|cut| !cut.last_day)
+                    || read.unreadable > 0 =>
             {
                 State::Partial
             }
@@ -306,6 +312,8 @@ impl Provider for Senders {
             findings.push(format!("No usual volume is named: {reason}."));
         }
         findings.extend(self.cut_findings(read));
+        findings
+            .extend(super::history::left_out(read.unreadable).filter(|_| read.problem.is_none()));
         let column = |label: &str, format| Column {
             label: label.to_owned(),
             format,

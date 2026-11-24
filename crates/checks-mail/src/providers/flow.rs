@@ -221,7 +221,8 @@ impl Flow {
 
     /// An observation of this provider; Unknown, with the reason, where the
     /// history could not be read, and where it would be in order over a
-    /// history that does not hold the week.
+    /// history that does not hold the week; Partial, with their number,
+    /// where it would be in order and the reading left events out.
     fn observation(
         &self,
         context: &Context<'_>,
@@ -234,6 +235,7 @@ impl Flow {
         let unknown = read.problem.as_ref();
         // What was seen stays what it is; only "in order" needs all of it.
         let incomplete = read.uncovered.as_ref().filter(|_| unknown.is_none());
+        let left_out = history::left_out(read.week.unreadable).filter(|_| unknown.is_none());
         let observation = Observation::new(Required {
             id: &format!("flow.{id}"),
             provider: self.name(),
@@ -244,22 +246,24 @@ impl Flow {
                 || (incomplete.is_some() && matches!(state, State::Ok | State::Partial))
             {
                 State::Unknown
+            } else if left_out.is_some() && state == State::Ok {
+                State::Partial
             } else {
                 state
             },
             checked_at: &context.checked_at(),
             source: "event history",
         })?;
-        Ok(match (unknown, incomplete) {
-            (Some(problem), _) => {
-                observation.with_findings(vec![format!("Nothing could be counted: {problem}.")])
-            }
-            (None, Some(reason)) => observation.with_findings(vec![format!(
+        let mut findings = match (unknown, incomplete) {
+            (Some(problem), _) => vec![format!("Nothing could be counted: {problem}.")],
+            (None, Some(reason)) => vec![format!(
                 "The event history is not current: {reason}. What is counted here may be too \
                  little."
-            )]),
-            (None, None) => observation,
-        })
+            )],
+            (None, None) => Vec::new(),
+        };
+        findings.extend(left_out);
+        Ok(observation.with_findings(findings))
     }
 }
 
