@@ -58,6 +58,14 @@ describe("interface language", () => {
     expect(i18n.t("sessions.title")).toBe("SMTP session from {{ip}}");
   });
 
+  it("gives every text that counts its plural forms", () => {
+    const english = flatten(CATALOGS.en);
+    const counting = [...english].filter(([, text]) => /{{\s*count\s*}}/.test(text)).map(([key]) => key.replace(/_(one|other)$/, ""));
+    for (const key of new Set(counting)) {
+      expect([english.has(`${key}_one`), english.has(`${key}_other`)], key).toEqual([true, true]);
+    }
+  });
+
   it("keeps every translation in step with the English catalog", () => {
     const english = flatten(CATALOGS.en);
     for (const [language, catalog] of Object.entries(CATALOGS)) {

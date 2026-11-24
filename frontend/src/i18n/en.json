@@ -103,7 +103,8 @@
     "tryAgain": "Try again"
   },
   "dashboard": {
-    "attention": " · {{count}} need attention",
+    "attention_one": " · {{count}} needs attention",
+    "attention_other": " · {{count}} need attention",
     "checks_one": "{{count}} check",
     "checks_other": "{{count}} checks",
     "counterResets_one": " {{count}} counter reset (service restart) was accounted for.",
@@ -120,7 +121,8 @@
     "periodHours_one": "{{count}} hour",
     "periodHours_other": "{{count}} hours",
     "samples": "Samples from {{from}} to {{to}}.",
-    "stale": " · {{count}} stale",
+    "stale_one": " · {{count}} stale",
+    "stale_other": " · {{count}} stale",
     "chart": {
       "classification": "Classification",
       "connections": "Connections",

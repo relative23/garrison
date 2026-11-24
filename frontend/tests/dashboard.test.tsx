@@ -22,9 +22,9 @@ describe("dashboard", () => {
     serve({ "GET metrics": { body: metrics() } });
     renderView(<Dashboard />, { status: status(observations) });
     expect(card("Antivirus").getByText("Warning")).toBeTruthy();
-    expect(card("Antivirus").getByText("2 checks · 1 need attention")).toBeTruthy();
+    expect(card("Antivirus").getByText("2 checks · 1 needs attention")).toBeTruthy();
     expect(card("Services").getByText("Failed")).toBeTruthy();
-    expect(card("Services").getByText("2 checks · 1 need attention · 1 stale")).toBeTruthy();
+    expect(card("Services").getByText("2 checks · 1 needs attention · 1 stale")).toBeTruthy();
     expect(screen.getByRole("link", { name: /^Services/ }).getAttribute("href")).toBe("/admin/services");
     // An old OK is no current OK.
     expect(card("Spam filter").getByText("Unknown")).toBeTruthy();
@@ -32,6 +32,14 @@ describe("dashboard", () => {
     // Modules without observations and the dashboard itself get no card.
     expect(screen.queryByRole("link", { name: /^Backups/ })).toBeNull();
     expect(screen.queryByRole("link", { name: /^Dashboard/ })).toBeNull();
+    await screen.findByText(/No samples were recorded in this period/);
+  });
+
+  it("counts the checks that need attention in their plural forms", async () => {
+    serve({ "GET metrics": { body: metrics() } });
+    const two = ["warning", "failed"] as const;
+    renderView(<Dashboard />, { status: status(two.map((state, index) => observation({ id: `t${index}`, modules: ["dns_tls"], state }))) });
+    expect(card("DNS & TLS").getByText("2 checks · 2 need attention")).toBeTruthy();
     await screen.findByText(/No samples were recorded in this period/);
   });
 
