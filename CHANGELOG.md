@@ -1978,8 +1978,9 @@ Notable changes for operators and users. The format follows
   one it does not take is named with why, and a closed `/etc/garrison` with
   the `chmod` that opens it.
 - **`garrison doctor` tries the broker's and the collector's API keys with
-  Stalwart**, as their services use them, and fails one Stalwart no longer
-  knows, with which nobody can sign in, with the setup that makes a new one.
+  Stalwart**, the broker's with what the broker reads, and fails one Stalwart
+  no longer knows or lets read it, with which nobody can sign in, with the
+  setup that mends it.
 - **The warning of nginx's include for another port restarts `garrison-web`
   in its way without the installer**, which left nginx answering 502, and
   `garrison doctor`'s line of a 502 says whether anything listens on
