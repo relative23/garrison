@@ -213,6 +213,20 @@ pub fn macros_until(message: &[u8], until: Instant) -> Outcome {
     scan(message, Some(until))
 }
 
+/// What a file holds that a mail program handed over: a document in it as it
+/// stands, or in the message it is where it names an encoding. Its last four
+/// bytes are left out, which a group of base64 that the data's end cuts short
+/// gives as each decoder ends: they decide no document, since an archive
+/// ends in the record of its directory's end and a compound file's names
+/// stand first in entries of 128 bytes. For the tests and the fuzz targets,
+/// to ask of a decoder's output.
+#[cfg(any(test, feature = "testing"))]
+#[must_use]
+pub fn in_file(file: &[u8]) -> Option<Found> {
+    let file = &file[..file.len().saturating_sub(4)];
+    Work::new(None, file.len()).scanned_deep(file)
+}
+
 fn scan(message: &[u8], until: Option<Instant>) -> Outcome {
     let mut work = Work::new(until, message.len());
     match (candidates(message, &mut work), work.gap) {

@@ -212,7 +212,7 @@ fn no_document_a_decoder_the_scan_follows_rebuilds_is_called_clean() {
     for (name, change, body) in cases() {
         let builders: Vec<&str> = READ
             .iter()
-            .filter(|(_, decode)| matches!(macros(&decode(&body)), Outcome::Macros(_)))
+            .filter(|(_, decode)| in_file(&decode(&body)).is_some())
             .map(|(decoder, _)| *decoder)
             .collect();
         if builders.is_empty() {
@@ -237,8 +237,7 @@ fn the_decoders_the_scan_does_not_follow_are_still_not_followed() {
     for (decoder, decode) in NOT_READ {
         assert!(
             cases().iter().any(|(_, _, body)| {
-                matches!(macros(&decode(body)), Outcome::Macros(_))
-                    && macros(&message(body)) == Outcome::Clean
+                in_file(&decode(body)).is_some() && macros(&message(body)) == Outcome::Clean
             }),
             "{decoder}"
         );

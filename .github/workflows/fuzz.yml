@@ -24,11 +24,13 @@ jobs:
         # The fuzzer's own limit for an input it makes.
         max_len: [4096]
         include:
-          # A message is scanned in time whatever its size: these two get
-          # inputs of up to a megabyte, and -timeout fails a slow one.
+          # A message is scanned in time whatever its size: these get inputs
+          # of up to a megabyte, and -timeout fails a slow one.
           - target: milter_scan
             max_len: 1048576
           - target: milter_session
+            max_len: 1048576
+          - target: milter_base64
             max_len: 1048576
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
