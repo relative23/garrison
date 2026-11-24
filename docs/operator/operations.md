@@ -102,7 +102,8 @@ database that did not exist when the backup was made, and starts the
 services. What was recorded since the backup is in the `pre-restore-*` copy
 and no longer in Garrison; restore that copy to take the restore back.
 Run again after it was interrupted, a restore finishes and names its first
-run's copy as the state from before.
+run's copy as the state from before; where Garrison was started since, it
+copies the state as it is first, as a new restore does.
 
 A backup holds neither sessions nor credentials. After a restore everyone
 signs in again. On a new host, restore `/etc/garrison` from your host backup
@@ -161,15 +162,17 @@ stopped, the installer switches back by itself:
    whose schema rose goes back to its copy in `pre-upgrade-*`, and one that
    did not exist before the upgrade is removed; the installer names them.
    What they recorded between the backup and the stop, seconds as a rule, is
-   lost. Every other database keeps its data.
+   lost. Every other database keeps its data. Where a copy does not fit
+   beside its database, none goes back and the installer says where to free
+   space.
 3. It checks with the old release's own `self-check` that it reads every
    database, starts it and waits until it stays up. Only then does the
    installer say `the previous release is running`, and `previous` is again
    what it was before the upgrade.
 
 If the old release does not start either, the installer says so and stops
-what did start. `/opt/garrison/current` then still names the new release and
-`previous` the old one, so that
+what did start. `/opt/garrison/current` then still names the new release,
+where the upgrade had switched to it, and `previous` the old one, so that
 
 ```sh
 sudo /opt/garrison/current/bin/garrison install --rollback --restore-state
@@ -188,13 +191,19 @@ changes. After a successful installation it keeps the running,
 the previous and one older release, and the three newest of its own backups
 plus the one a rollback restores; it removes the older ones. Backups you write
 with `garrison backup --to` are left alone; the `pre-restore-*` copies of a
-restore count among the installer's own.
+restore and the `pre-switch-back-*` ones count among the installer's own.
 
 While one installer runs, a second one is refused. An upgrade that was
 interrupted, even killed, is finished by running its installer again, or
 `garrison upgrade` with the same archive; `/opt/garrison/unfinished.json`
-notes what the installer began until a release runs again. A rollback is
-finished by running it again; one that went back to a release from before this
+notes what the installer began until a release runs again. Once a service of
+Garrison's was started after that note, by the interrupted run itself, a
+reboot or by hand, the next run removes it and puts nothing back on its
+word, since the databases may hold what was recorded since; only where the
+new release is current and does not run does it still switch back, once it
+has copied the state as it is to `pre-switch-back-*`. A rollback is
+finished by running it again, with the state from before the upgrade where it
+began with `--restore-state`; one that went back to a release from before this
 one is finished by the release it left, as its first line says: `sudo
 /opt/garrison/releases/<release>/bin/garrison install --rollback`.
 

@@ -172,15 +172,31 @@ pub(super) fn protect_policy() -> Step {
 /// Only a regular file reached without a link, which is all the broker reads:
 /// a link, a folder or a device that `broker.policy` names is left as it is,
 /// and check-config refuses it then. Owner and mode are set on the file that
-/// was opened, so that nothing put in its place meanwhile is changed.
+/// was opened, so that nothing put in its place meanwhile is changed. Only
+/// root's own file is made the broker's: one of another user, who may write
+/// a folder outside /etc/garrison, would become the policy the broker grants
+/// by, and is refused as the broker refuses it.
 fn protect(policy: &Path) -> Step {
+    use std::os::unix::fs::MetadataExt;
+
     use rustix::fs::{Mode, OFlags};
     let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
     let Ok(file) = rustix::fs::open(policy, flags, Mode::empty()).map(fs::File::from) else {
         return Ok(());
     };
-    if !io(file.metadata(), policy)?.is_file() {
+    let metadata = io(file.metadata(), policy)?;
+    if !metadata.is_file() {
         return Ok(());
+    }
+    if metadata.uid() != 0 {
+        return Err(format!(
+            "{}, the access policy that broker.policy names, belongs to the user with ID {}, \
+             not to root: the installer makes no other user's file the policy, and the broker \
+             takes none. Where it is the policy you mean, `chown root {}` and run this again",
+            policy.display(),
+            metadata.uid(),
+            policy.display()
+        ));
     }
     let group = crate::access::group_id("garrison-broker").map(rustix::fs::Gid::from_raw);
     rustix::fs::fchown(&file, Some(rustix::fs::Uid::ROOT), group)
@@ -262,5 +278,29 @@ mod tests {
         }
         let mode = |path: &Path| fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!((mode(&elsewhere), mode(&folder)), (0o644, 0o755));
+    }
+
+    /// A policy file of another user than root, as one who may write a
+    /// folder outside /etc/garrison puts there, stays as it is and is
+    /// refused; the test's own user stands in for that other one.
+    #[test]
+    fn a_policy_of_another_user_is_refused_and_left_as_it_is() {
+        let directory = tempfile::tempdir().unwrap();
+        let policy = directory.path().join("access.json");
+        fs::write(&policy, "{}").unwrap();
+        fs::set_permissions(&policy, fs::Permissions::from_mode(0o644)).unwrap();
+        let refused = protect(&policy).unwrap_err();
+        assert!(
+            refused.contains("not to root: the installer makes no other user's file the policy"),
+            "{refused}"
+        );
+        assert!(
+            refused.contains(&format!("`chown root {}`", policy.display())),
+            "{refused}"
+        );
+        assert_eq!(
+            fs::metadata(&policy).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
     }
 }

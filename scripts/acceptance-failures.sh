@@ -124,6 +124,20 @@ scenario_refusals() {
     running "after the refusals" "$old"
 }
 
+scenario_base_hidden() {
+    step "A release base that a link puts under /home, which the units hide, is refused before anything changes"
+    upgraded
+    # The disk under /home that /opt/garrison is linked to, as a RHEL host's
+    # large partition is.
+    inside 'mv /opt/garrison /home/garrison && ln -s /home/garrison /opt/garrison'
+    pid=$(inside 'systemctl show -p MainPID --value garrison-web.service')
+    refused "an installer whose release base leads under /home is refused" \
+        '/root/release/bin/garrison install' "/opt/garrison leads to /home/garrison, which lies under /home"
+    check "and nothing stopped" "test \"\$(systemctl show -p MainPID --value garrison-web.service)\" = '$pid'"
+    inside 'rm /opt/garrison && mv /home/garrison /opt/garrison'
+    running "after the base under /home" "$new"
+}
+
 scenario_failed_start() {
     step "A release that does not start is switched back"
     # The web service of this copy exits right after it starts.
@@ -157,22 +171,26 @@ scenario_crash_loop() {
 # The schema of the status database, which a migration raises.
 status_schema() { inside 'sqlite3 /var/lib/garrison/collector/status.sqlite "PRAGMA user_version"'; }
 
-scenario_migrated_then_failed() {
-    step "A release that migrated a database and then failed is switched back with the state from before"
-    # What a release with a migration does when it first opens a database:
-    # it raises the schema, and the release before cannot read it any more.
+# What a release with a migration does when it first opens a database: it
+# raises the schema, and the release before cannot read it any more. The web
+# service of this copy, /root/migrating, migrates before it starts, as root,
+# and systemd ends it after three seconds every time: started, then failed.
+migrating_release() {
     inside_input 'cat > /usr/local/bin/acceptance-migrate && chmod 755 /usr/local/bin/acceptance-migrate' <<'MIGRATE'
 #!/bin/sh
 exec sqlite3 /var/lib/garrison/collector/status.sqlite 'PRAGMA user_version = 99'
 MIGRATE
-    # The web service of this copy migrates before it starts, as root, and
-    # systemd ends it after three seconds every time: started, then failed.
-    inside 'cp -a /root/release /root/migrating && cd /root/migrating &&
+    inside 'rm -rf /root/migrating && cp -a /root/release /root/migrating && cd /root/migrating &&
         printf "%s+migrating\n" "$(cat VERSION)" > VERSION &&
         sed -i "s|^\[Service\]$|[Service]\nRuntimeMaxSec=3s\nExecStartPre=+/usr/local/bin/acceptance-migrate|" \
             deploy/systemd/garrison-web.service &&
         grep -q "^ExecStartPre=+/usr/local/bin/acceptance-migrate$" deploy/systemd/garrison-web.service &&
         find . -type f ! -name SHA256SUMS | sed "s|^\./||" | sort | xargs sha256sum > SHA256SUMS'
+}
+
+scenario_migrated_then_failed() {
+    step "A release that migrated a database and then failed is switched back with the state from before"
+    migrating_release
     check "a collection run wrote the status database" 'systemctl start garrison-collect.service'
     current=$(inside 'basename "$(readlink -f /opt/garrison/current)"')
     earlier=$(inside 'readlink -f /opt/garrison/previous 2>/dev/null || true')
@@ -210,6 +228,38 @@ MIGRATE
     running "after the second attempt" "$current"
 }
 
+scenario_switch_back_room() {
+    step "A switch back whose copy does not fit beside its database puts none back and says why"
+    upgraded
+    migrating_release
+    # The status database grows to some 5 MiB on a file system of 8 MiB:
+    # its copy from before the upgrade does not fit beside it.
+    inside 'systemctl stop garrison-collect.timer garrison-collect.service &&
+        sqlite3 /var/lib/garrison/collector/status.sqlite "CREATE TABLE IF NOT EXISTS padding(x);
+            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+            INSERT INTO padding SELECT randomblob(1000) FROM n;" &&
+        cp -a /var/lib/garrison/collector /root/collector-room &&
+        mount -t tmpfs -o size=8m garrison-room /var/lib/garrison/collector &&
+        cp -a /root/collector-room/. /var/lib/garrison/collector/ && rm -r /root/collector-room &&
+        systemctl start garrison-collect.timer'
+    if inside 'umask 077 && /root/migrating/bin/garrison install > /root/switch-room.log 2>&1'; then
+        inside 'cat /root/switch-room.log' || true
+        echo "FAIL  the upgrade to a release that migrated and fell over fails"
+        exit 1
+    fi
+    check "the switch back says where a copy does not fit, not that the old release failed" \
+        '{ grep -q "the copies from before the upgrade need" /root/switch-room.log &&
+            ! grep -q "did not start either" /root/switch-room.log; } || { cat /root/switch-room.log; false; }'
+    check "and puts nothing back" \
+        "test \"\$(sqlite3 -readonly /var/lib/garrison/collector/status.sqlite 'PRAGMA user_version')\" = 99"
+    # With room again, what the answer names returns to the release that ran.
+    inside 'systemctl stop garrison-collect.timer garrison-collect.service;
+        cp -a /var/lib/garrison/collector /root/collector-room && umount /var/lib/garrison/collector &&
+        cp -a /root/collector-room/. /var/lib/garrison/collector/ && rm -r /root/collector-room /root/switch-room.log'
+    installer '/opt/garrison/current/bin/garrison install --rollback --restore-state'
+    running "after the switch back that had no room" "$new"
+}
+
 scenario_concurrent() {
     step "Two installers at once"
     inside 'cd /root; umask 077
@@ -234,6 +284,13 @@ scenario_reinstall() {
     check "a reinstall keeps last-pre-upgrade" \
         'test "$(readlink /var/backups/garrison/last-pre-upgrade)" = "$(cat /root/last-before)"'
     names "a reinstall keeps the previous release" previous "$old"
+    # Without a previous release there is no rollback to name.
+    inside 'mv /opt/garrison/previous /root/previous.link'
+    installer '/root/release/bin/garrison install > /root/reinstall.log 2>&1'
+    check "a reinstall without a previous release names no rollback" \
+        "{ ! grep -q 'Roll back with' /root/reinstall.log && grep -q -F 'Garrison $new is running.' /root/reinstall.log; } ||
+            { cat /root/reinstall.log; false; }"
+    inside 'mv /root/previous.link /opt/garrison/previous && rm /root/reinstall.log'
     running "after the reinstall" "$new"
 }
 
@@ -290,8 +347,9 @@ scenario_stopped_collector() {
     running "after the stopped collector" "$new"
 }
 
-# Stalwart takes the new keys of a rotation that stops at their check, the
-# old ones go all the same, and the services still hold the old secrets.
+# Stalwart takes the new keys of a rotation that stops at their check: the
+# run restarts the services that hold the secrets all the same, the old
+# keys go, and it names the run that finishes it.
 scenario_rotation() {
     step "Setting up again after a rotation that failed"
     upgraded
@@ -299,12 +357,21 @@ scenario_rotation() {
     inside 'umask 077 && printf "{\"apiKey\": \"stand-in-administrator\"}" > /root/stalwart-admin.json'
     says "a rotation restarts the services that hold the secrets" "$setup --rotate" \
         "restarted with the new secrets"
-    inside 'touch /root/stand-in-refuses'
-    refused "a rotation whose keys Stalwart refuses stops" "$setup --rotate" \
-        "The API keys that new ones replaced were removed"
-    inside 'rm /root/stand-in-refuses'
-    says "setup again restarts the services that still hold the replaced secrets" "$setup" \
-        "restarted with the new secrets"
+    inside 'cp /root/stand-in-keys /root/keys-before-rotation && touch /root/stand-in-refuses'
+    if inside "umask 077 && $setup --rotate > /root/rotation.log 2>&1"; then
+        inside 'cat /root/rotation.log' || true
+        echo "FAIL  a rotation whose keys Stalwart refuses stops"
+        exit 1
+    fi
+    echo "ok    a rotation whose keys Stalwart refuses stops"
+    check "the failed rotation restarted the services that hold the secrets" \
+        'grep -q -F "garrison-ingest and garrison-broker restarted with the new secrets." /root/rotation.log'
+    check "the failed rotation removed the keys that new ones replaced" \
+        'for id in $(cut -d " " -f 1 /root/keys-before-rotation); do ! grep -q "^$id " /root/stand-in-keys || exit 1; done'
+    check "the failed rotation names the run that finishes it" \
+        'grep -q -F "Run \`garrison stalwart setup --rotate\` again once this is mended." /root/rotation.log'
+    inside 'rm /root/stand-in-refuses /root/keys-before-rotation /root/rotation.log'
+    says "setup again once Stalwart takes the keys" "$setup" "Settings reloaded."
     check "the receiver holds the signature key of its file" \
         'test "$(cat /run/credentials/garrison-ingest.service/webhook-signature-key)" = \
             "$(cat /etc/garrison/credentials/webhook-signature-key)"'
@@ -316,6 +383,44 @@ scenario_rotation() {
                 "$(cat /etc/garrison/credentials/broker-native-key)"'
     inside 'rm /root/stalwart-admin.json'
     running "after the rotation" "$new"
+}
+
+scenario_milter_asked() {
+    step "The installer does not stop a macro filter that Stalwart still asks"
+    upgraded
+    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.milter &&
+        printf "\n[milter]\n" >> /etc/garrison/garrison.toml'
+    installer '/root/release/bin/garrison install'
+    check "the filter runs with the [milter] section" 'systemctl is-active --quiet garrison-milter.service'
+    # An entry of Stalwart's at the filter's port that setup did not note,
+    # and the section gone.
+    inside 'printf "%s" "{\"id\": \"m1\", \"host\": \"127.0.0.1\", \"port\": 8096, \"enable\": true}" \
+            > /root/stand-in-milters && cat /root/garrison.toml.milter > /etc/garrison/garrison.toml'
+    says "the next installer run says why the filter keeps running" '/root/release/bin/garrison install' \
+        "keeps running: Stalwart asks its milter entry m1 at 127.0.0.1:8096"
+    check "and the filter runs on" 'systemctl is-active --quiet garrison-milter.service'
+    inside 'rm /root/stand-in-milters'
+    installer '/root/release/bin/garrison install'
+    check "once nothing asks it, the next run stops it" '! systemctl is-active --quiet garrison-milter.service'
+    running "after the filter Stalwart asked" "$new"
+}
+
+scenario_milter_sandbox() {
+    step "The macro filter's unit writes nowhere: no /tmp of its own, not the host's shared memory"
+    upgraded
+    # Tried within the unit before its service starts, as the filter itself
+    # would; it needs no [milter] section for that.
+    inside_input 'mkdir -p /etc/systemd/system/garrison-milter.service.d &&
+        cat > /etc/systemd/system/garrison-milter.service.d/acceptance-probe.conf && systemctl daemon-reload' <<'PROBE'
+[Service]
+ExecStartPre=/bin/sh -c 'for place in /dev/shm /dev/mqueue /tmp /var/tmp; do if : > "$$place/garrison-milter-probe" 2>/dev/null; then echo "writable $$place"; fi; done'
+PROBE
+    inside 'systemctl start garrison-milter.service >/dev/null 2>&1; systemctl stop garrison-milter.service;
+        systemctl reset-failed garrison-milter.service' || true
+    check "the filter's unit writes in none of those places" \
+        '! journalctl -u garrison-milter.service --no-pager | grep "writable /" && test ! -e /dev/shm/garrison-milter-probe'
+    inside 'rm -r /etc/systemd/system/garrison-milter.service.d && systemctl daemon-reload'
+    running "after the filter's unit" "$new"
 }
 
 scenario_collect_beside() {
@@ -343,11 +448,16 @@ install_previous
 old=$(inside 'cat /root/previous/VERSION')
 new=$(inside 'cat /root/release/VERSION')
 running "installed" "$old"
-for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check failed_start crash_loop migrated_then_failed concurrent \
-    upgrade_killed upgrade_resumed rollback_killed restore_killed restore_refused restore_refused_config restore_policy \
+for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check base_hidden failed_start crash_loop migrated_then_failed \
+    switch_back_room concurrent \
+    upgrade_killed switch_back_failed_early upgrade_resumed rollback_killed restore_killed upgrade_came_up restore_came_up \
+    rollback_state_killed rollback_came_up \
+    restore_refused restore_refused_config restore_policy \
     restore_policy_link restore_room rollback_after_restore elsewhere_unloadable elsewhere_purge rollback_refused \
-    interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere unwritten \
-    rotation collect_beside restore_leftovers access_links access_folder access_actions}; do
+    rollback_refused_config rollback_room \
+    interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere \
+    policy_foreign unwritten \
+    rotation milter_asked milter_sandbox collect_beside restore_leftovers access_links access_folder access_actions}; do
     "scenario_$scenario"
 done
 

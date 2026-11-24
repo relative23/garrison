@@ -14,10 +14,13 @@ Restart=on-failure
 RestartSec=2
 UMask=0077
 # The filter reads the configuration and speaks with the mail server on
-# loopback; it keeps nothing and reaches nothing else.
+# loopback; it keeps nothing and reaches nothing else. It may write nowhere:
+# its /tmp and /var/tmp are empty and read-only, and the host's shared
+# memory and message queues, which PrivateDevices= still binds, are gone.
 NoNewPrivileges=true
 CapabilityBoundingSet=
-PrivateTmp=true
+TemporaryFileSystem=/tmp:ro /var/tmp:ro
+InaccessiblePaths=-/dev/shm -/dev/mqueue
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true

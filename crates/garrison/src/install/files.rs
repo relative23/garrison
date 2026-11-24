@@ -169,6 +169,35 @@ pub(super) fn lock(path: &Path) -> Step<File> {
     }
 }
 
+/// A new folder `<kind>-<stamp>` in `parent`, root's alone, which no other
+/// run has: the copy that a killed installer started goes on into the folder
+/// of its second, and two copies into one folder break each other. Where
+/// the second's name is taken, the next second's is made.
+pub(super) fn fresh_folder(parent: &Path, kind: &str) -> Step<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    let private = || {
+        let mut builder = fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder
+    };
+    io(private().recursive(true).create(parent), parent)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let stamp = garrison_core::time::now().strftime("%Y%m%dT%H%M%S");
+        let folder = parent.join(format!("{kind}-{stamp}"));
+        match private().create(&folder) {
+            Ok(()) => return Ok(folder),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AlreadyExists
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            Err(error) => return Err(format!("{}: {error}", folder.display())),
+        }
+    }
+}
+
 /// Atomic: the link always points somewhere valid.
 pub(super) fn switch(link: &Path, target: &Path) -> Step {
     let temporary = link.with_file_name(format!(
@@ -306,6 +335,28 @@ mod tests {
         assert_eq!(fs::read_to_string(one.join("marker")).unwrap(), "two");
         assert_eq!(fs::read_to_string(two.join("marker")).unwrap(), "one");
         assert!(exchange(&one, &directory.path().join("absent")).is_err());
+    }
+
+    /// Two runs within one second, or one beside a copy that a killed run
+    /// goes on with, each get a folder of their own, root's alone.
+    #[test]
+    fn each_run_backs_up_into_a_folder_no_other_run_has() {
+        let directory = tempfile::tempdir().unwrap();
+        let backups = directory.path().join("var/backups/garrison");
+        let first = fresh_folder(&backups, "pre-reinstall").unwrap();
+        let second = fresh_folder(&backups, "pre-reinstall").unwrap();
+        assert_ne!(first, second);
+        for folder in [&first, &second] {
+            let mode = fs::metadata(folder).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "{}", folder.display());
+            let name = folder.file_name().unwrap().to_string_lossy().into_owned();
+            let stamp = name.strip_prefix("pre-reinstall-").unwrap();
+            assert_eq!((stamp.len(), stamp.as_bytes()[8]), (15, b'T'), "{name}");
+        }
+        // A file where the folders go is no place for them.
+        let file = directory.path().join("file");
+        fs::write(&file, "").unwrap();
+        assert!(fresh_folder(&file, "pre-upgrade").is_err());
     }
 
     #[test]

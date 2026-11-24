@@ -85,7 +85,8 @@ fn old_backups(backups: &Path, last: &Path) -> Vec<PathBuf> {
         let stamp = name
             .strip_prefix("pre-upgrade-")
             .or_else(|| name.strip_prefix("pre-reinstall-"))
-            .or_else(|| name.strip_prefix("pre-restore-"))?;
+            .or_else(|| name.strip_prefix("pre-restore-"))
+            .or_else(|| name.strip_prefix("pre-switch-back-"))?;
         let digits = stamp.chars().filter(char::is_ascii_digit).count();
         (stamp.len() == 15 && digits == 14 && stamp.as_bytes()[8] == b'T').then(|| stamp.to_owned())
     };
@@ -173,6 +174,7 @@ mod tests {
             "pre-upgrade-20261030T064159",
             "pre-upgrade-20261030T112756",
             "pre-upgrade-20261030T132151",
+            "pre-switch-back-20261027T100000",
             "latest",
             "pre-upgrade-yesterday",
         ] {
@@ -181,8 +183,9 @@ mod tests {
         let last = backups.join("last-pre-upgrade");
         symlink(backups.join("pre-upgrade-20261028T100000"), &last).unwrap();
         let lines = prune(&directory.path().join("no-base"), backups, &last);
-        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(lines.len(), 2, "{lines:?}");
         assert!(!backups.join("pre-reinstall-20261029T100000").exists());
+        assert!(!backups.join("pre-switch-back-20261027T100000").exists());
         for kept in [
             "pre-upgrade-20261028T100000",
             "pre-upgrade-20261030T064159",

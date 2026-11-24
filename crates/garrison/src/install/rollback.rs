@@ -15,7 +15,7 @@ use rustix::fs::{Gid, Uid};
 
 use super::files::{Step, announce, io, lock, switch};
 use super::system::install_system_files;
-use super::unfinished::{self, Unfinished};
+use super::unfinished::{self, Seen, Unfinished};
 use super::{
     BACKUPS, BASE, CONFIG, LAST, LOCK, cli, precheck, preflight, start, state, stop_services,
 };
@@ -74,13 +74,13 @@ fn state_fits(target: &Path, source: &Path, comes_back: bool) -> Step<(Uid, Gid)
             ));
         }
     }
-    precheck::copies_fit(source, &config, &[])?;
+    precheck::copies_fit(source, &config, &[], "the rollback")?;
     Ok(owner)
 }
 
 /// Put the pre-upgrade copies of the databases and the policy back, the
 /// policy owned by `owner`; what went back is in `restored`.
-fn restore_state(source: &Path, owner: (Uid, Gid), restored: &mut Vec<&'static str>) -> Step {
+fn restore_state(source: &Path, owner: (Uid, Gid), restored: &mut state::Returned) -> Step {
     // The configured state directories, which need not be the defaults.
     let settings = Path::new(CONFIG).join("garrison.toml");
     let config = config::load(&settings)
@@ -94,7 +94,7 @@ fn roll_back_to(
     target: &Path,
     after: Option<&Path>,
     source: Option<(&Path, (Uid, Gid))>,
-    restored: &mut Vec<&'static str>,
+    restored: &mut state::Returned,
 ) -> Step {
     if let Some((source, owner)) = source {
         restore_state(source, owner, restored)?;
@@ -107,11 +107,15 @@ fn roll_back_to(
 }
 
 /// Where a rollback goes: to `target`, leaving `left`, and what `previous`
-/// names once it is done.
+/// names once it is done. `state` where an earlier run of this rollback put
+/// the state from before the upgrade back, `started` where it had started
+/// its target, and its state went back before that.
 struct Plan {
     target: PathBuf,
     left: PathBuf,
     after: Option<PathBuf>,
+    state: bool,
+    started: bool,
 }
 
 /// What the rollback returns to: an unfinished upgrade is undone, an
@@ -122,18 +126,39 @@ fn plan(base: &Path) -> Step<Plan> {
         &base.join("current"),
     )?;
     match unfinished::read()? {
-        Some(Unfinished::Upgrade { from, previous, .. }) => Ok(Plan {
+        Seen::Holds(Unfinished::Upgrade { from, previous, .. })
+        | Seen::Failed(Unfinished::Upgrade { from, previous, .. }) => Ok(Plan {
             target: from,
             left: current,
             after: previous,
+            state: false,
+            started: false,
         }),
-        Some(Unfinished::Rollback { from, to, previous }) => Ok(Plan {
+        Seen::Holds(Unfinished::Rollback {
+            from,
+            to,
+            previous,
+            state,
+        }) => Ok(Plan {
             target: to,
             left: from,
             after: previous,
+            state: state.is_some(),
+            started: false,
         }),
-        Some(record @ Unfinished::Restore { .. }) => Err(record.finish_first()),
-        None => {
+        Seen::Holds(record @ Unfinished::Restore { .. }) | Seen::Failed(record) => {
+            Err(record.finish_first())
+        }
+        Seen::Stale(Unfinished::Rollback {
+            from, to, previous, ..
+        }) if to == current => Ok(Plan {
+            target: to,
+            left: from,
+            after: previous,
+            state: false,
+            started: true,
+        }),
+        Seen::Stale(_) | Seen::Nothing => {
             let Ok(target) = fs::canonicalize(base.join("previous")) else {
                 return Err("There is no previous release to return to.".into());
             };
@@ -147,6 +172,8 @@ fn plan(base: &Path) -> Step<Plan> {
                 target,
                 after: Some(current.clone()),
                 left: current,
+                state: false,
+                started: false,
             })
         }
     }
@@ -154,14 +181,29 @@ fn plan(base: &Path) -> Step<Plan> {
 
 pub(super) fn rollback(with_state: bool) -> Step {
     preflight()?;
+    super::requirements::base_shown()?;
     let _held = lock(Path::new(LOCK))?;
     let base = Path::new(BASE);
     let Plan {
         target,
         left: current,
         after,
+        state,
+        started,
     } = plan(base)?;
     let name = target.file_name().unwrap_or_default().to_string_lossy();
+    // The target ran on the state that went back: what it recorded since
+    // stays, and the rollback finishes with links, system files and a start.
+    if started && with_state {
+        announce(&format!(
+            "The state from before the upgrade went back before {name} was started; it does \
+             not go back again over what was recorded since."
+        ));
+    }
+    if state && !with_state {
+        announce("The rollback began with --restore-state and goes on with it.");
+    }
+    let with_state = (with_state || state) && !started;
     let source = if with_state {
         Some(restore_source(&name)?)
     } else {
@@ -181,11 +223,15 @@ pub(super) fn rollback(with_state: bool) -> Step {
     }
     // After a schema change only the pre-upgrade copies suit the previous
     // release, and only its own self-check knows which schemas it reads.
-    if !with_state && !cli(&target, &["self-check"])?.status.success() {
-        return Err(format!(
-            "{name} cannot read the current data, probably because a database schema changed. \
-             Roll back with --restore-state to return to the data from before the upgrade."
-        ));
+    if !with_state {
+        let checked = cli(&target, &["self-check"])?;
+        if !checked.status.success() {
+            return Err(format!(
+                "{name} cannot read the current data, as its self-check says of {}. Roll back \
+                 with --restore-state to return to the data from before the upgrade.",
+                state::unreadable(&checked.stdout)
+            ));
+        }
     }
     let source = match source {
         Some(source) => Some((source.clone(), state_fits(&target, &source, comes_back)?)),
@@ -202,16 +248,19 @@ pub(super) fn rollback(with_state: bool) -> Step {
          --rollback{}",
         if with_state { " --restore-state" } else { "" }
     ));
+    // The system files of the target protect the policy as it is.
+    super::system::protect_policy().map_err(|error| format!("{error}. Nothing was changed."))?;
     unfinished::write(&Unfinished::Rollback {
         from: current.clone(),
         to: target.clone(),
         previous: after.clone(),
+        state: source.as_ref().map(|(source, _)| source.clone()),
     })?;
     stop_services();
     let restoring = source
         .as_ref()
         .map(|(source, owner)| (source.as_path(), *owner));
-    let mut restored = Vec::new();
+    let mut restored = state::Returned::default();
     if let Err(error) = roll_back_to(&target, after.as_deref(), restoring, &mut restored) {
         // Garrison is stopped now: back to the release that ran, and running.
         announce("Rollback failed; starting the release that ran before.");
@@ -231,9 +280,7 @@ pub(super) fn rollback(with_state: bool) -> Step {
             "the release that ran before did not start either".to_owned()
         };
         // What went back stays: the release that ran runs on it now.
-        let back = restoring.map_or_else(String::new, |(source, _)| {
-            state::went_back(&restored, source)
-        });
+        let back = restoring.map_or_else(String::new, |(source, _)| restored.said(source));
         return Err(format!(
             "The rollback failed ({error}); {outcome}.{back} See the journal."
         ));

@@ -11,7 +11,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::files::{Step, announce, io, lock, must, run};
-use super::{BACKUPS, BASE, CONFIG, LOCK, SYSTEMCTL, UNITS, command, preflight};
+use super::requirements::root_with_systemctl;
+use super::{BACKUPS, BASE, CONFIG, LOCK, SYSTEMCTL, UNITS, command};
 
 const USERS: [&str; 5] = [
     "garrison-milter",
@@ -22,6 +23,10 @@ const USERS: [&str; 5] = [
 ];
 const SEMODULE: &str = "/usr/sbin/semodule";
 const NGINX: &str = "/usr/sbin/nginx";
+const UNSHARE: &str = "/usr/bin/unshare";
+/// The copy of nginx's snippets that its test runs over: root's; the
+/// installer's lock keeps a second run out.
+const NGINX_CHECK: &str = "/run/garrison-uninstall.check";
 
 /// Something the uninstallation removes.
 #[derive(Debug, PartialEq, Eq)]
@@ -161,6 +166,7 @@ fn installer_backups(backups: &Path) -> Vec<PathBuf> {
                         || name.starts_with("pre-upgrade-")
                         || name.starts_with("pre-reinstall-")
                         || name.starts_with("pre-restore-")
+                        || name.starts_with("pre-switch-back-")
                 })
         })
         .collect();
@@ -178,24 +184,56 @@ fn module_loaded() -> bool {
 }
 
 /// nginx must accept its configuration without Garrison's snippets, or an
-/// include left in a server block would keep nginx from starting. The files
-/// move aside for the test and come back whatever it says.
+/// include left in a server block would keep nginx from starting. It tests
+/// that in a mount namespace of its own, over a copy of the snippets' folder
+/// without Garrison's: nothing nginx or anyone else reads changes, also where
+/// the test is cut short, so that a dry run tests the same.
 fn nginx_stays_valid(snippets: &[PathBuf]) -> Step {
-    if snippets.is_empty() || !Path::new(NGINX).exists() {
+    let Some(folder) = snippets.first().and_then(|snippet| snippet.parent()) else {
+        return Ok(());
+    };
+    if !Path::new(NGINX).exists() {
         return Ok(());
     }
-    let aside: Vec<(PathBuf, PathBuf)> = snippets
-        .iter()
-        .map(|path| (path.clone(), path.with_extension("conf.garrison-uninstall")))
-        .collect();
-    for (path, moved) in &aside {
-        io(fs::rename(path, moved), path)?;
+    if !Path::new(UNSHARE).exists() {
+        return Err(format!(
+            "{UNSHARE} (util-linux) is needed to test nginx without Garrison's snippets; \
+             nothing was changed"
+        ));
     }
-    let test = run(NGINX, &["-t"]);
-    for (path, moved) in &aside {
-        io(fs::rename(moved, path), path)?;
-    }
-    let test = test?;
+    let copy = Path::new(NGINX_CHECK);
+    let _ = fs::remove_dir_all(copy);
+    let (copy_text, folder_text) = (copy.display().to_string(), folder.display().to_string());
+    // `cp -a` keeps each file's SELinux label, which nginx's domain reads by.
+    let tested = must("/bin/cp", &["-a", &folder_text, &copy_text])
+        .and_then(|()| {
+            for snippet in snippets {
+                let named = snippet.file_name().map(|name| copy.join(name));
+                if let Some(named) = named {
+                    io(fs::remove_file(&named), &named)?;
+                }
+            }
+            Ok(())
+        })
+        .and_then(|()| {
+            let bound = "mount --bind \"$1\" \"$2\" && exec \"$3\" -t";
+            run(
+                UNSHARE,
+                &[
+                    "--mount",
+                    "--",
+                    "/bin/sh",
+                    "-c",
+                    bound,
+                    "sh",
+                    &copy_text,
+                    &folder_text,
+                    NGINX,
+                ],
+            )
+        });
+    let _ = fs::remove_dir_all(copy);
+    let test = tested?;
     if test.status.success() {
         return Ok(());
     }
@@ -234,7 +272,7 @@ fn remove(item: &Item) -> Step {
 }
 
 fn uninstall(purge: bool, dry_run: bool) -> Step {
-    preflight()?;
+    root_with_systemctl()?;
     let _held = lock(Path::new(LOCK))?;
     let root = Path::new("/");
     let items = plan(root, purge, module_loaded(), &super::policy());
@@ -287,184 +325,4 @@ pub(crate) fn run_uninstall(purge: bool, dry_run: bool) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const DEFAULT_POLICY: &str = "/etc/garrison/access-policy.json";
-
-    fn host() -> tempfile::TempDir {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path();
-        for folder in [
-            "etc/systemd/system",
-            "etc/polkit-1/rules.d",
-            "etc/nginx/snippets",
-            "etc/garrison/credentials",
-            "etc/sysusers.d",
-            "usr/bin",
-            "opt/garrison/releases/0.1.0",
-            "var/lib/garrison/web",
-            "var/backups/garrison/pre-upgrade-20261030T132151",
-            "var/backups/garrison/latest",
-        ] {
-            fs::create_dir_all(root.join(folder)).unwrap();
-        }
-        for file in [
-            "etc/systemd/system/garrison-web.service",
-            "etc/polkit-1/rules.d/50-garrison.rules",
-            "etc/nginx/snippets/garrison.conf",
-            "etc/nginx/snippets/garrison-stalwart-server.conf",
-            "etc/nginx/snippets/other.conf",
-            "etc/sysusers.d/garrison.conf",
-        ] {
-            fs::write(root.join(file), "").unwrap();
-        }
-        std::os::unix::fs::symlink(
-            "/opt/garrison/current/bin/garrison",
-            root.join("usr/bin/garrison"),
-        )
-        .unwrap();
-        std::os::unix::fs::symlink(
-            "pre-upgrade-20261030T132151",
-            root.join("var/backups/garrison/last-pre-upgrade"),
-        )
-        .unwrap();
-        directory
-    }
-
-    fn paths(items: &[Item], root: &Path) -> Vec<String> {
-        items
-            .iter()
-            .filter_map(|item| match item {
-                Item::Path(path) => Some(path.strip_prefix(root).unwrap().display().to_string()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn by_default_the_program_goes_and_the_data_stays() {
-        let directory = host();
-        let root = directory.path();
-        let items = plan(root, false, true, Path::new(DEFAULT_POLICY));
-        assert_eq!(items[0], Item::Units);
-        assert!(items.contains(&Item::Module));
-        assert!(!items.contains(&Item::Users));
-        assert_eq!(
-            paths(&items, root),
-            [
-                "etc/systemd/system/garrison-web.service",
-                "etc/polkit-1/rules.d/50-garrison.rules",
-                "etc/nginx/snippets/garrison-stalwart-server.conf",
-                "etc/nginx/snippets/garrison.conf",
-                "usr/bin/garrison",
-                "opt/garrison",
-            ]
-        );
-    }
-
-    #[test]
-    fn another_program_of_the_commands_name_stays() {
-        let directory = host();
-        let root = directory.path();
-        fs::remove_file(root.join("usr/bin/garrison")).unwrap();
-        fs::write(root.join("usr/bin/garrison"), "another program").unwrap();
-        let paths = paths(&plan(root, true, false, Path::new(DEFAULT_POLICY)), root);
-        assert!(!paths.contains(&"usr/bin/garrison".to_owned()), "{paths:?}");
-    }
-
-    #[test]
-    fn a_purge_also_takes_data_users_and_the_installers_backups_only() {
-        let directory = host();
-        let root = directory.path();
-        let items = plan(root, true, false, Path::new(DEFAULT_POLICY));
-        assert!(!items.contains(&Item::Module));
-        assert!(items.contains(&Item::Users));
-        let paths = paths(&items, root);
-        for gone in [
-            "etc/garrison",
-            "var/lib/garrison",
-            "var/backups/garrison/last-pre-upgrade",
-            "var/backups/garrison/pre-upgrade-20261030T132151",
-            "etc/sysusers.d/garrison.conf",
-        ] {
-            assert!(paths.contains(&gone.to_owned()), "{gone}");
-        }
-        assert!(
-            !paths
-                .iter()
-                .any(|path| path.ends_with("latest") || path.ends_with("other.conf"))
-        );
-    }
-
-    /// A policy kept elsewhere goes with its lock and its backups, and
-    /// nothing else of its folder.
-    #[test]
-    fn a_purge_takes_a_policy_where_the_configuration_names_it() {
-        let directory = host();
-        let root = directory.path();
-        fs::create_dir_all(root.join("srv/garrison")).unwrap();
-        for file in [
-            "access.json",
-            "access.json.lock",
-            "access.json.20261030T132151.bak",
-            "access.json.orig",
-            "other.json",
-        ] {
-            fs::write(root.join("srv/garrison").join(file), "").unwrap();
-        }
-        let elsewhere = Path::new("/srv/garrison/access.json");
-        let gone = paths(&plan(root, true, false, elsewhere), root);
-        let policies: Vec<&String> = gone.iter().filter(|path| path.starts_with("srv")).collect();
-        assert_eq!(
-            policies,
-            [
-                "srv/garrison/access.json",
-                "srv/garrison/access.json.20261030T132151.bak",
-                "srv/garrison/access.json.lock",
-            ]
-        );
-        // Without a purge it stays, as the configuration does.
-        let kept = paths(&plan(root, false, false, elsewhere), root);
-        assert!(!kept.iter().any(|path| path.starts_with("srv")), "{kept:?}");
-    }
-
-    /// Where garrison.toml does not load, nobody knows where it keeps the
-    /// policy: the purge says so, and only then.
-    #[test]
-    fn a_purge_says_where_it_cannot_find_the_policy() {
-        let directory = tempfile::tempdir().unwrap();
-        let settings = directory.path().join("garrison.toml");
-        assert_eq!(policy_unknown(&settings), None);
-        let text = garrison_testing::config_text(directory.path(), "http://127.0.0.1:9");
-        fs::write(&settings, &text).unwrap();
-        assert_eq!(policy_unknown(&settings), None);
-        fs::write(&settings, format!("nonsense_setting = 1\n{text}")).unwrap();
-        let said = policy_unknown(&settings).unwrap();
-        assert!(
-            said.starts_with(&format!(
-                "{} does not load, so an access policy it names outside /etc/garrison is not \
-                 removed (",
-                settings.display()
-            )),
-            "{said}"
-        );
-        assert!(said.contains("nonsense_setting"), "{said}");
-    }
-
-    /// A purge takes only files: a folder or a link that `broker.policy`
-    /// names, or that bears the name of its lock or of a backup, is not the
-    /// policy's and stays with all it holds.
-    #[test]
-    fn a_purge_takes_only_the_files_of_a_policy_kept_elsewhere() {
-        let directory = host();
-        let root = directory.path();
-        let srv = root.join("srv");
-        fs::create_dir_all(srv.join("data/mail")).unwrap();
-        fs::write(srv.join("data/mail/inbox"), "mail").unwrap();
-        fs::create_dir_all(srv.join("data.20261030T132151.bak")).unwrap();
-        std::os::unix::fs::symlink("/etc/passwd", srv.join("data.lock")).unwrap();
-        let gone = paths(&plan(root, true, false, Path::new("/srv/data")), root);
-        assert!(!gone.iter().any(|path| path.starts_with("srv")), "{gone:?}");
-    }
-}
+mod tests;

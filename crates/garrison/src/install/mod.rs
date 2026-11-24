@@ -26,6 +26,7 @@ mod rollback;
 mod selinux;
 mod services;
 mod settle;
+mod stale;
 #[cfg(test)]
 mod stand_in;
 mod state;
@@ -40,15 +41,13 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use garrison_core::time;
-
 use crate::{say, units};
-use files::{Step, announce, copy_tree, exchange, io, lock, place, run, switch};
-use requirements::{preflight, room, size, state_size};
+use files::{Step, announce, copy_tree, exchange, fresh_folder, io, lock, place, run, switch};
+use requirements::{base_shown, preflight, room, size, state_size};
 pub(crate) use restore::run_restore;
 use services::{check_config, start, stop_services};
 use system::{install_system_files, protect_policy};
-use unfinished::Unfinished;
+use unfinished::{Seen, Unfinished};
 pub(crate) use uninstall::run_uninstall;
 
 pub(crate) const BASE: &str = "/opt/garrison";
@@ -86,17 +85,21 @@ fn policy_in(config: &Path) -> PathBuf {
 
 /// Whether Garrison is configured here: once its access policy is there,
 /// and also where the installer started the services before, which it
-/// enables as it starts them and only an uninstallation disables. Such an
-/// installation, whose configuration does not load or whose policy is
-/// missing, is for check-config to refuse, not a first installation.
+/// enables as it starts them and only an uninstallation disables, all of
+/// them; any one still enabled counts, also where the operator disabled the
+/// web service. Such an installation, whose configuration does not load or
+/// whose policy is missing, is for check-config to refuse, not a first
+/// installation.
 fn configured(installed: bool) -> bool {
     Path::new(CONFIG).join("garrison.toml").exists()
         && (policy().exists() || (installed && started_before()))
 }
 
 fn started_before() -> bool {
-    run(SYSTEMCTL, &["is-enabled", "--quiet", units::WEB])
-        .is_ok_and(|output| output.status.success())
+    // `is-enabled` succeeds where any one of the units is enabled.
+    let mut asked = vec!["is-enabled", "--quiet"];
+    asked.extend(services::ENABLE);
+    run(SYSTEMCTL, &asked).is_ok_and(|output| output.status.success())
 }
 
 /// The extracted release this binary belongs to: `<release>/bin/garrison`.
@@ -163,23 +166,33 @@ fn install_release(here: &Path, version: &str) -> Step<PathBuf> {
 /// reinstall of the running release would otherwise replace it with data the
 /// previous release cannot read.
 fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
-    let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
     let kind = if upgrade {
         "pre-upgrade"
     } else {
         "pre-reinstall"
     };
-    let target = Path::new(BACKUPS).join(format!("{kind}-{stamp}"));
+    let target = fresh_folder(Path::new(BACKUPS), kind)
+        .map_err(|error| format!("backup failed: {error}"))?;
     announce(&format!(
         "Backing up the running state to {}",
         target.display()
     ));
     let output = cli(current, &["backup", "--to", &target.display().to_string()])?;
     if !output.status.success() {
-        return Err(format!(
-            "backup failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        let _ = fs::remove_dir_all(&target);
+        let said = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        // The running release makes this backup: a setting that only the new
+        // release knows keeps it from loading the configuration.
+        if said.starts_with("Cannot load") {
+            let running = fs::canonicalize(current).unwrap_or_else(|_| current.to_owned());
+            return Err(format!(
+                "backup failed: {said}; {}, the release that runs, makes the backup before the \
+                 upgrade and cannot load {CONFIG}/garrison.toml: take out the settings it does \
+                 not know, upgrade, then put them back",
+                unfinished::name(&running)
+            ));
+        }
+        return Err(format!("backup failed: {said}"));
     }
     copy_config(Path::new(CONFIG), &target.join("etc"))?;
     if upgrade {
@@ -188,7 +201,10 @@ fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
     Ok(target)
 }
 
-/// The configuration without credentials, which have their own protected backup.
+/// The configuration without credentials, which have their own protected
+/// backup. Each file keeps its mode, at most 0644, so that one put back from
+/// the copy with its mode is read as before; the backup's folder is root's
+/// alone.
 fn copy_config(source: &Path, target: &Path) -> Step {
     io(fs::create_dir_all(target), target)?;
     for entry in io(fs::read_dir(source), source)?.flatten() {
@@ -199,7 +215,8 @@ fn copy_config(source: &Path, target: &Path) -> Step {
         if from.is_dir() {
             copy_config(&from, &to)?;
         } else {
-            place(&from, &to, 0o600)?;
+            let mode = io(fs::metadata(&from), &from)?.permissions().mode() & 0o644;
+            place(&from, &to, mode)?;
         }
     }
     Ok(())
@@ -239,11 +256,12 @@ The release is installed, but Garrison is not configured yet.
   3. Create the access policy:   garrison access init
   4. Check everything:           garrison check-config
   5. Run the installer again to start the services.
-  6. Give Garrison a host name of its own (never Stalwart's) and include
-     /etc/nginx/snippets/garrison.conf in that HTTPS server block.
-     Optional, for a \"Switch to Garrison WebUI\" row in the Stalwart WebUI: add
-     include /etc/nginx/snippets/garrison-stalwart-switch*.conf;
-     inside the location that serves the Stalwart WebUI (/admin/).
+  6. Give Garrison a host name of its own (never Stalwart's):
+     `garrison nginx` prints its server block and the lines for Stalwart's.
+     Add
+       include /etc/nginx/snippets/garrison-stalwart-server*.conf;
+     to every server block that proxies to Stalwart: it keeps the metrics
+     exporter that step 2 turns on off the internet.
 
 The command is available as {command}.",
         target = target.display(),
@@ -267,6 +285,7 @@ fn switch_to(release: &Path, old: Option<&Path>, configured: bool) -> Step {
 fn install() -> Step {
     // Root first: without it the release may not even be readable.
     preflight()?;
+    base_shown()?;
     let here = here()?;
     let version = verify::verify(&here)?;
     let _held = lock(Path::new(LOCK))?;
@@ -287,7 +306,7 @@ fn install() -> Step {
     if old.is_some() && configured && resumed.is_none() {
         needs.push((Path::new(BACKUPS), state_size()));
     }
-    room(&needs)?;
+    room(&needs, "the installation")?;
     let release = install_release(&here, &version)?;
     // As `old` is: where /opt is a link, the path under BASE and the one the
     // links resolve to differ, and a reinstall would pass for an upgrade.
@@ -298,7 +317,8 @@ fn install() -> Step {
     if old.is_some() && configured {
         // The installer sets the policy's owner and mode anyway; the check must
         // not refuse what it is about to correct.
-        protect_policy()?;
+        protect_policy()
+            .map_err(|error| format!("{error}; the running release was not touched"))?;
         // A configuration the new release refuses leaves the running one
         // alone. Its warnings follow as it starts.
         check_config(&release, false).map_err(|error| match &resumed {
@@ -362,6 +382,12 @@ fn install() -> Step {
     for line in housekeeping::prune(base, backups, &backups.join(LAST)) {
         announce(&line);
     }
+    // Only where `previous` names another release is there one to return to.
+    let previous = fs::canonicalize(base.join("previous")).ok();
+    if previous.is_none_or(|previous| previous == release) {
+        announce(&format!("Garrison {version} is running."));
+        return Ok(());
+    }
     // The release before cannot read a database this one migrates. Name the
     // rollback that works now, not only when a plain `--rollback` refuses.
     announce(&format!(
@@ -383,9 +409,10 @@ fn install() -> Step {
 /// runs from the installed release, which holds no archive to install from.
 pub(crate) fn start_installed() -> Step {
     preflight()?;
+    base_shown()?;
     let _held = lock(Path::new(LOCK))?;
-    if let Some(record) = unfinished::read()? {
-        return Err(record.finish_first());
+    if let Seen::Holds(record) | Seen::Failed(record) = unfinished::read()? {
+        return Err(record.not_started());
     }
     let current = io(
         fs::canonicalize(Path::new(BASE).join("current")),
@@ -428,6 +455,35 @@ pub(crate) fn run_installer(rollback_requested: bool, with_state: bool) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The copy of the configuration in a backup keeps the modes the
+    /// services read it by, so that a file put back from it with its mode,
+    /// as with `mv` or `cp -p`, is read again; the credentials stay out.
+    #[test]
+    fn a_configuration_copy_keeps_the_modes_of_its_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let (source, target) = (directory.path().join("etc"), directory.path().join("copy"));
+        fs::create_dir_all(source.join("credentials")).unwrap();
+        fs::write(source.join("garrison.toml"), "schema = 1\n").unwrap();
+        fs::write(source.join("private.toml"), "kept = true\n").unwrap();
+        fs::write(source.join("credentials/broker-native-key"), "secret").unwrap();
+        let set = |name: &str, mode: u32| {
+            fs::set_permissions(source.join(name), fs::Permissions::from_mode(mode)).unwrap();
+        };
+        set("garrison.toml", 0o644);
+        set("private.toml", 0o600);
+        copy_config(&source, &target).unwrap();
+        let mode = |name: &str| {
+            fs::metadata(target.join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(mode("garrison.toml"), 0o644);
+        assert_eq!(mode("private.toml"), 0o600);
+        assert!(!target.join("credentials").exists());
+    }
 
     #[test]
     fn the_policy_is_where_the_configuration_names_it() {

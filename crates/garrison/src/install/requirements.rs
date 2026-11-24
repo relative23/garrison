@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use garrison_core::config::{self, Database};
 
 use super::files::{Step, io, run};
-use super::{CONFIG, SYSTEMCTL};
+use super::{BASE, CONFIG, SYSTEMCTL};
 
 /// `LoadCredential=` in the units arrived with systemd 247.
 const SYSTEMD: u32 = 247;
@@ -17,14 +17,22 @@ const PKACTION: &str = "/usr/bin/pkaction";
 /// Left free after the installation, for the services' own writes.
 const SPARE: u64 = 64 << 20;
 
-pub(super) fn preflight() -> Step {
+/// What an uninstallation needs: root and systemctl. Neither polkit nor a
+/// systemd that knows the units' settings, which only a start needs.
+pub(super) fn root_with_systemctl() -> Step {
     if !rustix::process::geteuid().is_root() {
         return Err("Run as root.".into());
     }
-    for tool in [SYSTEMCTL, "/usr/bin/systemd-sysusers"] {
-        if !Path::new(tool).exists() {
-            return Err(format!("{tool} is required."));
-        }
+    if !Path::new(SYSTEMCTL).exists() {
+        return Err(format!("{SYSTEMCTL} is required."));
+    }
+    Ok(())
+}
+
+pub(super) fn preflight() -> Step {
+    root_with_systemctl()?;
+    if !Path::new("/usr/bin/systemd-sysusers").exists() {
+        return Err("/usr/bin/systemd-sysusers is required.".into());
     }
     let output = run(SYSTEMCTL, &["--version"])?;
     match systemd_version(&String::from_utf8_lossy(&output.stdout)) {
@@ -57,6 +65,15 @@ pub(super) fn preflight() -> Step {
         );
     }
     Ok(())
+}
+
+/// Before a command that starts the services: the units must find the
+/// release where it lies, not through a link into a place they hide.
+pub(super) fn base_shown() -> Step {
+    match crate::units::hidden_base(Path::new(BASE)) {
+        Some(why) => Err(format!("{why}; nothing was changed.")),
+        None => Ok(()),
+    }
 }
 
 /// `systemd 257 (257.13-1~deb13u1)` is 257.
@@ -121,8 +138,39 @@ fn existing(path: &Path) -> &Path {
 }
 
 /// Every `(directory, bytes)` must fit on its filesystem, with a tenth more and
-/// some space to spare; needs on one filesystem add up.
-pub(super) fn room(needs: &[(&Path, u64)]) -> Step {
+/// some space to spare; needs on one filesystem add up. `what` names what
+/// needs the room, such as "the installation".
+pub(super) fn room(needs: &[(&Path, u64)], what: &str) -> Step {
+    match lacking(needs, true)? {
+        Some((directory, free, wanted)) => Err(format!(
+            "{} has {} MiB free and {what} needs {} MiB; nothing was changed.",
+            directory.display(),
+            free >> 20,
+            wanted >> 20
+        )),
+        None => Ok(()),
+    }
+}
+
+/// Every `(directory, bytes)` must fit on its filesystem as it is, for the
+/// copies from before an upgrade that a switch back puts back: a way back
+/// needs no room to spare.
+pub(super) fn exact_room(needs: &[(&Path, u64)]) -> Step {
+    match lacking(needs, false)? {
+        Some((directory, free, wanted)) => Err(format!(
+            "{} has {} MiB free and the copies from before the upgrade need {} MiB there; free \
+             space there",
+            directory.display(),
+            free >> 20,
+            wanted.div_ceil(1 << 20)
+        )),
+        None => Ok(()),
+    }
+}
+
+/// The first filesystem that lacks room for what `needs` puts on it, with
+/// what it has free and what it needs, with the margin of `room` or none.
+fn lacking(needs: &[(&Path, u64)], spare: bool) -> Step<Option<(PathBuf, u64, u64)>> {
     let mut filesystems: Vec<(u64, &Path, u64)> = Vec::new();
     for (path, bytes) in needs {
         let directory = existing(path);
@@ -136,17 +184,16 @@ pub(super) fn room(needs: &[(&Path, u64)]) -> Step {
         let stat = rustix::fs::statvfs(directory)
             .map_err(|error| format!("{}: {error}", directory.display()))?;
         let free = stat.f_bavail.saturating_mul(stat.f_frsize);
-        let wanted = bytes + bytes / 10 + SPARE;
+        let wanted = if spare {
+            bytes + bytes / 10 + SPARE
+        } else {
+            bytes
+        };
         if free < wanted {
-            return Err(format!(
-                "{} has {} MiB free and the installation needs {} MiB; nothing was changed.",
-                directory.display(),
-                free >> 20,
-                wanted >> 20
-            ));
+            return Ok(Some((directory.to_owned(), free, wanted)));
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -198,12 +245,16 @@ mod tests {
     fn room_is_measured_on_the_filesystem_that_takes_the_files() {
         let directory = tempfile::tempdir().unwrap();
         let missing = directory.path().join("not/yet/created");
-        room(&[(&missing, 1)]).unwrap();
-        let refused = room(&[(&missing, u64::MAX / 4)]).unwrap_err();
+        room(&[(&missing, 1)], "the installation").unwrap();
+        let refused = room(&[(&missing, u64::MAX / 4)], "the installation").unwrap_err();
         assert!(refused.ends_with("; nothing was changed."), "{refused}");
+        assert!(
+            refused.contains(" MiB free and the installation needs "),
+            "{refused}"
+        );
         // Two needs on one filesystem add up.
         let stat = rustix::fs::statvfs(directory.path()).unwrap();
         let half = stat.f_bavail * stat.f_frsize / 2;
-        assert!(room(&[(directory.path(), half), (&missing, half)]).is_err());
+        assert!(room(&[(directory.path(), half), (&missing, half)], "the restore").is_err());
     }
 }

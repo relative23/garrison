@@ -40,6 +40,47 @@ check "a dry run changes nothing" \
     'test "$(find /opt/garrison /etc/garrison /etc/systemd/system /etc/polkit-1/rules.d | sort)" = "$(cat /root/before.list)"'
 services "after the dry run"
 
+step "The test of nginx without Garrison's snippets changes none of them"
+# A stand-in for nginx: its test takes three seconds, marked by a file in
+# /run while it runs, and fails where it sees Garrison's include, as a
+# server block that includes it by its name does.
+inside_input 'cat > /usr/sbin/nginx && chmod 755 /usr/sbin/nginx' <<'NGINX'
+#!/bin/sh
+test "$1" = -t || exit 2
+: > /run/acceptance-nginx-testing
+sleep 3
+rm -f /run/acceptance-nginx-testing
+! test -e /etc/nginx/snippets/garrison.conf
+NGINX
+inside 'mkdir -p /etc/nginx/snippets && echo "# other" > /etc/nginx/snippets/other.conf &&
+    /root/release/bin/garrison nginx --snippet > /etc/nginx/snippets/garrison.conf &&
+    ls /etc/nginx/snippets > /root/snippets.before'
+# The command `1` in the background until the stand-in's test runs: then
+# the snippets are looked at once, as they are in that moment.
+while_testing() {
+    inside "umask 077 && rm -f /root/late.pid && { $1 > /root/nginx-test.log 2>&1 & echo \$! > /root/late.pid; } &&
+        for i in \$(seq 100); do test -e /run/acceptance-nginx-testing && break; sleep 0.1; done &&
+        test -e /run/acceptance-nginx-testing"
+}
+kept='test "$(ls /etc/nginx/snippets)" = "$(cat /root/snippets.before)"'
+while_testing '/opt/garrison/current/bin/garrison uninstall --dry-run'
+if ! inside "$kept"; then
+    inside 'ls /etc/nginx/snippets' || true
+    echo "FAIL  while a dry run tests nginx, Garrison's snippets stay where they are"
+    exit 1
+fi
+echo "ok    while a dry run tests nginx, Garrison's snippets stay where they are"
+check "and the dry run finds that nginx stays valid without them" \
+    'grep -q "Would remove /etc/nginx/snippets/garrison.conf" /root/nginx-test.log'
+while_testing '/opt/garrison/current/bin/garrison uninstall'
+inside 'p=$(cat /root/late.pid) && kill -KILL $(cat /proc/$p/task/$p/children 2>/dev/null) $p &&
+    for i in $(seq 300); do test -e /proc/$p || break; sleep 0.1; done'
+check "an uninstallation killed while it tests nginx leaves the snippets as they were" "$kept"
+check "and nothing of Garrison's was removed" 'test -d /opt/garrison && test -L /usr/bin/garrison'
+inside 'rm -r /usr/sbin/nginx /etc/nginx /root/snippets.before /root/nginx-test.log /root/late.pid
+    /run/acceptance-nginx-testing 2>/dev/null; true'
+services "after the test of nginx"
+
 step "Uninstalling keeps configuration and data"
 installer '/opt/garrison/current/bin/garrison uninstall'
 check "the program is gone" 'test ! -e /opt/garrison'
@@ -86,6 +127,9 @@ installer '/root/release/bin/garrison install > /root/install-beside.log 2>&1'
 check "another program named garrison is left alone" \
     'test "$(cat /usr/bin/garrison)" = "another program" &&
         grep -q "/usr/bin/garrison is something else and was left alone" /root/install-beside.log'
+check "the first installation's steps name the include that keeps Stalwart's exporter private" \
+    'grep -q "include /etc/nginx/snippets/garrison-stalwart-server\*.conf;" /root/install-beside.log &&
+        grep -q "garrison nginx" /root/install-beside.log'
 inside 'rm /usr/bin/garrison'
 installer '/root/release/bin/garrison install'
 check "the next installation makes the link" \
@@ -93,5 +137,14 @@ check "the next installation makes the link" \
 check "the new installation starts from the example configuration" \
     'grep -q "garrison.example.org" /etc/garrison/garrison.toml'
 check "the service users exist again" 'getent passwd garrison-broker >/dev/null'
+
+step "A purge where polkit's rules folder is gone"
+# As after `apt purge polkitd`: uninstalling needs neither polkit nor its folder.
+inside 'mv /etc/polkit-1/rules.d /root/polkit-rules.away'
+installer '/root/release/bin/garrison uninstall --purge > /root/purge-without-polkit.log 2>&1' ||
+    { inside 'cat /root/purge-without-polkit.log'; echo "FAIL  a purge without polkit's rules folder"; exit 1; }
+echo "ok    a purge without polkit's rules folder"
+check "it removed the program and the configuration" 'test ! -e /opt/garrison && test ! -e /etc/garrison'
+inside 'mv /root/polkit-rules.away /etc/polkit-1/rules.d && rm -f /etc/polkit-1/rules.d/50-garrison.rules'
 
 step "Accepted: uninstalling keeps what it should and a purge leaves nothing"

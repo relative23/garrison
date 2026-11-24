@@ -13,8 +13,10 @@
 //! one. Then every database and the access policy go back as
 //! `--rollback --restore-state` puts them back, and the services start.
 //!
-//! Run again after it was interrupted, a restore makes no new copy and
-//! names the first run's (`unfinished.rs`).
+//! Run again after it was interrupted before Garrison started, a restore
+//! makes no new copy and names the first run's (`unfinished.rs`). Once
+//! Garrison runs, also on a state that went back only in part, the record
+//! goes, and a restore run again copies the state as it is first.
 //!
 //! A backup holds no sessions and no credentials: users sign in again, and
 //! where `/etc/garrison/credentials` was lost as well, `garrison stalwart
@@ -24,11 +26,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use garrison_core::config;
-use garrison_core::time;
 
-use super::files::{Step, announce, io, lock};
+use super::files::{Step, announce, fresh_folder, io, lock};
 use super::requirements::{preflight, state_size};
-use super::unfinished::{self, Unfinished};
+use super::unfinished::{self, Seen, Unfinished};
 use super::{BACKUPS, BASE, CONFIG, LOCK, cli, precheck, start, state, stop_services};
 
 /// The backup at `from`, if it is one that `garrison backup` wrote.
@@ -50,12 +51,14 @@ fn backup_at(from: &Path) -> Step<PathBuf> {
 
 fn restore(from: &Path) -> Step {
     preflight()?;
+    super::requirements::base_shown()?;
     let _held = lock(Path::new(LOCK))?;
-    // An interrupted restore's copy stays the state from before.
+    // An interrupted restore's copy stays the state from before, while
+    // nothing has written the state since.
     let earlier = match unfinished::read()? {
-        Some(Unfinished::Restore { kept, .. }) => Some(kept),
-        Some(record) => return Err(record.finish_first()),
-        None => None,
+        Seen::Holds(Unfinished::Restore { kept, .. }) => Some(kept),
+        Seen::Holds(record) | Seen::Failed(record) => return Err(record.finish_first()),
+        Seen::Stale(_) | Seen::Nothing => None,
     };
     let source = backup_at(from)?;
     let link = Path::new(BASE).join("current");
@@ -103,7 +106,7 @@ fn restore(from: &Path) -> Step {
     // where this run copies it.
     let copy_room = [(Path::new(BACKUPS), state_size())];
     let besides: &[(&Path, u64)] = if earlier.is_some() { &[] } else { &copy_room };
-    precheck::copies_fit(&source, &config, besides)?;
+    precheck::copies_fit(&source, &config, besides, "the restore")?;
     let kept = match earlier {
         Some(kept) => {
             announce(&format!(
@@ -120,49 +123,80 @@ fn restore(from: &Path) -> Step {
         kept: kept.clone(),
     })?;
     stop_services();
-    let mut restored = Vec::new();
+    let mut restored = state::Returned::default();
     let result = state::restore_all(&source, &config, owner, &mut restored);
     // Garrison is stopped now: whatever was put back, it starts again.
     let started = start(&current);
-    match (result, started) {
-        (Ok(()), Ok(())) => {
-            unfinished::done()?;
-            announce(&format!(
-                "Restored the state from {place}; Garrison {name} is running. Users sign in \
-                 again: a backup holds no sessions. The state from before is in {}.",
-                kept.display()
-            ));
-            Ok(())
+    let put_back = Restored {
+        place: &place,
+        release: &name,
+        kept: &kept,
+        went_back: restored.said(&source),
+    };
+    put_back.said(result, started)
+}
+
+/// What a restore put back, from where, and where the state from before is.
+struct Restored<'a> {
+    place: &'a str,
+    release: &'a str,
+    kept: &'a Path,
+    went_back: String,
+}
+
+impl Restored<'_> {
+    /// The restore's last word. Once Garrison runs, it records on what was
+    /// put back, which no copy holds: the record goes, also after a failure.
+    fn said(&self, result: Step, started: Step) -> Step {
+        let left = match &started {
+            Ok(()) => unfinished::done().err(),
+            Err(_) => None,
+        };
+        let left = left.map(|error| format!(" {error}.")).unwrap_or_default();
+        let (place, name, kept) = (self.place, self.release, self.kept.display());
+        match (result, started) {
+            (Ok(()), Ok(())) if left.is_empty() => {
+                announce(&format!(
+                    "Restored the state from {place}; Garrison {name} is running. Users sign \
+                     in again: a backup holds no sessions. The state from before is in {kept}."
+                ));
+                Ok(())
+            }
+            (Ok(()), Ok(())) => Err(format!(
+                "Restored the state from {place}; Garrison {name} is running, but{left} The \
+                 state from before is in {kept}."
+            )),
+            (Err(error), started) => Err(format!(
+                "The restore failed ({error}); Garrison {}.{} The state from before is in \
+                 {kept}.{left}",
+                if started.is_ok() {
+                    "is running with what could be put back"
+                } else {
+                    "did not start either"
+                },
+                self.went_back,
+            )),
+            (Ok(()), Err(error)) => Err(format!(
+                "The state was put back, but Garrison did not start ({error}). The state from \
+                 before is in {kept}; see the journal."
+            )),
         }
-        (Err(error), started) => Err(format!(
-            "The restore failed ({error}); Garrison {}.{} The state from before is in {}.",
-            if started.is_ok() {
-                "is running with what could be put back"
-            } else {
-                "did not start either"
-            },
-            state::went_back(&restored, &source),
-            kept.display()
-        )),
-        (Ok(()), Err(error)) => Err(format!(
-            "The state was put back, but Garrison did not start ({error}). The state from \
-             before is in {}; see the journal.",
-            kept.display()
-        )),
     }
 }
 
 /// What is there now, copied by `current`'s own backup, so that this restore
 /// can be taken back.
 fn keep(current: &Path) -> Step<PathBuf> {
-    let stamp = time::now().strftime("%Y%m%dT%H%M%S").to_string();
-    let kept = Path::new(BACKUPS).join(format!("pre-restore-{stamp}"));
+    let kept = fresh_folder(Path::new(BACKUPS), "pre-restore").map_err(|error| {
+        format!("The state as it is could not be backed up ({error}); nothing was changed.")
+    })?;
     announce(&format!(
         "Backing up the state as it is to {}",
         kept.display()
     ));
     let backup = cli(current, &["backup", "--to", &kept.display().to_string()])?;
     if !backup.status.success() {
+        let _ = fs::remove_dir_all(&kept);
         return Err(format!(
             "The state as it is could not be backed up ({}); nothing was changed.",
             String::from_utf8_lossy(&backup.stderr).trim()

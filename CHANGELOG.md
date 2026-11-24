@@ -18,8 +18,9 @@ Notable changes for operators and users. The format follows
   `backup.service` for `backup.timer`; check-config names it.
 - A zone of Spamhaus' Data Query Service written with its key in `lists`,
   such as `KEY.zen.dq.spamhaus.net`, keeps working, and `check-config`,
-  the installer and `garrison doctor` warn of it: write the zone without
-  the key, `zen.dq.spamhaus.net`, keep the key in
+  the installer and `garrison doctor` warn of it. Once the upgrade is done,
+  since a release before this one refuses `collector.dqs_key`: write the
+  zone without the key, `zen.dq.spamhaus.net`, keep the key in
   `/etc/garrison/credentials/spamhaus-dqs-key` (root, mode 0600) and set
   `collector.dqs_key = "credential:spamhaus-dqs-key"`. A zone written
   without its key while that setting is missing is refused, and with it the
@@ -1303,6 +1304,9 @@ Notable changes for operators and users. The format follows
   listed a message that a milter or a hook had refused among the messages
   waiting for delivery, for seven days. Such a message never reached the
   queue and is not counted there any more.
+- **The installer refuses `/opt/garrison` where a link puts it under `/home`,
+  `/root`, `/tmp` or `/var/tmp`**, where no service could start; link it
+  elsewhere or mount the disk at `/opt/garrison`.
 - **An installation under a linked `/opt` keeps its rollback release.**
   Where `/opt` or `/opt/garrison` is a link to another disk, every upgrade
   removed all releases but the newest, the one to roll back to included; a
@@ -1761,12 +1765,37 @@ Notable changes for operators and users. The format follows
 - **An upgrade that was interrupted, also once `current` named the new
   release, is finished by running it again**, with the same installer or
   `garrison upgrade` and the same archive; it switches back where the new
-  release does not start.
-- **A rollback that was interrupted is finished by running it again**; where
-  it returned to a release from before this one, run the command its first
+  release did not start, and puts no copy back once Garrison ran since.
+- **A rollback that was interrupted is finished by running it again**, also
+  with the state from before the upgrade where it began with it; where it
+  returned to a release from before this one, run the command its first
   line names.
 - **A restore that was interrupted is finished by running it again**, and
-  names the copy of the state its first run made.
+  names the copy of the state its first run made; where Garrison ran since,
+  it copies the state as it is first.
+- **The installer and an uninstallation no longer stop the macro filter
+  while Stalwart may still ask it**, which left Stalwart deferring all
+  incoming mail; they say why the filter keeps running and that `garrison
+  stalwart setup` takes it out.
+- **The installer loads the SELinux module again where its last load
+  failed**, where it took the module as loaded and nginx answered 502; its
+  warning says how `semodule` ended where it said nothing.
+- **An uninstallation's test of nginx no longer renames Garrison's
+  snippets**, so a run cut short there no longer leaves nginx unable to
+  start, and a dry run changes nothing.
+- **The installer no longer makes a policy file of another user the one the
+  broker grants by**: it refuses such a file before anything stops and names
+  the command that makes it root's.
+- **`garrison.toml` put back from the copy in a backup before an upgrade is
+  read by the services again**, also where it was moved or copied with its
+  mode: the copy keeps the file's mode.
+- **A switch back after a failed upgrade that finds no room for a database's
+  copy says so and puts nothing back**, where it said that the previous
+  release did not start either; it also names what went back and what was
+  removed.
+- **An installer run right after one that was killed while it backed up no
+  longer fails with "backup failed: … disk I/O error".** Each run backs up
+  into a folder of its own, also two restores within one second.
 - **A stale event history no longer reads as a quiet mail server.** The
   mail-flow summaries and the sending accounts counted whatever the event
   history held and called it in order, also when the event receiver had not

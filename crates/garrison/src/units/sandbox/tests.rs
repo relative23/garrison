@@ -3,32 +3,47 @@ use std::collections::BTreeSet;
 use super::super::tests::values;
 use super::*;
 
+/// The settings of systemd.exec(5) that hide or replace a path.
+const HIDING: [&str; 18] = [
+    "ProtectHome=",
+    "PrivateTmp=",
+    "PrivateDevices=",
+    "ProtectKernelModules=",
+    "ProtectKernelTunables=",
+    "ProtectKernelLogs=",
+    "InaccessiblePaths=",
+    "TemporaryFileSystem=",
+    "BindPaths=",
+    "BindReadOnlyPaths=",
+    "RootDirectory=",
+    "RootImage=",
+    "MountImages=",
+    "ExtensionImages=",
+    "ExtensionDirectories=",
+    "PrivateUsers=",
+    "ProtectProc=",
+    "ProcSubset=",
+];
+
+/// The hiding settings of `unit` as it is shipped.
+fn hiding_of(unit: &str) -> BTreeSet<String> {
+    HIDING
+        .iter()
+        .flat_map(|key| {
+            values(key)
+                .into_iter()
+                .filter(|(named, _)| *named == unit)
+                .map(move |(_, value)| format!("{key}{value}"))
+        })
+        .collect()
+}
+
 /// The places hidden from the broker and from the collector are those of
 /// the settings in their units that hide or replace a path, as
 /// systemd.exec(5) gives them and a container showed them (systemd 257): a
 /// unit that hides more, or less, fails here until its list follows.
 #[test]
 fn the_places_hidden_are_those_the_broker_and_collector_units_hide() {
-    const HIDING: [&str; 18] = [
-        "ProtectHome=",
-        "PrivateTmp=",
-        "PrivateDevices=",
-        "ProtectKernelModules=",
-        "ProtectKernelTunables=",
-        "ProtectKernelLogs=",
-        "InaccessiblePaths=",
-        "TemporaryFileSystem=",
-        "BindPaths=",
-        "BindReadOnlyPaths=",
-        "RootDirectory=",
-        "RootImage=",
-        "MountImages=",
-        "ExtensionImages=",
-        "ExtensionDirectories=",
-        "PrivateUsers=",
-        "ProtectProc=",
-        "ProcSubset=",
-    ];
     let listed: BTreeSet<&str> = HIDDEN.iter().map(|(_, setting, _)| *setting).collect();
     for (unit, sets) in [(BROKER, &BROKER_SETS[..]), (COLLECT, &COLLECT_SETS[..])] {
         assert!(
@@ -36,16 +51,7 @@ fn the_places_hidden_are_those_the_broker_and_collector_units_hide() {
             "{unit}"
         );
         let listed: BTreeSet<String> = sets.iter().map(ToString::to_string).collect();
-        let set: BTreeSet<String> = HIDING
-            .iter()
-            .flat_map(|key| {
-                values(key)
-                    .into_iter()
-                    .filter(|(named, _)| *named == unit)
-                    .map(move |(_, value)| format!("{key}{value}"))
-            })
-            .collect();
-        assert_eq!(set, listed, "{unit}");
+        assert_eq!(hiding_of(unit), listed, "{unit}");
     }
     // No place is listed that neither unit hides.
     let set: BTreeSet<&str> = BROKER_SETS.iter().chain(&COLLECT_SETS).copied().collect();
@@ -76,6 +82,62 @@ fn the_places_hidden_are_those_the_broker_and_collector_units_hide() {
         .map(|(place, _, _)| *place)
         .collect();
     assert_eq!(same, ["/tmp", "/var/tmp"]);
+}
+
+/// The release base is judged by what any service unit hides, since each
+/// starts its service from it: a unit that hides more fails here until
+/// the list follows.
+#[test]
+fn a_release_base_no_unit_hides_is_the_only_one_taken() {
+    let services = [
+        super::super::WEB,
+        super::super::INGEST,
+        BROKER,
+        COLLECT,
+        super::super::WATCH,
+        super::super::MILTER,
+    ];
+    // ProtectProc= and ProcSubset= touch /proc alone, where no release lies;
+    // the macro filter's own two hide what PrivateTmp= and PrivateDevices=
+    // already count among the places hidden.
+    let elsewhere = [
+        "ProtectProc=invisible",
+        "ProcSubset=pid",
+        "TemporaryFileSystem=/tmp:ro /var/tmp:ro",
+        "InaccessiblePaths=-/dev/shm -/dev/mqueue",
+    ];
+    let any: BTreeSet<String> = services
+        .iter()
+        .flat_map(|unit| hiding_of(unit))
+        .filter(|setting| !elsewhere.contains(&setting.as_str()))
+        .collect();
+    let listed: BTreeSet<String> = ANY_SETS.iter().map(ToString::to_string).collect();
+    assert_eq!(any, listed);
+    let base = Path::new("/opt/garrison");
+    assert_eq!(base_hidden_at(base, Some(base)), None);
+    assert_eq!(
+        base_hidden_at(base, Some(Path::new("/srv/disk/garrison"))),
+        None
+    );
+    let refused = base_hidden_at(base, Some(Path::new("/home/disk/garrison"))).unwrap();
+    assert!(
+        refused.starts_with(
+            "/opt/garrison leads to /home/disk/garrison, which lies under /home, which \
+             Garrison's units hide from their services (ProtectHome=true)"
+        ),
+        "{refused}"
+    );
+    for hidden in [
+        "/root/garrison",
+        "/run/user/0/garrison",
+        "/tmp/garrison",
+        "/var/tmp/opt",
+    ] {
+        assert!(
+            base_hidden_at(base, Some(Path::new(hidden))).is_some(),
+            "{hidden}"
+        );
+    }
 }
 
 #[test]

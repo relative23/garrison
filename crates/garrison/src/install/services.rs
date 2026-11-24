@@ -10,7 +10,7 @@ use super::system::unit_file;
 use super::{CONFIG, SYSTEMCTL, UNITS, cli, milter, settle};
 use crate::units;
 
-const ENABLE: [&str; 5] = [
+pub(super) const ENABLE: [&str; 5] = [
     units::BROKER_SOCKET,
     units::WEB,
     units::INGEST,
