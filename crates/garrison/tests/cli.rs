@@ -129,6 +129,54 @@ fn the_switch_snippet_comes_from_the_interface_next_to_the_binary() {
     );
 }
 
+/// The first line of each file Garrison generates names the command that
+/// writes it, and the binary has that command: the polkit rule and the
+/// Stalwart WebUI's include.
+#[test]
+fn a_generated_files_first_line_names_a_command_that_exists() {
+    // A release layout: bin/garrison and static/ beside it.
+    let release = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    for folder in ["bin", "static"] {
+        std::fs::create_dir(release.path().join(folder)).unwrap();
+    }
+    let binary = release.path().join("bin/garrison");
+    std::fs::hard_link(env!("CARGO_BIN_EXE_garrison"), &binary).unwrap();
+    std::fs::write(
+        release.path().join("static/stalwart-switch.js"),
+        "/* row */",
+    )
+    .unwrap();
+    let directory = prepared();
+    let garrison = |arguments: &[&str]| {
+        finished(
+            Command::new(&binary)
+                .arg("--config")
+                .arg(directory.path().join("garrison.toml"))
+                .args(arguments),
+        )
+    };
+    for generator in ["polkit-rule", "stalwart-switch"] {
+        let generated = garrison(&[generator]);
+        assert_eq!(
+            generated.status.code(),
+            Some(0),
+            "{}",
+            text(&generated.stderr)
+        );
+        let first = text(&generated.stdout).lines().next().unwrap().to_owned();
+        let named = first.split('`').nth(1).unwrap_or_default();
+        let words: Vec<&str> = named.split_whitespace().collect();
+        assert_eq!(words.first(), Some(&"garrison"), "{generator}: {first}");
+        let help = garrison(&[&words[1..], &["--help"]].concat());
+        assert_eq!(
+            help.status.code(),
+            Some(0),
+            "{generator}'s first line names `{named}`: {}",
+            text(&help.stderr)
+        );
+    }
+}
+
 #[test]
 fn the_polkit_rule_allows_exactly_the_actions() {
     let directory = prepared();
