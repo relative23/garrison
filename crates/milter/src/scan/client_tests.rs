@@ -309,6 +309,10 @@ fn uuencode_is_read_as_a_mail_program_reads_it() {
             );
         }
     }
+}
+
+#[test]
+fn a_uuencode_block_that_was_not_read_whole_leaves_a_gap() {
     // A block as a writer of the format makes it, without its `end`, was
     // cut: what it lacks was not read.
     let cut = Uu {
