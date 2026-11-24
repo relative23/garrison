@@ -272,4 +272,10 @@ fn the_record_is_roots_alone_and_says_what_finishes_it() {
             .finish_first()
             .contains("--restore-state")
     );
+    // Setup's last step changed nothing, but the steps before it did.
+    assert_eq!(
+        upgrade(base).not_started(),
+        "An earlier run left an upgrade from 0.1 to 0.2 unfinished, so Garrison was not started; \
+         run the installer of 0.2 again to finish it, which starts Garrison as well."
+    );
 }

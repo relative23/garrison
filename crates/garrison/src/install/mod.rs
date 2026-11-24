@@ -385,7 +385,7 @@ pub(crate) fn start_installed() -> Step {
     preflight()?;
     let _held = lock(Path::new(LOCK))?;
     if let Seen::Holds(record) | Seen::Failed(record) = unfinished::read()? {
-        return Err(record.finish_first());
+        return Err(record.not_started());
     }
     let current = io(
         fs::canonicalize(Path::new(BASE).join("current")),

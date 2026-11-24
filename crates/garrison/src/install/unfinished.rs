@@ -252,7 +252,27 @@ impl Unfinished {
 
     /// Why another command must wait for this one, and what finishes it.
     pub(super) fn finish_first(&self) -> String {
-        let how = match self {
+        format!(
+            "An earlier run left {} unfinished; {} to finish it. Nothing was changed.",
+            self.describe(),
+            self.finished_by()
+        )
+    }
+
+    /// Why setup's last step did not start Garrison, after its other steps
+    /// changed what they change: what finishes this run starts Garrison too.
+    pub(super) fn not_started(&self) -> String {
+        format!(
+            "An earlier run left {} unfinished, so Garrison was not started; {} to finish it, \
+             which starts Garrison as well.",
+            self.describe(),
+            self.finished_by()
+        )
+    }
+
+    /// The command that finishes this run.
+    fn finished_by(&self) -> String {
+        match self {
             Self::Upgrade { to, .. } => format!("run the installer of {} again", name(to)),
             Self::Rollback { from, state, .. } => format!(
                 "run `{} install --rollback{}`",
@@ -268,11 +288,7 @@ impl Unfinished {
                 super::command::name(),
                 source.display()
             ),
-        };
-        format!(
-            "An earlier run left {} unfinished; {how} to finish it. Nothing was changed.",
-            self.describe()
-        )
+        }
     }
 }
 
