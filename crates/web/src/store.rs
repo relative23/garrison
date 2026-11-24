@@ -62,6 +62,11 @@ fn now() -> i64 {
     time::now().as_second()
 }
 
+/// The end of a session that has ended: before every time a clock gives,
+/// so that no step of the clock makes it a session again while its row
+/// waits for its token's revocation.
+const ENDED: i64 = i64::MIN;
+
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("no random numbers available")]
@@ -180,18 +185,20 @@ impl WebStore {
         Ok((identifier, session))
     }
 
+    /// The session of a cookie. One whose time is over, or that is dated
+    /// ahead of the clock, has ended, and is kept so from now on.
     pub fn get(&self, identifier: &str) -> Result<Option<Session>, StoreError> {
         if identifier.is_empty() || identifier.chars().count() > MAX_IDENTIFIER {
             return Ok(None);
         }
         let db = self.db();
-        Ok(db
+        let found = db
             .query_row(
-                "SELECT id_hash,subject,email,token,csrf,client_ip,expires_at FROM sessions \
-                 WHERE id_hash=?1 AND expires_at > ?2 AND created_at <= ?2",
-                params![digest(identifier), now()],
+                "SELECT id_hash,subject,email,token,csrf,client_ip,expires_at,created_at \
+                 FROM sessions WHERE id_hash=?",
+                [digest(identifier)],
                 |row| {
-                    Ok(Session {
+                    let session = Session {
                         id_hash: row.get(0)?,
                         subject: row.get(1)?,
                         email: row.get(2)?,
@@ -199,10 +206,25 @@ impl WebStore {
                         csrf: row.get(4)?,
                         client_ip: row.get(5)?,
                         expires_at: row.get(6)?,
-                    })
+                    };
+                    Ok((session, row.get::<_, i64>(7)?))
                 },
             )
-            .optional()?)
+            .optional()?;
+        let Some((session, created_at)) = found else {
+            return Ok(None);
+        };
+        let at = now();
+        if session.expires_at > at && created_at <= at {
+            return Ok(Some(session));
+        }
+        if session.expires_at != ENDED {
+            db.execute(
+                "UPDATE sessions SET expires_at=? WHERE id_hash=?",
+                params![ENDED, session.id_hash],
+            )?;
+        }
+        Ok(None)
     }
 
     /// End a session; its token, to revoke it.
@@ -218,27 +240,32 @@ impl WebStore {
     }
 
     /// End a session now but keep its row, whose token is still to be
-    /// revoked: no cookie finds it any more.
+    /// revoked: no cookie finds it any more, whatever the clock says.
     pub fn end(&self, id_hash: &str) -> Result<(), StoreError> {
         self.db().execute(
-            "UPDATE sessions SET expires_at=min(expires_at,?) WHERE id_hash=?",
-            params![now(), id_hash],
+            "UPDATE sessions SET expires_at=? WHERE id_hash=?",
+            params![ENDED, id_hash],
         )?;
         Ok(())
     }
 
     /// The digest and token of at most `limit` sessions that have ended,
-    /// those that ended first first. A session dated ahead of the clock, as
-    /// one signed in while it ran ahead, began at a time not known: it has
-    /// ended too, as no cookie finds it.
+    /// those signed in first first. Every session whose time is over is
+    /// ended here for good, and so is one dated ahead of the clock, as one
+    /// signed in while it ran ahead, which began at a time not known.
     pub fn ended(&self, limit: u16) -> Result<Vec<(String, String)>, StoreError> {
         let db = self.db();
+        db.execute(
+            "UPDATE sessions SET expires_at=?1 WHERE expires_at <> ?1 \
+             AND (expires_at <= ?2 OR created_at > ?2)",
+            params![ENDED, now()],
+        )?;
         let mut statement = db.prepare(
-            "SELECT id_hash,token FROM sessions WHERE expires_at <= ?1 OR created_at > ?1 \
-             ORDER BY expires_at LIMIT ?2",
+            "SELECT id_hash,token FROM sessions WHERE expires_at = ? \
+             ORDER BY created_at, id_hash LIMIT ?",
         )?;
         let rows =
-            statement.query_map(params![now(), limit], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            statement.query_map(params![ENDED, limit], |row| Ok((row.get(0)?, row.get(1)?)))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 

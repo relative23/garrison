@@ -143,6 +143,64 @@ async fn every_session_that_ends_takes_its_token_along() {
     }
 }
 
+/// The clock moved on `seconds`, or back where they are fewer than none:
+/// every stored time a clock gave lies that much further behind it, and
+/// one no clock gives stays.
+fn clock_moved(setup: &Setup, seconds: i64) {
+    let (first, last) = (
+        garrison_core::time::Timestamp::MIN.as_second(),
+        garrison_core::time::Timestamp::MAX.as_second(),
+    );
+    let db =
+        rusqlite::Connection::open(setup.config.web.state_directory.join("web.sqlite")).unwrap();
+    for column in ["created_at", "expires_at"] {
+        db.execute(
+            &format!(
+                "UPDATE sessions SET {column} = {column} - ?1 WHERE {column} BETWEEN ?2 AND ?3"
+            ),
+            [seconds, first, last],
+        )
+        .unwrap();
+    }
+}
+
+/// A sign-out that Stalwart does not answer the revocation of ends the
+/// session for good: after the clock went back five minutes, a copy of
+/// its cookie is answered as signed out, and the round revokes the token
+/// once Stalwart answers again.
+#[tokio::test]
+async fn a_session_signed_out_unrevoked_stays_ended_when_the_clock_goes_back() {
+    let mut setup = setup_with_cache(Duration::ZERO);
+    let csrf = setup.client.sign_in("code-admin").await;
+    // Signed in ten minutes ago.
+    clock_moved(&setup, 600);
+    let copy = setup.client.cookies.clone();
+    setup.provider.away.store(true, Ordering::SeqCst);
+    let headers = [("origin", ORIGIN), ("x-csrf-token", csrf.as_str())];
+    let out = setup
+        .client
+        .send(Method::POST, &api("logout"), &headers, None)
+        .await;
+    assert_eq!(out.json(), json!({"ok": true}));
+    clock_moved(&setup, -300);
+    setup.client.cookies = copy;
+    assert_eq!(
+        setup.client.get(&api("status")).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        setup.client.get(&api("session")).await.json(),
+        json!({"session": null})
+    );
+    assert_eq!(
+        *setup.provider.revoked.lock().unwrap(),
+        Vec::<String>::new()
+    );
+    setup.provider.away.store(false, Ordering::SeqCst);
+    assert!(setup.app.end_ended_sessions());
+    assert_eq!(*setup.provider.revoked.lock().unwrap(), ["admin-token"]);
+}
+
 #[tokio::test]
 async fn revoked_rights_end_the_session_but_outages_do_not() {
     let mut setup = setup_with_cache(Duration::ZERO);
