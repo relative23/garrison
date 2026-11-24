@@ -23,6 +23,10 @@ const USERS: [&str; 5] = [
 ];
 const SEMODULE: &str = "/usr/sbin/semodule";
 const NGINX: &str = "/usr/sbin/nginx";
+const UNSHARE: &str = "/usr/bin/unshare";
+/// The copy of nginx's snippets that its test runs over: root's; the
+/// installer's lock keeps a second run out.
+const NGINX_CHECK: &str = "/run/garrison-uninstall.check";
 
 /// Something the uninstallation removes.
 #[derive(Debug, PartialEq, Eq)]
@@ -180,24 +184,56 @@ fn module_loaded() -> bool {
 }
 
 /// nginx must accept its configuration without Garrison's snippets, or an
-/// include left in a server block would keep nginx from starting. The files
-/// move aside for the test and come back whatever it says.
+/// include left in a server block would keep nginx from starting. It tests
+/// that in a mount namespace of its own, over a copy of the snippets' folder
+/// without Garrison's: nothing nginx or anyone else reads changes, also where
+/// the test is cut short, so that a dry run tests the same.
 fn nginx_stays_valid(snippets: &[PathBuf]) -> Step {
-    if snippets.is_empty() || !Path::new(NGINX).exists() {
+    let Some(folder) = snippets.first().and_then(|snippet| snippet.parent()) else {
+        return Ok(());
+    };
+    if !Path::new(NGINX).exists() {
         return Ok(());
     }
-    let aside: Vec<(PathBuf, PathBuf)> = snippets
-        .iter()
-        .map(|path| (path.clone(), path.with_extension("conf.garrison-uninstall")))
-        .collect();
-    for (path, moved) in &aside {
-        io(fs::rename(path, moved), path)?;
+    if !Path::new(UNSHARE).exists() {
+        return Err(format!(
+            "{UNSHARE} (util-linux) is needed to test nginx without Garrison's snippets; \
+             nothing was changed"
+        ));
     }
-    let test = run(NGINX, &["-t"]);
-    for (path, moved) in &aside {
-        io(fs::rename(moved, path), path)?;
-    }
-    let test = test?;
+    let copy = Path::new(NGINX_CHECK);
+    let _ = fs::remove_dir_all(copy);
+    let (copy_text, folder_text) = (copy.display().to_string(), folder.display().to_string());
+    // `cp -a` keeps each file's SELinux label, which nginx's domain reads by.
+    let tested = must("/bin/cp", &["-a", &folder_text, &copy_text])
+        .and_then(|()| {
+            for snippet in snippets {
+                let named = snippet.file_name().map(|name| copy.join(name));
+                if let Some(named) = named {
+                    io(fs::remove_file(&named), &named)?;
+                }
+            }
+            Ok(())
+        })
+        .and_then(|()| {
+            let bound = "mount --bind \"$1\" \"$2\" && exec \"$3\" -t";
+            run(
+                UNSHARE,
+                &[
+                    "--mount",
+                    "--",
+                    "/bin/sh",
+                    "-c",
+                    bound,
+                    "sh",
+                    &copy_text,
+                    &folder_text,
+                    NGINX,
+                ],
+            )
+        });
+    let _ = fs::remove_dir_all(copy);
+    let test = tested?;
     if test.status.success() {
         return Ok(());
     }

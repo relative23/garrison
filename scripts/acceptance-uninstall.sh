@@ -40,6 +40,30 @@ check "a dry run changes nothing" \
     'test "$(find /opt/garrison /etc/garrison /etc/systemd/system /etc/polkit-1/rules.d | sort)" = "$(cat /root/before.list)"'
 services "after the dry run"
 
+step "The test of nginx without Garrison's snippets changes none of them"
+# A stand-in for nginx: its test takes three seconds and fails where it sees
+# Garrison's include, as a server block that includes it by its name does.
+inside_input 'cat > /usr/sbin/nginx && chmod 755 /usr/sbin/nginx' <<'NGINX'
+#!/bin/sh
+test "$1" = -t || exit 2
+sleep 3
+! test -e /etc/nginx/snippets/garrison.conf
+NGINX
+inside 'mkdir -p /etc/nginx/snippets && echo "# other" > /etc/nginx/snippets/other.conf &&
+    /root/release/bin/garrison nginx --snippet > /etc/nginx/snippets/garrison.conf &&
+    ls /etc/nginx/snippets > /root/snippets.before'
+snippets_kept='test "$(ls /etc/nginx/snippets)" = "$(cat /root/snippets.before)"'
+inside 'umask 077 && { /opt/garrison/current/bin/garrison uninstall --dry-run > /root/nginx-test.log 2>&1 & } && sleep 1.5'
+check "while a dry run tests nginx, Garrison's snippets stay where they are" "$snippets_kept"
+inside 'sleep 2'
+check "and the dry run finds that nginx stays valid without them" 'grep -q "Would remove /etc/nginx/snippets/garrison.conf" /root/nginx-test.log'
+inside 'umask 077 && rm -f /root/late.pid && { /opt/garrison/current/bin/garrison uninstall > /root/nginx-test.log 2>&1 & echo $! > /root/late.pid; } &&
+    sleep 1.5 && kill -KILL $(cat /proc/$(cat /root/late.pid)/task/$(cat /root/late.pid)/children 2>/dev/null) $(cat /root/late.pid)'
+check "an uninstallation killed while it tests nginx leaves the snippets as they were" "$snippets_kept"
+check "and nothing of Garrison's was removed" 'test -d /opt/garrison && test -L /usr/bin/garrison'
+inside 'rm -r /usr/sbin/nginx /etc/nginx /root/snippets.before /root/nginx-test.log /root/late.pid'
+services "after the test of nginx"
+
 step "Uninstalling keeps configuration and data"
 installer '/opt/garrison/current/bin/garrison uninstall'
 check "the program is gone" 'test ! -e /opt/garrison'
