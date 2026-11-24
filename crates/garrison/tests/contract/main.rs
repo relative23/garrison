@@ -241,23 +241,28 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
 
     rotate(&mut lab, directory.path(), &credential, &gateway);
 
-    // access init signs in with the new broker key.
-    let init = run(directory.path(), &["access", "init"]);
+    access_after_the_rotation(&lab, directory.path());
+    milter::macro_filter(&mut lab, directory.path(), &credential, &gateway);
+    refused_without_the_gateway(&mut lab, directory.path(), &credential);
+}
+
+/// `access init` signs in with the new broker key and finds the
+/// administrators, `bind-role` binds a role, and the policy is valid.
+fn access_after_the_rotation(lab: &Lab, directory: &std::path::Path) {
+    let init = run(directory, &["access", "init"]);
     assert_eq!(init.status.code(), Some(0), "{}", text(&init));
     assert!(
         text(&init).contains("to profile administrator."),
         "{}",
         text(&init)
     );
-    access::bind_role(&lab, directory.path());
-    let check = run(directory.path(), &["check-config"]);
+    access::bind_role(lab, directory);
+    let check = run(directory, &["check-config"]);
     assert!(
         text(&check).contains("Access policy valid"),
         "{}",
         text(&check)
     );
-    milter::macro_filter(&mut lab, directory.path(), &credential, &gateway);
-    refused_without_the_gateway(&mut lab, directory.path(), &credential);
 }
 
 /// Remove what setup created when the test ends, so the lab stays reusable.
