@@ -14,7 +14,7 @@ use garrison_stalwart::http::Request;
 use super::objects::{
     Created, Enabled, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, StoredKey,
 };
-use super::{Admin, MAX_ANSWER, write_secret};
+use super::{Admin, MAX_ANSWER, unreadable, write_secret};
 
 /// One of the keys: its file, as the broker or the collector reads it, its
 /// description in Stalwart, what it may do, whether a running service
@@ -46,19 +46,53 @@ pub(super) struct Replaced {
 
 /// The account the key in `target` belongs to, as the session it opens
 /// names it: an administrator lists only its own account's keys (Stalwart
-/// 1.1.0), and setup's keys are the administrator's that made them.
-fn owner(admin: &Admin, target: &Path) -> Option<String> {
-    let secret = files::read_secret(target, Privacy::Owned).ok()?;
+/// 1.1.0), and setup's keys are the administrator's that made them. A key
+/// Stalwart does not know (401) belongs to none, and one it refuses from
+/// this host's address (403) names none, which the key try at the end of
+/// the run says. Without an answer, or with another one, the account is not
+/// known, and the run stops before it makes a key: taken for the
+/// administrator's own, it would leave another administrator's key valid.
+fn owner(admin: &Admin, target: &Path) -> Result<Option<String>, String> {
+    let asked = |why: &dyn std::fmt::Display| {
+        format!(
+            "Asking Stalwart whose API key {} holds: {why}",
+            target.display()
+        )
+    };
+    let secret = files::read_secret(target, Privacy::Owned).map_err(|error| asked(&error))?;
     let answer = Request::get(&admin.session_url())
         .header("Authorization", &format!("Bearer {secret}"))
         .timeout(Duration::from_secs(30))
         .limit(MAX_ANSWER)
         .send()
-        .ok()
-        .filter(|answer| answer.status == 200)?;
-    let session = json::parse(&answer.body, MAX_ANSWER).ok()?;
+        .map_err(|error| asked(&error))?;
+    match answer.status {
+        200 => {}
+        401 | 403 => return Ok(None),
+        status => return Err(asked(&format!("Stalwart answered HTTP {status}"))),
+    }
+    let method = "GET /jmap/session";
+    let session = json::parse(&answer.body, MAX_ANSWER)
+        .map_err(|error| unreadable(method, &error.to_string()))?;
     let account = session["primaryAccounts"]["urn:stalwart:jmap"].as_str();
-    account.map(str::to_owned)
+    let account = account.ok_or_else(|| unreadable(method, "no account named"))?;
+    Ok(Some(account.to_owned()))
+}
+
+/// What setup says where Stalwart does not show the administrator the
+/// account that a file's key belongs to: JMAP's `accountNotFound`, as
+/// Stalwart answers a user without its administrator rights who asks for
+/// that account's keys (measured on Stalwart 1.1.0).
+fn unseen(error: String, target: &Path) -> String {
+    if !error.contains(": accountNotFound") {
+        return error;
+    }
+    format!(
+        "Stalwart does not show the administrator the account that the API key in {} belongs \
+         to: run setup as an administrator who holds the keys' permissions, as one with \
+         Stalwart's administrator role ({error})",
+        target.display()
+    )
 }
 
 /// What `ensure` did: the step, the keys a new one replaces, whether the
@@ -101,9 +135,10 @@ pub(super) fn ensure(
     // The file's key may be another administrator's: that account's keys of
     // this description count as well.
     let held = holds_key(&target);
-    let other = held.then(|| owner(admin, &target)).flatten();
+    let other = if held { owner(admin, &target)? } else { None };
     if let Some(account) = other.filter(|account| *account != own.account_id) {
-        let theirs: Listed<StoredKey> = admin.list_in("ApiKey", Some(&account))?;
+        let theirs = admin.list_in::<StoredKey>("ApiKey", Some(&account));
+        let theirs = theirs.map_err(|error| unseen(error, &target))?;
         let theirs = theirs.list.into_iter().filter(|item| ours(item));
         existing.extend(theirs.map(|item| (Some(account.clone()), item)));
     }

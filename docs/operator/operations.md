@@ -107,7 +107,11 @@ signs in again. On a new host, restore `/etc/garrison` from your host backup
 first; where `/etc/garrison/credentials` is lost, `garrison stalwart setup`
 makes new keys in Stalwart and here, before or after the restore. It also
 makes new ones where Stalwart no longer knows the keys of the files, as
-where that backup is older than the last `--rotate`.
+where that backup is older than the last `--rotate`; run it then as the
+administrator who ran that rotation, since setup finds another
+administrator's keys only through the files' keys: those the files no
+longer hold stay valid in that administrator's account until you remove
+them in the Stalwart WebUI.
 
 Your own backup of the mail data is watched in another way: where it is a
 restic or borg repository, `garrison backup-check` reports its newest
@@ -323,6 +327,6 @@ Stalwart WebUI if you no longer need them.
 | `stalwart setup` says Stalwart refuses an API key | Stalwart answered HTTP 403: it knows the key but sees this host at another address than 127.0.0.1, as in a Docker or Podman bridge network. Run Stalwart in the host network (`--network host`, Compose `network_mode: host`) and run `stalwart setup` again. A key Stalwart does not know at all (HTTP 401), as where `/etc/garrison/credentials` was put back from a copy older than the last rotation, setup makes anew by itself and says so. |
 | `stalwart setup` says that Stalwart's quota of API keys left no room, or that Stalwart holds no more API keys for the administrator's account | Stalwart takes five API keys an account, and setup makes its two in the administrator's, beside that account's own. Where a new key found no room beside an old one, the old one went first, and where the new one could then not be made, setup says what goes without it until a run of setup makes it, as the broker checking no user's rights, so that nobody can sign in. Remove the administrator's own keys that are no longer needed in the Stalwart WebUI, then run setup again. |
 | `stalwart setup` says it cannot write the credentials folder | It writes the keys Stalwart makes to `/etc/garrison/credentials`, which is root's: run it as root, with `sudo`. It stopped before it asked for the administrator and changed nothing. Run as root, it names the reason, such as a file system mounted read-only. |
-| `stalwart setup` says Stalwart refused the administrator | HTTP 401: Stalwart does not know the user name and password, or the API key, that setup was given; check them and run it again. HTTP 403: Stalwart knows the credential but does not take it from this host's address, as for an API key whose networks leave this host out, or for an address it blocked after failed sign-ins (see "Sign-in fails"). Setup changed nothing. Where it says that Stalwart refused the administrator an API key, setup was given an account without Stalwart's administrator rights: run it as an administrator. |
+| `stalwart setup` says Stalwart refused the administrator | HTTP 401: Stalwart does not know the user name and password, or the API key, that setup was given; check them and run it again. HTTP 403: Stalwart knows the credential but does not take it from this host's address, as for an API key whose networks leave this host out, or for an address it blocked after failed sign-ins (see "Sign-in fails"). Setup changed nothing. Where it says that Stalwart refused the administrator an API key, or does not show it the account that a key file's key belongs to, setup was given an account without Stalwart's administrator rights: run it as an administrator. |
 | The installer says how many MiB it needs | The release and a backup as large as the databases must fit; free space where it says, then run it again. Nothing was changed. |
 | `garrison upgrade` refuses a signature | The archive or its `.minisig` changed after signing, belongs to another release, or was signed with a key the installed release does not trust. Download both again from the release page. |

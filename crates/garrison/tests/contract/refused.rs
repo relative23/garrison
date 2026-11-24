@@ -10,7 +10,7 @@ use garrison_testing::lab::{Lab, random_hex, unique};
 use garrison_testing::{config_text, write_private};
 use serde_json::json;
 
-use super::together::{Capture, assert_together};
+use super::together::{Capture, assert_keys_held, assert_together};
 use super::{Setup, forget, lab, text};
 
 /// The keys in the lab described as Garrison's.
@@ -108,6 +108,48 @@ fn a_refused_administrator_is_said_as_such() {
             "{status}: exit {code:?}, {keys} keys of Garrison's: {said}"
         );
     }
+}
+
+/// A user without administrator rights is told to run setup as an
+/// administrator also where setup ran before: the files' keys then belong
+/// to an account that Stalwart does not show that user. The keys the
+/// administrator made stay as they are, held by their files.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn a_user_without_rights_is_told_so_where_setup_ran_before() {
+    let (_guard, mut lab) = lab();
+    let setup = Setup::new(&lab, "http://127.0.0.1:9/webhook");
+    let credentials = setup.directory.join("credentials");
+    forget(&lab, &credentials);
+    let first = setup.run(&[]);
+    assert_eq!(first.status.code(), Some(0), "{}", text(&first));
+    let domains = lab.call("x:Domain/get", &json!({"ids": null, "properties": ["id"]}));
+    let (user, password) = (unique(), random_hex(18));
+    lab.create(
+        "Account",
+        &json!({
+            "@type": "User",
+            "name": user,
+            "domainId": domains["list"][0]["id"],
+            "credentials": {"0": {"@type": "Password", "secret": password}},
+            "roles": {"@type": "User"},
+            "permissions": {"@type": "Inherit"},
+        }),
+    );
+    let administrator = fs::read(&setup.credential).unwrap();
+    let document = json!({"username": user, "secret": password}).to_string();
+    write_private(Path::new(&setup.credential), document.as_bytes());
+    let output = setup.run(&[]);
+    write_private(Path::new(&setup.credential), &administrator);
+    let said = text(&output);
+    assert!(
+        output.status.code() == Some(1)
+            && said.contains("run setup as an administrator who holds the keys' permissions"),
+        "exit {:?}: {said}",
+        output.status.code()
+    );
+    assert_keys_held(&lab, &credentials, &setup.gateway, "after the user's run");
+    forget(&lab, &credentials);
 }
 
 /// Without root on an installed host, the credentials folder is root's:
