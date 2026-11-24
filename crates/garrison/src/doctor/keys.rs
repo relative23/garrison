@@ -193,7 +193,7 @@ mod tests {
             ]
         );
         // An address Stalwart blocked gets no answer at all (measured on
-        // 1.1.0), so a 403 is the key's address, which its state names.
+        // 1.1.0 only), so a 403 is the key's address, which its state names.
         assert_eq!(
             tried("broker-native-key", Service::Broker, Ok(403)),
             Finding::fail(states::other_address(Service::Broker, "broker-native-key"))
@@ -218,7 +218,7 @@ mod tests {
     }
 
     /// A broker's key that opens its session but lacks a permission the
-    /// broker reads with (measured on Stalwart 1.1.0: narrowed to
+    /// broker reads with (measured on Stalwart 1.2.0: narrowed to
     /// `authenticate`, `forbidden` for x:Account/get) leaves nobody's
     /// rights checked: it fails, with the setup that gives the key its
     /// permissions again.
@@ -251,7 +251,7 @@ mod tests {
 
     /// A collector's key that opens its session but may not query the
     /// domains and accounts the checks read, as a key an earlier release's
-    /// setup made (measured on Stalwart 1.1.0 with 0.1.2's ten permissions:
+    /// setup made (measured on Stalwart 1.2.0 with 0.1.2's ten permissions:
     /// `forbidden` for each query), leaves their cards unknown: it fails,
     /// with the setup that gives the key its permissions again.
     #[test]

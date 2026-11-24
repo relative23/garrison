@@ -62,7 +62,7 @@ pub(in crate::setup) fn account_full(held: &str, description: &str) -> State {
 
 /// The administrator may not grant the key of `description` its
 /// permissions (`error`, JMAP's forbidden), as Stalwart answers a user
-/// without its administrator rights (measured on Stalwart 1.1.0).
+/// without its administrator rights (measured on Stalwart 1.1.0 only).
 pub(in crate::setup) fn key_not_granted(description: &str, error: &State) -> State {
     State::new(
         "setup-key-not-granted",

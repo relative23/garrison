@@ -330,7 +330,7 @@ pub(super) fn take_up(key: &Key) -> Result<(), State> {
 /// What setup says where Stalwart made no new key. A user without
 /// administrator rights reads the list of keys, its own, but may not grant
 /// a key the permissions it lacks: JMAP's `forbidden`, as Stalwart answers
-/// it (measured on Stalwart 1.1.0). JMAP's error type stays with it.
+/// it (measured on Stalwart 1.1.0 only). JMAP's error type stays with it.
 fn refused(failed: Failed, description: &str) -> Failed {
     let state = if failed.is("forbidden") {
         states::key_not_granted(description, &failed.state)

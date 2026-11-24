@@ -208,7 +208,7 @@ fn a_502_names_the_restart_where_nothing_listens_on_web_port() {
 
 /// Only Stalwart's exporter's own answer is taken for it: Prometheus text,
 /// or its refusal of a scrape without its credential, which names Stalwart
-/// in its challenge (measured on 1.1.0). A web page that a webmail's server
+/// in its challenge (measured on 1.2.0). A web page that a webmail's server
 /// block answers for any path serves no metrics, and another server's
 /// refusal is none of Stalwart's.
 #[test]

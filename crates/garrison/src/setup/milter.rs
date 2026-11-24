@@ -28,7 +28,7 @@ use entries::Entry;
 /// The entry as setup writes it: switched on, and asked once a message's
 /// data has arrived. Stalwart fills in the rest: protocol 6, its own
 /// timeouts. It takes `enable` only as an expression and `stages` as a map
-/// that an update replaces whole (measured on 1.1.0), so an entry switched
+/// that an update replaces whole (measured on 1.1.0 only), so an entry switched
 /// off or asked at other stages by hand is Garrison's filter's again.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

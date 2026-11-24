@@ -126,7 +126,7 @@ fn exported(body: &str) -> bool {
 
 /// The exporter that `stalwart setup` enables must not answer from outside.
 /// Only its own answer counts: its text, or 401 for a scrape without its
-/// credential with a challenge that names Stalwart (measured on 1.1.0); a
+/// credential with a challenge that names Stalwart (measured on 1.2.0); a
 /// page that answers every path serves no metrics.
 pub(super) fn metrics(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Finding> {
     let mut origins = vec![origin(&config.deployment.issuer)];
@@ -166,7 +166,7 @@ fn challenged(answer: &Answer) -> bool {
 
 /// Whether Stalwart knows Garrison's sign-in client. Stalwart answers 200
 /// with JSON that holds `verified` or, for a client it refuses, `error`
-/// (measured on 1.1.0); any other answer is not Stalwart's.
+/// (measured on 1.2.0); any other answer is not Stalwart's.
 pub(super) fn sign_in(config: &Config, roots: &Arc<RootCertStore>) -> Finding {
     let client = oidc::client_id(&config.deployment.public_origin);
     let url = format!(
@@ -238,7 +238,7 @@ fn stated_issuer(url: &str) -> Result<String, String> {
 }
 
 /// The issuer Stalwart names itself, asked of its own listener: every
-/// sign-in comes back under that name (measured on 1.1.0: `https://` and
+/// sign-in comes back under that name (measured on 1.1.0 only: `https://` and
 /// its Default Hostname, whatever host was asked), and Garrison's callback
 /// takes only `deployment.issuer`.
 pub(super) fn issuer(config: &Config) -> Finding {
