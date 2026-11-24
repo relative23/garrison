@@ -1337,6 +1337,8 @@ Notable changes for operators and users. The format follows
 - **A version card without a version says why.** It names a command that
   ended with a status or did not finish in 8 seconds, and output in which
   `pattern` finds nothing; only standard output is read.
+- **The updates card and the systemd cards name a command that the
+  collector ended after 8 seconds as one that did not finish in time.**
 - **A count that a file system does not keep is no longer read as 0.**
   btrfs shows no share of free inodes instead of 0.0 %, and a file system
   without a size, such as /proc, is neither judged full nor forecast.
