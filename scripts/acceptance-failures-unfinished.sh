@@ -17,7 +17,9 @@ scenario_interrupted() {
     installer '/root/release/bin/garrison install'
     running "after killed installers" "$new"
     check "no event was lost" "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -ge $before"
-    check "previous names an installed release" 'test -x "$(readlink -f /opt/garrison/previous)/bin/garrison"'
+    # Whichever of the two ran before the last installer, the other one is
+    # what a rollback returns to.
+    names "previous is the other release" previous "$old"
     check "the state to restore is complete" 'test -d "$(readlink -f /var/backups/garrison/last-pre-upgrade)/etc"'
     check "no partly unpacked release is left" '! ls -A /opt/garrison/releases | grep -q "^\."'
     # Each killed upgrade may have left a backup; the last run removes the old ones.

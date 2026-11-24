@@ -233,6 +233,7 @@ scenario_reinstall() {
     installer '/root/release/bin/garrison install'
     check "a reinstall keeps last-pre-upgrade" \
         'test "$(readlink /var/backups/garrison/last-pre-upgrade)" = "$(cat /root/last-before)"'
+    names "a reinstall keeps the previous release" previous "$old"
     running "after the reinstall" "$new"
 }
 
@@ -307,6 +308,12 @@ scenario_rotation() {
     check "the receiver holds the signature key of its file" \
         'test "$(cat /run/credentials/garrison-ingest.service/webhook-signature-key)" = \
             "$(cat /etc/garrison/credentials/webhook-signature-key)"'
+    # The broker runs since the checks before asked it. Started anew it
+    # would read the file; one that setup left running holds the old key.
+    check "the broker holds the native key of its file" \
+        'systemctl is-active --quiet garrison-broker.service &&
+            test "$(cat /run/credentials/garrison-broker.service/broker-native-key)" = \
+                "$(cat /etc/garrison/credentials/broker-native-key)"'
     inside 'rm /root/stalwart-admin.json'
     running "after the rotation" "$new"
 }

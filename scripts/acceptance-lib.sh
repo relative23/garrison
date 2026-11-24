@@ -376,6 +376,14 @@ EOF'
     installer '/root/previous/bin/garrison install'
 }
 
+# The link `$2` (current or previous) names release `$3` and no other. A
+# step that switches releases, or keeps them, is held to both links: a
+# release that reinstalls itself over `previous` leaves nothing to roll back
+# to, and still runs.
+names() {
+    check "$1" "test \"\$(basename \"\$(readlink -f /opt/garrison/$2)\")\" = '$3'"
+}
+
 services() {
     # One unit per check: `systemctl is-active a b` succeeds when any one is active.
     for unit in garrison-web.service garrison-ingest.service garrison-broker.socket \

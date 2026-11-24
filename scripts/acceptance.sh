@@ -33,6 +33,8 @@ fi
 
 services previous
 before=$(events)
+old=$(inside 'cat /root/previous/VERSION')
+new=$(inside 'cat /root/release/VERSION')
 
 step "Upgrading to the release under test"
 upgrade=$(mktemp)
@@ -42,7 +44,8 @@ if ! installer '/root/release/bin/garrison install' >"$upgrade" 2>&1; then
     exit 1
 fi
 cat "$upgrade"
-check "current points at the new release" 'readlink /opt/garrison/current | grep -q "$(cat /root/release/VERSION)"'
+names "current is the release under test" current "$new"
+names "previous is the release it upgraded from" previous "$old"
 check "the event history survived the upgrade" "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -ge $before"
 services upgraded
 # Laid out like Stalwart's host: the interface under /admin/, the root leads there.
@@ -309,7 +312,8 @@ else
     fi
     echo "ok    a rollback to a release that cannot load the configuration is refused"
     rm -f "$answer"
-    check "current still points at the release under test" 'readlink /opt/garrison/current | grep -q "$(cat /root/release/VERSION)"'
+    names "current is still the release under test" current "$new"
+    names "previous is still the release before it" previous "$old"
 fi
 services "kept with modules chosen"
 inside 'mv /etc/garrison/garrison.toml.previous /etc/garrison/garrison.toml &&
@@ -320,7 +324,8 @@ step "Rolling back to the previous release"
 answer=$(mktemp)
 refused=
 if installer '/opt/garrison/current/bin/garrison install --rollback' >"$answer" 2>&1; then
-    check "current points at the previous release" 'readlink /opt/garrison/current | grep -q "$(cat /root/previous/VERSION)"'
+    names "current is the previous release" current "$old"
+    names "previous is the release it rolled back from" previous "$new"
     services "rolled back"
 else
     # Across a schema change the previous release cannot read the data, so the
@@ -332,7 +337,8 @@ else
     fi
     echo "ok    a rollback across a schema change is refused"
     refused=1
-    check "current still points at the release under test" 'readlink /opt/garrison/current | grep -q "$(cat /root/release/VERSION)"'
+    names "current is still the release under test" current "$new"
+    names "previous is still the release before it" previous "$old"
     services "kept after the refused rollback"
 fi
 rm -f "$answer"
@@ -367,6 +373,10 @@ if [ -n "$refused" ]; then
     echo "ok    after the reinstall the last line still names --restore-state"
 fi
 rm -f "$again"
+names "current is the release under test" current "$new"
+# Also where the run reinstalled the release that ran: a rollback goes to
+# `previous`, and one that named the running release would return to nothing.
+names "previous is the release before it" previous "$old"
 services "upgraded again"
 
 step "Restoring a backup of the state"
@@ -394,6 +404,8 @@ check "the databases belong to their services again" \
         test "$(stat -c %U /var/lib/garrison/collector/status.sqlite)" = garrison-collector'
 services "after the restore"
 installer '/opt/garrison/current/bin/garrison install --rollback --restore-state'
+names "current is the previous release" current "$old"
+names "previous is the release it rolled back from" previous "$new"
 # Every batch stored after that state must be gone again.
 check "the events are those from before the upgrade" "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -eq $expected"
 services "restored"

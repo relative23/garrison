@@ -138,6 +138,8 @@ through_nginx rebooted
 
 step "Upgrading on this host"
 installer '/root/release/bin/garrison install'
+names "current is the release under test" current "$(inside 'cat /root/release/VERSION')"
+names "previous is the release it upgraded from" previous "$(inside 'cat /root/previous/VERSION')"
 services upgraded
 through_nginx upgraded
 
