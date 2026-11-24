@@ -302,9 +302,16 @@ event_count() {
         \"SELECT count(*) FROM events WHERE event_id = '$1'\")\" $2"
 }
 
+# The release under test, just upgraded to from the release before: the
+# state from before the upgrade is then that release's own.
+upgraded_from_old() {
+    installer '/root/previous/bin/garrison install'
+    installer '/root/release/bin/garrison install'
+}
+
 scenario_rollback_state_killed() {
     step "A rollback with the state from before the upgrade killed as it puts it back, then what the next command names"
-    upgraded
+    upgraded_from_old
     # Recorded since the upgrade: the state from before it does not hold it.
     stored_event rolled-away-event
     killed_at '/opt/garrison/current/bin/garrison install --rollback --restore-state' \
@@ -320,7 +327,7 @@ scenario_rollback_state_killed() {
 
 scenario_rollback_came_up() {
     step "A rollback with the state from before the upgrade killed once its release came up, then its first line's command"
-    upgraded
+    upgraded_from_old
     killed_at '/opt/garrison/current/bin/garrison install --rollback --restore-state' \
         "$(current_is "$old") && systemctl is-active --quiet garrison-web.service" 0 'Rolled back to'
     # The release it went back to runs and records on the state that went back.
