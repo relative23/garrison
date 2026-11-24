@@ -158,6 +158,16 @@ stops() {
     echo "ok    the play for $version stops and says: $words"
 }
 
+# The last play said WORDS.
+said() {
+    if ! grep -F -q -- "$1" "$log"; then
+        tail -n 40 "$log"
+        echo "FAIL  the play said: $1"
+        exit 1
+    fi
+    echo "ok    the play said: $1"
+}
+
 # No secret is in what the play printed: not the administrator that went in
 # on standard input, not a key the stand-in handed out, not the webhook's key
 # or the scrape credential as their files hold them.
@@ -201,7 +211,28 @@ scenario_setup_refused() {
     nothing_secret
     inside 'rm /root/stand-in-refuses'
     play "$newer"
+    said "Stalwart accepts both API keys from this host"
     services "after a setup that failed"
+    unchanged "a further run changes nothing" "$newer"
+}
+
+# garrison.toml keeps the policy in a folder of its own.
+scenario_policy_elsewhere() {
+    step "A policy kept elsewhere is found there"
+    inside 'mkdir -m 755 /etc/garrison/policy && mv /etc/garrison/access-policy.json /etc/garrison/policy/access.json'
+    cat > "$work/elsewhere.yml" <<'VARS'
+acceptance_policy: false
+acceptance_config: |
+  [broker]
+  policy = "/etc/garrison/policy/access.json"
+VARS
+    play "$newer" -e "@$work/elsewhere.yml"
+    said "Stalwart accepts both API keys from this host"
+    check "the installer took the policy there" \
+        '/opt/garrison/current/bin/garrison check-config 2>/dev/null | grep -q "Access policy valid: /etc/garrison/policy/access.json"'
+    services "with the policy kept elsewhere"
+    unchanged "a further run changes nothing" "$newer" -e "@$work/elsewhere.yml"
+    inside 'mv /etc/garrison/policy/access.json /etc/garrison/access-policy.json && rmdir /etc/garrison/policy'
 }
 
 # An unpacking cut short after its first files: tar writes SHA256SUMS and
@@ -232,9 +263,26 @@ scenario_unbound() {
     step "A first play that stopped at access init is finished by the next"
     fresh
     stops "$older" "garrison access bind-role" -e acceptance_policy=false
+    stops "$older" "binds no role and no account" -e acceptance_policy=false
     inside '/opt/garrison/current/bin/garrison access bind-role e --profile administrator >/dev/null'
     play "$older" -e acceptance_policy=false
     services "after a first play that stopped at access init"
+    unchanged "a further run changes nothing" "$older" -e acceptance_policy=false
+}
+
+# The first install stopped before its last step, which makes /etc/garrison:
+# the next play installs again and goes on to access init.
+scenario_first_unfinished() {
+    step "A first install that did not finish is done again"
+    fresh
+    name=garrison-$older-$arch
+    copy_in "$previous" "/root/$name.tar.gz"
+    inside "cd /root && chmod 600 $name.tar.gz && tar -xzf $name.tar.gz &&
+        $name/bin/garrison install </dev/null >/dev/null && rm -r /etc/garrison"
+    stops "$older" "garrison access bind-role" -e acceptance_policy=false
+    inside '/opt/garrison/current/bin/garrison access bind-role e --profile administrator >/dev/null'
+    play "$older" -e acceptance_policy=false
+    services "after a first install that did not finish"
     unchanged "a further run changes nothing" "$older" -e acceptance_policy=false
 }
 
@@ -258,6 +306,8 @@ acceptance_config: |
   timeout_seconds = 30
 VARS
     stops "$newer" "MiB free and the installation needs" -e "@$work/other.yml"
+    # Setup follows the configuration before the installer refuses it.
+    said "Stalwart accepts both API keys from this host"
     inside 'rm /root/filled'
     play "$newer" -e "@$work/other.yml"
     check "the configuration of the play that had no room is in force" \
@@ -346,7 +396,7 @@ play "$newer"
 check "the role upgraded to $newer" "test \"\$(cat /opt/garrison/current/VERSION)\" = '$newer'"
 services "upgraded by the role"
 
-for scenario in ${SCENARIOS:-setup_refused no_room upgrade_failed unbound unpack_cut restart}; do
+for scenario in ${SCENARIOS:-setup_refused policy_elsewhere no_room upgrade_failed unbound unpack_cut first_unfinished restart}; do
     "scenario_$scenario"
 done
 

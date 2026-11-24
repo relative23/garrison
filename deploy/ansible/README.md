@@ -25,10 +25,15 @@ Put `garrison-<version>-<arch>.tar.gz` and its `.minisig` in `archives/` next
 to the playbook. Changing `garrison_version` upgrades; the installer backs up
 and switches back on failure as always. A play that stopped on the way is
 finished by the next one: the role runs the installer until it has finished
-with this release and this configuration, which it notes in
-`/opt/garrison/ansible-installed`. The role prints `garrison doctor`'s
-report at the end and fails only when doctor cannot run. The nginx server
-block stays yours: `garrison nginx` prints one for your names.
+with this release and this configuration, and `garrison stalwart setup`,
+where `garrison_stalwart_admin` is set, until it has finished with this
+configuration; it notes both in `/opt/garrison/ansible-installed` and
+`ansible-setup`. So setup also runs after a change of the configuration, and
+Stalwart must answer then.
+Where the access policy binds no role and no account, the play stops and
+says how to bind one. The role prints `garrison doctor`'s report at the end;
+what doctor finds does not fail the play. The nginx server block stays
+yours: `garrison nginx` prints one for your names.
 
 Every user of the host may read `/etc/garrison/garrison.toml`. A
 notification address that is a secret itself, such as an ntfy topic that

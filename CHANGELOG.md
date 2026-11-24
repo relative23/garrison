@@ -1861,6 +1861,10 @@ Notable changes for operators and users. The format follows
 - **The Ansible role runs the installer again until it has finished with the
   play's release and configuration**, so that the next play starts Garrison
   where one stopped after the first install or its installer did not finish.
+- **The Ansible role runs `garrison stalwart setup` again where setup did
+  not finish or `garrison.toml` changed since, and finds the access policy
+  where `[broker] policy` keeps it**; where the policy binds no role and no
+  account, the play stops and says how to bind one.
 
 ## [0.1.2] - 2026-11-13
 
