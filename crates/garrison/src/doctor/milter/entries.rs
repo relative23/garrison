@@ -269,17 +269,7 @@ mod tests {
     /// without a port, is not.
     #[test]
     fn an_entry_is_asked_in_vain_where_no_milter_answers_it() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let milter = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
-            garrison_milter::server::serve(
-                &listener,
-                garrison_milter::Settings {
-                    max_bytes: 1024,
-                    ..Default::default()
-                },
-            );
-        });
+        let milter = crate::doctor::answering_milter();
         let (_held, silent) = crate::doctor::silent_port();
         let stored = read(&json!([
             {"id": "a", "host": "127.0.0.1", "port": milter},

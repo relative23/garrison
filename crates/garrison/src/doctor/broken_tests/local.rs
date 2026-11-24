@@ -157,17 +157,7 @@ pub(super) fn selinux_module_for_another_port() -> Broken {
 /// still asks the old one, where nothing answers, which is then no entry of
 /// the filter's.
 pub(super) fn milter_on_another_port() -> Broken {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        garrison_milter::server::serve(
-            &listener,
-            garrison_milter::Settings {
-                max_bytes: 1024,
-                ..Default::default()
-            },
-        );
-    });
+    let port = super::super::answering_milter();
     // Held, so that the stand-in for Stalwart is not given it.
     let (_held, old) = super::super::silent_port();
     let stalwart = serve(vec![json(&serde_json::json!({"methodResponses": [[

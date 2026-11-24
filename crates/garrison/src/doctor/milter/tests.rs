@@ -3,7 +3,7 @@ use std::net::ToSocketAddrs;
 
 use serde_json::{Value, json};
 
-use super::super::Level;
+use super::super::{Level, answering_milter};
 use super::*;
 
 /// Stalwart's milters as it answers them.
@@ -151,22 +151,6 @@ fn an_entry_the_running_filter_answers_is_the_filters() {
             Finding::fail(states::dropped(&beside[0], false, true)),
         ]
     );
-}
-
-/// A port of this host where a milter answers, served until the test ends.
-fn answering_milter() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        garrison_milter::server::serve(
-            &listener,
-            garrison_milter::Settings {
-                max_bytes: 1024,
-                ..Default::default()
-            },
-        );
-    });
-    port
 }
 
 /// What doctor says of the macro milter where garrison.toml has the filter
