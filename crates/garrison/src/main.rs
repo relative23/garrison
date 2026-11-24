@@ -7,6 +7,7 @@
 
 mod access;
 mod backup_check;
+mod check_config;
 mod config_file;
 mod detect;
 mod doctor;
@@ -29,7 +30,6 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use garrison_authz::Authority;
 use garrison_core::config::{self, Config};
 use garrison_core::credentials::Credentials;
 use garrison_core::logging;
@@ -247,80 +247,6 @@ pub(crate) fn placeholder(origin: &str) -> bool {
     .any(under)
 }
 
-fn check_config(config: &Config, path: &Path) -> u8 {
-    let providers = match garrison_collector::build(&config.collector.providers) {
-        Ok(providers) => providers,
-        Err(error) => {
-            complain(&format!("Configuration not usable: {error}"));
-            return 2;
-        }
-    };
-    let unloaded = loaded::unloaded(config);
-    let unaskable = dqs::refused(config);
-    // Root reads the checks' paths here; the collector, in its unit's sandbox, may not.
-    let places = units::collector_places(&providers, path);
-    if !unloaded.is_empty() || !unaskable.is_empty() || places.is_err() {
-        for secret in &unloaded {
-            complain(&format!("Configuration not usable: {}", secret.line()));
-        }
-        for (what, fix) in &unaskable {
-            complain(&format!("Configuration not usable: {what}. {fix}"));
-        }
-        for refusal in places.err().unwrap_or_default() {
-            complain(&format!("Configuration not usable: {refusal}"));
-        }
-        return 2;
-    }
-    say(&format!(
-        "Configuration valid: {} providers, {} actions.",
-        config.collector.providers.len(),
-        config.broker.actions.len()
-    ));
-    let deployment = &config.deployment;
-    for (setting, origin) in [
-        ("public_origin", &deployment.public_origin),
-        ("issuer", &deployment.issuer),
-    ] {
-        if placeholder(origin) {
-            complain(&format!(
-                "Warning: deployment.{setting} {origin} is a placeholder; set the real name."
-            ));
-        }
-    }
-    let include = unfollowed::installed_include();
-    for setting in unfollowed::settings(config, include.as_deref()) {
-        complain(&format!("Warning: {}. {}", setting.what, setting.fix));
-    }
-    for (what, fix) in dqs::warned(config) {
-        complain(&format!("Warning: {what}. {fix}"));
-    }
-    for warning in places.unwrap_or_default() {
-        complain(&format!("Warning: {warning}"));
-    }
-    // Root reads the policy here; the broker, in its unit's sandbox, may not.
-    match units::policy_place(&config.broker.policy, path) {
-        Err(refusal) => {
-            complain(&format!("Access policy not usable: {refusal}"));
-            return 1;
-        }
-        Ok(Some(warning)) => complain(&format!("Warning: {warning}")),
-        Ok(None) => {}
-    }
-    match Authority::new(config, credentials(config)).policy() {
-        Ok(_) => {
-            say(&format!(
-                "Access policy valid: {}",
-                config.broker.policy.display()
-            ));
-            0
-        }
-        Err(error) => {
-            complain(&format!("Access policy not usable: {error}"));
-            1
-        }
-    }
-}
-
 fn stalwart_switch(config: &Config) -> u8 {
     let script = static_directory().join(garrison_web::switch::SCRIPT);
     let Ok(data) = std::fs::read(&script) else {
@@ -365,7 +291,7 @@ fn dispatch(task: Task, config: &Config, path: &Path) -> u8 {
         }
         Task::Broker => service("broker", garrison_broker::run(config, credentials(config))),
         Task::Milter => service("milter", garrison_milter::run(config)),
-        Task::CheckConfig => check_config(config, path),
+        Task::CheckConfig => check_config::run(config, path),
         Task::Modules { set, yes, adopt } => {
             selection::run(path, config, set.as_deref(), yes, adopt)
         }
