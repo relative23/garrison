@@ -169,7 +169,12 @@ impl Scene {
             self.configure(setup, &lab.url, kind.milter());
             return Ok(None);
         }
-        // The others start where both places agree.
+        // The others start where both places agree; a second
+        // administrator's run where the first one set Garrison up, so that
+        // the files hold that one's keys.
+        if kind == Kind::Second {
+            self.forget(lab, &credentials);
+        }
         self.configure(setup, &lab.url, kind == Kind::MilterGone);
         let ready = setup.run(&[]);
         if ready.status.code() != Some(0) {
