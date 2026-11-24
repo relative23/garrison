@@ -17,6 +17,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use rusqlite::config::DbConfig;
+use rusqlite::limits::Limit;
 use rusqlite::{Connection, OpenFlags};
 
 use crate::config::Database;
@@ -144,6 +145,11 @@ impl Deref for Reader {
     }
 }
 
+/// The longest value a reader of a database another user writes takes: more
+/// than Garrison writes in one (a status snapshot of the `stalwart` check's
+/// 20 000 accounts is some MiB, the receiver's batch at most 8 MiB), and
+/// little beside a service's memory, which holds a value twice as it is read.
+const LONGEST: i32 = 16 << 20;
 /// How long a reader waits for the writer's lock each time it meets it.
 const FOR_THE_WRITER: Duration = Duration::from_secs(2);
 /// How long a reader whose request may go away sleeps between two tries
@@ -388,10 +394,10 @@ pub fn open_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, Sqlit
 fn connect_untrusted(path: &Path, flags: OpenFlags) -> Result<Connection, SqliteError> {
     let path = with_resolved_directory(path)?;
     regular(&path)?;
-    Ok(Connection::open_with_flags(
-        path,
-        flags | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )?)
+    let db = Connection::open_with_flags(path, flags | OpenFlags::SQLITE_OPEN_NOFOLLOW)?;
+    // SQLite refuses a longer value as it reads it, before it holds it.
+    db.set_limit(Limit::SQLITE_LIMIT_LENGTH, LONGEST)?;
+    Ok(db)
 }
 
 /// Refuses a named pipe or other file that is no regular file at `path`,
@@ -479,6 +485,8 @@ fn blanks_skipped(mut text: &str) -> &str {
     }
 }
 
+#[cfg(test)]
+mod length_tests;
 #[cfg(test)]
 mod reader_tests;
 #[cfg(test)]

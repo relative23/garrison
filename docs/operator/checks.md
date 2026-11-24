@@ -561,7 +561,9 @@ regular file, such as a named pipe in place of a database or of ClamAV's
 files, is not opened, and the card says "not a regular file". One put in
 place of a database or of its journal while the check opens it holds the
 check five seconds at the most, and the card says that SQLite did not open
-the database.
+the database. A database another user writes is not read where a value in
+it is longer than 16 MiB, more than Garrison or Fangfrisch writes in one:
+the card says "string or blob too big".
 
 ## `receipt`
 

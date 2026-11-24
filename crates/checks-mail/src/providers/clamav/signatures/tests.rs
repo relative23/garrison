@@ -245,3 +245,31 @@ fn signature_files_in_a_folder_the_collector_may_not_search_are_not_called_missi
         )
     );
 }
+
+#[test]
+fn a_refresh_log_row_longer_than_fangfrisch_writes_costs_the_log_not_the_memory() {
+    // Whoever writes Fangfrisch's database can write one row of any length;
+    // a reader takes no value of more than 16 MiB, so such a row costs the
+    // log, which the card names, and not the collector's memory.
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("fangfrisch.sqlite");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("CREATE TABLE refreshlog(path TEXT, updated TEXT)")
+        .unwrap();
+    db.execute(
+        "INSERT INTO refreshlog VALUES(hex(zeroblob(?1)) || '/other.ndb', '2026-10-29 06:00:00')",
+        [8 << 20],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO refreshlog VALUES('/var/lib/clamav/daily.cld', '2026-10-29 06:00:00')",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    let listed = ["daily.cld".to_owned()];
+    assert_eq!(
+        refresh_log(&path, &listed),
+        Err("string or blob too big".to_owned())
+    );
+}

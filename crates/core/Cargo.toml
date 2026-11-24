@@ -11,7 +11,8 @@ publish.workspace = true
 [dependencies]
 jiff.workspace = true
 log.workspace = true
-rusqlite.workspace = true
+# `limits`: a reader of another user's file bounds the length of a value.
+rusqlite = { workspace = true, features = ["limits"] }
 rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true

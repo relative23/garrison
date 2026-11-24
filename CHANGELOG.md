@@ -281,6 +281,10 @@ Notable changes for operators and users. The format follows
   of a domain, which already stopped asking, said that the resolver gave no
   answer for the records left; they now say "not asked" too, and a domain's
   MTA-STS policy, which was still fetched then, is fetched in the next run.
+- **One overlong value in a database another user writes no longer takes
+  the collector or the web service past its memory.** A reader takes no
+  value longer than 16 MiB; the card says that the database could not be
+  read.
 - **A named pipe in place of a file a check reads no longer holds the
   collection run.** The user that writes the event history or Fangfrisch's
   database could put a named pipe in its place, and root with ClamAV's
