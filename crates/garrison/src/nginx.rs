@@ -88,18 +88,31 @@ fn installed() -> Option<(u32, u32, u32)> {
     version(&String::from_utf8_lossy(&output.stderr))
 }
 
-/// The host of an origin or URL, without scheme, port or path.
-fn host(url: &str) -> &str {
+/// The host and the port of an origin or URL, without scheme or path:
+/// `https://host` is port 443.
+fn authority(url: &str) -> (&str, u16) {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split('/').next().unwrap_or(rest);
     authority
         .rsplit_once(':')
-        .map_or(authority, |(host, _)| host)
+        .and_then(|(host, port)| Some((host, port.parse().ok()?)))
+        .unwrap_or((authority, 443))
+}
+
+/// The host of an origin or URL, without scheme, port or path.
+fn host(url: &str) -> &str {
+    authority(url).0
 }
 
 /// The block for `config`, for nginx `found` (unknown: the current syntax).
 fn site(config: &Config, found: Option<(u32, u32, u32)>) -> String {
-    let own = host(&config.deployment.public_origin);
+    let (own, port) = authority(&config.deployment.public_origin);
+    // The redirect from plain HTTP keeps a port other than HTTPS's own.
+    let kept = if port == 443 {
+        String::new()
+    } else {
+        format!(":{port}")
+    };
     let old = found.is_some_and(|version| version < HTTP2_DIRECTIVE);
     let (listen, http2) = if old {
         (" http2", "")
@@ -128,12 +141,12 @@ server {{
     access_log off;
     # With certbot --webroot, serve its challenge here before the redirect:
     # location /.well-known/acme-challenge/ {{ root /var/lib/letsencrypt; }}
-    location / {{ return 301 https://$host$request_uri; }}
+    location / {{ return 301 https://$host{kept}$request_uri; }}
 }}
 
 server {{
-    listen 443 ssl{listen};
-    listen [::]:443 ssl{listen};{http2}
+    listen {port} ssl{listen};
+    listen [::]:{port} ssl{listen};{http2}
     server_name {own};
     ssl_certificate     /etc/letsencrypt/live/{own}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{own}/privkey.pem;
@@ -319,6 +332,34 @@ mod tests {
                 lead.contains("\"Client addresses for Stalwart's limits\"")
                     && !lead.contains("\nserver"),
                 "{lead}"
+            );
+        }
+    }
+
+    /// configuration.md allows `https://host:port` where nginx serves
+    /// Garrison on another port than 443: the block listens there, and the
+    /// redirect from plain HTTP keeps the port.
+    #[test]
+    fn the_block_listens_on_the_port_public_origin_names() {
+        let mut moved = config();
+        moved.deployment.public_origin = "https://garrison.example.org:8443".into();
+        for found in [None, Some((1, 22, 1)), Some((1, 26, 3))] {
+            let text = site(&moved, found);
+            assert!(
+                text.contains("    listen 8443 ssl") && text.contains("    listen [::]:8443 ssl"),
+                "{text}"
+            );
+            assert!(!text.contains("listen 443"), "{text}");
+            assert!(
+                text.contains("location / { return 301 https://$host:8443$request_uri; }"),
+                "{text}"
+            );
+            assert!(text.contains("server_name garrison.example.org;"), "{text}");
+            let plain = site(&config(), found);
+            assert!(plain.contains("    listen 443 ssl"), "{plain}");
+            assert!(
+                plain.contains("return 301 https://$host$request_uri;"),
+                "{plain}"
             );
         }
     }

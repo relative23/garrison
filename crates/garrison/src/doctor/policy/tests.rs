@@ -317,3 +317,105 @@ fn a_closed_folder_on_the_way_to_the_default_place_is_opened() {
         assert_eq!(found.fix.as_deref(), Some(fix), "{folder}");
     }
 }
+
+/// check-config says each finding on the policy as one line with its fix:
+/// what the broker does not take is a refusal, a warning or what is not
+/// known a warning, and a command to run is named as one.
+#[test]
+fn check_config_says_what_the_broker_meets() {
+    let fix = format!("chown root:garrison-broker {PATH} && chmod 640 {PATH}");
+    assert_eq!(verdict(&judged(0, 991, 0o640)), Met::Taken(None));
+    assert_eq!(
+        verdict(&judged(0, 0, 0o600)),
+        Met::Refused(format!(
+            "garrison-broker may not read the access policy (root:root, mode 600), so nobody \
+             can sign in: {PATH}. Run `{fix}`."
+        ))
+    );
+    assert_eq!(
+        verdict(&judged(990, 991, 0o600)),
+        Met::Taken(Some(format!(
+            "garrison-broker owns the access policy (garrison-broker:garrison-broker, mode \
+             600), which the installer keeps root's, so that only root may change what it \
+             grants. Run `{fix}`."
+        )))
+    );
+    let file = Seen {
+        uid: 0,
+        gid: 991,
+        mode: 0o640,
+    };
+    let nobody = readable(Path::new(PATH), file, &[], None, &Names::default());
+    assert_eq!(
+        verdict(&nobody),
+        Met::Taken(Some(
+            "it is not known whether the broker can read the access policy: this host has no \
+             user garrison-broker."
+                .to_owned()
+        ))
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("access-policy.json");
+    assert_eq!(
+        as_the_broker(&missing),
+        Met::Missing(format!(
+            "the access policy is missing: {}. Run `garrison access init`, which makes it.",
+            missing.display()
+        ))
+    );
+}
+
+/// What the policy grants is read as the broker reads it, owner and mode
+/// aside, which `readable` judges: for a file of the reader's own,
+/// `granted` and the broker's `Authority::policy` give the same policy, or
+/// the same words for one that is a link, too large, no JSON or names an
+/// action garrison.toml does not have.
+#[test]
+fn what_the_policy_grants_is_read_as_the_broker_reads_it() {
+    use garrison_authz::Authority;
+    use garrison_core::credentials::Credentials;
+    let directory = tempfile::tempdir().unwrap();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    let broker = || {
+        let credentials = Credentials::new(&config.credentials_directory);
+        Authority::new(&config, credentials)
+            .policy()
+            .map_err(|error| error.to_string())
+    };
+    let path = &config.broker.policy;
+    let mut named = garrison_testing::policy_document();
+    named["profiles"]["administrator"]["actions"] = serde_json::json!(["run_reports"]);
+    let large = format!("{{\"x\": \"{}\"}}", "x".repeat(LIMIT));
+    let ways: [(&str, &dyn Fn()); 5] = [
+        ("a policy", &|| {
+            garrison_testing::write_policy(&config, &garrison_testing::policy_document());
+        }),
+        ("an action garrison.toml does not have", &|| {
+            garrison_testing::write_policy(&config, &named);
+        }),
+        ("no JSON", &|| garrison_testing::write_private(path, b"{")),
+        ("too large", &|| {
+            garrison_testing::write_private(path, large.as_bytes());
+        }),
+        ("a link", &|| {
+            let elsewhere = directory.path().join("elsewhere.json");
+            fs::rename(path, &elsewhere).unwrap();
+            std::os::unix::fs::symlink(&elsewhere, path).unwrap();
+        }),
+    ];
+    for (what, made) in ways {
+        made();
+        let read = broker();
+        // The broker words a policy too large so; check-config and doctor
+        // say it with the way out.
+        let granted = granted(&config).map_err(|unread| match unread {
+            Unread::TooLarge => format!(
+                "Garrison access policy: Protected file is too large: {}",
+                path.display()
+            ),
+            Unread::Other(error) => error,
+        });
+        assert_eq!(granted, read, "{what}");
+        assert_eq!(read.is_ok(), what == "a policy", "{what}: {read:?}");
+    }
+}

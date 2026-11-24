@@ -278,7 +278,10 @@ fn the_policy_is_read_no_further_than_a_policy_can_be() {
     let said = text(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{said}");
     assert!(
-        said.contains("is larger than a policy can be (64 KiB), so it is no policy"),
+        said.contains(
+            "is larger than the broker reads (64 KiB), so it is no policy: move it away and run \
+             `garrison access init`, or copy back the newest backup beside it"
+        ),
         "{said}"
     );
     let policy = directory.path().join("policy.json");

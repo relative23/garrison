@@ -86,6 +86,17 @@ fn a_red_hat_host_reports_the_paths_its_units_name() {
         notifications,
         "ntfy_url = \"https://notify.example.org/<topic>\" under [notifications]"
     ));
+    // As the example configuration says: a token goes into its file, and a
+    // topic without one into ntfy-url, since every user reads garrison.toml.
+    assert!(mentions(
+        notifications,
+        "with the topic's token in /etc/garrison/credentials/ntfy-token"
+    ));
+    assert!(mentions(
+        notifications,
+        "a topic without a token goes into /etc/garrison/credentials/ntfy-url instead, with \
+         ntfy_url = \"credential:ntfy-url\""
+    ));
     assert!(!component(&inventory, "garrison").found);
 }
 

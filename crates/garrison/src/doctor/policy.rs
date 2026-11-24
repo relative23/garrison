@@ -9,16 +9,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-use garrison_authz::Authority;
-use garrison_authz::policy::parse_policy;
+use garrison_authz::policy::{Policy, parse_policy};
 use garrison_core::config::Config;
-use garrison_core::credentials::Credentials;
+use garrison_core::files::{ProtectedFileError, open_regular_file};
+use garrison_core::json::{self, JsonError};
 use serde_json::Value;
 
-use super::{Finding, counted};
+use super::{Finding, Level, counted};
 use crate::units;
 
 /// The user, and the group, the broker's unit runs it as.
@@ -266,12 +267,60 @@ fn beyond(config: &Config) -> Vec<String> {
         .collect()
 }
 
+/// What the policy grants, as the broker reads it once it takes the file
+/// (see [`readable`]): never through a link, no more than the broker reads,
+/// and with the actions garrison.toml names. Root reads more than the broker
+/// does, but `read_protected` as root would refuse a policy the broker owns,
+/// which the broker takes.
+pub(crate) fn granted(config: &Config) -> Result<Policy, Unread> {
+    let path = &config.broker.policy;
+    let unread =
+        |error: ProtectedFileError| Unread::Other(format!("Garrison access policy: {error}"));
+    let mut data = Vec::new();
+    open_regular_file(path)
+        .and_then(|file| file.take(LIMIT as u64 + 1).read_to_end(&mut data))
+        .map_err(|_| unread(ProtectedFileError::Unavailable(path.clone())))?;
+    let raw = json::parse(&data, LIMIT).map_err(|error| match error {
+        JsonError::TooLarge => Unread::TooLarge,
+        JsonError::Invalid(_) => unread(ProtectedFileError::InvalidJson(path.clone())),
+    })?;
+    let actions: BTreeSet<&str> = config
+        .broker
+        .actions
+        .iter()
+        .map(|action| action.id.as_str())
+        .collect();
+    parse_policy(&raw, &actions).map_err(|error| Unread::Other(error.to_string()))
+}
+
+/// Why what a policy grants does not read.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Unread {
+    /// The file is larger than the broker reads, so it is no policy.
+    TooLarge,
+    /// Anything else, in the broker's words.
+    Other(String),
+}
+
 /// What the policy grants, read and checked as the broker reads it.
 pub(super) fn content(config: &Config) -> Finding {
-    let authority = Authority::new(config, Credentials::new(&config.credentials_directory));
-    let policy = match authority.policy() {
+    let policy = match granted(config) {
         Ok(policy) => policy,
-        Err(error) => {
+        Err(Unread::TooLarge) => {
+            let path = &config.broker.policy;
+            let mut fix = crate::access::way_out(path);
+            fix.replace_range(..1, &fix[..1].to_uppercase());
+            return Finding::fail(
+                format!(
+                    "the access policy is larger than the broker reads ({} KiB), so nobody can \
+                     sign in: {}",
+                    LIMIT / 1024,
+                    path.display()
+                ),
+                format!("{fix}."),
+            );
+        }
+        Err(Unread::Other(error)) => {
             let beyond = beyond(config);
             if !beyond.is_empty() {
                 return Finding::fail(
@@ -283,7 +332,6 @@ pub(super) fn content(config: &Config) -> Finding {
                     "Run `garrison access update`, which mends it.",
                 );
             }
-            let error = error.to_string();
             let why = error.trim_start_matches("Garrison access policy: ");
             return Finding::fail(
                 format!("the access policy does not read ({why}), so nobody can sign in"),
@@ -317,16 +365,17 @@ fn folders(path: &Path) -> Vec<(PathBuf, Seen)> {
         .collect()
 }
 
-pub(super) fn checks(config: &Config) -> Vec<Finding> {
-    let path = &config.broker.policy;
-    let mut findings = Vec::new();
+/// What the broker meets at the policy at `path` on this host: a failure
+/// where no file of its own is there (`Err`); else what [`readable`] finds
+/// for this host's broker, and whether the broker takes the file.
+fn met(path: &Path) -> Result<(Finding, bool), Finding> {
     match fs::symlink_metadata(path) {
-        Err(_) => findings.push(Finding::fail(
+        Err(_) => Err(Finding::fail(
             format!("the access policy is missing: {}", path.display()),
             "Run `garrison access init`, which makes it.",
         )),
         // Neither the installer nor the broker follows a link here.
-        Ok(metadata) if !metadata.is_file() => findings.push(Finding::fail(
+        Ok(metadata) if !metadata.is_file() => Err(Finding::fail(
             format!(
                 "the access policy is a link or a folder, not a file: {}",
                 path.display()
@@ -337,16 +386,60 @@ pub(super) fn checks(config: &Config) -> Vec<Finding> {
             let read = |file: &str| fs::read_to_string(file).unwrap_or_default();
             let (names, broker) = accounts(&read("/etc/passwd"), &read("/etc/group"));
             let file = Seen::of(&metadata);
-            findings.push(readable(
-                path,
-                file,
-                &folders(path),
-                broker.as_ref(),
-                &names,
-            ));
+            let found = readable(path, file, &folders(path), broker.as_ref(), &names);
+            Ok((found, taken(file, broker.as_ref())))
+        }
+    }
+}
+
+/// The access policy at `path` as the broker meets it, for check-config.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Met {
+    /// No file of its own is there: what is wrong and what mends it.
+    Missing(String),
+    /// The broker does not take it: what is wrong and what mends it.
+    Refused(String),
+    /// The broker takes it, or nothing says it does not: what to warn of.
+    Taken(Option<String>),
+}
+
+/// [`met`] for check-config, with each finding as one sentence and its fix.
+pub(crate) fn as_the_broker(path: &Path) -> Met {
+    match met(path) {
+        Err(missing) => Met::Missing(said(&missing)),
+        Ok((found, _)) => verdict(&found),
+    }
+}
+
+/// One finding of [`readable`] as check-config says it.
+fn verdict(found: &Finding) -> Met {
+    match found.level {
+        Level::Ok => Met::Taken(None),
+        Level::Warn => Met::Taken(Some(said(found))),
+        Level::Unknown => Met::Taken(Some(format!("it is not known {}.", found.what))),
+        Level::Fail => Met::Refused(said(found)),
+    }
+}
+
+/// A finding and its fix as one line: a fix that is a command is to be run.
+fn said(found: &Finding) -> String {
+    match &found.fix {
+        Some(fix) if fix.ends_with('.') => format!("{}. {fix}", found.what),
+        Some(fix) => format!("{}. Run `{fix}`.", found.what),
+        None => format!("{}.", found.what),
+    }
+}
+
+pub(super) fn checks(config: &Config) -> Vec<Finding> {
+    let path = &config.broker.policy;
+    let mut findings = Vec::new();
+    match met(path) {
+        Err(missing) => findings.push(missing),
+        Ok((found, taken)) => {
+            findings.push(found);
             // Root reads what the broker would take; one it does not take
             // grants nothing to judge.
-            if taken(file, broker.as_ref()) {
+            if taken {
                 findings.push(content(config));
             }
         }

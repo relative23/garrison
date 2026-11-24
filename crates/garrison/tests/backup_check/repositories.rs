@@ -5,148 +5,13 @@
 //! neither, since the card would show them as this repository's.
 
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
-use std::process::{Command, Output};
 
 use serde_json::{Map, Value, json};
 
-use super::support::{finished, text};
-use super::{Tools, read};
-
-const OLD: &str = "0a0b0c0d0e0f00112233445566778899aabbccddeeff00112233445566778899";
-const NEW: &str = "f0e1d2c3b4a5968778695a4b3c2d1e0ffedcba98765432100123456789abcdef";
-/// The repository's place, as the runs name it.
-const HERE: [&str; 2] = ["--repo", "/srv/repo"];
-
-/// The stand-ins' ID of the repository; an empty one is none.
-fn id(id: &'static str) -> [(&'static str, &'static str); 1] {
-    [("REPO_ID", id)]
-}
-
-/// One tool's runs against one report, with stand-ins of their own.
-struct Case {
-    tools: Tools,
-    tool: &'static str,
-    report: PathBuf,
-}
-
-impl Case {
-    fn new(tool: &'static str) -> Case {
-        let tools = Tools::new();
-        let report = tools.report("report");
-        Case {
-            tools,
-            tool,
-            report,
-        }
-    }
-
-    /// The variable that names the repository to the tool.
-    fn variable(&self) -> &'static str {
-        if self.tool == "restic" {
-            "RESTIC_REPOSITORY"
-        } else {
-            "BORG_REPO"
-        }
-    }
-
-    /// One run of `tool` with `arguments` in `environment`, which writes the
-    /// report.
-    fn run_as(&self, tool: &str, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
-        let mut asked = vec![tool];
-        asked.extend_from_slice(arguments);
-        asked.extend(["--report", self.report.to_str().unwrap()]);
-        self.tools.run_with(&asked, environment)
-    }
-
-    fn run(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
-        self.run_as(self.tool, arguments, environment)
-    }
-
-    /// A run of `tool` that checks and restores, as the weekly one does, and
-    /// passes.
-    fn checked_as(&self, tool: &str, arguments: &[&str], environment: &[(&str, &str)]) {
-        let mut asked = arguments.to_vec();
-        asked.extend(["--verify", "--restore", "/etc/hosts"]);
-        let ran = self.run_as(tool, &asked, environment);
-        assert_eq!(ran.status.code(), Some(0), "{}", text(&ran.stderr));
-        let written = read(&self.report);
-        assert_eq!(
-            (&written["verify"]["ok"], &written["restore"]["ok"]),
-            (&json!(true), &json!(true))
-        );
-    }
-
-    fn checked(&self, arguments: &[&str], environment: &[(&str, &str)]) {
-        self.checked_as(self.tool, arguments, environment);
-    }
-
-    /// The report as `change` leaves it, in its place.
-    fn changed(&self, change: impl FnOnce(&mut Map<String, Value>)) {
-        let mut report = read(&self.report);
-        change(report.as_object_mut().unwrap());
-        std::fs::write(&self.report, report.to_string()).unwrap();
-    }
-
-    /// The file restic reads the repository's place from, holding `place`.
-    fn file(&self, place: &str) -> String {
-        let file = self.tools.directory.path().join("repository");
-        std::fs::write(&file, place).unwrap();
-        file.to_str().unwrap().to_owned()
-    }
-
-    /// The last integrity check and test restore on the card, as one
-    /// collection run shows the report.
-    fn card(&self) -> (Value, Value) {
-        let directory = tempfile::tempdir().unwrap();
-        let configuration = directory.path().join("garrison.toml");
-        let provider = format!(
-            "\n[[providers]]\ntype = \"backup-check\"\ntool = \"{}\"\npath = \"{}\"\n",
-            self.tool,
-            self.report.display()
-        );
-        let base = garrison_testing::config_text(directory.path(), "http://127.0.0.1:9");
-        std::fs::write(&configuration, base + &provider).unwrap();
-        let ran = finished(
-            Command::new(env!("CARGO_BIN_EXE_garrison"))
-                .arg("--config")
-                .arg(&configuration)
-                .arg("collect")
-                .env_remove("CREDENTIALS_DIRECTORY"),
-        );
-        assert!(ran.status.success(), "{}", text(&ran.stderr));
-        let database =
-            rusqlite::Connection::open(directory.path().join("collector/status.sqlite")).unwrap();
-        let document: String = database
-            .query_row("SELECT document FROM snapshots", [], |row| row.get(0))
-            .unwrap();
-        let document: Value = serde_json::from_str(&document).unwrap();
-        let id = format!("backup-check.{}", self.tool);
-        let observations = document["observations"].as_array().unwrap();
-        let card = observations
-            .iter()
-            .find(|card| card["id"] == id.as_str())
-            .unwrap();
-        let field = |label: &str| {
-            card["fields"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .find(|field| field["label"] == label)
-                .map_or(Value::Null, |field| field["value"].clone())
-        };
-        (field("Last integrity check"), field("Last test restore"))
-    }
-}
-
-/// One way for the report before a run to be what it is: its name, whether
-/// the card may show the check and restore that report held, and the runs,
-/// the last of which it gives where it ends with one.
-type Way = (String, bool, Box<dyn Fn(&Case) -> Option<Output>>);
-
-fn way(name: &str, kept: bool, runs: impl Fn(&Case) -> Option<Output> + 'static) -> Way {
-    (name.to_owned(), kept, Box::new(runs))
-}
+use super::case::{Case, HERE, NEW, OLD, Way, id, way};
+use super::spellings;
+use super::stand_in::read;
+use super::support::text;
 
 /// The repository asked again, under the name it had or under another.
 fn places(tool: &str) -> Vec<Way> {
@@ -358,7 +223,13 @@ fn parts(tool: &'static str) -> Vec<Way> {
 fn no_check_or_restore_of_another_repository_or_of_none_known_reaches_the_card() {
     let mut wrong = Vec::new();
     for tool in ["restic", "borg"] {
-        let ways = [places(tool), reports(tool), runs(tool), parts(tool)];
+        let ways = [
+            places(tool),
+            spellings::ways(tool),
+            reports(tool),
+            runs(tool),
+            parts(tool),
+        ];
         for (name, kept, steps) in ways.into_iter().flatten() {
             let case = Case::new(tool);
             let last = steps(&case);
@@ -406,7 +277,9 @@ fn a_run_says_why_it_keeps_nothing_and_names_what_the_file_names() {
         after(&["--repo", "/mnt/copy"], &id(OLD)),
         format!(
             "The last report, {to}, is of the restic repository /srv/repo (ID {OLD}), and this \
-             run asks the restic repository /mnt/copy (ID {OLD}): {lost}"
+             run asks the restic repository /mnt/copy (ID {OLD}): its last integrity check and \
+             test restore are not kept. The same ID at another place is a copy, which needs a \
+             --report of its own; name one repository alike in every run.\n"
         )
     );
     assert_eq!(
@@ -417,6 +290,18 @@ fn a_run_says_why_it_keeps_nothing_and_names_what_the_file_names() {
         )
     );
     assert_eq!(read(&case.report)["repositoryId"], Value::Null);
+    // A listing that fails is said first, and is the cause.
+    case.checked(&HERE, &id(OLD));
+    let unlisted = case.run(&HERE, &[("REPO_ID", OLD), ("BROKEN", "snapshots")]);
+    assert_eq!(unlisted.status.code(), Some(1));
+    assert_eq!(
+        text(&unlisted.stderr),
+        format!(
+            "restic did not list its snapshots: Fatal: the repository is locked by another \
+             process\nThe last report, {to}, is not known to be of this repository, since restic \
+             could not list it: {lost}"
+        )
+    );
     assert_eq!(
         after(&[], &id(OLD)),
         format!(

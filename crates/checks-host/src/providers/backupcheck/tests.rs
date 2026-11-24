@@ -362,3 +362,53 @@ fn a_snapshot_or_a_report_from_the_future_is_not_a_fresh_one() {
     near["snapshots"]["at"] = json!(at(-240));
     assert_eq!(observed(Some(&near), 0o644, "").state, State::Ok);
 }
+
+/// A time written without its offset, which a browser reads in its own
+/// time zone, is shown nowhere and judges nothing: the card says which and
+/// is Unknown, never Failed for a repository that holds snapshots nor
+/// overdue for a check that is not. One with another offset is shown as
+/// written, one instant for every viewer.
+#[test]
+fn a_time_without_its_offset_is_not_shown_and_judges_nothing() {
+    let times = [
+        ("snapshots", "at", "Listed"),
+        ("snapshots", "newest", "Newest snapshot"),
+        ("verify", "at", "Checked"),
+        ("restore", "at", "Restored"),
+    ];
+    let mut naive = report();
+    for (part, key, _) in times {
+        let text = naive[part][key].as_str().unwrap();
+        naive[part][key] = json!(text.trim_end_matches("+00:00"));
+    }
+    let seen = observed(Some(&naive), 0o600, "verify_days = 7\nrestore_days = 7\n");
+    assert_eq!(seen.state, State::Unknown, "{:?}", seen.findings);
+    for (part, key, label) in times {
+        assert_eq!(field(&seen, label), &Value::Null, "{label}");
+        let written = naive[part][key].as_str().unwrap();
+        let said = format!(
+            "{label} is not shown: \"{written}\" is no time with its offset, such as \
+             2026-11-17T03:00:00Z."
+        );
+        assert!(seen.findings.contains(&said), "{said}: {:?}", seen.findings);
+    }
+    assert_eq!(field(&seen, "Snapshots"), &json!(14));
+    assert_eq!(seen.findings.len(), times.len(), "{:?}", seen.findings);
+    // One time that does not read leaves the others judged.
+    let mut checked = report();
+    checked["verify"]["at"] = json!("yesterday");
+    let seen = observed(Some(&checked), 0o600, "verify_days = 7\n");
+    assert_eq!(seen.state, State::Unknown, "{:?}", seen.findings);
+    assert_eq!(field(&seen, "Newest snapshot"), &json!(at(3700)));
+    // Another offset is shown as written.
+    let mut local = report();
+    let newest = time::parse(local["snapshots"]["newest"].as_str().unwrap()).unwrap();
+    let written = time::isoformat_written(time::Written {
+        instant: newest,
+        offset: 3600,
+    });
+    local["snapshots"]["newest"] = json!(written);
+    let seen = observed(Some(&local), 0o600, "");
+    assert_eq!(seen.state, State::Ok, "{:?}", seen.findings);
+    assert_eq!(field(&seen, "Newest snapshot"), &json!(written));
+}

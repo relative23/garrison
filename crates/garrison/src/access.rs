@@ -26,6 +26,7 @@ mod folder;
 
 use defaults::{Candidate, administrator_roles, default_profiles};
 use folder::{Current, Folder, MAX_POLICY};
+pub(crate) use folder::{too_large, way_out};
 
 const POLICY_GROUP: &str = "garrison-broker";
 
@@ -247,13 +248,7 @@ fn written(config: &Config) -> Result<Policy, String> {
     let path = &config.broker.policy;
     there(path)?;
     let raw = read_protected(path, MAX_POLICY).map_err(|error| match error {
-        ProtectedFileError::TooLarge(_) => format!(
-            "The access policy {} is larger than the broker reads ({} KiB), so it is no policy: \
-             copy back the last backup beside it ({}.<time>.bak) with sudo cp.",
-            path.display(),
-            MAX_POLICY / 1024,
-            path.display()
-        ),
+        ProtectedFileError::TooLarge(_) => too_large(path),
         error => format!("Garrison access policy: {error}"),
     })?;
     let named = named(config);
@@ -278,8 +273,8 @@ fn update(config: &Config) -> Result<u8, String> {
         }
         say(
             "Run the installer again now: it writes the polkit rule for these actions and \
-             restarts the broker, which reads them only when it starts. Until then a broker \
-             that does not know an action the policy names lets nobody use Garrison.",
+             restarts the broker and the web service, which read them only when they start; \
+             until then an added action is offered to nobody.",
         );
         Ok(0)
     })
@@ -295,7 +290,7 @@ fn native(config: &Config) -> Result<JmapClient, String> {
 fn init(config: &Config, force: bool) -> Result<u8, String> {
     let path = &config.broker.policy;
     let exists = || {
-        say(&format!(
+        complain(&format!(
             "{} exists; use --force to replace it (a backup is kept).",
             path.display()
         ));
@@ -411,7 +406,7 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
             let mut policy = load(config)?;
             if !policy.profiles.contains_key(profile) {
                 let known: Vec<&str> = policy.profiles.keys().map(String::as_str).collect();
-                say(&format!(
+                complain(&format!(
                     "Unknown profile {profile}; known: {}",
                     known.join(", ")
                 ));
@@ -440,7 +435,10 @@ fn execute(config: &Config, command: &Command) -> Result<u8, String> {
         }),
         Command::Deny { subject, undo } => {
             if !is_subject(subject) {
-                say("Invalid subject");
+                complain(&format!(
+                    "{subject:?} is no subject: a subject is 1 to 128 letters, digits and _ . : \
+                     @ -, and that of a local Stalwart account its numeric account ID."
+                ));
                 return Ok(1);
             }
             locked(config, false, |folder| {

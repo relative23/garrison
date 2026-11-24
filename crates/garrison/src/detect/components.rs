@@ -9,6 +9,7 @@ use garrison_collector::providers::directives::directives;
 use super::Component;
 use super::host::{Host, Socket, Unit};
 use super::system::{Family, System};
+use crate::units::CREDENTIALS;
 
 const STALWART: [&str; 2] = ["stalwart.service", "stalwart-mail.service"];
 const SCANNER: [&str; 3] = [
@@ -375,8 +376,13 @@ impl Seen<'_, '_> {
             }
             component.note(format!(
                 "to be told through it: ntfy_url = \"{}/<topic>\" under [notifications] in \
-                 garrison.toml",
+                 garrison.toml, with the topic's token in {CREDENTIALS}/ntfy-token",
                 base.as_deref().unwrap_or("https://<its name>")
+            ));
+            // Every user of the host may read garrison.toml.
+            component.note(format!(
+                "a topic without a token goes into {CREDENTIALS}/ntfy-url instead, with \
+                 ntfy_url = \"credential:ntfy-url\", since every user may read garrison.toml"
             ));
         }
         component

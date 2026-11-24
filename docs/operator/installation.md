@@ -192,7 +192,8 @@ administration. `check-config` refuses a shared origin.
 
 Create the DNS record and a certificate for that name, then give it a server
 block that serves nothing else. `garrison nginx` prints one for your names,
-written for the nginx installed on this host, with the lines that belong in
+on the port `public_origin` names (443 where it names none), written for the
+nginx installed on this host, with the lines that belong in
 Stalwart's server blocks and, as optional ones, those of
 [client addresses for Stalwart's limits](#client-addresses-for-stalwarts-limits):
 
@@ -432,7 +433,9 @@ Nothing asks a question unless standard input and standard output are both a
 terminal, so the same steps run from cloud-init, Ansible or a shell script.
 Every command exits with 0 on success and 1 on failure, with the reason on
 standard error; 2 means it was called wrongly or found no usable
-configuration. Run without root, `doctor`, `setup` and `stalwart setup` exit
+configuration. `doctor` and `self-check` write their whole report on
+standard output, failures among it, and end with 1 where it holds one. Run
+without root, `doctor`, `notify-test`, `setup` and `stalwart setup` exit
 with 2, and `install`, `upgrade`, `restore` and `uninstall` with 1.
 
 ```sh

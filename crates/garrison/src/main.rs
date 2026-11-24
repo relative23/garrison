@@ -1,12 +1,13 @@
 //! `garrison <command>`: the entry point for services and operators.
 //!
-//! Service commands (started by systemd): web, ingest, collect, broker.
-//! Operator commands: install, detect, check-config, modules, access,
-//! stalwart, polkit-rule, stalwart-switch, backup, self-check. Every command
-//! but `install` and `detect` reads the configuration first.
+//! The services systemd starts and the operator's commands are one binary;
+//! `garrison --help` lists them. A command that works with the configuration
+//! loads the file `--config` names first; one that uses the units' own file,
+//! or reads none, refuses the option.
 
 mod access;
 mod backup_check;
+mod check_config;
 mod config_file;
 mod detect;
 mod doctor;
@@ -29,7 +30,6 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use garrison_authz::Authority;
 use garrison_core::config::{self, Config};
 use garrison_core::credentials::Credentials;
 use garrison_core::logging;
@@ -42,9 +42,11 @@ use garrison_core::logging;
     arg_required_else_help = true
 )]
 struct Arguments {
-    /// The configuration file.
-    #[arg(long, global = true, default_value = config::DEFAULT_PATH)]
-    config: PathBuf,
+    /// The configuration file, /etc/garrison/garrison.toml where none is named;
+    /// install, uninstall, setup, upgrade, restore, backup-check and detect
+    /// take none.
+    #[arg(long, global = true, value_name = "FILE")]
+    config: Option<PathBuf>,
     /// Also log debug messages, including those of libraries.
     #[arg(long, global = true)]
     verbose: bool,
@@ -247,80 +249,6 @@ pub(crate) fn placeholder(origin: &str) -> bool {
     .any(under)
 }
 
-fn check_config(config: &Config, path: &Path) -> u8 {
-    let providers = match garrison_collector::build(&config.collector.providers) {
-        Ok(providers) => providers,
-        Err(error) => {
-            complain(&format!("Configuration not usable: {error}"));
-            return 2;
-        }
-    };
-    let unloaded = loaded::unloaded(config);
-    let unaskable = dqs::refused(config);
-    // Root reads the checks' paths here; the collector, in its unit's sandbox, may not.
-    let places = units::collector_places(&providers, path);
-    if !unloaded.is_empty() || !unaskable.is_empty() || places.is_err() {
-        for secret in &unloaded {
-            complain(&format!("Configuration not usable: {}", secret.line()));
-        }
-        for (what, fix) in &unaskable {
-            complain(&format!("Configuration not usable: {what}. {fix}"));
-        }
-        for refusal in places.err().unwrap_or_default() {
-            complain(&format!("Configuration not usable: {refusal}"));
-        }
-        return 2;
-    }
-    say(&format!(
-        "Configuration valid: {} providers, {} actions.",
-        config.collector.providers.len(),
-        config.broker.actions.len()
-    ));
-    let deployment = &config.deployment;
-    for (setting, origin) in [
-        ("public_origin", &deployment.public_origin),
-        ("issuer", &deployment.issuer),
-    ] {
-        if placeholder(origin) {
-            complain(&format!(
-                "Warning: deployment.{setting} {origin} is a placeholder; set the real name."
-            ));
-        }
-    }
-    let include = unfollowed::installed_include();
-    for setting in unfollowed::settings(config, include.as_deref()) {
-        complain(&format!("Warning: {}. {}", setting.what, setting.fix));
-    }
-    for (what, fix) in dqs::warned(config) {
-        complain(&format!("Warning: {what}. {fix}"));
-    }
-    for warning in places.unwrap_or_default() {
-        complain(&format!("Warning: {warning}"));
-    }
-    // Root reads the policy here; the broker, in its unit's sandbox, may not.
-    match units::policy_place(&config.broker.policy, path) {
-        Err(refusal) => {
-            complain(&format!("Access policy not usable: {refusal}"));
-            return 1;
-        }
-        Ok(Some(warning)) => complain(&format!("Warning: {warning}")),
-        Ok(None) => {}
-    }
-    match Authority::new(config, credentials(config)).policy() {
-        Ok(_) => {
-            say(&format!(
-                "Access policy valid: {}",
-                config.broker.policy.display()
-            ));
-            0
-        }
-        Err(error) => {
-            complain(&format!("Access policy not usable: {error}"));
-            1
-        }
-    }
-}
-
 fn stalwart_switch(config: &Config) -> u8 {
     let script = static_directory().join(garrison_web::switch::SCRIPT);
     let Ok(data) = std::fs::read(&script) else {
@@ -368,7 +296,7 @@ fn dispatch(task: Task, config: &Config, path: &Path) -> u8 {
             garrison_broker::run(config, path, credentials(config)),
         ),
         Task::Milter => service("milter", garrison_milter::run(config)),
-        Task::CheckConfig => check_config(config, path),
+        Task::CheckConfig => check_config::run(config, path),
         Task::Modules { set, yes, adopt } => {
             selection::run(path, config, set.as_deref(), yes, adopt)
         }
@@ -394,9 +322,37 @@ fn load(path: &Path) -> Result<Config, String> {
     config::load(path).map_err(|error| format!("Cannot load {}: {error}", path.display()))
 }
 
+/// Why a command follows no `--config`: it uses the file the units read, as
+/// the installer and setup do, or it reads no configuration.
+fn unfollowed(command: &Command) -> Option<(&'static str, &'static str)> {
+    let units = "uses /etc/garrison/garrison.toml, the units' configuration";
+    let none = "reads no configuration";
+    Some(match command {
+        Command::Install { .. } => ("install", units),
+        Command::Uninstall { .. } => ("uninstall", units),
+        Command::Setup => ("setup", units),
+        Command::Upgrade { .. } => ("upgrade", units),
+        Command::Restore { .. } => ("restore", units),
+        Command::BackupCheck { .. } => ("backup-check", none),
+        Command::Detect { .. } => ("detect", none),
+        Command::Watch | Command::Configured(_) => return None,
+    })
+}
+
 fn main() -> ExitCode {
     let arguments = Arguments::parse();
     logging::init(arguments.verbose);
+    if let (Some(named), Some((command, why))) = (&arguments.config, unfollowed(&arguments.command))
+    {
+        complain(&format!(
+            "garrison {command} {why}, so it takes no --config ({}).",
+            named.display()
+        ));
+        return ExitCode::from(2);
+    }
+    let path = arguments
+        .config
+        .unwrap_or_else(|| PathBuf::from(config::DEFAULT_PATH));
     let code = match arguments.command {
         // The installer runs before a configuration exists.
         Command::Install {
@@ -404,11 +360,11 @@ fn main() -> ExitCode {
             restore_state,
         } => install::run_installer(rollback, restore_state),
         Command::Upgrade { archive, signature } => upgrade::run(&archive, signature.as_deref()),
-        Command::Setup => wizard::run(&arguments.config),
+        Command::Setup => wizard::run(&path),
         Command::Uninstall { purge, dry_run } => install::run_uninstall(purge, dry_run),
         Command::Restore { from } => install::run_restore(&from),
         // The watch also looks where the configuration no longer loads.
-        Command::Watch => watch::run(&arguments.config),
+        Command::Watch => watch::run(&path),
         Command::BackupCheck {
             tool,
             repo,
@@ -424,8 +380,8 @@ fn main() -> ExitCode {
         }),
         // Detection also runs before a configuration exists.
         Command::Detect { format } => detect::run(format),
-        Command::Configured(task) => match load(&arguments.config) {
-            Ok(config) => dispatch(task, &config, &arguments.config),
+        Command::Configured(task) => match load(&path) {
+            Ok(config) => dispatch(task, &config, &path),
             Err(message) => {
                 complain(&message);
                 2

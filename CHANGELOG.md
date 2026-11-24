@@ -634,8 +634,8 @@ Notable changes for operators and users. The format follows
   access bind-role` says the same of a role it binds to a profile whose
   rights the role lacks, whose users would get nothing of it. Where a policy
   that reads is there, `init --force` keeps it in that case, since a new one
-  would bind nobody and sign everyone out, and says what keeps the kept one
-  from working.
+  would bind nobody and sign everyone out, and names actions in it that
+  `garrison.toml` no longer has and a policy that binds nobody.
 - **`garrison access init` and `bind-role` work on a Stalwart with more than
   64 roles, and `bind-role` names why a role's rights cannot be evaluated.**
 - **A `garrison access` command no longer waits without a word for a lock
@@ -661,8 +661,33 @@ Notable changes for operators and users. The format follows
   says, which also says what `init --force` drops and how the policy file
   is written.
 - **A backup's card shows only that repository's own integrity check and
-  test restore.** After the upgrade, a card that expects them warns until
-  the next `garrison backup-check` run with `--verify` or `--restore`.
+  test restore**, whichever way each run names its place. After the upgrade,
+  a card with `verify_days` warns until the next `garrison backup-check` run
+  with `--verify`, and one with `restore_days` until the next with
+  `--restore`.
+- **Two `garrison backup-check` runs that write one report take turns**, so
+  that one never writes back an older check or restore over the one the
+  other made meanwhile.
+- **`garrison nginx` prints a block that listens on the port
+  `public_origin` names**, and its redirect from plain HTTP keeps that port;
+  it listened on 443 whatever the origin said.
+- **`garrison setup` says the configuration holds its addresses only where it
+  does.** A `[deployment]` table it cannot edit, as with dotted keys, ends the
+  setup with the lines to write there by hand.
+- **`garrison setup` asks for the modules unless a top-level `modules`
+  chooses them**, as `garrison modules` writes it; a check's own `modules`
+  line no longer skips the choice.
+- **`garrison modules --set` without `--yes` ends with 2 where no terminal is
+  to answer its question.** A script adds `--yes`, as the installation guide
+  shows.
+- **The refusals of `garrison access` and a failed check or restore of
+  `garrison backup-check` are said on standard error**, as the installation
+  guide says of every command.
+- **`garrison notify-test` without root says to run it as root and ends with
+  2**, as `garrison doctor` does.
+- **`garrison install`, `uninstall`, `setup`, `upgrade`, `restore`,
+  `backup-check` and `detect` refuse `--config`, which none of them
+  follows**, with exit 2 before they do anything.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year
@@ -1990,6 +2015,11 @@ Notable changes for operators and users. The format follows
   reading takes it**: one the broker owns is a warning, no longer a failure,
   one it does not take is named with why, and a closed `/etc/garrison` with
   the `chmod` that opens it.
+- **`garrison check-config` judges the access policy as the broker meets
+  it**: one the broker may not read or reach is refused with the command
+  that mends it, and one the broker owns is taken, with a warning. An
+  upgrade stops there, before anything changes, where a folder on the way
+  keeps the broker from the policy; nobody could sign in there before either.
 - **`garrison doctor` tries the broker's and the collector's API keys with
   Stalwart**, as their services use them, and fails one Stalwart no longer
   knows, with which nobody can sign in, with the setup that makes a new one.

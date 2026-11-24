@@ -124,8 +124,8 @@ fn a_lock_another_process_holds_is_said_and_not_waited_for() {
             Some(1),
             format!(
                 "{} is held by another process, as another `garrison access` command: try \
-                 again once it has ended. Where none runs, remove the file, which an earlier \
-                 release made readable for others, and run the command again.\n",
+                 again once it has ended. Where none runs, remove the file and run the command \
+                 again.\n",
                 lock.display()
             )
         )

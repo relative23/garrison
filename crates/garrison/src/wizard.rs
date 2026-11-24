@@ -51,6 +51,19 @@ fn ask(question: &str, default: Option<&str>) -> Result<String, String> {
     }
 }
 
+/// Whether `line` opens the table `name`: `[name]`, also with spaces inside
+/// the brackets, the name quoted or a comment after it.
+fn opens(line: &str, name: &str) -> bool {
+    line.split('#')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .filter(|inner| !inner.starts_with('['))
+        .is_some_and(|inner| inner.trim().trim_matches(['"', '\'']) == name)
+}
+
 /// `text` with `key = "value"` in the `[deployment]` section: the key's line
 /// is replaced, or added at the end of the section; comments stay.
 fn with_deployment(text: &str, key: &str, value: &str) -> String {
@@ -69,12 +82,12 @@ fn with_deployment(text: &str, key: &str, value: &str) -> String {
                 lines.insert(at, wanted.clone());
                 done = true;
             }
-            inside = trimmed == "[deployment]";
+            inside = opens(trimmed, "deployment");
         } else if inside
             && !done
             && trimmed
                 .split_once('=')
-                .is_some_and(|(name, _)| name.trim() == key)
+                .is_some_and(|(name, _)| name.trim().trim_matches(['"', '\'']) == key)
         {
             lines.push(wanted.clone());
             done = true;
@@ -86,6 +99,53 @@ fn with_deployment(text: &str, key: &str, value: &str) -> String {
         lines.push(wanted);
     }
     lines.join("\n") + "\n"
+}
+
+/// What writing the addresses into a configuration comes to.
+#[derive(Debug, PartialEq, Eq)]
+enum Written {
+    /// The file holds them already.
+    Already,
+    /// The file with them in place.
+    Changed(String),
+    /// With them the file does not load: why.
+    Invalid(String),
+    /// The `[deployment]` table is written so that no line of it could be
+    /// replaced, as with dotted keys.
+    Unwritable,
+}
+
+/// The configuration `text` with `answers` for [`ADDRESSES`], judged by what
+/// its `[deployment]` table holds then, not by whether the text changed.
+fn written(text: &str, answers: &[String]) -> Written {
+    let mut updated = text.to_owned();
+    for (key, value) in ADDRESSES.iter().zip(answers) {
+        updated = with_deployment(&updated, key, value);
+    }
+    let table = updated.parse::<toml::Table>().ok();
+    let deployment = table
+        .as_ref()
+        .and_then(|table| table.get("deployment")?.as_table());
+    let held = deployment.is_some_and(|deployment| {
+        ADDRESSES.iter().zip(answers).all(|(key, value)| {
+            deployment.get(*key).and_then(toml::Value::as_str) == Some(value.as_str())
+        })
+    });
+    if !held {
+        return Written::Unwritable;
+    }
+    match config::from_text(&updated) {
+        Err(error) => Written::Invalid(error.to_string()),
+        Ok(_) if updated == text => Written::Already,
+        Ok(_) => Written::Changed(updated),
+    }
+}
+
+/// Whether `text` chooses the modules, with the top-level `modules` that
+/// `garrison modules` writes; a provider's `modules` chooses none.
+fn chosen(text: &str) -> bool {
+    text.parse::<toml::Table>()
+        .is_ok_and(|table| table.contains_key("modules"))
 }
 
 /// The current value of a `[deployment]` key, unless it is still a placeholder.
@@ -126,16 +186,12 @@ fn addresses(path: &Path) -> Result<(), String> {
             ),
         )?;
         let answers = [own, issuer, local, format!("{webui}/")];
-        let mut updated = text.clone();
-        for (key, value) in ADDRESSES.iter().zip(&answers) {
-            updated = with_deployment(&updated, key, value);
-        }
-        match config::from_text(&updated) {
-            Ok(_) if updated == text => {
+        match written(&text, &answers) {
+            Written::Already => {
                 say("The configuration already has these addresses.");
                 return Ok(());
             }
-            Ok(_) => {
+            Written::Changed(updated) => {
                 let previous = crate::config_file::replace(path, &text, &updated)?;
                 say(&format!(
                     "Written; the previous file is {}.",
@@ -143,7 +199,18 @@ fn addresses(path: &Path) -> Result<(), String> {
                 ));
                 return Ok(());
             }
-            Err(error) => say(&format!("{error}\nLet's try again.")),
+            Written::Invalid(error) => say(&format!("{error}\nLet's try again.")),
+            Written::Unwritable => {
+                let [own, issuer, local, webui] = &answers;
+                return Err(format!(
+                    "The addresses cannot be written into {}: its deployment table is not one \
+                     [deployment] section with a line for each, as dotted keys write it. Write \
+                     public_origin = \"{own}\", issuer = \"{issuer}\", stalwart_url = \"{local}\" \
+                     and admin_url = \"{webui}\" under [deployment] there, then run `garrison \
+                     setup` again.",
+                    path.display()
+                ));
+            }
         }
     }
 }
@@ -168,10 +235,7 @@ fn guided(path: &Path) -> Result<(), String> {
     step(2, "Modules");
     let config = load(path)?;
     let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    if text
-        .lines()
-        .any(|line| line.trim_start().starts_with("modules"))
-    {
+    if chosen(&text) {
         say("The modules are chosen already; `garrison modules` changes them.");
     } else {
         finish(
@@ -282,6 +346,110 @@ mod tests {
                 "{text:?} -> {edited:?}"
             );
         }
+    }
+
+    /// The example configuration with its `[deployment]` table written in
+    /// another form TOML allows.
+    fn example_as(form: &str) -> String {
+        let example = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deploy/config/garrison.example.toml"
+        ))
+        .unwrap();
+        let header = "[deployment]\n";
+        let (start, end) = (
+            example.find(header).unwrap(),
+            example.find("[web]\n").unwrap(),
+        );
+        let table = &example[start + header.len()..end];
+        let rewritten = |line: &dyn Fn(&str) -> String| -> String {
+            table.lines().map(|text| line(text) + "\n").collect()
+        };
+        let keyed = |text: &str| !text.starts_with('#') && text.contains(" = ");
+        let (header, table) = match form {
+            "a comment after the header" => ("[deployment] # addresses\n", table.to_owned()),
+            "spaces inside the brackets" => ("[ deployment ]\n", table.to_owned()),
+            "quoted keys" => (
+                header,
+                rewritten(&|text| match text.split_once(" = ") {
+                    Some((key, value)) if keyed(text) => format!("\"{key}\" = {value}"),
+                    _ => text.to_owned(),
+                }),
+            ),
+            "dotted keys" => (
+                "",
+                rewritten(&|text| {
+                    if keyed(text) {
+                        format!("deployment.{text}")
+                    } else {
+                        text.to_owned()
+                    }
+                }),
+            ),
+            _ => (header, table.to_owned()),
+        };
+        format!("{}{header}{table}{}", &example[..start], &example[end..])
+    }
+
+    /// Step 1 writes the addresses wherever the table's lines can be
+    /// replaced, says the file holds them only where it does, and refuses
+    /// where they cannot be written there, as with dotted keys.
+    #[test]
+    fn the_addresses_are_written_where_the_table_takes_them_or_refused() {
+        let answers = [
+            "https://garrison.mail.internal",
+            "https://mail.mail.internal",
+            "http://127.0.0.1:8080",
+            "https://mail.mail.internal/admin/",
+        ]
+        .map(str::to_owned);
+        let forms = [
+            "plain",
+            "a comment after the header",
+            "spaces inside the brackets",
+            "quoted keys",
+        ];
+        for form in forms {
+            let text = example_as(form);
+            assert!(config::from_text(&text).is_ok(), "{form}");
+            let Written::Changed(updated) = written(&text, &answers) else {
+                panic!("{form}: {:?}", written(&text, &answers));
+            };
+            let deployment = config::from_text(&updated).unwrap().deployment;
+            let loaded = [
+                deployment.public_origin,
+                deployment.issuer,
+                deployment.stalwart_url,
+                deployment.admin_url,
+            ];
+            assert_eq!(loaded, answers, "{form}");
+            assert_eq!(written(&updated, &answers), Written::Already, "{form}");
+        }
+        let dotted = example_as("dotted keys");
+        assert!(config::from_text(&dotted).is_ok());
+        assert_eq!(written(&dotted, &answers), Written::Unwritable);
+        // Answers the configuration refuses are asked again.
+        let shared = [&answers[1], &answers[1], &answers[2], &answers[3]].map(String::clone);
+        assert!(matches!(
+            written(&example_as("plain"), &shared),
+            Written::Invalid(_)
+        ));
+    }
+
+    /// The modules are chosen where the file has the top-level `modules` of
+    /// `garrison modules`, also over several lines, and not by a provider's.
+    #[test]
+    fn the_modules_are_chosen_by_a_top_level_key_alone() {
+        let example = example_as("plain");
+        assert!(!chosen(&example));
+        assert!(chosen(&format!("modules = [\"backups\"]\n{example}")));
+        assert!(chosen(&format!(
+            "modules = [\n    \"backups\",\n]\n{example}"
+        )));
+        let provider = "\n[[providers]]\ntype = \"receipt\"\nid = \"nightly\"\ntitle = \"Nightly\"\n\
+                        path = \"/var/lib/garrison/receipts/nightly.json\"\nmodules = [\"services\"]\n";
+        assert!(config::from_text(&(example.clone() + provider)).is_ok());
+        assert!(!chosen(&(example + provider)));
     }
 
     #[test]

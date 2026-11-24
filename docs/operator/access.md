@@ -52,8 +52,9 @@ right its profile requires, and why where the role's rights cannot be
 evaluated, as for a tenant's role. Both judge a role by the roles it
 inherits from alone, however many roles Stalwart holds. Where a policy that
 reads is there already, `init --force` keeps it then, since a new one would
-bind nobody and sign everyone out, and says what keeps the kept one from
-working, if anything.
+bind nobody and sign everyone out, and names actions in it that
+garrison.toml no longer has and a policy that binds no role and no account;
+whether a bound role still lets its users in, `garrison access check` shows.
 
 An account that belongs to a tenant, a tenant's administrator's too
 (Stalwart's tenants are an Enterprise feature), and a group are refused
@@ -94,8 +95,9 @@ policy's folder and write over nothing there: a lock at
 `access-policy.json.lock` that is a link, no file, another user's file or a
 second name of another file (a hard link) is refused and left as it is, and
 so is a policy that is a link or no file; a policy larger than the broker
-reads (64 KiB) is no policy, no command writes one, and `init --force`
-leaves it as it is too. A lock that another process holds is not waited
+reads (64 KiB) is no policy, which every command and `check-config` say with
+what mends it, no command writes one, and `init --force` leaves it as it is
+too. A lock that another process holds is not waited
 for: the command says so and ends. There is deliberately no web page that
 edits the policy.
 

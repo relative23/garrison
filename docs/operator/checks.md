@@ -254,28 +254,34 @@ The command adds no secret of its own: it runs with the environment your
 backup job already has (`RESTIC_REPOSITORY`, `RESTIC_PASSWORD_FILE`,
 `BORG_REPO`, `BORG_PASSPHRASE` and the like), or takes the repository with
 `--repo`. It writes `/var/lib/garrison/backup-check/<tool>.json`, which the
-provider reads. The report names the repository as the tool was given it,
-without what signs in to it (one that restic reads from the file
-`RESTIC_REPOSITORY_FILE` names by what that file holds; an empty
-`RESTIC_REPOSITORY` or `BORG_REPO` names none, as the tools take it), and
-holds the repository's own ID, which restic gives with `restic cat config`
-and borg with its listing. A run keeps the last check and restore of the
-report before it only where that report is of the same tool, the same name
-and the same ID: another repository under the same name, as another disk
-mounted at its place, starts without them, and so do a copy of it under
-another name, a report without an ID and a run for which the tool gives no
-ID, as where it cannot open the repository; the command says so. A copy made
-byte for byte, as by rsync, keeps the repository's ID, so one under the same
-name counts as the same repository. The card shows no check or restore of a
-report an earlier release wrote, which holds no ID: where `verify_days` or
-`restore_days` is set, it warns until the next run with `--verify` or
-`--restore`. A report that is a link or no plain file, is larger than 256
-KiB, is not one JSON object as the command writes it, or can be changed by a
-user other than root makes the check Unknown. The command reads the report
-it wrote last the same way, to keep its last check and restore: from
-anything else it keeps neither, says so and writes its report in that place.
-Call the command from the backup job's own unit, and less often with the two
-longer runs:
+provider reads. The report names where the repository is, without what signs
+in to it but a login: a folder on this host as the folder its name leads to,
+whatever slashes, dots, links, `local:` or `file://` are on the way; borg's
+repository elsewhere as borg writes it, `user@host:repo` and
+`ssh://user@host/./repo` alike; restic's elsewhere as given, without the
+slashes at its end (one that restic reads from the file
+`RESTIC_REPOSITORY_FILE` by what that file holds; an empty
+`RESTIC_REPOSITORY` or `BORG_REPO` names none, as the tools take it). It
+also holds the repository's own ID, which restic gives with `restic cat
+config` and borg with its listing. A run keeps the last check and restore of
+the report before it only where that report is of the same tool, the same
+place and the same ID: another repository at its place, as another disk
+mounted there, starts without them, and so do a copy of it at another place,
+a report without an ID and a run for which the tool gives no ID, as where it
+cannot open the repository; the command says so. A copy made byte for byte,
+as by rsync, keeps the repository's ID, so one at the same place counts as
+the same repository. Other names of one restic repository elsewhere, such as
+sftp's two forms, count as two places: name it alike in every run, as one
+`EnvironmentFile` for both units does. The card shows no check or restore of
+a report an earlier release wrote, which holds no ID: where `verify_days` is
+set, it warns until the next run with `--verify`, and where `restore_days`
+is set, until the next run with `--restore`. A report that is a link or no
+plain file, is larger than 256 KiB, is not one JSON object as the command
+writes it, or can be changed by a user other than root makes the check
+Unknown. The command reads the report it wrote last the same way, to keep
+its last check and restore: from anything else it keeps neither, says so and
+writes its report in that place. Call the command from the backup job's own
+unit, and less often with the two longer runs:
 
 ```ini
 # In the backup job's unit: report after every backup.
@@ -299,7 +305,8 @@ an interrupted run left there, as after a reboot or a stopped unit, is
 removed by the next test restore once it has not changed for an hour and no
 run holds it; the command says so, and names a copy it could not remove.
 The exit code of the command is 1 when something it ran failed, so the unit
-shows it too.
+shows it too. Two runs that write one report take turns: the second waits
+for the first and says so, and keeps what the first wrote.
 
 ## `systemd`: one-shot jobs
 
