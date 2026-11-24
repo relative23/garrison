@@ -51,11 +51,15 @@
     "accounts": "Accounts under attack",
     "accountsNote": "A name someone tried is shown only where an account of that name exists. Other names are not recorded: they may be passwords typed into the wrong field.",
     "bans": "Stalwart's bans",
+    "bansNote": "Stalwart blocks an IPv6 address with its /64, which its list of blocked IPs then names; an address banned only because an account it tried was tried too often is blocked alone.",
     "checksUnread": "The collector's checks of this module could not be read.",
     "footer": "From recorded events between {{from}} and {{to}}. Each list shows at most 50 rows.",
     "networks": "Networks with several addresses",
+    "notRecorded": "Not recorded yet",
+    "refusedNotRecorded": "The history holds no connection that Stalwart refused while it blocked its address: Stalwart sends them once <code>garrison stalwart setup</code> has run with this release of Garrison.",
     "sources": "Addresses",
     "truncated": "More events were recorded in this period than are counted here; the figures are those of the newest events.",
+    "withNetwork": "with its /64, {{network}}",
     "column": {
       "account": "Account",
       "accounts": "Accounts tried",
@@ -68,17 +72,19 @@
       "lastSeen": "Last seen",
       "network": "Network",
       "reason": "Reason",
+      "refused": "Refused",
       "tlsErrors": "TLS errors"
     },
     "empty": {
       "accounts": "No failed sign-in named an existing account.",
       "bans": "Stalwart banned no address in this period.",
       "networks": "No network was seen with more than one address.",
-      "sources": "No failed sign-in, ban or TLS error was recorded in this period."
+      "sources": "No failed sign-in, ban, refused connection or TLS error was recorded in this period."
     },
     "figure": {
       "bans": "Bans",
       "failedSignIns": "Failed sign-ins",
+      "refused": "Refused while blocked",
       "sources": "Addresses",
       "tlsErrors": "TLS handshake errors",
       "unknownAccounts": "For no existing account"
@@ -368,7 +374,7 @@
     },
     "dns_tls": {
       "description": "DNS records of each domain, blocklists and reverse names, resolver process and TLS certificate checks.",
-      "intro": "The DNS records of your domains, the blocklists and reverse names of the addresses you send from, the resolver process and the certificates your mail listeners present.",
+      "intro": "The DNS records of your domains, the blocklists and reverse names of the addresses you send from, the resolver process and the certificates your mail listeners present. These blocklists are the public lists other mail servers ask about your sending addresses, not an account's Blocked senders in Stalwart.",
       "label": "DNS & TLS"
     },
     "logs": {

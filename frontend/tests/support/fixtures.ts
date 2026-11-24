@@ -171,7 +171,7 @@ export function attacks(overrides: Partial<Attacks> = {}): Attacks {
     since: NOW - 86400,
     until: NOW,
     truncated: false,
-    totals: { failedSignIns: 1205, unknownAccounts: 1100, tlsErrors: 3, bans: 1, sources: 2 },
+    totals: { failedSignIns: 1205, unknownAccounts: 1100, tlsErrors: 3, bans: 1, refused: null, sources: 2 },
     sources: [
       {
         address: "192.0.2.10",
@@ -180,6 +180,7 @@ export function attacks(overrides: Partial<Attacks> = {}): Attacks {
         accounts: 2,
         tlsErrors: 0,
         bans: 1,
+        refused: 0,
         firstSeen: NOW - 7200,
         lastSeen: NOW - 600,
         listeners: ["imaps", "submission"],
@@ -191,14 +192,15 @@ export function attacks(overrides: Partial<Attacks> = {}): Attacks {
         accounts: 1,
         tlsErrors: 3,
         bans: 0,
+        refused: 0,
         firstSeen: NOW - 3600,
         lastSeen: NOW - 300,
         listeners: ["submission"],
       },
     ],
-    networks: [{ network: "192.0.2.0/24", sources: 2, failedSignIns: 1205, tlsErrors: 3, bans: 1, lastSeen: NOW - 300 }],
+    networks: [{ network: "192.0.2.0/24", sources: 2, failedSignIns: 1205, tlsErrors: 3, bans: 1, refused: 0, lastSeen: NOW - 300 }],
     accounts: [{ name: "anna@example.test", failedSignIns: 105, sources: 2, lastSeen: NOW - 300 }],
-    bans: [{ at: NOW - 600, address: "192.0.2.10", reason: "authentication" }],
+    bans: [{ at: NOW - 600, address: "192.0.2.10", network: null, reason: "authentication" }],
     ...overrides,
   };
 }

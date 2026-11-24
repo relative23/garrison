@@ -3,6 +3,14 @@
   "label": "Authentication failed",
   "explanation": "A login attempt was rejected due to incorrect credentials; repeated failures from the same IP may trigger an authentication ban."
  },
+ "auth.mfa-required": {
+  "label": "Missing MFA token for authentication",
+  "explanation": "MFA token is required for authentication but was not provided"
+ },
+ "auth.too-many-attempts": {
+  "label": "Too many authentication attempts",
+  "explanation": "The client has exceeded the configured limit for failed login attempts in a rolling window; further attempts may be blocked."
+ },
  "delivery.attempt-end": {
   "label": "Delivery attempt ended",
   "explanation": "The outbound delivery attempt has finished, either successfully or with a temporary/permanent failure recorded."
@@ -295,6 +303,14 @@
   "label": "Banned due to authentication errors",
   "explanation": "IP address was banned due to multiple authentication errors"
  },
+ "security.ip-blocked": {
+  "label": "Blocked IP address",
+  "explanation": "Rejected connection from blocked IP address"
+ },
+ "security.ip-unauthorized": {
+  "label": "Unauthorized IP address",
+  "explanation": "IP address is not authorized to authenticate using this credential"
+ },
  "security.loiter-ban": {
   "label": "Banned due to loitering",
   "explanation": "IP address was banned due to multiple loitering events"
@@ -319,6 +335,10 @@
   "label": "ARC verification passed",
   "explanation": "Successful ARC verification"
  },
+ "smtp.auth-not-allowed": {
+  "label": "Authentication not allowed",
+  "explanation": "Authentication is not allowed on this listener"
+ },
  "smtp.concurrency-limit-exceeded": {
   "label": "Concurrency limit exceeded",
   "explanation": "The concurrency limit was exceeded"
@@ -330,6 +350,10 @@
  "smtp.connection-start": {
   "label": "SMTP connection started",
   "explanation": "A new SMTP connection was started"
+ },
+ "smtp.did-not-say-ehlo": {
+  "label": "Client did not say EHLO",
+  "explanation": "The remote server did not send EHLO command"
  },
  "smtp.dkim-fail": {
   "label": "DKIM verification failed",
@@ -347,13 +371,25 @@
   "label": "DMARC check passed",
   "explanation": "Successful DMARC verification"
  },
+ "smtp.dsn-disabled": {
+  "label": "DSN extension disabled",
+  "explanation": "The DSN extension is disabled"
+ },
  "smtp.ehlo": {
   "label": "SMTP EHLO command",
   "explanation": "The remote server sent an EHLO command"
  },
+ "smtp.invalid-command": {
+  "label": "Invalid command",
+  "explanation": "The remote client sent an invalid command"
+ },
  "smtp.invalid-ehlo": {
   "label": "Invalid EHLO command",
   "explanation": "The remote server sent an invalid EHLO command"
+ },
+ "smtp.invalid-sender-address": {
+  "label": "Invalid sender address",
+  "explanation": "The specified sender address is invalid"
  },
  "smtp.iprev-fail": {
   "label": "IPREV check failed",
@@ -363,9 +399,17 @@
   "label": "IPREV check passed",
   "explanation": "Reverse IP check passed"
  },
+ "smtp.loop-detected": {
+  "label": "Mail loop detected",
+  "explanation": "A mail loop was detected, the message contains too many Received headers"
+ },
  "smtp.mail-from": {
   "label": "SMTP MAIL FROM command",
   "explanation": "The remote client sent a MAIL FROM command"
+ },
+ "smtp.mail-from-missing": {
+  "label": "MAIL FROM address missing",
+  "explanation": "The remote client issued an RCPT TO command before MAIL FROM"
  },
  "smtp.mail-from-not-allowed": {
   "label": "MAIL FROM not allowed",
@@ -386,6 +430,14 @@
  "smtp.message-too-large": {
   "label": "Message too large",
   "explanation": "The message was rejected because it was too large"
+ },
+ "smtp.multiple-from-domains": {
+  "label": "Multiple From domains",
+  "explanation": "The message was rejected because its From header lists mailboxes from more than one domain, which would bypass DMARC"
+ },
+ "smtp.multiple-mail-from": {
+  "label": "Multiple MAIL FROM commands",
+  "explanation": "The remote client already sent a MAIL FROM command"
  },
  "smtp.rate-limit-exceeded": {
   "label": "Rate limit exceeded",
@@ -427,9 +479,21 @@
   "label": "Time limit exceeded",
   "explanation": "The remote host kept the SMTP session open too long"
  },
+ "smtp.too-many-invalid-rcpt": {
+  "label": "Too many invalid recipients",
+  "explanation": "The remote client exceeded the number of invalid RCPT TO commands allowed"
+ },
+ "smtp.too-many-messages": {
+  "label": "Too many messages",
+  "explanation": "The remote server exceeded the number of messages allowed per session"
+ },
  "smtp.too-many-recipients": {
   "label": "Too many recipients",
   "explanation": "The remote client exceeded the number of recipients allowed"
+ },
+ "smtp.unsupported-parameter": {
+  "label": "Unsupported parameter",
+  "explanation": "The command contained an unsupported parameter"
  },
  "spam.train-completed": {
   "label": "Spam classifier training completed",

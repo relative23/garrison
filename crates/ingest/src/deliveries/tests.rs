@@ -164,6 +164,20 @@ fn every_rejected_smtp_command_has_a_reason() {
         ("smtp.mail-from-unauthorized", "Sender not authorized"),
         ("smtp.mail-from-not-allowed", "Sender not allowed"),
         ("smtp.invalid-ehlo", "Invalid EHLO"),
+        // What Stalwart 1.2.0 refused in a session of the lab, each with its
+        // own event: the mail, and the commands that ask what it does not do.
+        ("smtp.too-many-invalid-rcpt", "Too many invalid recipients"),
+        ("smtp.multiple-from-domains", "From names several domains"),
+        ("smtp.loop-detected", "Mail loop detected"),
+        ("smtp.too-many-messages", "Too many messages"),
+        ("smtp.did-not-say-ehlo", "No EHLO first"),
+        ("smtp.mail-from-missing", "No MAIL FROM first"),
+        ("smtp.multiple-mail-from", "Second MAIL FROM"),
+        ("smtp.invalid-command", "Invalid command"),
+        ("smtp.invalid-sender-address", "Invalid sender address"),
+        ("smtp.unsupported-parameter", "Unsupported parameter"),
+        ("smtp.dsn-disabled", "DSN not offered"),
+        ("smtp.auth-not-allowed", "Authentication not allowed"),
     ] {
         let kind = EventType::parse(event_type).expect(event_type);
         assert_eq!(rejection(kind), Some(reason), "{event_type}");

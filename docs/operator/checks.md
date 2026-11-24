@@ -383,7 +383,11 @@ records of the domains after the oldest 100.
 ## `reputation`
 
 A receiving server looks the sender's address up in blocklists and asks for
-its reverse name. The check asks the same questions, every six hours, for
+its reverse name. These blocklists are public lists in DNS that other mail
+servers ask about this server's own addresses, not Stalwart's Blocked
+senders and Safe senders, which decide for one account whether a sender's
+mail goes to its Junk folder. The check asks the same questions, every six
+hours, for
 every address of the mail hosts: `hosts`, or without it the hosts Stalwart
 names in the MX records of its domains, of the `max_domains` oldest of them;
 the cards say when Stalwart has more. A reading made with another resolver

@@ -692,6 +692,7 @@ dependencies = [
  "hmac",
  "log",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",

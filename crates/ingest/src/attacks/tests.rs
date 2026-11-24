@@ -68,13 +68,14 @@ fn sign_ins_bans_and_handshakes_are_summed_by_address_network_and_account() {
     assert!(!summary.truncated);
     assert_eq!(
         json!(summary.totals),
-        json!({"failedSignIns": 5, "unknownAccounts": 1, "tlsErrors": 2, "bans": 2, "sources": 3})
+        json!({"failedSignIns": 5, "unknownAccounts": 1, "tlsErrors": 2, "bans": 2, "refused": null,
+               "sources": 3})
     );
     assert_eq!(
         json!(summary.sources[0]),
         json!({
             "address": "192.0.2.10", "network": "192.0.2.0/24", "failedSignIns": 4,
-            "accounts": 2, "tlsErrors": 0, "bans": 1,
+            "accounts": 2, "tlsErrors": 0, "bans": 1, "refused": 0,
             "firstSeen": MIDNIGHT + 36_000, "lastSeen": MIDNIGHT + 36_061,
             "listeners": ["imaps", "submission"],
         })
@@ -89,7 +90,7 @@ fn sign_ins_bans_and_handshakes_are_summed_by_address_network_and_account() {
     assert_eq!(
         json!(summary.networks),
         json!([{"network": "192.0.2.0/24", "sources": 2, "failedSignIns": 5, "tlsErrors": 1,
-                "bans": 1, "lastSeen": MIDNIGHT + 41_400}])
+                "bans": 1, "refused": 0, "lastSeen": MIDNIGHT + 41_400}])
     );
     assert_eq!(
         json!(summary.accounts),
@@ -101,10 +102,157 @@ fn sign_ins_bans_and_handshakes_are_summed_by_address_network_and_account() {
     assert_eq!(
         json!(summary.bans),
         json!([
-            {"at": MIDNIGHT + 43_201, "address": "2001:db8:1:2:aaaa::1", "reason": "scan"},
-            {"at": MIDNIGHT + 36_061, "address": "192.0.2.10", "reason": "authentication"},
+            {"at": MIDNIGHT + 43_201, "address": "2001:db8:1:2:aaaa::1",
+             "network": "2001:db8:1:2::/64", "reason": "scan"},
+            {"at": MIDNIGHT + 36_061, "address": "192.0.2.10", "network": null,
+             "reason": "authentication"},
         ])
     );
+}
+
+/// Stalwart names the address it banned; for an IPv6 one it blocks the /64
+/// with it, which its own list of blocked IPs names and finds.
+#[test]
+fn a_ban_of_an_ipv6_address_names_the_64_blocked_with_it() {
+    let events = [
+        other(
+            1,
+            "security.authentication-ban",
+            "10:00:00",
+            "2001:db8:1:2::5",
+        ),
+        other(2, "security.scan-ban", "10:00:01", "2001:db8:5c:1::7"),
+        other(3, "security.authentication-ban", "10:00:02", "192.0.2.7"),
+        // An IPv4 address a dual-stack listener reports in IPv6 form.
+        other(4, "security.loiter-ban", "10:00:03", "::ffff:198.51.100.9"),
+    ];
+    let summary = summary(&events, MIDNIGHT, MIDNIGHT + 86_399);
+    assert_eq!(
+        json!(summary.bans),
+        json!([
+            {"at": MIDNIGHT + 36_003, "address": "::ffff:198.51.100.9", "network": null, "reason": "loiter"},
+            {"at": MIDNIGHT + 36_002, "address": "192.0.2.7", "network": null, "reason": "authentication"},
+            {"at": MIDNIGHT + 36_001, "address": "2001:db8:5c:1::7", "network": "2001:db8:5c:1::/64",
+             "reason": "scan"},
+            {"at": MIDNIGHT + 36_000, "address": "2001:db8:1:2::5", "network": "2001:db8:1:2::/64",
+             "reason": "authentication"},
+        ])
+    );
+}
+
+/// Stalwart refuses every connection of an address or network it blocks;
+/// the summary counts those refusals where it counts the rest, and says
+/// that it has none to count where the history never held one, as before
+/// setup asked Stalwart for them.
+#[test]
+fn refusals_of_a_blocked_network_count_by_address_and_network() {
+    let events = [
+        other(
+            1,
+            "security.authentication-ban",
+            "10:00:00",
+            "2001:db8:1:2::5",
+        ),
+        other(2, "security.ip-blocked", "10:00:01", "2001:db8:1:2::5"),
+        other(3, "security.ip-blocked", "10:00:02", "2001:db8:1:2::99"),
+        other(4, "security.ip-blocked", "10:00:03", "2001:db8:1:2::99"),
+    ];
+    let day = summary(&events, MIDNIGHT, MIDNIGHT + 86_399);
+    assert_eq!(json!(day.totals)["refused"], json!(3));
+    let refused: Vec<(Value, Value)> = day
+        .sources
+        .iter()
+        .map(|source| (json!(source.address), json!(source)["refused"].clone()))
+        .collect();
+    assert_eq!(
+        refused,
+        [
+            (json!("2001:db8:1:2::99"), json!(2)),
+            (json!("2001:db8:1:2::5"), json!(1)),
+        ]
+    );
+    assert_eq!(
+        json!(day.networks),
+        json!([{"network": "2001:db8:1:2::/64", "sources": 2, "failedSignIns": 0, "tlsErrors": 0,
+                "bans": 1, "refused": 3, "lastSeen": MIDNIGHT + 36_003}])
+    );
+    // A stretch without one counts none, once the history has held one.
+    let later = summary(&events, MIDNIGHT + 40_000, MIDNIGHT + 86_399);
+    assert_eq!(json!(later.totals)["refused"], json!(0));
+    let never = summary(&events[..1], MIDNIGHT, MIDNIGHT + 86_399);
+    assert_eq!(json!(never.totals)["refused"], Value::Null);
+    assert_eq!(json!(never.sources[0])["refused"], json!(0));
+}
+
+/// Stalwart refuses a sign-in with the right password and no second factor,
+/// and one with a credential from an address it does not allow, each with an
+/// event of its own (measured on 1.2.0): both are failed sign-ins of their
+/// address, and of their account where Stalwart names it.
+#[test]
+fn sign_ins_refused_for_a_second_factor_or_an_address_are_failed_sign_ins() {
+    let events = [
+        event(
+            1,
+            "auth.mfa-required",
+            &format!("{DAY}10:00:00Z"),
+            &json!({"remoteIp": "198.51.100.120", "listenerId": "http", "accountId": 3,
+                    "accountName": "anna@example.test", "reason": "MFA token required"}),
+        ),
+        event(
+            2,
+            "security.ip-unauthorized",
+            &format!("{DAY}10:00:01Z"),
+            &json!({"remoteIp": "198.51.100.77", "listenerId": "http", "accountId": 1,
+                    "reason": "IP address not allowed."}),
+        ),
+    ];
+    let day = summary(&events, MIDNIGHT, MIDNIGHT + 86_399);
+    // The key's account exists, named by its ID alone: no unknown account.
+    assert_eq!(
+        (
+            json!(day.totals)["failedSignIns"].clone(),
+            json!(day.totals)["unknownAccounts"].clone()
+        ),
+        (json!(2), json!(0))
+    );
+    assert_eq!(
+        json!(day.accounts),
+        json!([{"name": "anna@example.test", "failedSignIns": 1, "sources": 1,
+                "lastSeen": MIDNIGHT + 36_000}])
+    );
+    let addresses: Vec<&str> = day
+        .sources
+        .iter()
+        .map(|source| source.address.as_str())
+        .collect();
+    assert_eq!(addresses, ["198.51.100.77", "198.51.100.120"]);
+}
+
+/// Stalwart ends a mail session after three failed sign-ins and refuses the
+/// fourth with an event of its own and no account (measured on 1.2.0 over
+/// IMAP and SMTP submission): a failed sign-in of its address, of no
+/// account, and of none that would be unknown.
+#[test]
+fn a_sign_in_refused_for_too_many_attempts_is_a_failed_sign_in() {
+    let events = [
+        failed(1, "10:00:00", "192.0.2.10", None),
+        event(
+            2,
+            "auth.too-many-attempts",
+            &format!("{DAY}10:00:01Z"),
+            &json!({"remoteIp": "192.0.2.10", "listenerId": "imaps"}),
+        ),
+    ];
+    let day = summary(&events, MIDNIGHT, MIDNIGHT + 86_399);
+    assert_eq!(
+        (
+            json!(day.totals)["failedSignIns"].clone(),
+            json!(day.totals)["unknownAccounts"].clone()
+        ),
+        (json!(2), json!(1))
+    );
+    assert_eq!(json!(day.sources[0])["failedSignIns"], json!(2));
+    assert_eq!(day.sources[0].listeners, ["imaps", "submission"]);
 }
 
 #[test]

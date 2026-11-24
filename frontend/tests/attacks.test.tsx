@@ -2,7 +2,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 
 import { ApiError } from "../src/api/client";
 import { Attacks } from "../src/modules/Attacks";
-import { attacks, coverage, observation, status } from "./support/fixtures";
+import { NOW, attacks, coverage, observation, status } from "./support/fixtures";
 import { renderView } from "./support/render";
 import { serve } from "./support/server";
 
@@ -29,6 +29,45 @@ describe("Attacks & bans", () => {
     expect(screen.queryByText(/More events were recorded/)).toBeNull();
   });
 
+  it("name the /64 that Stalwart blocks with an IPv6 address it banned", async () => {
+    const bans = [
+      { at: NOW - 60, address: "2001:db8:1:2::5", network: "2001:db8:1:2::/64", reason: "scan" as const },
+      { at: NOW - 120, address: "192.0.2.10", network: null, reason: "authentication" as const },
+    ];
+    serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks({ bans }) } });
+    renderView(<Attacks />);
+    const [, first, second] = within(await screen.findByRole("table", { name: "Stalwart's bans" })).getAllByRole("row");
+    expect(first?.textContent).toContain("2001:db8:1:2::5");
+    expect(first?.textContent).toContain("with its /64, 2001:db8:1:2::/64");
+    expect(second?.textContent).not.toContain("/64");
+    expect(screen.getByText(/Stalwart blocks an IPv6 address with its \/64/)).toBeTruthy();
+  });
+
+  it("count the connections Stalwart refused while it blocked them, once it reports them", async () => {
+    const refused = attacks({
+      totals: { failedSignIns: 1205, unknownAccounts: 1100, tlsErrors: 3, bans: 1, refused: 40, sources: 2 },
+      sources: attacks().sources.map((source, index) => (index === 0 ? { ...source, refused: 40 } : source)),
+    });
+    serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: refused } });
+    renderView(<Attacks />);
+    const sources = await screen.findByRole("table", { name: "Addresses" });
+    expect(screen.getByText("Refused while blocked").nextElementSibling?.textContent).toBe("40");
+    expect(within(sources).getByRole("columnheader", { name: "Refused" })).toBeTruthy();
+    expect(within(table("Networks with several addresses")).getByRole("columnheader", { name: "Refused" })).toBeTruthy();
+    expect(screen.queryByText(/sends them once/)).toBeNull();
+  });
+
+  it("say that no refused connection is recorded where Stalwart reported none yet", async () => {
+    serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks() } });
+    renderView(<Attacks />);
+    const sources = await screen.findByRole("table", { name: "Addresses" });
+    expect(screen.getByText("Refused while blocked").nextElementSibling?.textContent).toBe("Not recorded yet");
+    expect(screen.getByText("garrison stalwart setup").closest("p")?.textContent).toContain(
+      "Stalwart sends them once garrison stalwart setup has run",
+    );
+    expect(within(sources).queryByRole("columnheader", { name: "Refused" })).toBeNull();
+  });
+
   it("ask for the period that is chosen", async () => {
     const server = serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks() } });
     renderView(<Attacks />);
@@ -43,7 +82,7 @@ describe("Attacks & bans", () => {
   it("say so when a quiet period has nothing and when a busy one is cut", async () => {
     const quiet = attacks({
       truncated: true,
-      totals: { failedSignIns: 0, unknownAccounts: 0, tlsErrors: 0, bans: 0, sources: 0 },
+      totals: { failedSignIns: 0, unknownAccounts: 0, tlsErrors: 0, bans: 0, refused: 0, sources: 0 },
       sources: [],
       networks: [],
       accounts: [],
@@ -51,7 +90,7 @@ describe("Attacks & bans", () => {
     });
     serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: quiet } });
     renderView(<Attacks />);
-    expect(await screen.findByText("No failed sign-in, ban or TLS error was recorded in this period.")).toBeTruthy();
+    expect(await screen.findByText("No failed sign-in, ban, refused connection or TLS error was recorded in this period.")).toBeTruthy();
     expect(screen.getByText("Stalwart banned no address in this period.")).toBeTruthy();
     expect(screen.getByText("No failed sign-in named an existing account.")).toBeTruthy();
     expect(screen.getByText("No network was seen with more than one address.")).toBeTruthy();

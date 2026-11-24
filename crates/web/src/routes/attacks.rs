@@ -85,6 +85,7 @@ impl From<found::Source> for AttackSource {
             accounts,
             tls_errors,
             bans,
+            refused,
             first_seen,
             last_seen,
             listeners,
@@ -96,6 +97,7 @@ impl From<found::Source> for AttackSource {
             accounts: count(accounts),
             tls_errors: count(tls_errors),
             bans: count(bans),
+            refused: count(refused),
             first_seen,
             last_seen,
             listeners,
@@ -111,6 +113,7 @@ impl From<found::Network> for AttackNetwork {
             failed_sign_ins,
             tls_errors,
             bans,
+            refused,
             last_seen,
         } = network;
         AttackNetwork {
@@ -119,6 +122,7 @@ impl From<found::Network> for AttackNetwork {
             failed_sign_ins: count(failed_sign_ins),
             tls_errors: count(tls_errors),
             bans: count(bans),
+            refused: count(refused),
             last_seen,
         }
     }
@@ -148,6 +152,7 @@ impl From<found::Totals> for AttackTotals {
             unknown_accounts,
             tls_errors,
             bans,
+            refused,
             sources,
         } = totals;
         AttackTotals {
@@ -155,6 +160,7 @@ impl From<found::Totals> for AttackTotals {
             unknown_accounts: count(unknown_accounts),
             tls_errors: count(tls_errors),
             bans: count(bans),
+            refused: refused.map(count),
             sources: count(sources),
         }
     }
@@ -166,6 +172,7 @@ fn ban(ban: found::Ban) -> ApiResult<Ban> {
     let found::Ban {
         at,
         address,
+        network,
         reason,
     } = ban;
     let reason = match reason.as_str() {
@@ -178,6 +185,7 @@ fn ban(ban: found::Ban) -> ApiResult<Ban> {
     Ok(Ban {
         at,
         address,
+        network,
         reason,
     })
 }

@@ -17,7 +17,8 @@ pub enum Group {
 
 /// The list below names every recorded event type once, with its group. The
 /// enum, the names and the lookups are all written from that one list, so
-/// they cannot disagree; three hand-written lists of 111 lines each could.
+/// they cannot disagree; three hand-written lists of over a hundred lines
+/// each could.
 macro_rules! event_types {
     ($( $(#[$about:meta])* $group:ident { $( $variant:ident => $name:literal, )* } )*) => {
         /// A recorded event type.
@@ -87,6 +88,18 @@ event_types! {
         SmtpDmarcFail => "smtp.dmarc-fail",
         SmtpIprevPass => "smtp.iprev-pass",
         SmtpIprevFail => "smtp.iprev-fail",
+        SmtpTooManyInvalidRcpt => "smtp.too-many-invalid-rcpt",
+        SmtpMultipleFromDomains => "smtp.multiple-from-domains",
+        SmtpLoopDetected => "smtp.loop-detected",
+        SmtpTooManyMessages => "smtp.too-many-messages",
+        SmtpDidNotSayEhlo => "smtp.did-not-say-ehlo",
+        SmtpMailFromMissing => "smtp.mail-from-missing",
+        SmtpMultipleMailFrom => "smtp.multiple-mail-from",
+        SmtpInvalidCommand => "smtp.invalid-command",
+        SmtpInvalidSenderAddress => "smtp.invalid-sender-address",
+        SmtpUnsupportedParameter => "smtp.unsupported-parameter",
+        SmtpDsnDisabled => "smtp.dsn-disabled",
+        SmtpAuthNotAllowed => "smtp.auth-not-allowed",
     }
     /// Queue lifecycle and outbound delivery events, grouped by queue ID.
     Delivery {
@@ -143,10 +156,14 @@ event_types! {
     /// Everything else that is recorded: logins, security, the server itself.
     Other {
         AuthFailed => "auth.failed",
+        AuthMfaRequired => "auth.mfa-required",
+        AuthTooManyAttempts => "auth.too-many-attempts",
         SecurityAbuseBan => "security.abuse-ban",
         SecurityAuthenticationBan => "security.authentication-ban",
         SecurityLoiterBan => "security.loiter-ban",
         SecurityScanBan => "security.scan-ban",
+        SecurityIpBlocked => "security.ip-blocked",
+        SecurityIpUnauthorized => "security.ip-unauthorized",
         MessageIngestDuplicate => "message-ingest.duplicate",
         MessageIngestError => "message-ingest.error",
         MessageIngestHam => "message-ingest.ham",

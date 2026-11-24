@@ -317,11 +317,16 @@ export interface components {
             lastSeen: number;
             network: string;
             /** Format: int64 */
+            refused: number;
+            /** Format: int64 */
             sources: number;
             /** Format: int64 */
             tlsErrors: number;
         };
-        /** @description One address that failed to sign in, was banned or failed a TLS handshake. */
+        /**
+         * @description One address that failed to sign in, was banned or refused, or failed a
+         *     TLS handshake.
+         */
         AttackSource: {
             /**
              * Format: int64
@@ -340,6 +345,12 @@ export interface components {
             listeners: string[];
             /** @description The /24 of an IPv4 address, the /64 of an IPv6 address. */
             network: string;
+            /**
+             * Format: int64
+             * @description Its connections that Stalwart refused while it blocked the address or
+             *     its network.
+             */
+            refused: number;
             /** Format: int64 */
             tlsErrors: number;
         };
@@ -348,6 +359,13 @@ export interface components {
             bans: number;
             /** Format: int64 */
             failedSignIns: number;
+            /**
+             * Format: int64
+             * @description Connections Stalwart refused while it blocked their address; null
+             *     where the history holds none at all, as before `garrison stalwart
+             *     setup` asked Stalwart for them.
+             */
+            refused?: number | null;
             /**
              * Format: int64
              * @description Every address seen, also beyond the rows of the list.
@@ -393,6 +411,11 @@ export interface components {
             address: string;
             /** Format: int64 */
             at: number;
+            /**
+             * @description The /64 of an IPv6 address, which Stalwart blocks with it unless an
+             *     account's count of failed sign-ins alone banned the address.
+             */
+            network?: string | null;
             reason: components["schemas"]["BanReason"];
         };
         /**

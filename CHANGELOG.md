@@ -59,6 +59,20 @@ Notable changes for operators and users. The format follows
   `garrison_stalwart_admin` is set, and setup changes nothing where Stalwart
   is as asked.** Stalwart must answer in every play, and that administrator
   must still work.
+- Run `garrison stalwart setup` again after the upgrade: the collector's key
+  needs `sysDomainQuery` and `sysAccountQuery` now, to find the domains and
+  accounts the checks read. Until then the DNS records, Blocklists, Reverse
+  names and TLS certificates cards say that Stalwart did not give its
+  domains, the Management API card that it refused `x:Account/query`, and
+  the Spam and ham by domain card that it did not give its accounts.
+- **The first play of the Ansible role runs `garrison stalwart setup`, where
+  `garrison_stalwart_admin` is set, also on a host that an earlier release's
+  role set up.** Stalwart must answer then, and that administrator must still
+  work.
+- **Stalwart sends the further events this release reads, such as the
+  connections it refused from a blocked address, once `garrison stalwart
+  setup` has run again.** Until then Attacks & bans shows those refusals as
+  "Not recorded yet".
 
 ### Added
 
@@ -130,6 +144,19 @@ Notable changes for operators and users. The format follows
   refuses, before anything stops, until the address is written into
   `garrison.toml` again. See
   [configuration](docs/operator/configuration.md#an-address-that-is-a-secret).
+- **A session on the Sessions page names more of what Stalwart refused in
+  it.** Among them too many invalid recipients, a mail loop, a From of
+  several domains, too many messages and a command out of order or not
+  offered.
+- **Attacks & bans counts a sign-in that Stalwart refused for a missing
+  second factor, from an address its credential does not allow, or after
+  too many in one mail session, as a failed sign-in.** It counts to its
+  address, and to its account where Stalwart names one.
+- **Attacks & bans counts the connections Stalwart refused from an address
+  it blocks.** They are counted by address and network, beside the bans.
+- **Attacks & bans names the /64 that Stalwart 1.2.0 blocks with a banned
+  IPv6 address.** Stalwart's list of blocked IPs holds that network, not the
+  address its event names, so look for the /64 there.
 
 ### Changed
 
