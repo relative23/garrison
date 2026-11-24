@@ -1854,6 +1854,9 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` says that nginx does not reach the web service where it
   answers 502 for Garrison**, and names the service, the include's port and the
   SELinux module instead of the include itself.
+- **A session that ends by its time ends its token at Stalwart too**, as a
+  sign-out does, and a revocation Stalwart did not answer is asked again, so
+  no token outlasts its session for the rest of Stalwart's hour.
 
 ## [0.1.2] - 2026-11-13
 

@@ -87,6 +87,7 @@ fn fixture(refusal: u16) -> Fixture {
     )
     .revoking_with(move |_| {
         counted.fetch_add(1, Ordering::SeqCst);
+        true
     });
     Fixture {
         gate: Arc::new(gate),

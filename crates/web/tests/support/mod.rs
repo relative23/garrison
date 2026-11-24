@@ -10,6 +10,7 @@ pub(crate) mod rights;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -119,8 +120,11 @@ impl Broker for FakeBroker {
 
 #[derive(Default)]
 pub(crate) struct FakeProvider {
+    /// The tokens whose revocation the provider answered.
     pub(crate) revoked: Mutex<Vec<String>>,
     pub(crate) verifiers: Mutex<Vec<String>>,
+    /// Whether it answers no revocation, as Stalwart that is away.
+    pub(crate) away: AtomicBool,
 }
 
 /// The provider as the application holds it; the test keeps the other handle.
@@ -153,6 +157,9 @@ impl Identity for Shared {
     }
 
     fn revoke(&self, _: &str, token: &str) -> Result<(), Error> {
+        if self.0.away.load(Ordering::SeqCst) {
+            return Err(Error::Unavailable("Stalwart is unavailable".into()));
+        }
         self.0.revoked.lock().unwrap().push(token.into());
         Ok(())
     }

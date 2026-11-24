@@ -1,22 +1,174 @@
 //! How a session ends: at sign-out, when the policy refuses its user, when
-//! its token turns out to be another user's, and what survives a restart of
-//! the service.
+//! its token turns out to be another user's, by its time, and with its
+//! token in each case; and what survives a restart of the service.
 
 // Helpers fail the test by panicking, like the tests themselves.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod support;
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 
 use axum::http::{Method, StatusCode};
 use serde_json::json;
-use support::{Client, ORIGIN, application, grant, refused, setup, setup_with_cache};
+use support::{Client, ORIGIN, Setup, application, grant, refused, setup, setup_with_cache};
 
 const SESSION_COOKIE: &str = "__Host-garrison_session";
 
 fn api(path: &str) -> String {
     format!("/api/{path}")
+}
+
+/// Each way a session of the user of `admin-token` ends.
+#[derive(Clone, Copy, Debug)]
+enum Ending {
+    SignOut,
+    Refused,
+    AnotherAccount,
+    SignedInAgain,
+    TimeOver,
+    /// Stalwart no longer takes the token, which so needs no revocation.
+    TokenInvalid,
+}
+
+/// End the session of `setup`'s browser, whose CSRF token is `csrf`, so.
+async fn end(setup: &mut Setup, csrf: &str, ending: Ending) {
+    match ending {
+        Ending::SignOut => {
+            let headers = [("origin", ORIGIN), ("x-csrf-token", csrf)];
+            let out = setup
+                .client
+                .send(Method::POST, &api("logout"), &headers, None)
+                .await;
+            assert_eq!(out.json(), json!({"ok": true}));
+        }
+        Ending::Refused | Ending::AnotherAccount | Ending::TokenInvalid => {
+            let answer = match ending {
+                Ending::Refused => refused(403, "Garrison access is not authorized"),
+                Ending::AnotherAccount => Ok(grant("2", &["dashboard"], &[])),
+                _ => refused(401, "Sign-in required again"),
+            };
+            setup.broker.set("admin-token", answer);
+            assert!(
+                setup
+                    .client
+                    .get(&api("status"))
+                    .await
+                    .status
+                    .is_client_error()
+            );
+        }
+        Ending::SignedInAgain => {
+            setup.client.sign_in("code-viewer").await;
+        }
+        Ending::TimeOver => {
+            let database = setup.config.web.state_directory.join("web.sqlite");
+            let db = rusqlite::Connection::open(database).unwrap();
+            db.execute(
+                "UPDATE sessions SET expires_at = unixepoch() - 1 WHERE token = 'admin-token'",
+                [],
+            )
+            .unwrap();
+        }
+    }
+}
+
+/// The rows that hold `admin-token`, and how many of them a cookie finds.
+fn rows(setup: &Setup) -> (i64, i64) {
+    let db =
+        rusqlite::Connection::open(setup.config.web.state_directory.join("web.sqlite")).unwrap();
+    db.query_row(
+        "SELECT count(*), count(*) FILTER (WHERE expires_at > unixepoch()) FROM sessions \
+         WHERE token = 'admin-token'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .unwrap()
+}
+
+/// However a session ends, no token of it is left that Stalwart still
+/// takes: it is revoked, at once or in the web service's next round, and
+/// where Stalwart did not answer, the session's row stays, ended, until a
+/// round asks again and Stalwart answers. A token Stalwart no longer takes
+/// needs none.
+#[tokio::test]
+async fn every_session_that_ends_takes_its_token_along() {
+    for ending in [
+        Ending::SignOut,
+        Ending::Refused,
+        Ending::AnotherAccount,
+        Ending::SignedInAgain,
+        Ending::TimeOver,
+        Ending::TokenInvalid,
+    ] {
+        let revoking = !matches!(ending, Ending::TokenInvalid);
+        let revoked = |setup: &Setup| setup.provider.revoked.lock().unwrap().clone();
+        for away in [false, true] {
+            let case = format!("{ending:?}, Stalwart away: {away}");
+            let mut setup = setup_with_cache(Duration::ZERO);
+            let csrf = setup.client.sign_in("code-admin").await;
+            setup.provider.away.store(away, Ordering::SeqCst);
+            end(&mut setup, &csrf, ending).await;
+            assert_eq!(rows(&setup).1, 0, "{case}: no cookie finds it");
+            let at_once = revoking && !away && !matches!(ending, Ending::TimeOver);
+            let expected: Vec<String> = if at_once {
+                vec!["admin-token".into()]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(revoked(&setup), expected, "{case}");
+            let pending = away && revoking;
+            assert_eq!(setup.app.end_ended_sessions(), !pending, "{case}");
+            if away {
+                assert_eq!(revoked(&setup), Vec::<String>::new(), "{case}");
+                assert_eq!(
+                    rows(&setup).0,
+                    i64::from(revoking),
+                    "{case}: kept to ask again"
+                );
+                setup.provider.away.store(false, Ordering::SeqCst);
+                assert!(setup.app.end_ended_sessions(), "{case}");
+            }
+            let expected: Vec<String> = if revoking {
+                vec!["admin-token".into()]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(revoked(&setup), expected, "{case}");
+            assert_eq!(rows(&setup), (0, 0), "{case}");
+        }
+    }
+}
+
+/// The running service ends a session within a moment of its time, token
+/// and all, and asks no later than that.
+#[tokio::test]
+async fn the_service_ends_a_session_at_its_time() {
+    let mut setup = setup();
+    setup.client.sign_in("code-admin").await;
+    let db =
+        rusqlite::Connection::open(setup.config.web.state_directory.join("web.sqlite")).unwrap();
+    db.execute(
+        "UPDATE sessions SET expires_at = unixepoch() + 1 WHERE token = 'admin-token'",
+        [],
+    )
+    .unwrap();
+    let rounds = tokio::spawn(garrison_web::end_sessions_on_time(Arc::clone(&setup.app)));
+    let start = Instant::now();
+    while setup.provider.revoked.lock().unwrap().is_empty() {
+        assert!(start.elapsed() < Duration::from_secs(10), "no revocation");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    rounds.abort();
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_eq!(*setup.provider.revoked.lock().unwrap(), ["admin-token"]);
+    assert_eq!(rows(&setup), (0, 0));
 }
 
 #[tokio::test]

@@ -112,11 +112,7 @@ impl App {
         let gate = {
             let identity = Arc::clone(&identity);
             let client = client_id(&config.deployment.public_origin);
-            gate.revoking_with(move |token| {
-                if identity.revoke(&client, token).is_err() {
-                    log::warn!("Token revocation could not be confirmed");
-                }
-            })
+            gate.revoking_with(move |token| revoked(identity.revoke(&client, token)))
         };
         Arc::new(App {
             config,
@@ -136,6 +132,48 @@ impl App {
     pub fn redirect_uri(&self) -> String {
         redirect_uri(&self.config.deployment.public_origin)
     }
+
+    /// End the sessions that have ended here, by their time or with a
+    /// revocation Stalwart did not answer, as a sign-out ends one: each
+    /// token is revoked, and its row goes once Stalwart has answered, so
+    /// that no token outlives its session there. Whether all of them went:
+    /// where Stalwart did not answer, or the store failed, the rest wait.
+    pub fn end_ended_sessions(&self) -> bool {
+        let ended = match self.store.ended(ENDED_AT_ONCE) {
+            Ok(ended) => ended,
+            Err(error) => {
+                log::error!("The sessions that have ended could not be read: {error}");
+                return false;
+            }
+        };
+        let client = self.client_id();
+        for (id_hash, token) in ended {
+            if !revoked(self.identity.revoke(&client, &token)) {
+                return false;
+            }
+            if let Err(error) = self.store.delete(&id_hash) {
+                log::error!("A session that has ended could not be deleted: {error}");
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Sessions that [`App::end_ended_sessions`] ends at a time.
+const ENDED_AT_ONCE: u16 = 100;
+
+/// Whether Stalwart answered a revocation; one it did not answer is said,
+/// and asked again (`end_sessions_on_time`).
+fn revoked(answer: Result<(), garrison_stalwart::Error>) -> bool {
+    answer
+        .inspect_err(|error| {
+            log::warn!(
+                "Stalwart did not answer the revocation of a token whose session has ended \
+                 ({error}); it is asked again within a minute"
+            );
+        })
+        .is_ok()
 }
 
 async fn headers(request: Request, next: Next) -> Response {

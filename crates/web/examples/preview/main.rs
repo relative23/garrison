@@ -100,6 +100,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enable_all()
         .build()?;
     runtime.block_on(async move {
+        tokio::spawn(garrison_web::end_sessions_on_time(Arc::clone(&app)));
         let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
         println!("Preview on {origin}/ (Ctrl+C or SIGTERM ends it)");
         let routes = router(app)
