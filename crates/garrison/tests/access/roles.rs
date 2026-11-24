@@ -191,3 +191,122 @@ fn init_force_keeps_a_policy_that_reads_where_no_role_qualifies() {
     );
     server.requests();
 }
+
+/// What the administrator profile requires, as init says it.
+const REQUIRES: &str = "The administrator profile requires authenticate, sysAccountUpdate, \
+                        sysDomainUpdate, sysRoleUpdate and sysActionCreate.";
+
+/// What init says of the role `lacking` gives.
+const ADMIN_LACKS: &str = "Stalwart's default administrator role admin (Administrators) lacks \
+                           sysRoleUpdate: give the role that right in the native administration \
+                           (Roles), then run garrison access bind-role admin --profile \
+                           administrator. As it is, it meets the profiles operator and viewer.";
+
+/// Where no role qualifies, `init --force` says that it keeps the policy,
+/// and what keeps the kept one from working, if anything: an action
+/// garrison.toml no longer has, or that it binds nobody, and then what to
+/// do. Of a policy that binds a role it says nothing more.
+#[test]
+fn init_force_says_what_keeps_the_kept_policy_from_working() {
+    let (authentication, roles) = lacking();
+    let (url, _) = super::graph::stalwart(authentication, roles.as_array().unwrap().clone());
+    let directory = prepared();
+    let settings = directory.path().join("garrison.toml");
+    let written = std::fs::read_to_string(&settings).unwrap();
+    std::fs::write(&settings, written.replace("http://127.0.0.1:9", &url)).unwrap();
+    let path = directory.path().join("policy.json");
+    let forced = || {
+        let ran = run(directory.path(), &["access", "init", "--force"]);
+        assert_eq!(ran.status.code(), Some(1), "{}", text(&ran.stderr));
+        text(&ran.stderr)
+    };
+    let kept = format!(
+        "No native administrator role with full administrative rights was found, and a new \
+         default policy would bind no role and sign everyone out: {} is kept as it is.\n",
+        path.display()
+    );
+    // Each part is looked at, whatever the one before it showed.
+    let mut wrong = Vec::new();
+    let mut expect = |what: &str, said: String, wanted: String| {
+        if said != wanted {
+            wrong.push(format!("{what}: {said:?}"));
+        }
+    };
+    expect("a policy that binds roles", forced(), kept.clone());
+    let mut naming = garrison_testing::policy_document();
+    naming["profiles"]["administrator"]["actions"] = json!(["run_backup", "run_other"]);
+    garrison_testing::write_private(&path, naming.to_string().as_bytes());
+    let removed = format!(
+        "{kept}The access policy {} names run_other, which garrison.toml no longer has: run \
+         `garrison access update`, which takes it out of the profiles.\n",
+        path.display()
+    );
+    expect("one naming a removed action", forced(), removed);
+    let mut nobody = garrison_testing::policy_document();
+    nobody["roleBindings"] = json!({});
+    garrison_testing::write_private(&path, nobody.to_string().as_bytes());
+    let unbound = format!(
+        "{kept}It binds no role or account either, so nobody can sign in yet. \
+         {REQUIRES}\n{ADMIN_LACKS}\n"
+    );
+    expect("one that binds nobody", forced(), unbound);
+    let help = run(directory.path(), &["access", "init", "--help"]);
+    let help = text(&help.stdout)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let force = "--force Start over with the default policy, keeping a backup; where no role \
+                 qualifies, a policy that reads stays";
+    expect(
+        "--help",
+        help.contains(force).to_string(),
+        "true".to_owned(),
+    );
+    assert_eq!(wrong, Vec::<String>::new());
+}
+
+/// Each of Stalwart's default administrator roles that init leaves out is
+/// named with why: one that is every user's default role too, one Stalwart
+/// has no role of, one whose rights cannot be evaluated. Where none is left
+/// that only lacks rights, init says how to bind a role of one's own.
+#[test]
+fn init_names_each_default_administrator_role_it_leaves_out() {
+    let (_, roles) = lacking();
+    let mut odd = role("odd", &["authenticate"], "Of another shape");
+    odd["enabledPermissions"] = json!(["authenticate"]);
+    let mut all = roles.as_array().unwrap().clone();
+    all.extend([role("both", &ADMINISTRATOR_RIGHTS, "Everyone's"), odd]);
+    let defaults = |admin: &[&str]| {
+        json!({"id": "singleton", "defaultAdminRoleIds": names(admin),
+               "defaultUserRoleIds": names(&["both"])})
+    };
+    let first = "No native administrator role with full administrative rights was found, so the \
+                 policy binds no role and nobody can sign in yet.";
+    let both = "Stalwart's default administrator role both is left out: it is every user's \
+                default role too, and binding it would make every user an administrator.";
+    let (url, _) = super::graph::stalwart(defaults(&["admin", "both", "gone", "odd"]), all.clone());
+    let directory = against(&url);
+    let init = run(directory.path(), &["access", "init"]);
+    assert_eq!(
+        (init.status.code(), text(&init.stderr)),
+        (
+            Some(1),
+            format!(
+                "{first} {REQUIRES}\n{ADMIN_LACKS}\n{both}\nStalwart's default administrator \
+                 role gone is left out: Stalwart has no role of that ID.\nStalwart's default \
+                 administrator role odd (Of another shape) is left out: its rights cannot be \
+                 evaluated (this release cannot read role odd).\n"
+            )
+        )
+    );
+    let (url, _) = super::graph::stalwart(defaults(&["both"]), all);
+    let directory = against(&url);
+    let init = run(directory.path(), &["access", "init"]);
+    assert_eq!(
+        text(&init.stderr),
+        format!(
+            "{first} {REQUIRES}\n{both}\nOnce the role of your administrators holds these \
+             rights, bind it with garrison access bind-role <role-id> --profile administrator.\n"
+        )
+    );
+}

@@ -42,7 +42,8 @@ Where no role of Stalwart's has all five rights, as where its administrator
 role was changed or your administrators have a role of their own, `init`
 writes the profiles without a binding, says so and ends with 1. It names,
 for each of Stalwart's default administrator roles, the rights it lacks and
-the profiles it meets as it is. Nobody can sign in until a role is bound to
+the profiles it meets as it is, or why it leaves the role out, as one that
+is every user's default role too. Nobody can sign in until a role is bound to
 a profile whose rights it holds: give the role what it lacks in the native
 administration (Roles), then bind it with
 `garrison access bind-role <role-id> --profile administrator`, or bind it to
@@ -52,7 +53,7 @@ evaluated, as for a tenant's role. Both judge a role by the roles it
 inherits from alone, however many roles Stalwart holds. Where a policy that
 reads is there already,
 `init --force` keeps it then, since a new one would bind nobody and sign
-everyone out.
+everyone out, and says what keeps the kept one from working, if anything.
 
 An account that belongs to a tenant, a tenant's administrator's too
 (Stalwart's tenants are an Enterprise feature), and a group are refused

@@ -598,11 +598,11 @@ Notable changes for operators and users. The format follows
   says on standard error what the administrator profile requires and, for
   each of Stalwart's default administrator roles, which of those rights it
   lacks, that Stalwart's administrator gives them to the role, and which
-  profiles it meets as it is. `garrison access bind-role` says the same of
+  profiles it meets as it is, or why it leaves the role out. `garrison access bind-role` says the same of
   a role it binds to a profile whose rights the role lacks, whose users
   would get nothing of it. Where a policy that reads is there, `init
   --force` keeps it in that case, since a new one would bind nobody and sign
-  everyone out.
+  everyone out, and says what keeps the kept one from working.
 - **`garrison access init` and `bind-role` work on a Stalwart with more than
   64 roles, and `bind-role` names why a role's rights cannot be evaluated.**
 - **An action added after `garrison access init` reaches its users.**

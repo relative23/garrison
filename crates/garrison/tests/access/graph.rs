@@ -17,7 +17,7 @@ use super::{ADMINISTRATOR_RIGHTS, policy, role};
 /// does: `x:Authentication/get` with `authentication`, `x:Role/get` with
 /// the roles of the IDs asked for, every role where no ID is named, and the
 /// IDs it does not have as not found; and how many roles it has sent.
-fn stalwart(authentication: Value, roles: Vec<Value>) -> (String, Arc<AtomicUsize>) {
+pub(super) fn stalwart(authentication: Value, roles: Vec<Value>) -> (String, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let sent = Arc::new(AtomicUsize::new(0));

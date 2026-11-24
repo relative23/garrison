@@ -235,40 +235,74 @@ pub(super) fn judged(
 }
 
 /// One of Stalwart's default administrator roles as it is: what it lacks of
-/// the administrator profile's rights, and the default profiles it meets.
+/// the administrator profile's rights and the default profiles it meets, or
+/// why `init` leaves it out.
 pub(super) struct Candidate {
-    pub(super) description: String,
+    pub(super) description: Option<String>,
+    pub(super) fit: Result<Fit, String>,
+}
+
+pub(super) struct Fit {
     pub(super) lacks: Vec<String>,
     pub(super) meets: Vec<String>,
 }
 
-/// Stalwart's default *administrator* roles (not also default user roles),
-/// each as it is; `init` binds those that lack nothing.
+/// Stalwart's default administrator roles, each as it is. `init` binds those
+/// that lack nothing, and leaves out one that is every user's default role
+/// too, which would make every user an administrator.
 pub(super) fn administrator_roles(config: &Config) -> Result<BTreeMap<String, Candidate>, String> {
     let client = native(config)?;
     let authentication = authentication(&client)?;
     let profiles = default_profiles(config);
-    let admin = &authentication.default_admin_role_ids.0;
     let user = &authentication.default_user_role_ids.0;
     let mut result = BTreeMap::new();
-    for identifier in admin.difference(user) {
-        let Some(Judged {
-            description,
-            rights: Ok(rights),
-        }) = judged(&client, &authentication, identifier)?
-        else {
-            continue;
+    for identifier in &authentication.default_admin_role_ids.0 {
+        let left = |why: &str| Candidate {
+            description: None,
+            fit: Err(why.to_owned()),
         };
-        result.insert(
-            identifier.clone(),
-            Candidate {
-                description: description.unwrap_or_else(|| identifier.clone()),
-                lacks: lacking(&strings(&ADMIN_PERMISSIONS), &rights),
-                meets: meets(&profiles, &rights),
-            },
-        );
+        let candidate = if user.contains(identifier) {
+            left(
+                "it is every user's default role too, and binding it would make every user an \
+                 administrator",
+            )
+        } else {
+            match judged(&client, &authentication, identifier)? {
+                None => left("Stalwart has no role of that ID"),
+                Some(Judged {
+                    description,
+                    rights,
+                }) => Candidate {
+                    description,
+                    fit: rights
+                        .map(|rights| Fit {
+                            lacks: lacking(&strings(&ADMIN_PERMISSIONS), &rights),
+                            meets: meets(&profiles, &rights),
+                        })
+                        .map_err(|why| format!("its rights cannot be evaluated ({why})")),
+                },
+            }
+        };
+        result.insert(identifier.clone(), candidate);
     }
     Ok(result)
+}
+
+/// The candidates that lack nothing of the administrator profile's rights.
+pub(super) fn qualified(candidates: &BTreeMap<String, Candidate>) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|(_, candidate)| candidate.fit.as_ref().is_ok_and(|fit| fit.lacks.is_empty()))
+        .map(|(identifier, _)| identifier.clone())
+        .collect()
+}
+
+/// A role as messages name it: its ID, with its description where it has one.
+pub(super) fn named(identifier: &str, candidate: &Candidate) -> String {
+    match &candidate.description {
+        Some(description) => format!("{identifier} ({description})"),
+        None => identifier.to_owned(),
+    }
 }
 
 /// What of `required` `rights` does not hold, in order.
@@ -313,39 +347,58 @@ fn as_it_is(meets: &[String]) -> String {
     }
 }
 
-/// What `init` says where it bound no role: what the administrator profile
-/// requires, and for each of Stalwart's default administrator roles what
-/// it lacks of that, where to give it, and what it meets as it is.
-pub(super) fn unbound(candidates: &BTreeMap<String, Candidate>) -> String {
+/// The rights the administrator profile requires, as a sentence.
+pub(super) fn requires() -> String {
     let required: Vec<String> = ADMIN_PERMISSIONS.map(str::to_owned).to_vec();
-    let mut lines = vec![format!(
-        "No native administrator role with full administrative rights was found, so the policy \
-         binds no role and nobody can sign in yet. The administrator profile requires {}.",
-        listed(&required)
-    )];
-    if candidates.is_empty() {
-        lines.push(
-            "Stalwart names no default administrator role: once the role of your \
-             administrators holds these rights, bind it with garrison access bind-role \
-             <role-id> --profile administrator."
-                .to_owned(),
-        );
-    }
+    format!("The administrator profile requires {}.", listed(&required))
+}
+
+/// For each of Stalwart's default administrator roles what it lacks of the
+/// administrator profile's rights, where to give them and what it meets as
+/// it is, or why `init` leaves it out; and how to bind a role of one's own
+/// where none is left that only lacks rights. One line each.
+pub(super) fn candidates_said(candidates: &BTreeMap<String, Candidate>) -> Vec<String> {
+    let mut lines = Vec::new();
     for (identifier, candidate) in candidates {
+        let role = named(identifier, candidate);
+        lines.push(match &candidate.fit {
+            Ok(fit) => format!(
+                "Stalwart's default administrator role {role} lacks {}: give the role {} in the \
+                 native administration (Roles), then run garrison access bind-role {identifier} \
+                 --profile administrator. {}",
+                listed(&fit.lacks),
+                if fit.lacks.len() == 1 {
+                    "that right"
+                } else {
+                    "those rights"
+                },
+                as_it_is(&fit.meets)
+            ),
+            Err(why) => format!("Stalwart's default administrator role {role} is left out: {why}."),
+        });
+    }
+    let bind = "bind it with garrison access bind-role <role-id> --profile administrator.";
+    if candidates.is_empty() {
         lines.push(format!(
-            "Stalwart's default administrator role {identifier} ({}) lacks {}: give the role {} \
-             in the native administration (Roles), then run garrison access bind-role \
-             {identifier} --profile administrator. {}",
-            candidate.description,
-            listed(&candidate.lacks),
-            if candidate.lacks.len() == 1 {
-                "that right"
-            } else {
-                "those rights"
-            },
-            as_it_is(&candidate.meets)
+            "Stalwart names no default administrator role: once the role of your \
+             administrators holds these rights, {bind}"
+        ));
+    } else if candidates.values().all(|candidate| candidate.fit.is_err()) {
+        lines.push(format!(
+            "Once the role of your administrators holds these rights, {bind}"
         ));
     }
+    lines
+}
+
+/// What `init` says where it bound no role and wrote the policy anew.
+pub(super) fn unbound(candidates: &BTreeMap<String, Candidate>) -> String {
+    let mut lines = vec![format!(
+        "No native administrator role with full administrative rights was found, so the policy \
+         binds no role and nobody can sign in yet. {}",
+        requires()
+    )];
+    lines.extend(candidates_said(candidates));
     lines.join("\n")
 }
 
