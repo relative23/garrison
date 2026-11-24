@@ -319,6 +319,15 @@ scenario_elsewhere_unloadable() {
     check "and changes nothing: the release that ran is current, nothing backed up" "
         test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$old' &&
             test \$(ls /var/backups/garrison | wc -l) -eq $backups"
+    # Also where the operator disabled the web service: the other services
+    # the installer enabled say that it started them.
+    inside 'systemctl disable --quiet garrison-web.service'
+    refused "with the web service disabled, that upgrade is refused all the same" \
+        '/root/release/bin/garrison install' "the running release was not touched"
+    check "and changes nothing then either" "
+        test \"\$(basename \"\$(readlink -f /opt/garrison/current)\")\" = '$old' &&
+            test \$(ls /var/backups/garrison | wc -l) -eq $backups"
+    inside 'systemctl enable --quiet garrison-web.service'
     # Where the configuration loads and names a policy that is not there.
     inside 'cat /root/garrison.toml.named > /etc/garrison/garrison.toml &&
         mv /etc/garrison-policy/access.json /root/access.json.away'

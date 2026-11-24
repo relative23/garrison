@@ -85,17 +85,21 @@ fn policy_in(config: &Path) -> PathBuf {
 
 /// Whether Garrison is configured here: once its access policy is there,
 /// and also where the installer started the services before, which it
-/// enables as it starts them and only an uninstallation disables. Such an
-/// installation, whose configuration does not load or whose policy is
-/// missing, is for check-config to refuse, not a first installation.
+/// enables as it starts them and only an uninstallation disables, all of
+/// them; any one still enabled counts, also where the operator disabled the
+/// web service. Such an installation, whose configuration does not load or
+/// whose policy is missing, is for check-config to refuse, not a first
+/// installation.
 fn configured(installed: bool) -> bool {
     Path::new(CONFIG).join("garrison.toml").exists()
         && (policy().exists() || (installed && started_before()))
 }
 
 fn started_before() -> bool {
-    run(SYSTEMCTL, &["is-enabled", "--quiet", units::WEB])
-        .is_ok_and(|output| output.status.success())
+    // `is-enabled` succeeds where any one of the units is enabled.
+    let mut asked = vec!["is-enabled", "--quiet"];
+    asked.extend(services::ENABLE);
+    run(SYSTEMCTL, &asked).is_ok_and(|output| output.status.success())
 }
 
 /// The extracted release this binary belongs to: `<release>/bin/garrison`.
