@@ -287,8 +287,9 @@ Notable changes for operators and users. The format follows
   files: opening it waited for a writer, so the run never reached its
   snapshot and systemd ended it, run after run. A reader of a database that
   another user writes, the web service's history queries and root's
-  commands among them, now refuses one that is no regular file before
-  SQLite opens it, and the checks say "not a regular file" on their cards.
+  commands among them, now refuses one that is no regular file, and waits
+  five seconds at the most for one put in place of the database or its
+  journal while SQLite opens it; the checks say so on their cards.
   The Signature databases card also says when Fangfrisch's database cannot
   be read, and is Partial then; it reads Fangfrisch's whole refresh log,
   where it read its first 512 rows.

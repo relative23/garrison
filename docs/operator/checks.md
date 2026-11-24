@@ -558,7 +558,10 @@ Where `fangfrisch_database` names Fangfrisch's database, the card
 its whole refresh log; where that database cannot be read, the card says
 why and is Partial where it would be OK. A file a check reads that is no
 regular file, such as a named pipe in place of a database or of ClamAV's
-files, is not opened, and the card says "not a regular file".
+files, is not opened, and the card says "not a regular file". One put in
+place of a database or of its journal while the check opens it holds the
+check five seconds at the most, and the card says that SQLite did not open
+the database.
 
 ## `receipt`
 
