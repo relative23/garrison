@@ -631,8 +631,8 @@ Notable changes for operators and users. The format follows
   access bind-role` says the same of a role it binds to a profile whose
   rights the role lacks, whose users would get nothing of it. Where a policy
   that reads is there, `init --force` keeps it in that case, since a new one
-  would bind nobody and sign everyone out, and says what keeps the kept one
-  from working.
+  would bind nobody and sign everyone out, and names actions in it that
+  `garrison.toml` no longer has and a policy that binds nobody.
 - **`garrison access init` and `bind-role` work on a Stalwart with more than
   64 roles, and `bind-role` names why a role's rights cannot be evaluated.**
 - **A `garrison access` command no longer waits without a word for a lock

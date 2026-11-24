@@ -52,8 +52,9 @@ right its profile requires, and why where the role's rights cannot be
 evaluated, as for a tenant's role. Both judge a role by the roles it
 inherits from alone, however many roles Stalwart holds. Where a policy that
 reads is there already, `init --force` keeps it then, since a new one would
-bind nobody and sign everyone out, and says what keeps the kept one from
-working, if anything.
+bind nobody and sign everyone out, and names actions in it that
+garrison.toml no longer has and a policy that binds no role and no account;
+whether a bound role still lets its users in, `garrison access check` shows.
 
 An account that belongs to a tenant, a tenant's administrator's too
 (Stalwart's tenants are an Enterprise feature), and a group are refused
