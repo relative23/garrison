@@ -57,7 +57,7 @@ pub(super) fn settled(
     answers: Vec<String>,
     rotate: bool,
     take_up: &dyn Fn(&Key) -> Result<(), String>,
-) -> (Result<(), String>, Vec<String>) {
+) -> (Result<bool, String>, Vec<String>) {
     let file = key_file(directory);
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     garrison_testing::write_private(&file, written.as_bytes());
@@ -122,7 +122,7 @@ fn a_key_file_that_holds_no_key_gets_a_new_one() {
         ];
         let (outcome, requests) =
             settled(directory.path(), (written, 0o600), answers, false, &TAKEN);
-        assert_eq!(outcome, Ok(()), "{written:?}");
+        assert_eq!(outcome, Ok(true), "{written:?}");
         assert_eq!(
             named(&requests),
             [
@@ -150,7 +150,7 @@ fn a_key_file_that_holds_no_key_gets_a_new_one() {
     ];
     let written = format!("{OLD}\n");
     let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
-    assert_eq!(outcome, Ok(()));
+    assert_eq!(outcome, Ok(true));
     assert_eq!(
         named(&requests),
         [
@@ -159,6 +159,28 @@ fn a_key_file_that_holds_no_key_gets_a_new_one() {
             "x:ApiKey/set update",
             "GET /jmap/session"
         ]
+    );
+}
+
+/// A kept key whose rights Stalwart shows as setup gives them, its networks
+/// without the prefix of a single address as Stalwart shows them, is left
+/// as it is, and only tried.
+#[test]
+fn a_kept_key_with_its_rights_is_left_as_it_is() {
+    let directory = tempfile::tempdir().unwrap();
+    let held = json(
+        &json!({"methodResponses": [["x:ApiKey/get", {"accountId": "b", "list": [{
+        "id": "old", "description": "garrison collector", "secret": "****",
+        "permissions": {"@type": "Replace", "permissions": {"authenticate": true}},
+        "allowedIps": {"127.0.0.1": true}}]}, "0"]]}),
+    );
+    let answers = vec![held, session("b"), answer(200, "{}")];
+    let written = format!("{OLD}\n");
+    let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
+    assert_eq!(outcome, Ok(false));
+    assert_eq!(
+        named(&requests),
+        ["x:ApiKey/get", "GET /jmap/session", "GET /jmap/session"]
     );
 }
 
@@ -177,7 +199,7 @@ fn a_key_file_others_may_read_gets_a_new_key() {
     ];
     let written = format!("{OLD}\n");
     let (outcome, requests) = settled(directory.path(), (&written, 0o644), answers, false, &TAKEN);
-    assert_eq!(outcome, Ok(()));
+    assert_eq!(outcome, Ok(true));
     assert!(
         requests[4].contains(r#""destroy":["old"]"#),
         "{}",
@@ -207,7 +229,7 @@ fn two_keys_of_one_description_are_replaced_by_one() {
     ];
     let written = format!("{OLD}\n");
     let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
-    assert_eq!(outcome, Ok(()));
+    assert_eq!(outcome, Ok(true));
     assert!(requests[4].contains(r#""destroy":["old"]"#));
     assert!(requests[5].contains(r#""destroy":["older"]"#));
 }

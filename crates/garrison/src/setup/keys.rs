@@ -14,7 +14,7 @@ use garrison_core::json;
 use garrison_stalwart::http::Request;
 
 use super::objects::{
-    Created, Enabled, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, StoredKey,
+    Created, Enabled, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, Stored,
 };
 use super::{Admin, MAX_ANSWER, limited, restart, say, unreadable, write_secret};
 
@@ -115,11 +115,12 @@ fn unseen(error: String, target: &Path) -> String {
 
 /// What Stalwart and its file hold of one key, read before anything
 /// changes: its keys of the description in the accounts concerned, the one
-/// to keep where its file holds it, what a new key is said as, and what
-/// setup says where Stalwart's quota leaves a new one no room.
+/// to keep where its file holds it, as Stalwart shows it, what a new key is
+/// said as, and what setup says where Stalwart's quota leaves a new one no
+/// room.
 pub(super) struct Found {
     existing: Vec<AccountKey>,
-    keep: Option<AccountKey>,
+    keep: Option<(AccountKey, Stored)>,
     made: String,
     full: String,
 }
@@ -135,11 +136,11 @@ pub(super) fn find(
     keys: &[&Key],
     rotate: bool,
 ) -> Result<Vec<Found>, String> {
-    let own: Listed<StoredKey> = admin.list_in("ApiKey", None)?;
+    let own: Listed<Stored> = admin.list_in("ApiKey", None)?;
     let named: Vec<String> = own
         .list
         .iter()
-        .map(|item| match &item.description {
+        .map(|item| match item.text("description") {
             Some(text) => format!("'{text}'"),
             None => format!("one without a description ({})", item.id),
         })
@@ -147,33 +148,38 @@ pub(super) fn find(
     let mut found = Vec::new();
     for key in keys {
         let target = directory.join(key.file);
-        let ours = |item: &StoredKey| item.description.as_deref() == Some(key.description);
-        let listed = |account: Option<&str>, item: &StoredKey| AccountKey {
-            account: account.map(str::to_owned),
-            id: item.id.clone(),
-        };
-        let mut existing: Vec<AccountKey> = own
+        let ours = |item: &&Stored| item.text("description") == Some(key.description);
+        let mut found_keys: Vec<(Option<String>, Stored)> = own
             .list
             .iter()
-            .filter(|item| ours(item))
-            .map(|item| listed(None, item))
+            .filter(ours)
+            .map(|item| (None, item.clone()))
             .collect();
         let session = owner(admin, &target)?;
         if let Some(Session::Of(account)) = &session
             && *account != own.account_id
         {
-            let theirs = admin.list_in::<StoredKey>("ApiKey", Some(account));
+            let theirs = admin.list_in::<Stored>("ApiKey", Some(account));
             let theirs = theirs.map_err(|error| unseen(error, &target))?;
-            let theirs = theirs.list.iter().filter(|item| ours(item));
-            existing.extend(theirs.map(|item| listed(Some(account), item)));
+            let theirs = theirs.list.iter().filter(ours);
+            found_keys.extend(theirs.map(|item| (Some(account.clone()), item.clone())));
         }
+        let existing: Vec<AccountKey> = found_keys
+            .iter()
+            .map(|(account, item)| AccountKey {
+                account: account.clone(),
+                id: item.id.clone(),
+            })
+            .collect();
         // The one key of its description is kept where its file holds it.
         // Where Stalwart has several, as after a run that stopped before
         // the old one went, no run can tell which one the file holds, since
         // Stalwart shows no key's secret: a new key replaces them all.
         let known = matches!(session, Some(Session::Of(_) | Session::Refused));
-        let keep = match existing.as_slice() {
-            [only] if known && !rotate && holds_key(&target) => Some(only.clone()),
+        let keep = match (existing.as_slice(), found_keys.as_slice()) {
+            ([only], [(_, stored)]) if known && !rotate && holds_key(&target) => {
+                Some((only.clone(), stored.clone()))
+            }
             _ => None,
         };
         let (path, description) = (target.display(), key.description);
@@ -218,6 +224,8 @@ fn over_quota(error: &str) -> bool {
 /// removed, so that a service always holds a key Stalwart takes. Where
 /// Stalwart's quota leaves the new key no room, nothing of this key
 /// changes. `take_up` has the service that holds the key read a new one.
+/// Whether anything changed: a kept key whose rights are as setup gives
+/// them is left as it is.
 pub(super) fn settle(
     admin: &Admin,
     config: &Config,
@@ -225,7 +233,7 @@ pub(super) fn settle(
     found: Found,
     networks: &Enabled,
     take_up: &dyn Fn(&Key) -> Result<(), String>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let directory = &config.credentials_directory;
     let (target, description) = (directory.join(key.file), key.description);
     let rights = || KeyRights {
@@ -234,14 +242,23 @@ pub(super) fn settle(
         },
         allowed_ips: networks,
     };
-    if let Some(kept) = &found.keep {
-        let update = Set::update(&kept.id, rights());
-        admin.set_in("x:ApiKey/set", kept.account.as_deref(), &update)?;
+    if let Some((kept, stored)) = &found.keep {
+        let shown = KeyRights {
+            allowed_ips: &as_shown(networks),
+            ..rights()
+        };
+        let changed = !stored.holds(&shown);
+        if changed {
+            let update = Set::update(&kept.id, rights());
+            admin.set_in("x:ApiKey/set", kept.account.as_deref(), &update)?;
+        }
         tried(config, key)?;
-        say(&format!(
-            "- updated API key '{description}' (secret unchanged)"
-        ));
-        return Ok(());
+        if changed {
+            say(&format!(
+                "- updated API key '{description}' (secret unchanged)"
+            ));
+        }
+        return Ok(changed);
     }
     if let Err(error) = make(admin, &target, description, rights()) {
         return Err(if over_quota(&error) {
@@ -261,7 +278,16 @@ pub(super) fn settle(
                 format!("{error}; the API key '{description}' that the new one replaced stays")
             })?;
     }
-    Ok(())
+    Ok(true)
+}
+
+/// `networks` as Stalwart shows a key's: a single address without its
+/// prefix (measured on Stalwart 1.1.0).
+fn as_shown(networks: &Enabled) -> Enabled {
+    Enabled::of(networks.names().map(|network| {
+        let single = if network.contains(':') { "/128" } else { "/32" };
+        network.strip_suffix(single).unwrap_or(network).to_owned()
+    }))
 }
 
 /// A new key, its secret written to `target`. A key whose secret is lost is

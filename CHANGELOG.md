@@ -132,6 +132,10 @@ Notable changes for operators and users. The format follows
 
 ### Changed
 
+- **`garrison stalwart setup` changes nothing where it finds Stalwart set up
+  as asked,** and says "Stalwart is set up as asked; nothing was changed.";
+  it reloads Stalwart's settings and restarts a service only where it
+  changed something.
 - **The installer names the rollback that works.** After an upgrade that
   changes a database schema, as from 0.1.1 to 0.1.2, its last line says
   `garrison install --rollback --restore-state` and that the data recorded

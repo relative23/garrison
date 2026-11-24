@@ -11,14 +11,14 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
-use garrison_core::config::Config;
+use garrison_core::config::{Config, DEFAULT_PATH};
 use garrison_core::systemd::SYSTEMCTL;
 use serde::Serialize;
 
-use super::Admin;
-use super::objects::Set;
+use super::objects::{Set, Stored};
+use super::{Admin, unreadable};
 use crate::doctor::milter::{WITHIN, entries};
 use crate::units;
 use entries::Entry;
@@ -118,12 +118,15 @@ fn free(port: u16) -> Result<(), String> {
     }
 }
 
-/// Root starts the filter anew, so that it runs with the configuration as it
-/// is now; then it must answer on `port`.
-fn started(port: u16) -> Result<(), String> {
+/// Root starts the filter anew where it does not run, or runs with an older
+/// configuration than there is now, or is to move (`force`); then it must
+/// answer on `port`.
+fn started(port: u16, force: bool) -> Result<(), String> {
     if managed() {
         systemctl(&["enable", "--quiet"]);
-        systemctl(&["restart"]);
+        if force || !systemctl(&["is-active", "--quiet"]) || !current() {
+            systemctl(&["restart"]);
+        }
     }
     let mut problem = String::new();
     for _ in 0..10 {
@@ -138,6 +141,30 @@ fn started(port: u16) -> Result<(), String> {
          there, it defers all incoming mail. `journalctl -u {} -n 20` shows why it does not run.",
         units::MILTER
     ))
+}
+
+/// Whether the running filter started after `garrison.toml`, which its unit
+/// reads, last changed; where that cannot be seen, it did not.
+fn current() -> bool {
+    let started = std::process::Command::new(SYSTEMCTL)
+        .args([
+            "show",
+            "--timestamp=unix",
+            "--property",
+            "ActiveEnterTimestamp",
+        ])
+        .args(["--value", units::MILTER])
+        .output()
+        .ok()
+        .and_then(|output| {
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            text.strip_prefix('@')?.parse::<u64>().ok()
+        });
+    let changed = fs::metadata(DEFAULT_PATH)
+        .and_then(|file| file.modified())
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok());
+    matches!((started, changed), (Some(started), Some(changed)) if started > changed.as_secs())
 }
 
 /// Why setup leaves Stalwart's milters as they are: it asks `stranded` in
@@ -187,14 +214,17 @@ pub(super) fn prepare(admin: &Admin, config: &Config) -> Result<(), String> {
     match port {
         None => Ok(()),
         Some(port) if moving(&listening, port) => free(port),
-        Some(port) => started(port),
+        Some(port) => started(port, false),
     }
 }
 
 /// Enter, update or take out the filter's entries, as the configuration
-/// says, and leave one; what was done, if anything.
+/// says, and leave one, as Stalwart shows it where that is as asked; what was
+/// done, if anything.
 pub(super) fn ensure(admin: &Admin, config: &Config) -> Result<Option<String>, String> {
-    let stored = admin.list::<Entry>("MtaMilter")?;
+    let shown = admin.list::<Stored>("MtaMilter")?;
+    let read = serde_json::to_value(&shown).and_then(serde_json::from_value::<Vec<Entry>>);
+    let stored = read.map_err(|error| unreadable("x:MtaMilter/get", &error.to_string()))?;
     let port = config.milter.as_ref().map(|milter| milter.port);
     let ours = entries::ours(&stored, port, &listening()?);
     // One stays where the configuration has the filter: more would have
@@ -223,15 +253,26 @@ pub(super) fn ensure(admin: &Admin, config: &Config) -> Result<Option<String>, S
             milter.port
         )));
     };
-    admin.set("x:MtaMilter/set", &Set::update(&kept.id, wanted))?;
+    let held = shown.iter().find(|item| item.id == kept.id);
+    let unchanged = held.is_some_and(|item| item.holds(&wanted));
+    if !unchanged {
+        admin.set("x:MtaMilter/set", &Set::update(&kept.id, wanted))?;
+    }
     let more = match gone.len() {
         0 => String::new(),
         1 => "; took another entry for it out of Stalwart".to_owned(),
         many => format!("; took {many} other entries for it out of Stalwart"),
     };
     let port = milter.port;
-    let updated = format!("updated the macro milter's entry (127.0.0.1:{port}){more}");
-    Ok(Some(updated))
+    Ok(match (unchanged, gone.is_empty()) {
+        (true, true) => None,
+        (true, false) => Some(format!(
+            "kept the macro milter's entry (127.0.0.1:{port}){more}"
+        )),
+        (false, _) => Some(format!(
+            "updated the macro milter's entry (127.0.0.1:{port}){more}"
+        )),
+    })
 }
 
 /// After Stalwart has read its settings again, the filter follows them: one
@@ -249,7 +290,7 @@ pub(super) fn retire(config: &Config) -> Result<Vec<String>, String> {
     if let Some(milter) = &config.milter {
         let port = milter.port;
         if moving(&listening()?, port) {
-            started(port)?;
+            started(port, true)?;
             done.push(format!("moved the macro milter to 127.0.0.1:{port}"));
         }
         return Ok(done);

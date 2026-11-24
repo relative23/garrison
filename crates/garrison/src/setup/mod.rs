@@ -135,14 +135,19 @@ fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), Stri
     Ok(())
 }
 
+/// What setup says, and nothing else on standard output, where it finds
+/// everything as asked.
+const UNCHANGED: &str = "Stalwart is set up as asked; nothing was changed.";
+
 /// Everything setup makes in Stalwart and here, each step said once it is
 /// done. What Stalwart holds is read first, so that what refuses refuses
-/// before anything changes. Then the keys, each taken up by its service
-/// before the keys it replaces go; the sign-in client and the macro
-/// filter's entry; the webhook and the exporter, each new secret in its
-/// file before Stalwart is given it. Stalwart then reloads its settings,
-/// which is when it takes them, and the receiver starts again with its new
-/// key, as each service does that holds another secret than its file.
+/// before anything changes, and only what differs from what was asked is
+/// written. Then the keys, each taken up by its service before the keys it
+/// replaces go; the sign-in client and the macro filter's entry; the webhook
+/// and the exporter, each new secret in its file before Stalwart is given
+/// it. Stalwart then reloads its settings, which is when it takes them, and
+/// the receiver starts again with its new key, as each service does that
+/// holds another secret than its file.
 fn configure(
     admin: &Admin,
     config: &Config,
@@ -159,48 +164,65 @@ fn configure(
     } else {
         Some(exporter::find(admin)?)
     };
+    let mut keys_changed = false;
     for (key, found) in [&BROKER, &COLLECTOR].into_iter().zip(found) {
-        keys::settle(admin, config, key, found, networks, &keys::take_up)?;
+        keys_changed |= keys::settle(admin, config, key, found, networks, &keys::take_up)?;
     }
-    say("- Stalwart accepts both API keys from this host");
-    say(&format!("- {}", client::ensure(admin, config, client)?));
-    if let Some(step) = milter::ensure(admin, config)? {
-        say(&format!("- {step}"));
+    if keys_changed {
+        say("- Stalwart accepts both API keys from this host");
     }
+    // What Stalwart takes only when it reads its settings again.
+    let mut steps = vec![client::ensure(admin, config, client)?];
+    steps.push(milter::ensure(admin, config)?);
     let signing = webhook::key(directory, rotate)?;
     let url = asked.webhook_url;
-    let hooked = webhook::ensure(admin, config, url, hook.as_deref(), &signing);
-    say(&format!(
-        "- {}",
-        hooked.map_err(|error| until(error, signing.new, false))?
-    ));
+    let hooked = webhook::ensure(admin, config, url, hook.as_ref(), &signing);
+    steps.push(hooked.map_err(|error| until(error, signing.new, false))?);
     let scraping = match &metrics {
         Some(found) => exporter::credential(directory, found, rotate)
             .map_err(|error| until(error, signing.new, false))?,
         None => None,
     };
     let new_scrape = scraping.as_ref().is_some_and(|scrape| scrape.new);
-    if let Some(found) = &metrics {
-        let exported = exporter::ensure(admin, directory, found, scraping.as_ref());
-        say(&format!(
-            "- {}",
-            exported.map_err(|error| until(error, signing.new, new_scrape))?
-        ));
+    match (&metrics, &scraping) {
+        (Some(found), Some(scrape)) => steps.push(
+            exporter::ensure(admin, config, found, scrape)
+                .map_err(|error| until(error, signing.new, new_scrape))?,
+        ),
+        (Some(_), None) => say(&format!("- {}", exporter::theirs(directory))),
+        (None, _) => {}
     }
-    let reload = admin.set("x:Action/set", &Set::create(Action::ReloadSettings));
-    reload.map_err(|error| until(error, signing.new, new_scrape))?;
+    let steps: Vec<String> = steps.into_iter().flatten().collect();
+    for step in &steps {
+        say(&format!("- {step}"));
+    }
+    let reloaded = !steps.is_empty();
+    if reloaded {
+        let reload = admin.set("x:Action/set", &Set::create(Action::ReloadSettings));
+        reload.map_err(|error| until(error, signing.new, new_scrape))?;
+    }
     // Stalwart signs with the receiver's new key from now on, so the
     // receiver starts again to read it.
     let mut stale = restart::stale(directory);
     if signing.new {
         stale.insert(webhook::KEY_FILE);
     }
-    match restart::restart(&stale) {
-        Ok(None) => say("Settings reloaded."),
-        Ok(Some(line)) | Err(line) => say(&format!("Settings reloaded. {line}")),
+    let restarted = match restart::restart(&stale) {
+        Ok(said) => said,
+        Err(asked) => Some(asked),
+    };
+    let retired = milter::retire(config)?;
+    match (reloaded, restarted) {
+        (true, None) => say("Settings reloaded."),
+        (true, Some(line)) => say(&format!("Settings reloaded. {line}")),
+        (false, Some(line)) => say(&line),
+        (false, None) => {}
     }
-    for step in milter::retire(config)? {
+    for step in &retired {
         say(&format!("- {step}"));
+    }
+    if !keys_changed && !reloaded && stale.is_empty() && retired.is_empty() {
+        say(UNCHANGED);
     }
     Ok(())
 }

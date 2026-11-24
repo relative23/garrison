@@ -55,7 +55,7 @@ fn a_key_stalwart_does_not_know_or_refuses_here_names_no_account() {
         let written = format!("{OLD}\n");
         let (outcome, requests) =
             settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
-        assert_eq!(outcome, Ok(()), "{status}");
+        assert_eq!(outcome, Ok(true), "{status}");
         assert!(requests[2].contains(r#""create""#), "{}", requests[2]);
     }
 }
@@ -109,7 +109,7 @@ fn the_keys_another_administrator_made_are_kept_or_replaced_in_its_account() {
     ];
     let written = format!("{OLD}\n");
     let (outcome, requests) = settled(directory.path(), (&written, 0o600), kept, false, &TAKEN);
-    assert_eq!(outcome, Ok(()));
+    assert_eq!(outcome, Ok(true));
     assert!(
         requests[1].starts_with("GET /jmap/session "),
         "{}",
@@ -133,7 +133,7 @@ fn the_keys_another_administrator_made_are_kept_or_replaced_in_its_account() {
         ];
         let (outcome, requests) =
             settled(directory.path(), (&written, mode), replaced, rotate, &TAKEN);
-        assert_eq!(outcome, Ok(()), "{mode:o}");
+        assert_eq!(outcome, Ok(true), "{mode:o}");
         // The new key is the administrator's own; the old one goes from
         // the account that holds it.
         assert!(!requests[3].contains("accountId"), "{}", requests[3]);

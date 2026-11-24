@@ -4,18 +4,23 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use garrison_core::config::Config;
 use garrison_core::files::{Privacy, read_secret};
 use garrison_ingest::policy::{FORBIDDEN_EVENTS, event_types};
+use sha2::{Digest, Sha256};
 
 use super::keys::holds_key;
-use super::objects::{
-    self, Enabled, EventsPolicy, HttpAuth, Level, Secret, Set, StoredWebHook, WebHook,
-};
+use super::objects::{self, Enabled, EventsPolicy, HttpAuth, Level, Secret, Set, Stored, WebHook};
 use super::{Admin, random, write_secret};
 
 /// `WebHook` objects have no description; this header marks Garrison's own webhook.
 const MARKER: (&str, &str) = ("X-Garrison", "events");
+/// The header that names the signature key by a hash of it, which Stalwart
+/// shows where it masks the key, so that a run sees whether it holds the
+/// file's.
+const KEY_NAME: &str = "X-Garrison-Key";
 /// The signature key's file, as the receiver reads it.
 pub(super) const KEY_FILE: &str = "webhook-signature-key";
 
@@ -44,27 +49,28 @@ pub(super) fn key(directory: &Path, rotate: bool) -> Result<Signing, String> {
     Ok(Signing { key, new: true })
 }
 
-/// The ID of Garrison's webhook, where Stalwart has one.
-pub(super) fn find(admin: &Admin) -> Result<Option<String>, String> {
-    let marked = |item: &StoredWebHook| {
-        let headers = item.http_headers.as_ref();
+/// Garrison's webhook, where Stalwart has one.
+pub(super) fn find(admin: &Admin) -> Result<Option<Stored>, String> {
+    let marked = |item: &Stored| {
+        let headers = item.fields.get("httpHeaders");
         headers.and_then(|headers| headers.get(MARKER.0)?.as_str()) == Some(MARKER.1)
     };
-    let listed = admin.list::<StoredWebHook>("WebHook")?;
-    Ok(listed.into_iter().find(marked).map(|item| item.id))
+    let listed = admin.list::<Stored>("WebHook")?;
+    Ok(listed.into_iter().find(marked))
 }
 
-/// The webhook made or updated, `existing` where Stalwart has it, signing
-/// with `signing`'s key. Stalwart keeps a batch the receiver refuses while
-/// the key changes and sends it again.
+/// The webhook made, or updated where Stalwart's differs from it, signing
+/// with `signing`'s key; what was done, if anything. Stalwart keeps a batch
+/// the receiver refuses while the key changes and sends it again.
 pub(super) fn ensure(
     admin: &Admin,
     config: &Config,
     url: Option<&str>,
-    existing: Option<&str>,
+    existing: Option<&Stored>,
     signing: &Signing,
-) -> Result<String, String> {
+) -> Result<Option<String>, String> {
     let types = objects::webhook_events(event_types(), &FORBIDDEN_EVENTS)?;
+    let named = URL_SAFE_NO_PAD.encode(&Sha256::digest(signing.key.as_bytes())[..12]);
     let url = url.map_or_else(
         || format!("http://127.0.0.1:{}/webhook", config.ingest.port),
         str::to_owned,
@@ -82,18 +88,25 @@ pub(super) fn ensure(
             secret: &signing.key,
         },
         http_auth: HttpAuth::Unauthenticated,
-        http_headers: BTreeMap::from([MARKER]),
+        http_headers: BTreeMap::from([MARKER, (KEY_NAME, named.as_str())]),
         allow_invalid_certs: false,
         enable: true,
     };
-    let result = if let Some(id) = existing {
-        admin.set("x:WebHook/set", &Set::update(id, webhook))?;
-        "updated webhook"
-    } else {
-        admin.set("x:WebHook/set", &Set::create(webhook))?;
-        "created webhook"
+    let result = match existing {
+        Some(stored) if stored.holds(&webhook) => return Ok(None),
+        Some(stored) => {
+            admin.set("x:WebHook/set", &Set::update(&stored.id, webhook))?;
+            "updated webhook"
+        }
+        None => {
+            admin.set("x:WebHook/set", &Set::create(webhook))?;
+            "created webhook"
+        }
     };
-    Ok(format!("{result} -> {url} ({} event types)", types.len()))
+    Ok(Some(format!(
+        "{result} -> {url} ({} event types)",
+        types.len()
+    )))
 }
 
 #[cfg(test)]
@@ -151,5 +164,52 @@ mod tests {
             signed_with(&format!("{KEPT}\n"), created()),
             (KEPT.to_owned(), false, format!("{KEPT}\n"), true)
         );
+    }
+
+    /// What setup wrote, read back as Stalwart shows it, with its key
+    /// masked, holds what setup would write: the next run sends nothing. A
+    /// new key is a change, which the header that names the key shows.
+    #[test]
+    fn a_webhook_as_setup_wrote_it_is_left_as_it_is() {
+        let directory = tempfile::tempdir().unwrap();
+        garrison_testing::write_private(&directory.path().join(KEY_FILE), b"");
+        let created = json(&json!({"methodResponses": [["x:WebHook/set",
+            {"created": {"new": {"id": "hook"}}}, "0"]]}));
+        let server = serve(vec![created]);
+        let config = garrison_testing::config(directory.path(), &server.url);
+        let admin = Admin {
+            url: format!("{}/jmap/", server.url),
+            authorization: "Bearer admin".to_owned(),
+        };
+        let signing = key(directory.path(), false).unwrap();
+        let url = Some("http://127.0.0.1:9/webhook");
+        ensure(&admin, &config, url, None, &signing).unwrap();
+        let requests = server.requests();
+        let (_, body) = requests[0].split_once("\r\n\r\n").unwrap();
+        let sent: Value = serde_json::from_str(body).unwrap();
+        let mut shown = sent["methodCalls"][0][1]["create"]["new"].clone();
+        shown["id"] = json!("hook");
+        shown["signatureKey"] = json!({"@type": "Value", "secret": "****"});
+        let stored: Stored = serde_json::from_value(shown).unwrap();
+        let silent = serve(Vec::new());
+        let admin = Admin {
+            url: format!("{}/jmap/", silent.url),
+            authorization: "Bearer admin".to_owned(),
+        };
+        let kept = key(directory.path(), false).unwrap();
+        assert_eq!(ensure(&admin, &config, url, Some(&stored), &kept), Ok(None));
+        assert_eq!(silent.requests(), Vec::<String>::new());
+        let named = &stored.fields["httpHeaders"]["X-Garrison-Key"];
+        assert_eq!(named.as_str().map(str::len), Some(16));
+        let rotated = key(directory.path(), true).unwrap();
+        let server = serve(vec![json(&json!({"methodResponses": [["x:WebHook/set",
+            {"updated": {"hook": null}}, "0"]]}))]);
+        let admin = Admin {
+            url: format!("{}/jmap/", server.url),
+            authorization: "Bearer admin".to_owned(),
+        };
+        let updated = ensure(&admin, &config, url, Some(&stored), &rotated).unwrap();
+        server.requests();
+        assert!(updated.is_some_and(|step| step.starts_with("updated webhook")));
     }
 }
