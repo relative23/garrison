@@ -215,6 +215,44 @@ fn a_job_dated_ahead_stays_by_its_own_date_alone() {
     assert_eq!(left, ["recent", "ahead"]);
 }
 
+/// A row whose number is the greatest integer, as a damaged or hand-edited
+/// audit may hold, has SQLite number every later row at random. It costs
+/// that row's place alone: the jobs recorded after it are listed in their
+/// order, and the one recorded last is the newest that the settle time and
+/// the cooldown wait for.
+#[test]
+fn a_row_of_the_greatest_integer_keeps_the_later_jobs_in_order() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = JobStore::open(&directory.path().join("jobs.sqlite")).unwrap();
+    let damaged = Job {
+        created_at: now() - 3600,
+        ..job("damaged", JobStatus::Succeeded)
+    };
+    store.insert(&damaged).unwrap();
+    store
+        .db
+        .execute("UPDATE jobs SET rowid = ?1", [i64::MAX])
+        .unwrap();
+    let start = now() - 600;
+    let ids: Vec<String> = (0..30).map(|index| format!("job-{index:02}")).collect();
+    for (at, id) in (start..).zip(&ids) {
+        let record = Job {
+            created_at: at,
+            ..job(id, JobStatus::Succeeded)
+        };
+        store.insert(&record).unwrap();
+    }
+    let listed: Vec<String> = store
+        .recent(10)
+        .unwrap()
+        .into_iter()
+        .map(|job| job.id)
+        .collect();
+    let newest: Vec<String> = ids.iter().rev().take(10).cloned().collect();
+    assert_eq!(listed, newest);
+    assert_eq!(store.latest_created(None).unwrap(), Some(start + 29));
+}
+
 #[test]
 fn the_audit_is_private() {
     use std::os::unix::fs::PermissionsExt;

@@ -1983,6 +1983,9 @@ Notable changes for operators and users. The format follows
   not finish or `garrison.toml` changed since, and finds the access policy
   where `[broker] policy` keeps it**; where the policy binds no role and no
   account, the play stops and says how to bind one.
+- **A row numbered with the greatest integer, in a damaged or hand-edited
+  event history or audit, no longer puts every later event or job in random
+  order**, nor keeps `garrison doctor` dating the last event by it.
 
 ## [0.1.2] - 2026-11-13
 

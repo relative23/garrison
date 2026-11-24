@@ -286,6 +286,15 @@ impl JobStore {
     }
 
     pub fn insert(&self, job: &Job) -> rusqlite::Result<()> {
+        // SQLite numbers a row one past the greatest, but after a row of the
+        // greatest integer, which counting never reaches, at random: such a
+        // row moves to follow the others, so that the rows keep the order in
+        // which the jobs were recorded.
+        self.db.execute(
+            "UPDATE jobs SET rowid = (SELECT coalesce(max(rowid), 0) + 1 FROM jobs \
+             WHERE rowid < ?1) WHERE rowid = ?1",
+            [i64::MAX],
+        )?;
         self.db.execute(
             &format!("INSERT INTO jobs({COLUMNS}) VALUES(?,?,?,?,?,?,?,?,?,?,?)"),
             params![
