@@ -1036,6 +1036,8 @@ Notable changes for operators and users. The format follows
 - **A name lookup that failed is named in the system's words** on the
   sign-in and DNS records cards and in notifications, which tell a name
   that does not exist from one that could not be looked up now.
+- **The Sign-in page card and `garrison doctor` say what mends the page by
+  its cause**: the certificate of the issuer's host, its name, or the proxy.
 - **A blocklist that gives no verdict keeps the Blocklists card from being
   OK.** A list that refused this resolver, as Spamhaus refuses public ones,
   answered with an error or did not answer at all, showed only in its row:

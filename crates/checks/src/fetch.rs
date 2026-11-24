@@ -31,9 +31,12 @@ use rustls::{CertificateError, ClientConfig, ClientConnection, RootCertStore, St
 use crate::timed::Timed;
 
 mod answer;
+mod failed;
 
 pub use answer::Answer;
 use answer::{enough, parse};
+use failed::tls_failed;
+pub use failed::{Failed, Part};
 
 /// One step waits this long at most: the lookup, the connection, one read
 /// or write.
@@ -135,7 +138,7 @@ fn split(url: &str) -> Result<(bool, String, u16, String), String> {
 /// would hold the caller for as long as its own configuration says. A
 /// lookup that failed keeps the system's words, which tell a name that does
 /// not exist from one that could not be looked up now.
-fn resolve(host: &str, port: u16, until: Instant) -> Result<Vec<SocketAddr>, String> {
+fn resolve(host: &str, port: u16, until: Instant) -> Result<Vec<SocketAddr>, Failed> {
     let (answer, asked) = mpsc::channel();
     let name = host.to_owned();
     std::thread::spawn(move || {
@@ -148,24 +151,28 @@ fn resolve(host: &str, port: u16, until: Instant) -> Result<Vec<SocketAddr>, Str
     let patience = until.saturating_duration_since(Instant::now()).min(TIMEOUT);
     match asked.recv_timeout(patience) {
         Ok(Ok(addresses)) => Ok(addresses),
-        Ok(Err(error)) => Err(format!("{host} could not be looked up: {error}")),
-        Err(_) => Err(format!(
+        Ok(Err(error)) => Err(Failed::name(format!(
+            "{host} could not be looked up: {error}"
+        ))),
+        Err(_) => Err(Failed::name(format!(
             "{host}: the name lookup gave no answer within {} s",
             patience.as_secs()
-        )),
+        ))),
     }
 }
 
-fn connect(host: &str, port: u16, until: Instant) -> Result<Timed, String> {
-    let mut last = format!("{host} does not resolve");
+fn connect(host: &str, port: u16, until: Instant) -> Result<Timed, Failed> {
+    let mut last = Failed::name(format!("{host} does not resolve"));
     for target in resolve(host, port, until)? {
         let patience = until.saturating_duration_since(Instant::now()).min(TIMEOUT);
         if patience.is_zero() {
-            return Err(format!("{host}:{port}: not reached in the request's time"));
+            return Err(Failed::other(format!(
+                "{host}:{port}: not reached in the request's time"
+            )));
         }
         match TcpStream::connect_timeout(&target, patience) {
             Ok(stream) => return Ok(Timed::new(stream, until, TIMEOUT)),
-            Err(error) => last = format!("{host}:{port}: {error}"),
+            Err(error) => last = Failed::other(format!("{host}:{port}: {error}")),
         }
     }
     Err(last)
@@ -188,7 +195,7 @@ pub fn secure_stream_until(
     roots: &Arc<RootCertStore>,
     until: Instant,
 ) -> Result<StreamOwned<ClientConnection, Timed>, String> {
-    secure_stream_at(host, port, roots, until, None)
+    secure_stream_at(host, port, roots, until, None).map_err(String::from)
 }
 
 /// The same, with the certificate judged at `at` where it is given.
@@ -198,13 +205,13 @@ fn secure_stream_at(
     roots: &Arc<RootCertStore>,
     until: Instant,
     at: Option<Timestamp>,
-) -> Result<StreamOwned<ClientConnection, Timed>, String> {
+) -> Result<StreamOwned<ClientConnection, Timed>, Failed> {
     let stream = connect(host, port, until)?;
-    let name =
-        ServerName::try_from(host.to_owned()).map_err(|_| format!("{host} is no host name"))?;
-    let config = client_config(roots, at)?;
-    let connection =
-        ClientConnection::new(Arc::new(config), name).map_err(|error| error.to_string())?;
+    let name = ServerName::try_from(host.to_owned())
+        .map_err(|_| Failed::other(format!("{host} is no host name")))?;
+    let config = client_config(roots, at).map_err(Failed::other)?;
+    let connection = ClientConnection::new(Arc::new(config), name)
+        .map_err(|error| Failed::other(error.to_string()))?;
     Ok(StreamOwned::new(connection, stream))
 }
 
@@ -352,21 +359,19 @@ pub struct Request<'a> {
 
 /// `GET url` with no headers of its own.
 pub fn get(url: &str, roots: &Arc<RootCertStore>) -> Result<Answer, String> {
-    send(
-        &Request {
-            method: "GET",
-            url,
-            headers: &[],
-            body: &[],
-            needs: Needs::Whole,
-        },
-        roots,
-    )
+    fetched(url, roots, None).map_err(String::from)
 }
 
 /// `GET url`, with the server's certificate judged at `at`, the time of a
 /// check's run.
 pub fn get_at(url: &str, roots: &Arc<RootCertStore>, at: Timestamp) -> Result<Answer, String> {
+    fetched(url, roots, Some(at)).map_err(String::from)
+}
+
+/// `GET url`, with the server's certificate judged at `at`, the time of a
+/// check's run, or by the clock where it is none, and where it failed, why
+/// by the part of it that failed.
+pub fn fetched(url: &str, roots: &Roots, at: Option<Timestamp>) -> Result<Answer, Failed> {
     let request = Request {
         method: "GET",
         url,
@@ -374,7 +379,7 @@ pub fn get_at(url: &str, roots: &Arc<RootCertStore>, at: Timestamp) -> Result<An
         body: &[],
         needs: Needs::Whole,
     };
-    send_at(&request, roots, Instant::now() + WITHIN, Some(at))
+    send_at(&request, roots, Instant::now() + WITHIN, at)
 }
 
 pub fn send(request: &Request<'_>, roots: &Arc<RootCertStore>) -> Result<Answer, String> {
@@ -387,7 +392,7 @@ pub fn send_until(
     roots: &Arc<RootCertStore>,
     until: Instant,
 ) -> Result<Answer, String> {
-    send_at(request, roots, until, None)
+    send_at(request, roots, until, None).map_err(String::from)
 }
 
 /// The request done by `until`, with a server's certificate judged at `at`
@@ -397,21 +402,23 @@ fn send_at(
     roots: &Arc<RootCertStore>,
     until: Instant,
     at: Option<Timestamp>,
-) -> Result<Answer, String> {
+) -> Result<Answer, Failed> {
     let url = request.url;
-    let (secure, host, port, path) = split(url)?;
+    let (secure, host, port, path) = split(url).map_err(Failed::other)?;
     let authority = host_header(&host, port, secure);
     let mut data = if secure {
         let mut tls = secure_stream_at(&host, port, roots, until, at)?;
-        exchange(&mut tls, &authority, &path, request).map_err(|error| tls_error(&error))?
+        exchange(&mut tls, &authority, &path, request).map_err(|error| tls_failed(&error))?
     } else {
         let mut stream = connect(&host, port, until)?;
-        exchange(&mut stream, &authority, &path, request).map_err(|error| error.to_string())?
+        exchange(&mut stream, &authority, &path, request)
+            .map_err(|error| Failed::other(error.to_string()))?
     };
     let most = usize::try_from(LIMIT).unwrap_or(usize::MAX);
     let longer = data.len() > most;
     data.truncate(most);
-    let mut answer = parse(&data).ok_or_else(|| format!("{url} gave no HTTP answer"))?;
+    let mut answer =
+        parse(&data).ok_or_else(|| Failed::other(format!("{url} gave no HTTP answer")))?;
     if longer {
         answer.cut = Some(format!(
             "the answer is longer than the {} KiB that are read",

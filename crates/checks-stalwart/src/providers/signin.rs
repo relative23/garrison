@@ -23,7 +23,7 @@ use garrison_stalwart::sign_in_page::{self, Kind};
 use serde::{Deserialize, Serialize};
 
 use crate::context::{Collected, Context, Provider, Report};
-use crate::fetch::{self, Roots, origin};
+use crate::fetch::{self, Part, Roots, origin};
 use crate::kept::{Kept, keep, recalled};
 use crate::options::{Checked, Options};
 
@@ -41,6 +41,12 @@ const EVERY: i64 = 300;
 const KEPT: &str = "signin.page";
 /// Why an examination stopped before it had asked everything.
 const RUN_OVER: &str = "the collection run's time was used up";
+/// What mends a page whose name this host could not look up.
+const NAME_FIX: &str = "This host must resolve the issuer's name as visitors do; check its DNS \
+                        records and this host's resolver.";
+/// What mends a page whose server's certificate is not one to trust now.
+const CERTIFICATE_FIX: &str = "The issuer's host must present a certificate for its name from an \
+                               authority visitors trust; renew or replace it.";
 
 /// What an examination of the page found.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -180,8 +186,13 @@ pub fn examine(page: &str, own: &str, query: &str, asking: Asking<'_>) -> Examin
                 page_fix,
             );
         }
-        Err(error) => {
-            return Examined::failed(format!("Stalwart's sign-in page {page}: {error}"), page_fix);
+        Err(failed) => {
+            let fix = match failed.part {
+                Part::Name => NAME_FIX,
+                Part::Certificate => CERTIFICATE_FIX,
+                Part::Other => page_fix,
+            };
+            return Examined::failed(format!("Stalwart's sign-in page {page}: {failed}"), fix);
         }
     };
     if asking.deadline.expired() {
@@ -453,6 +464,8 @@ impl Provider for SignIn {
     }
 }
 
+#[cfg(test)]
+mod advice_tests;
 #[cfg(test)]
 mod clock_tests;
 #[cfg(test)]

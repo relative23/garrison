@@ -3,7 +3,7 @@
 use garrison_core::time::Timestamp;
 
 use crate::context::Deadline;
-use crate::fetch::{self, Answer, Roots};
+use crate::fetch::{self, Answer, Failed, Roots};
 
 /// How an examination asks for the page and its files: the authorities
 /// their server's certificate must come from, until when it asks, and the
@@ -28,10 +28,7 @@ impl<'a> Asking<'a> {
         }
     }
 
-    pub(super) fn get(self, url: &str) -> Result<Answer, String> {
-        match self.at {
-            Some(at) => fetch::get_at(url, self.roots, at),
-            None => fetch::get(url, self.roots),
-        }
+    pub(super) fn get(self, url: &str) -> Result<Answer, Failed> {
+        fetch::fetched(url, self.roots, self.at)
     }
 }
