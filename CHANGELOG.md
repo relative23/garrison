@@ -228,27 +228,11 @@ Notable changes for operators and users. The format follows
   session, as when a tab is shown again or another tab starts, the page
   stayed signed in, its menu and data in view, until a later request was
   refused, up to a minute later. It now says that the session has ended.
-- **A document with macros is found however the message wraps it.** The scan
-  undid quoted-printable only when the message held one of four byte strings,
-  so an Office document written as quoted-printable on a single line, in
-  lower-case hexadecimal, or with only some bytes escaped passed as clean;
-  base64 a sender broke up with white space or with characters outside its
-  alphabet was not read, nor was a uuencoded attachment; and a document
-  behind an odd boundary, an unusual `Content-Type` or deep nesting was
-  missed. The scan now finds the document without reading the message's
-  structure: it undoes quoted-printable over the whole message, decodes the
-  base64 of the whole message on each of the four grids a run of symbols can
-  sit on (ignoring every byte outside the alphabet, so boundaries, headers
-  and junk fall away), and reads a uuencode `begin`/`end` block wherever it
-  stands. It reads each encoding as the mail programs do that read it most
-  freely: base64 written in padded pieces, quoted-printable around base64,
-  uuencode in the characters and `begin` lines such a program takes, and
-  the base64 inside Word's XML files. No boundary, nesting depth or header
-  is read to decide this, so none of them hides a document. A part that
-  declares a transfer encoding the scan cannot decode, a yEnc or BinHex
-  block, or a uuencode block begun and not ended, is marked unscanned
-  (`on_incomplete`), not passed as clean
-  (see [configuration](docs/operator/configuration.md#milter)).
+- **The macro filter reads base64, quoted-printable and uuencode wherever
+  they stand in a message, and base64 in each way the mail programs it names
+  read a `=` in it.** The [configuration](docs/operator/configuration.md#milter)
+  names what it does not read and when it marks a message unscanned, as it
+  does more often now for a message attached as base64 inside another.
 - **The collector starts where setup wrote no metrics credential.** Its
   unit loads `metrics-credential`, and systemd starts no unit whose
   credential file is missing ("Failed to set up credentials",

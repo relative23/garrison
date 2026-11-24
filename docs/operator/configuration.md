@@ -297,22 +297,28 @@ the newer format (`.docm`, `.xlsm`, `.pptm`, also under another name such as
 XML files (Word 2003 XML, and the newer format saved as one XML file) with an
 embedded macro store, each also inside zip archives up to three levels deep.
 A file counts as soon as it has a macro project, also an empty one. The
-filter finds the document however the message wraps it, without reading the
-message's structure: it reads the message as it stands, decodes the base64 of
-the whole message (ignoring any byte outside the alphabet, so folding, odd
-line ends, padding or junk a sender put in the base64 fall away, and also
-with padding in the middle taken for the end of a piece, as mail programs
-take it), undoes quoted-printable and reads what comes of it the same ways,
-and reads a uuencode block wherever it stands, by the characters, line
-lengths and `begin` lines a mail program takes.
+filter looks for the document without reading the message's structure: it
+reads the message as it stands, decodes the base64 of the whole message
+(ignoring any byte outside the alphabet, so folding, odd line ends or junk a
+sender put in the base64 fall away) in each way the decoders of PHP, Python,
+Perl, Thunderbird, Evolution, Geary and Balsa (GLib, GMime 3), MimeKit and
+Jakarta Mail read a `=` in it, undoes quoted-printable (also with `=` before
+a lone CR taken for a soft break, as Thunderbird and PHP take it) and reads
+what comes of it the same ways, and reads a uuencode block wherever it
+stands, by the characters, line lengths and `begin` lines a mail program
+takes.
 A body wrapped again in a transfer encoding (a base64-encoded forwarded
 message with its own base64 attachment) is read in turn, three encodings deep.
 No boundary, nesting depth or header is read to decide this, so none of them
 hides a document. What it does not see: an archive with a password, other
 archive formats such as 7z and RAR, Excel 4.0 macro sheets in an old `.xls`
 file, the macros of an old `.ppt` file, macros in LibreOffice's own formats,
-and a document behind a link. It complements a virus scanner and does not
-replace one.
+a document behind a link, and a document only these decoders rebuild: Node's
+mail parsers (libbase64, postal-mime), Node's `Buffer` with `-` and `_` in
+the base64, GMime 2.6, a program that counts `=` in base64 under
+quoted-printable soft line breaks, and some programs' reading of
+quoted-printable that is not well formed. How Outlook and Apple Mail decode
+is not known. It complements a virus scanner and does not replace one.
 
 A message the filter could not scan completely is never passed as if it were
 clean. That is a message
@@ -327,7 +333,10 @@ clean. That is a message
   (any but 7bit, 8bit, binary, base64, quoted-printable and uuencode), that
   holds a yEnc or a BinHex block, which the filter does not decode either, or
   a uuencode block begun and not ended, or that nests more than three
-  transfer encodings deep, or
+  transfer encodings deep,
+- that needs more decoding than 48 times its size, as a message attached as
+  base64 inside another does that holds a quoted-printable part and an
+  attachment, or
 - whose scan was not done 20 seconds after the message's end, the wait for
   other messages' scans included.
 
