@@ -60,6 +60,14 @@ struct Asked {
     blocked: Vec<String>,
 }
 
+/// What the status database keeps of the free space: the readings, with the
+/// path whose file system they measured.
+#[derive(Debug, Deserialize, Serialize)]
+struct Readings {
+    path: PathBuf,
+    samples: Vec<Sample>,
+}
+
 type Made = Result<Observation, ProviderError>;
 
 /// A list option: not set, distinct names that are accepted, or anything else.
@@ -269,23 +277,38 @@ impl HostCare {
     )]
     fn disk(&self, context: &Context<'_>) -> Made {
         let source = self.disk_path.display().to_string();
-        let Ok(filesystem) = rustix::fs::statvfs(&self.disk_path) else {
-            return Ok(self
-                .observation(
-                    context,
-                    "disk-forecast",
-                    "Disk forecast",
-                    State::Unknown,
-                    &source,
-                )?
-                .with_findings(vec!["The file system could not be read.".to_owned()]));
+        // A file system of the kernel's, such as /proc, keeps no size, and
+        // its free space of none is nothing to carry forward.
+        let measured = match rustix::fs::statvfs(&self.disk_path) {
+            Ok(filesystem) if filesystem.f_blocks > 0 => Ok(filesystem),
+            Ok(_) => Err("The file system gives no size."),
+            Err(_) => Err("The file system could not be read."),
+        };
+        let filesystem = match measured {
+            Ok(filesystem) => filesystem,
+            Err(why) => {
+                return Ok(self
+                    .observation(
+                        context,
+                        "disk-forecast",
+                        "Disk forecast",
+                        State::Unknown,
+                        &source,
+                    )?
+                    .with_findings(vec![why.to_owned()]));
+            }
         };
         let free = filesystem.f_bavail.saturating_mul(filesystem.f_frsize);
-        let kept: Vec<Sample> = context
-            .memory
-            .recall(DISK)
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default();
+        // The readings of another file system say nothing of this one. The
+        // releases before kept the readings alone, of the same `disk_path`
+        // unless it changed with the upgrade.
+        let kept: Vec<Sample> = context.memory.recall(DISK).map_or_else(Vec::new, |text| {
+            match serde_json::from_str::<Readings>(&text) {
+                Ok(readings) if readings.path == self.disk_path => readings.samples,
+                Ok(_) => Vec::new(),
+                Err(_) => serde_json::from_str(&text).unwrap_or_default(),
+            }
+        });
         let samples = reading::recorded(
             kept.clone(),
             Sample {
@@ -295,11 +318,16 @@ impl HostCare {
         );
         // Also where one reading goes as another comes, so that their number
         // stays the same: the one that came is kept, and the other is gone.
-        if samples != kept
-            && let Ok(text) = serde_json::to_string(&samples)
+        let readings = Readings {
+            path: self.disk_path.clone(),
+            samples,
+        };
+        if readings.samples != kept
+            && let Ok(text) = serde_json::to_string(&readings)
         {
             context.memory.keep(DISK, &text);
         }
+        let samples = readings.samples;
         let trend = reading::trend(&samples);
         let days = trend
             .filter(|change| *change < 0.0)
@@ -338,23 +366,28 @@ impl HostCare {
         let short = |unit: &&str| unit.trim_end_matches(".service").to_owned();
         let mut arguments = vec!["systemctl", "is-active"];
         arguments.extend(&units);
-        // The exit code only says whether all are active; the lines say which.
-        let active: Option<Vec<String>> = context.runner.run(&arguments).ok().map(|output| {
-            let states: Vec<String> = output
-                .stdout
-                .lines()
-                .map(|line| line.trim().to_owned())
-                .collect();
-            units
-                .iter()
-                .zip(&states)
-                .filter(|(_, state)| *state == "active")
-                .map(|(unit, _)| short(unit))
-                .collect()
-        });
-        let (state, finding) = match &active {
-            None => (State::Unknown, Some("systemctl did not answer.".to_owned())),
-            Some(active) if active.is_empty() && self.firewall_units.is_none() => (
+        // The exit code only says whether all are active; the lines say
+        // which, one for each unit, or there is no answer.
+        let answer = match context.runner.run(&arguments) {
+            Err(_) => Err("systemctl did not answer."),
+            Ok(output) => {
+                let states: Vec<&str> = output.stdout.lines().map(str::trim).collect();
+                if states.len() == units.len() {
+                    Ok(units
+                        .iter()
+                        .zip(&states)
+                        .filter(|(_, state)| **state == "active")
+                        .map(|(unit, _)| short(unit))
+                        .collect::<Vec<String>>())
+                } else {
+                    Err("systemctl gave no state for every firewall unit.")
+                }
+            }
+        };
+        let active = answer.as_ref().ok().cloned();
+        let (state, finding) = match &answer {
+            Err(why) => (State::Unknown, Some((*why).to_owned())),
+            Ok(active) if active.is_empty() && self.firewall_units.is_none() => (
                 State::Warning,
                 Some(
                     "No firewall service is active (firewalld, nftables, ufw). Where a unit of the \
@@ -362,14 +395,14 @@ impl HostCare {
                         .to_owned(),
                 ),
             ),
-            Some(active) if active.is_empty() => (
+            Ok(active) if active.is_empty() => (
                 State::Warning,
                 Some(format!(
                     "None of the firewall units is active ({}).",
                     units.iter().map(short).collect::<Vec<_>>().join(", ")
                 )),
             ),
-            Some(_) => (State::Ok, None),
+            Ok(_) => (State::Ok, None),
         };
         Ok(self
             .observation(

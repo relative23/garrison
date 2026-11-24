@@ -27,11 +27,13 @@ use garrison_core::observations::{Evidence, Observation, Required, State};
 use garrison_core::time::Written;
 use serde_json::Value;
 
+use super::hidden;
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
 mod keys;
 mod shown;
+mod unread;
 
 use keys::{Condition, Key, Selected, date, key, lookup, selected};
 
@@ -188,31 +190,78 @@ impl Receipt {
         )
     }
 
-    /// What a receipt with rows says where they cannot all be read, and the
-    /// state it may have at most: Unknown where `rows` names no list, as
-    /// where a job that failed early wrote none, and Partial where rows are
-    /// no objects, which are not read.
+    /// What a receipt with rows says where they cannot all be read or
+    /// judged, and the state it may have at most: Unknown where `rows` names
+    /// no list, as where a job that failed early wrote none, or where
+    /// `ok_rows` found no row to judge, as in an empty list, and Partial
+    /// where rows are no objects, which are not read.
     fn unread_rows(&self, document: &Value) -> Option<(State, String)> {
         let Some(list) = self.place(document)?.as_array() else {
-            let why = if self.rows.as_ref().is_some_and(Vec::is_empty) {
-                "The receipt is no list of rows."
-            } else {
-                "The receipt holds no list of rows where `rows` names one."
-            };
+            let why = "The receipt holds no list of rows where `rows` names one.";
             return Some((State::Unknown, why.to_owned()));
         };
         let (others, total) = (
             list.iter().filter(|item| !item.is_object()).count(),
             list.len(),
         );
+        let judged_none = self.ok_rows.is_some() && others == total;
         let finding = match others {
+            0 if judged_none => "The receipt lists no rows, so `ok_rows` judged none.".to_owned(),
             0 => return None,
             1 => format!("1 of the receipt's {total} rows is no object and was not read."),
             _ => {
                 format!("{others} of the receipt's {total} rows are no objects and were not read.")
             }
         };
-        Some((State::Partial, finding))
+        let at_most = if judged_none {
+            State::Unknown
+        } else {
+            State::Partial
+        };
+        Some((at_most, finding))
+    }
+
+    /// What the card says of a receipt of the other shape than its entry
+    /// reads, a list for an entry that reads an object or the other way
+    /// round, which it does not judge.
+    fn misshapen(&self, document: &Value) -> Option<String> {
+        let path = self.path.display();
+        match (
+            document.is_array(),
+            self.rows.as_ref().is_some_and(Vec::is_empty),
+        ) {
+            (true, false) => Some(format!(
+                "The receipt at {path} is a list, but its entry reads an object: read a list \
+                 with rows = [] and row_date, as checks.md shows."
+            )),
+            (false, true) => Some(format!(
+                "The receipt at {path} is an object, but rows = [] reads a list: name the key \
+                 of its list in rows, such as rows = [\"results\"], or leave rows out to read \
+                 the object."
+            )),
+            _ => None,
+        }
+    }
+
+    /// What the card says where its table cannot show every row it read
+    /// (`items`): how many rows the receipt lists, those that are no
+    /// objects among them, and which the table shows.
+    fn cut(&self, document: &Value, items: &[Value]) -> Option<String> {
+        if items.len() <= MAX_ROWS {
+            return None;
+        }
+        let listed = self
+            .place(document)
+            .and_then(Value::as_array)
+            .map_or(items.len(), Vec::len);
+        let read = if listed == items.len() {
+            String::new()
+        } else {
+            format!(" of the {} it read", items.len())
+        };
+        Some(format!(
+            "The receipt lists {listed} rows; the table shows the last {MAX_ROWS}{read}."
+        ))
     }
 
     fn reported(&self, document: &Value, items: Option<&[Value]>) -> Option<Written> {
@@ -266,55 +315,6 @@ impl Receipt {
             Some(_) => None,
         }
     }
-
-    /// Why there is no receipt to read, with what mends it: none at its
-    /// path, which a job of the operator's writes; a folder on the way that
-    /// the collector's user may not search; a file it may not open, as one
-    /// a job writes under umask 027 or 077; a link or no plain file; or a
-    /// file too large or no JSON object or list.
-    fn unread(&self) -> String {
-        let path = self.path.display();
-        let denied = |error: &std::io::Error| error.kind() == std::io::ErrorKind::PermissionDenied;
-        match std::fs::symlink_metadata(&self.path) {
-            Err(error) if denied(&error) => {
-                // The deepest folder that can be looked at is the one that
-                // cannot be searched.
-                let folder = self
-                    .path
-                    .ancestors()
-                    .skip(1)
-                    .find(|folder| std::fs::symlink_metadata(folder).is_ok())
-                    .unwrap_or(&self.path)
-                    .display();
-                format!(
-                    "The receipt at {path} cannot be looked for: the collector's user may not \
-                     search the folder {folder}; let every user search it (chmod o+x {folder})."
-                )
-            }
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                format!("The receipt at {path} cannot be looked for: {error}.")
-            }
-            Err(_) => {
-                format!("No receipt at {path}: the job that writes it has written none there.")
-            }
-            Ok(metadata) if metadata.is_symlink() => format!(
-                "The receipt at {path} is a link, which is not followed: let the job write the \
-                 file there itself."
-            ),
-            Ok(metadata) if !metadata.is_file() => format!(
-                "The receipt at {path} is no plain file: let the job write it there as one."
-            ),
-            Ok(_) if std::fs::File::open(&self.path).is_err_and(|error| denied(&error)) => format!(
-                "The receipt at {path} is there, but the collector's user may not open it: let \
-                 the job write it with mode 0644 (chmod 0644 {path})."
-            ),
-            Ok(_) => format!(
-                "The receipt at {path} cannot be read: it must be at most {} KiB of JSON, an \
-                 object or a list.",
-                MAX_DOCUMENT / 1024
-            ),
-        }
-    }
 }
 
 impl Provider for Receipt {
@@ -351,9 +351,15 @@ impl Provider for Receipt {
             .map(|observation| observation.with_scope(self.scope.clone()))
         };
         let Some((document, metadata)) = read else {
-            let unknown = base(State::Unknown)?.with_findings(vec![self.unread()]);
+            let unknown = base(State::Unknown)?
+                .with_findings(vec![self.unread(hidden::place(&self.path).as_deref())]);
             return Ok(Report::of(unknown));
         };
+        if let Some(finding) = self.misshapen(&document) {
+            return Ok(Report::of(
+                base(State::Unknown)?.with_findings(vec![finding]),
+            ));
+        }
         // A result that someone else could have written is not evidence.
         let trusted = changed_only_by_trusted(&metadata);
         let items = self.items(&document);
@@ -388,12 +394,11 @@ impl Provider for Receipt {
             }
             findings.push(finding);
         }
-        if let Some(items) = items.as_ref().filter(|items| items.len() > MAX_ROWS) {
-            findings.push(format!(
-                "The receipt lists {} rows; the table shows the last {MAX_ROWS}.",
-                items.len()
-            ));
-        }
+        findings.extend(
+            items
+                .as_deref()
+                .and_then(|items| self.cut(&document, items)),
+        );
         let fields = self.fields(&document, reported, &mut findings);
         let table = items.as_ref().map(|items| {
             let shown = &items[items.len().saturating_sub(MAX_ROWS)..];
@@ -436,6 +441,9 @@ impl Provider for Receipt {
         Ok(report)
     }
 }
+
+#[cfg(test)]
+mod rows_tests;
 
 #[cfg(test)]
 mod tests;

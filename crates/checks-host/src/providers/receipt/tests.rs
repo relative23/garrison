@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use garrison_core::observations::Format;
 use garrison_core::time;
 use serde_json::json;
@@ -11,7 +13,7 @@ fn provider(text: &str) -> Receipt {
 }
 
 /// A receipt only this user can change, whatever the umask.
-fn write(path: &std::path::Path, text: &str) {
+fn write(path: &Path, text: &str) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::write(path, text).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).unwrap();

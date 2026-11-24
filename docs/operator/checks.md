@@ -37,8 +37,8 @@ observation the checks report is in [observation ids](observations.md).
 
 | `type` | Options | Shows |
 |---|---|---|
-| `host` | `disk_path`, `modules` | Memory, load, disk, uptime |
-| `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path` (with `disk`), `firewall_units`, `modules` | What the host needs from its operator; see below |
+| `host` | `disk_path` (`/`), `proc` (`/proc`, for tests), `modules` | Memory, load, disk, uptime |
+| `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path` (with `disk`), `firewall_units`, `root` (`/`, for tests), `modules` | What the host needs from its operator; see below |
 | `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; an alias, such as `sshd.service`, shows the state of the unit it names and names that unit ("Alias of"). Timers show their schedule and next run. For one-shot jobs see below |
 | `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `max_domains` (20, at most 100), `modules` | Certificate validity per endpoint; see below |
 | `mail-flow` | `checks` (default: all of `spam`, `milter`, `authentication`, `tls`) | A week of the recorded events in numbers; see below |
@@ -49,7 +49,7 @@ observation the checks report is in [observation ids](observations.md).
 | `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30), `verify_days` (0: not expected), `restore_days` (0), `path`, `modules` | What the backup tool reported of its repository; see below |
 | `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity: a bundle (`plugins/<id>.js`) that does not match the SHA-256 in `plugins/registry.json` is a failure. A plugin whose bundle cannot be checked, as one the registry does not list or lists twice, gives no hash for, or whose bundle is missing, a link, unreadable or larger than 2 MiB, is named with why; the card is then Partial, or Unknown where no bundle could be checked, as without `plugins`, which name the plugins to check |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
-| `version-command` | `component`, `command`, `pattern` (its first group, `( )`, is the version), `modules` | Installed version from a command; it runs in the collector's sandbox, so a program that compiles code at run time (a JIT) fails there |
+| `version-command` | `component`, `command`, `pattern` (its first group, `( )`, is the version), `modules` | Installed version from a command; it runs in the collector's sandbox, so a program that compiles code at run time (a JIT) fails there. Only its standard output is read, so a version written to standard error, as `nginx -v` writes it, is not found; a card without a version says why |
 | `reputation` | `hosts` (default: the mail hosts Stalwart names), `max_domains` (20, at most 100), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
 | `senders` | `min_recipients` (50), `factor` (5), `burst` (100), `bounces` (10), `modules` | The sender addresses that send unusually much; see below |
 | `releases` | `products` (`garrison`, `stalwart`; default both) | Whether a newer release exists; see below |
@@ -98,9 +98,11 @@ changes nothing; one that cannot be made is Unknown.
   says.
 - `disk`: the free space of `disk_path` (default `/`), read hourly and carried
   forward in a straight line. A disk that would be full within 14 days is a
-  warning. The forecast needs a day of readings first.
+  warning. The forecast needs a day of readings first, and again after
+  `disk_path` changes.
 - `firewall`: whether one of the services firewalld, nftables and ufw is
-  active; none is a warning. Where a unit of the host's own loads the rules,
+  active; none is a warning, and a systemctl that gives no state for each,
+  as while it cannot reach systemd, is Unknown. Where a unit of the host's own loads the rules,
   for example one that runs `nft -f`, name it:
   `firewall_units = ["host-firewall.service"]`. The check then asks for
   those units instead; `garrison detect` names the ones it finds. The rules
@@ -547,7 +549,9 @@ A receipt counts only if nobody else can have written it: it must belong to
 root (or to the collector's own user) and must not be writable by others, nor
 by its group unless that group is root. Otherwise the observation is Unknown.
 Let the job write it as root with mode `0644`. Where the card cannot read the
-receipt, it says why and what mends it: there is no file at `path`, which the
+receipt, it says why and what mends it: the collector's unit hides the place,
+as it does `/home` and `/tmp` (see [below](#paths-the-collector-cannot-see));
+there is no file at `path`, which the
 job has not written; the collector's user may not search a folder on the way
 there (`chmod o+x` that folder) or may not open the file, as where a job
 under umask 027 or 077 writes it with mode 0640 or 0600 (mode `0644` mends
@@ -558,11 +562,14 @@ A receipt can list results, one row each: `rows = []` where the file itself
 is the list, or `rows = ["results"]` for a list under that key. `columns`
 makes its table and `ok_rows` is what every row must meet. A list needs
 `row_date`, the key of each row's date, the newest of which is the
-receipt's; `fields`, `ok_when` and `date` read an object. Every
+receipt's; `fields`, `ok_when` and `date` read an object. A receipt of the
+other shape, a list where the entry reads an object or the other way round,
+is Unknown, and the card says how to read it. Every
 row is judged, however many; the table shows the last 200, where a job that
 appends a row for each run puts the newest, and the card says how many rows
 the receipt lists where there are more. Where `rows` names no list, as where a
-job that failed early wrote none, the card is Unknown and says so; a row that
+job that failed early wrote none, or `ok_rows` finds no row to judge, as in an
+empty list, the card is Unknown and says so; a row that
 is no JSON object is not read, and the card says how many and is Partial
 where it would be in order.
 
@@ -586,8 +593,8 @@ some places of the host from it: `/home`, `/root` and `/run/user`
 where the `restart` check reads the installed kernels; the broker's unit
 hides that too. `check-config`, and with it the installer before an upgrade,
 refuses a path of a check that lies there, also through a link, and
-`garrison doctor` names it: `disk_path`, `proc` and `root` of `host` and
-`host-care`, the `path` of `receipt` and `backup-check`, the files and the
+`garrison doctor` names it: `disk_path` and `proc` of `host`, `disk_path`
+and `root` of `host-care`, the `path` of `receipt` and `backup-check`, the files and the
 database folder of `clamav`, `admin_directory` of `bulwark` and the program
 a `version-command` runs. Root sees them there, the collector does not, so
 the check would read nothing there, or the free space of the collector's

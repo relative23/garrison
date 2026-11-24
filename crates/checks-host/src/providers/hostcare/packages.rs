@@ -7,6 +7,7 @@ use std::{fs, io};
 
 use super::reading::{self, Pending};
 use crate::command::Runner;
+use crate::providers::ran::not_run;
 
 /// What changes when packages are installed or removed or new metadata is
 /// fetched: rpm's and dpkg's databases, apt's package cache and the folder
@@ -41,7 +42,7 @@ pub(super) fn pending(root: &Path, runner: &dyn Runner) -> (String, Result<Pendi
     let run = |arguments: &[&str]| {
         runner
             .run(arguments)
-            .map_err(|error| format!("{} did not run: {error}", arguments[0]))
+            .map_err(|error| not_run(arguments[0], &error))
     };
     if has("apt-get") {
         let source = "apt-get -s dist-upgrade".to_owned();

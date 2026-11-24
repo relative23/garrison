@@ -269,7 +269,7 @@ fn updates_that_cannot_be_read_are_unknown_and_asked_for_again_within_the_hour()
         (
             vec![("usr/bin/apt-get", ""), (LISTED, "")],
             vec![],
-            "apt-get did not run: entity not found",
+            "apt-get could not be run: entity not found",
         ),
         (
             vec![("usr/bin/apt-get", ""), (LISTED, "")],
@@ -417,5 +417,41 @@ fn a_dnf_cache_that_only_root_may_read_is_named_with_its_remedy() {
             "The pending updates are not known: only root may read the dnf cache folder of \
              docker-ce-stable in /var/cache/dnf; chmod 755 on it lets this check read it."
         ]
+    );
+}
+
+/// Gives every command the error of one that the runner ended at its time
+/// limit.
+struct Late;
+
+impl Runner for Late {
+    fn run(&self, _: &[&str]) -> io::Result<Output> {
+        Err(io::Error::new(io::ErrorKind::TimedOut, "command timed out"))
+    }
+}
+
+/// A package manager that the collector ended at its time for a command
+/// ran: the card says that it did not finish in that time, and how long it
+/// is.
+#[test]
+fn a_package_manager_ended_at_its_time_limit_is_named_so() {
+    let root = tempfile::tempdir().unwrap();
+    host(root.path(), &[("usr/bin/dnf", "")]);
+    let observation = checked(
+        &provider(root.path(), "\"updates\""),
+        &Late,
+        &Remembered::default(),
+        0,
+    );
+    assert_eq!(
+        (observation.state, observation.findings),
+        (
+            State::Unknown,
+            vec![
+                "The pending updates are not known: dnf did not finish within 8 seconds and was \
+                 ended."
+                    .to_owned()
+            ]
+        )
     );
 }

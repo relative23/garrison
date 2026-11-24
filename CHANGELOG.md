@@ -1311,6 +1311,30 @@ Notable changes for operators and users. The format follows
   it, as the documentation asks), a link, which is not followed, or no
   plain file, and a file larger than 1024 KiB or no JSON object or list,
   and names what mends each.
+- **A receipt that another user swaps for a named pipe no longer holds up
+  the collection run.**
+- **A receipt whose `ok_rows` finds no row to judge is no longer in
+  order.** An empty list of rows is Unknown now, as a missing one is.
+- **A receipt in a place the collector's unit hides, such as `/root` or
+  `/tmp`, says so instead of asking for a `chmod`.** Let the job write it
+  where the collector sees it, as under `/var/lib`.
+- **A list receipt read by an entry for an object is Unknown and says how
+  to read it, instead of Failed.** A list is read with `rows = []` and
+  `row_date`.
+- **The disk forecast begins anew where `disk_path` changes, instead of
+  mixing the readings of two file systems.**
+- **The firewall card is Unknown where systemctl gives no state for its
+  units, instead of warning that no firewall runs.**
+- **The host card keeps what it read where one of its sources cannot be
+  read, such as a `disk_path` that is not there, and names that source.**
+- **A version card without a version says why.** It names a command that
+  ended with a status or did not finish in 8 seconds, and output in which
+  `pattern` finds nothing; only standard output is read.
+- **The updates card and the systemd cards name a command that the
+  collector ended after 8 seconds as one that did not finish in time.**
+- **A count that a file system does not keep is no longer read as 0.**
+  btrfs shows no share of free inodes instead of 0.0 %, and a file system
+  without a size, such as /proc, is neither judged full nor forecast.
 - **A receipt's time is the same instant for every viewer.** A field or
   column of a receipt with `format = "datetime"` went out as the job wrote
   it, and a time written without its offset, such as `2026-11-17T03:00:00`,

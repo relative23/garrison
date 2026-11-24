@@ -17,6 +17,7 @@ use garrison_core::time;
 use regex_lite::Regex;
 use serde_json::{Map, json};
 
+use super::ran::not_run;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::options::{Checked, Options, fail, modules_of};
 
@@ -315,7 +316,7 @@ impl Systemd {
         let output = context
             .runner
             .run(&arguments)
-            .map_err(|error| format!("systemctl show could not be run: {error}."))?;
+            .map_err(|error| format!("{}.", not_run("systemctl show", &error)))?;
         let mut answers = Vec::new();
         for block in output.stdout.split("\n\n") {
             // A property a unit has several of, such as a timer's rules,

@@ -87,6 +87,15 @@ impl Runner for Missing {
     }
 }
 
+/// Gives every command the error of one ended at the runner's time limit.
+struct Late;
+
+impl Runner for Late {
+    fn run(&self, _: &[&str]) -> io::Result<Output> {
+        Err(io::Error::new(io::ErrorKind::TimedOut, "command timed out"))
+    }
+}
+
 /// An answer is read only for a unit it names. One that names none, too
 /// few answers, one without the unit's load state and a systemctl that
 /// cannot be run leave the units Unknown, and each says why.
@@ -151,6 +160,16 @@ fn a_unit_without_an_answer_of_its_own_is_unknown_and_says_why() {
             observation.findings[0].starts_with("systemctl show could not be run: "),
             "{:?}",
             observation.findings
+        );
+    }
+    // A systemctl that ran and was ended at the collector's time limit.
+    for observation in observed(units, &Late) {
+        assert_eq!(
+            (observation.state, observation.findings),
+            (
+                State::Unknown,
+                vec!["systemctl show did not finish within 8 seconds and was ended.".to_owned()]
+            )
         );
     }
 }

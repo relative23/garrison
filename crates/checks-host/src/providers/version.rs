@@ -8,6 +8,7 @@ use garrison_core::observations::{Evidence, Kind, Observation, Required, State};
 use regex_lite::Regex;
 use serde_json::{Map, json};
 
+use super::ran::not_run;
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
@@ -53,15 +54,38 @@ impl VersionCommand {
         })
     }
 
-    fn version(&self, context: &Context<'_>) -> Option<String> {
+    /// The version the command gives, or why it gives none.
+    fn version(&self, context: &Context<'_>) -> Result<String, String> {
+        let program = &self.command[0];
         let arguments: Vec<&str> = self.command.iter().map(String::as_str).collect();
-        let output = context.runner.run(&arguments).ok()?;
-        if output.code != Some(0) {
-            return None;
+        let output = context
+            .runner
+            .run(&arguments)
+            .map_err(|error| format!("{}.", not_run(program, &error)))?;
+        match output.code {
+            Some(0) => {}
+            Some(code) => return Err(format!("{program} exited with status {code}.")),
+            None => return Err(format!("{program} was ended by a signal.")),
+        }
+        // As `nginx -v` writes its version to standard error, which the
+        // runner does not keep.
+        if output.stdout.trim().is_empty() {
+            return Err(format!(
+                "{program} wrote nothing to its standard output, the only output that is read."
+            ));
         }
         let head: String = output.stdout.chars().take(MAX_OUTPUT).collect();
-        let found = self.pattern.captures(&head)?;
-        Some(found.get(1)?.as_str().to_owned())
+        let found = self.pattern.captures(&head);
+        match found.as_ref().and_then(|found| found.get(1)) {
+            Some(version) => Ok(version.as_str().to_owned()),
+            None if head.len() < output.stdout.len() => Err(format!(
+                "The first {MAX_OUTPUT} characters of the output of {program} hold nothing that \
+                 `pattern` finds."
+            )),
+            None => Err(format!(
+                "The output of {program} holds nothing that `pattern` finds."
+            )),
+        }
     }
 }
 
@@ -101,14 +125,14 @@ impl Provider for VersionCommand {
         let version = self.version(context);
         let mut value = Map::new();
         value.insert("component".into(), json!(self.component));
-        value.insert("version".into(), json!(version));
+        value.insert("version".into(), json!(version.as_ref().ok()));
         let observation = Observation::new(Required {
             id: &self.id(),
             provider: self.name(),
             title: &self.component,
             modules: self.modules.iter().copied(),
             evidence: Evidence::Inventory,
-            state: if version.is_some() {
+            state: if version.is_ok() {
                 State::Ok
             } else {
                 State::Unknown
@@ -119,6 +143,7 @@ impl Provider for VersionCommand {
         .with_kind(Kind::Version)
         .with_scope("Installed binary; the running process version is not verified.")
         .with_value(value)
+        .with_findings(version.err().into_iter().collect())
         .with_max_age(3600);
         Ok(Report::of(observation))
     }
