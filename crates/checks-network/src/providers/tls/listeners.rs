@@ -10,6 +10,7 @@
 //! ports that are asked.
 
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use garrison_stalwart::jmap::JmapClient;
@@ -53,6 +54,9 @@ pub(super) struct Listener {
     implicit_tls: bool,
 }
 
+/// Where a listener that listens on every address is reached.
+const LOOPBACK: &str = "127.0.0.1";
+
 /// The port of `[::]:465` or `0.0.0.0:465`.
 fn port(bind: &str) -> Option<u16> {
     bind.rsplit_once(':')?
@@ -62,25 +66,44 @@ fn port(bind: &str) -> Option<u16> {
         .filter(|port| *port > 0)
 }
 
-/// Each TLS port of `listeners` once for each of `hosts`, lowest port first.
+/// Where a probe reaches a listener bound to `bind`: at its port, on the
+/// address it is bound to, as `192.0.2.10:465`, or on 127.0.0.1 where it
+/// listens on every address, as `[::]:465`.
+fn reached(bind: &str) -> Option<(String, u16)> {
+    let port = port(bind)?;
+    let address = match bind.parse::<SocketAddr>() {
+        Ok(bound) if !bound.ip().is_unspecified() => bound.ip().to_string(),
+        _ => LOOPBACK.to_owned(),
+    };
+    Some((address, port))
+}
+
+/// Each TLS port of `listeners` once for each of `hosts`, lowest port first,
+/// on the address it is reached at: 127.0.0.1 where any listener binds the
+/// port on every address.
 pub(super) fn derived(listeners: &[Listener], hosts: &[String]) -> Vec<Endpoint> {
-    let mut ports: BTreeMap<u16, bool> = BTreeMap::new();
+    let mut ports: BTreeMap<u16, (bool, String)> = BTreeMap::new();
     for listener in listeners.iter().filter(|listener| listener.use_tls) {
         let starttls = !listener.implicit_tls;
         if starttls && listener.protocol != "smtp" {
             continue;
         }
-        for port in listener.bind.keys().filter_map(|bind| port(bind)) {
-            ports.entry(port).or_insert(starttls);
+        for (address, port) in listener.bind.keys().filter_map(|bind| reached(bind)) {
+            let reach = ports
+                .entry(port)
+                .or_insert_with(|| (starttls, address.clone()));
+            if address == LOOPBACK {
+                reach.1 = address;
+            }
         }
     }
     let mut endpoints = Vec::new();
     for host in hosts {
-        for (port, starttls) in &ports {
+        for (port, (starttls, address)) in &ports {
             endpoints.push(Endpoint {
                 host: host.clone(),
                 port: *port,
-                address: "127.0.0.1".to_owned(),
+                address: address.clone(),
                 starttls: *starttls,
             });
         }
@@ -175,6 +198,31 @@ mod tests {
         );
         assert_eq!(derived(&listeners(), &[]), Vec::new());
         assert_eq!(derived(&[], &hosts), Vec::new());
+    }
+
+    /// A listener bound to one address is probed on that address; one bound
+    /// to every address on 127.0.0.1, also where another binds the same
+    /// port to one address.
+    #[test]
+    fn a_listener_is_probed_on_the_address_it_is_bound_to() {
+        let bound: Vec<Listener> = serde_json::from_value(json!([
+            {"protocol": "smtp", "bind": {"192.0.2.10:465": true}, "useTls": true, "implicitTls": true},
+            {"protocol": "imap", "bind": {"[2001:db8::5]:993": true}, "useTls": true, "implicitTls": true},
+            {"protocol": "smtp", "bind": {"192.0.2.10:25": true, "[::]:25": true}, "useTls": true, "implicitTls": false},
+        ]))
+        .unwrap();
+        let reached: Vec<(u16, String)> = derived(&bound, &["mail.example.test".to_owned()])
+            .into_iter()
+            .map(|endpoint| (endpoint.port, endpoint.address))
+            .collect();
+        assert_eq!(
+            reached,
+            [
+                (25, "127.0.0.1".to_owned()),
+                (465, "192.0.2.10".to_owned()),
+                (993, "2001:db8::5".to_owned()),
+            ]
+        );
     }
 
     #[test]

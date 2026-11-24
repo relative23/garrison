@@ -46,6 +46,11 @@ Notable changes for operators and users. The format follows
   `https://hooks.example.org?key=…`, on which nothing ever went out, is
   refused by `check-config`, and with it the upgrade. Write
   `https://hooks.example.org/?key=…`.
+- Run `garrison stalwart setup` again after the upgrade: the collector's key
+  needs `sysDomainQuery` and `sysAccountQuery` now, to find the domains and
+  accounts the checks read. Until then the DNS records, Blocklists, Reverse
+  names and TLS certificates cards say that Stalwart did not give its
+  domains, and the Management API card that it refused `x:Account/query`.
 
 ### Added
 
@@ -1030,6 +1035,26 @@ Notable changes for operators and users. The format follows
   run's time left unasked, as after a policy taken from within the hour,
   the card stayed Unknown or Partial, which sends no notification. It is a
   warning in either case now.
+- **A notification of the TLS certificates or a domain's DNS records card
+  names what made it a warning or a failure.**
+- **A long DNS answer no longer stops the DNS and reputation checks where
+  the resolver refuses TCP.** That record or host is named with why; let the
+  resolver answer over TCP on port 53.
+- **The DNS, reputation and TLS checks take their first `max_domains`
+  domains however many Stalwart has, and count the rest.**
+- **The mailbox storage card reads Stalwart's accounts up to `max_accounts`
+  and says how many it leaves.** Raise `max_accounts` where it names some.
+- **The TLS check probes a listener Stalwart binds to one address on that
+  address.**
+- **The TLS certificates card says where an SMTP listener stopped before
+  TLS**: a closed connection, its greeting, EHLO or STARTTLS.
+- **The metrics exporter's card names what writes a scrape credential that
+  Stalwart refuses**, `garrison stalwart setup`.
+- **A name lookup that failed is named in the system's words** on the
+  sign-in and DNS records cards and in notifications, which tell a name
+  that does not exist from one that could not be looked up now.
+- **The Sign-in page card and `garrison doctor` say what mends the page by
+  its cause**: the certificate of the issuer's host, its name, or the proxy.
 - **A blocklist that gives no verdict keeps the Blocklists card from being
   OK.** A list that refused this resolver, as Spamhaus refuses public ones,
   answered with an error or did not answer at all, showed only in its row:

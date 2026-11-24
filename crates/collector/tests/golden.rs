@@ -156,10 +156,13 @@ fn every_provider_reports_the_expected_observations() {
         serde_json::from_str(&std::fs::read_to_string(fixtures().join("golden.json")).unwrap())
             .unwrap();
     let jmap = std::fs::read_to_string(fixtures().join("jmap.json")).unwrap();
+    let accounts = std::fs::read_to_string(fixtures().join("jmap-accounts.json")).unwrap();
     let metrics = std::fs::read_to_string(fixtures().join("metrics.txt")).unwrap();
-    // In provider order: management API, exporter, health endpoint.
+    // In provider order: management API and its accounts, exporter, health
+    // endpoint.
     let server = serve(vec![
         answer(200, &jmap),
+        answer(200, &accounts),
         answer(200, &metrics),
         answer(204, ""),
     ]);

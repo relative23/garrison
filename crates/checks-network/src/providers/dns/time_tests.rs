@@ -99,11 +99,11 @@ fn nothing_is_asked_once_the_time_for_the_runs_checks_is_over() {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     let address = socket.local_addr().unwrap();
     socket.set_nonblocking(true).unwrap();
-    let stalwart = serve(vec![answer_json(&json!({
-        "methodResponses": [["x:Domain/get", {"list": [
+    let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+        &serde_json::json!([
             {"id": "b", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 mail.example.test.\n"}
-        ]}, "0"]]
-    }))]);
+        ]),
+    ))]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&stalwart.url);
@@ -145,11 +145,11 @@ fn the_records_left_when_the_time_is_over_are_named_as_not_asked() {
     let (address, handle) = resolver_after(zone, None, 1, Duration::from_millis(1500));
     let zone_file = "example.test. IN MX 10 mail.example.test.\n\
                      example.test. IN TXT \"v=spf1 mx -all\"\n";
-    let stalwart = serve(vec![answer_json(&json!({
-        "methodResponses": [["x:Domain/get", {"list": [
+    let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+        &serde_json::json!([
             {"id": "b", "name": "example.test", "dnsZoneFile": zone_file}
-        ]}, "0"]]
-    }))]);
+        ]),
+    ))]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&stalwart.url);

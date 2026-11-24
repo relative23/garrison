@@ -46,3 +46,30 @@ fn the_exporters_card_says_why_its_answer_could_not_be_read() {
         ]
     );
 }
+
+/// Stalwart refuses a scrape credential it does not take, as after it was
+/// changed in the Stalwart WebUI, with 401 or 403: the card says so and
+/// names what writes it.
+#[test]
+fn a_refused_scrape_credential_names_what_writes_it() {
+    for status in [401, 403] {
+        assert_eq!(
+            card(answer(status, "")),
+            (
+                State::Unknown,
+                vec![format!(
+                    "The exporter refused the collector's scrape credential (HTTP {status}). \
+                     {SCRAPE_FIX}"
+                )]
+            )
+        );
+    }
+    // Another status is named as it is.
+    assert_eq!(
+        card(answer(404, "")),
+        (
+            State::Unknown,
+            vec!["The exporter answered HTTP 404.".to_owned()]
+        )
+    );
+}

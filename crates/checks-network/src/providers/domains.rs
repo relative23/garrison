@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use garrison_stalwart::jmap::JmapClient;
+use garrison_stalwart::jmap::{JmapClient, Listed};
 use serde::Deserialize;
 
 use crate::context::Context;
@@ -57,14 +57,19 @@ pub(super) fn not_given(error: &garrison_stalwart::Error, what: &str, besides: &
     }
 }
 
-/// Stalwart's domains, as the collector's `key` reads them.
+/// Stalwart's first `most` domains with their zone files, as the
+/// collector's `key` reads them, and how many it has: only those are read,
+/// so that the answer does not grow with the domains a check leaves out.
 pub(super) fn domains(
     context: &Context<'_>,
     key: &str,
-) -> Result<Vec<Domain>, garrison_stalwart::Error> {
+    most: usize,
+) -> Result<Listed<Domain>, garrison_stalwart::Error> {
     JmapClient::new(&context.deployment.stalwart_url, key)
         .with_timeout(Duration::from_secs(8))
-        .get::<Domain>("Domain", None, &["name", "dnsZoneFile"])
+        .listed::<Domain>("Domain", &["name", "dnsZoneFile"], most, || {
+            !context.deadline.expired()
+        })
 }
 
 /// A domain as far as it is read.

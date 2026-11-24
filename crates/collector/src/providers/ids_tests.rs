@@ -55,10 +55,15 @@ fn case(kind: &'static str, options: &str) -> Case {
 pub(super) fn cases(work: &Path) -> Vec<Case> {
     let fixtures = golden();
     let jmap = std::fs::read_to_string(fixtures.join("jmap.json")).unwrap();
+    let accounts = std::fs::read_to_string(fixtures.join("jmap-accounts.json")).unwrap();
     let (work, golden) = (work.display(), fixtures.display());
-    let domains = answer_json(&json!({"methodResponses": [["x:Domain/get", {"list": [
-        {"id": "b", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 mail.example.test.\n"}
-    ]}, "0"]]}));
+    // The domains' IDs from a query, and those domains.
+    let domains = answer_json(&json!({"methodResponses": [
+        ["x:Domain/query", {"ids": ["b"], "position": 0, "total": 1}, "0"],
+        ["x:Domain/get", {"list": [
+            {"id": "b", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 mail.example.test.\n"}
+        ]}, "1"],
+    ]}));
     vec![
         case(
             "backup-check",
@@ -115,7 +120,7 @@ pub(super) fn cases(work: &Path) -> Vec<Case> {
         case("senders", ""),
         case("sign-in", ""),
         Case {
-            stalwart: vec![answer(200, &jmap)],
+            stalwart: vec![answer(200, &jmap), answer(200, &accounts)],
             ..case(
                 "stalwart",
                 "milter_host = \"127.0.0.1\"\nmilter_port = 7357\nmax_accounts = 3",

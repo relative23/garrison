@@ -86,53 +86,6 @@
     "notFound": []
    },
    "5"
-  ],
-  [
-   "x:Account/get",
-   {
-    "list": [
-     {
-      "id": "a",
-      "@type": "User",
-      "emailAddress": "full@example.test",
-      "quotas": {
-       "maxDiskQuota": 1000
-      },
-      "usedDiskQuota": 955
-     },
-     {
-      "id": "b",
-      "@type": "User",
-      "emailAddress": "half@example.test",
-      "quotas": {
-       "maxDiskQuota": 2000
-      },
-      "usedDiskQuota": 1000
-     },
-     {
-      "id": "c",
-      "@type": "User",
-      "emailAddress": "unlimited@example.test",
-      "usedDiskQuota": 5000
-     },
-     {
-      "id": "d",
-      "@type": "User",
-      "emailAddress": null,
-      "usedDiskQuota": 0,
-      "quotas": {
-       "maxDiskQuota": 0
-      }
-     },
-     {
-      "id": "e",
-      "@type": "Group",
-      "emailAddress": "team@example.test"
-     }
-    ],
-    "notFound": []
-   },
-   "6"
   ]
  ]
 }

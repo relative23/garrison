@@ -9,6 +9,7 @@ use garrison_testing::tls::serve_until;
 
 use super::tests::{STALWART, html, in_order};
 use super::*;
+use crate::context::Deadline;
 use crate::testing::{Canned, Remembered, config, table};
 
 /// How the page is asked at `at`, trusting the authority of `roots`.

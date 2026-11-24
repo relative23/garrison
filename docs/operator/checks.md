@@ -42,7 +42,7 @@ observation the checks report is in [observation ids](observations.md).
 | `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; an alias, such as `sshd.service`, shows the state of the unit it names and names that unit ("Alias of"). Timers show their schedule and next run. For one-shot jobs see below |
 | `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `max_domains` (20, at most 100), `modules` | Certificate validity per endpoint; see below |
 | `mail-flow` | `checks` (default: all of `spam`, `milter`, `authentication`, `tls`) | A week of the recorded events in numbers; see below |
-| `stalwart` | `milter_host`, `milter_port`, `max_accounts` | Spam settings, classifier, milter, queue, mailbox storage, running version |
+| `stalwart` | `milter_host`, `milter_port`, `max_accounts` (1000, at most 20 000: how many of Stalwart's accounts the mailbox storage reads) | Spam settings, classifier, milter, queue, mailbox storage, running version |
 | `prometheus` | `path` | Native counters and gauges for the dashboard |
 | `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
 | `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning, and so is one dated more than five minutes ahead of the host's clock, whose age is not known; where both are there the newer one counts, also for the dashboard's signature age |
@@ -162,8 +162,10 @@ server would send it. The certificate must be trusted by the system's
 authorities and valid for that name; one that expires within 14 days is a
 warning. Without `endpoints` the check asks Stalwart what to probe: every
 listener that speaks TLS (25 with STARTTLS, 465, 993, 443 and whatever else
-is set up), once under the name of each mail host of Stalwart's domains, of
-the first `max_domains` of them; the card says when Stalwart has more. It
+is set up), on the address it is bound to, or on 127.0.0.1 where it listens
+on every address, once under the name of each mail host of Stalwart's
+domains, of the first `max_domains` of them; the card says when Stalwart has
+more. It
 probes 24 such endpoints at the most; where there are more, the card says how
 many and is Partial where it would be OK. A listener added later is then
 checked without a change here, and a certificate that does not cover a mail
@@ -339,7 +341,9 @@ check asks the resolver for them and compares:
 The answers are those of this resolver at this moment; another resolver may
 still hold older ones. A record that the resolver answers with an error, such
 as SERVFAIL for a zone whose DNSSEC signatures expired, or with an answer
-that is malformed or cut off, says "not read" and why. A record that could
+that is malformed or cut off, says "not read" and why; so does one whose
+answer is too long for UDP where the resolver then takes no question over
+TCP, which it must on port 53. A record that could
 not be read keeps the domain from being in order, optional as it may be: a
 needed one leaves it Unknown, an optional one, such as a TLSA record, Partial
 where it would be OK, and the card names the records and why; where the

@@ -1,5 +1,6 @@
 use garrison_core::config::Database;
-use serde_json::Value;
+use garrison_core::recording;
+use serde_json::{Value, json};
 
 use super::answers::{Fixed, Plain, Stages, Tolerant, Written, only, rows, total};
 use super::*;
@@ -126,8 +127,6 @@ fn the_calls_are_written_as_stalwart_reads_them() {
             ["x:QueuedMessage/query", {"calculateTotal": true, "limit": 1}],
             ["x:MtaMilter/get", {"ids": null,
                 "properties": ["host", "port", "enable", "stages", "tempFailOnError"]}],
-            ["x:Account/get", {"ids": null,
-                "properties": ["id", "@type", "emailAddress", "quotas", "usedDiskQuota"]}],
         ])
     );
 }

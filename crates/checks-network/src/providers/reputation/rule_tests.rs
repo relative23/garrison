@@ -20,7 +20,7 @@ use garrison_testing::http::{answer, json as answer_json, serve};
 use super::tests::{V4, V6, Zone, address, listed, mail_host, pointer};
 use super::*;
 use crate::context::{Deadline, DqsKey};
-use crate::providers::dns::domains_tests::twenty_one_domains;
+use crate::providers::dns::domains_tests::{domains_value, twenty_one_domains};
 use crate::providers::dns::stand_in::{Fault, resolver_faulty};
 use crate::testing::{Canned, config, table};
 
@@ -327,10 +327,10 @@ fn host_scenarios() -> Vec<Scenario> {
         );
     }
     let long = format!("{}{}.example.test", "a".repeat(60), ".b".repeat(97));
-    let with_long = answer_json(&serde_json::json!({"methodResponses": [["x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": format!(
-            "example.test. IN MX 10 mail.example.test.\nexample.test. IN MX 20 {long}.\n"
-        )}]}, "0"]]}));
+    let zone =
+        format!("example.test. IN MX 10 mail.example.test.\nexample.test. IN MX 20 {long}.\n");
+    let domain = serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone}]);
+    let with_long = answer_json(&domains_value(&domain));
     let of_stalwart = "lists = [\"b.example.org\"]\nlists_ipv6 = []";
     let scenarios = [
         (

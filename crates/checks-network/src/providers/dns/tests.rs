@@ -160,9 +160,9 @@ pub(super) fn collected_with(
     address: SocketAddr,
     policy: Option<String>,
 ) -> Vec<Observation> {
-    let stalwart = serve(vec![answer_json(&json!({
-        "methodResponses": [["x:Domain/get", {"list": domains}, "0"]]
-    }))]);
+    let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+        &serde_json::json!(domains),
+    ))]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&stalwart.url);

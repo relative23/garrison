@@ -11,9 +11,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{PoisonError, RwLock, RwLockReadGuard};
 
+use garrison_stalwart::Error;
 use garrison_stalwart::ids::account_id_for_subject;
-use garrison_stalwart::jmap::JmapClient;
+use garrison_stalwart::jmap::{JmapClient, Listed};
 use garrison_stalwart::permissions::{
     ACCOUNT_PROPERTIES, AUTHENTICATION_PROPERTIES, Account, Authentication, Native,
     ROLE_PROPERTIES, Role, RoleIds, account_rights, evaluate, is_verified_scope, native_rights,
@@ -56,6 +58,16 @@ fn fetch(lab: &Lab, account_id: &str) -> (Account, BTreeMap<String, Role>, Authe
         roles,
         read(&authentication["list"][0]),
     )
+}
+
+/// The tests that create or remove accounts hold this shared while they
+/// run, their clean-up included; the test that counts every account of the
+/// server holds it alone: Stalwart lists the newest accounts first, so one
+/// added or removed meanwhile moves the others across a page.
+static ACCOUNTS: RwLock<()> = RwLock::new(());
+
+fn creating_accounts() -> RwLockReadGuard<'static, ()> {
+    ACCOUNTS.read().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn domain_id(lab: &Lab) -> String {
@@ -118,6 +130,7 @@ fn assert_equal(lab: &Lab, user: &User) -> BTreeSet<String> {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn default_admin_and_user_roles() {
+    let _accounts = creating_accounts();
     let mut lab = Lab::from_environment();
     for kind in ["Admin", "User"] {
         let user = make_user(
@@ -132,6 +145,7 @@ fn default_admin_and_user_roles() {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn custom_roles_with_inheritance_and_denial() {
+    let _accounts = creating_accounts();
     let mut lab = Lab::from_environment();
     let tag = unique();
     let parent = lab.create(
@@ -171,6 +185,7 @@ fn custom_roles_with_inheritance_and_denial() {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn account_level_overrides() {
+    let _accounts = creating_accounts();
     let mut lab = Lab::from_environment();
     for mode in ["Merge", "Replace"] {
         let user = make_user(
@@ -226,6 +241,7 @@ fn account_level_overrides() {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn oidc_subject_maps_to_account_id() {
+    let _accounts = creating_accounts();
     let mut lab = Lab::from_environment();
     let user = make_user(
         &mut lab,
@@ -263,14 +279,20 @@ fn role_map_shape_is_boolean() {
 /// A client of the management API with a key that holds the broker's
 /// permissions alone, as `stalwart setup` makes it, named by `tag`.
 fn broker_client(lab: &mut Lab, tag: &str) -> JmapClient {
-    let permissions: Value = BROKER_PERMISSIONS
+    keyed(lab, &format!("{tag} broker"), &BROKER_PERMISSIONS)
+}
+
+/// A client of the management API with a key that holds `permissions`
+/// alone, named by `tag`.
+fn keyed(lab: &mut Lab, tag: &str, permissions: &[&str]) -> JmapClient {
+    let permissions: Value = permissions
         .iter()
         .map(|name| (name.to_string(), json!(true)))
         .collect();
     let created = lab.call(
         "x:ApiKey/set",
         &json!({"create": {"k": {
-            "description": format!("{tag} broker contract test"),
+            "description": format!("{tag} contract test"),
             "permissions": {"@type": "Replace", "permissions": permissions},
             "expiresAt": null,
         }}}),
@@ -279,6 +301,60 @@ fn broker_client(lab: &mut Lab, tag: &str) -> JmapClient {
     lab.created
         .push(("ApiKey".into(), key["id"].as_str().unwrap().to_owned()));
     JmapClient::new(&lab.url, key["secret"].as_str().unwrap())
+}
+
+/// Stalwart gives a `/get` of all objects the first 500 of them alone, and
+/// a query pages through all of them, with a get of each page's IDs in the
+/// same request: `listed` reads every one, with the `/query` permission of
+/// the kind beside its `/get` one, and without it is refused.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn objects_beyond_the_500_of_one_get_are_listed_in_pages() {
+    let _alone = ACCOUNTS.write().unwrap_or_else(PoisonError::into_inner);
+    let mut lab = Lab::from_environment();
+    let tag = unique();
+    let domain = domain_id(&lab);
+    for batch in 0..6 {
+        let create: serde_json::Map<String, Value> = (0..100)
+            .map(|number| {
+                let name = format!("{tag}x{batch}x{number}");
+                let account = json!({"@type": "User", "name": name, "domainId": domain});
+                (format!("u{number}"), account)
+            })
+            .collect();
+        let created = lab.call("x:Account/set", &json!({"create": create}));
+        for account in created["created"].as_object().unwrap().values() {
+            let id = account["id"].as_str().unwrap().to_owned();
+            lab.created.push(("Account".into(), id));
+        }
+    }
+    let client = keyed(
+        &mut lab,
+        &tag,
+        &["authenticate", "sysAccountGet", "sysAccountQuery"],
+    );
+    let all: Vec<Value> = client.get("Account", None, &["id"]).unwrap();
+    assert_eq!(all.len(), 500);
+    let listed: Listed<Value> = client.listed("Account", &["id"], 100_000, || true).unwrap();
+    assert!(listed.total > 600, "{}", listed.total);
+    let ids: BTreeSet<&str> = listed
+        .objects
+        .iter()
+        .filter_map(|account| account["id"].as_str())
+        .collect();
+    assert_eq!(
+        (listed.objects.len(), ids.len()),
+        (listed.total, listed.total)
+    );
+    let unqueried = keyed(
+        &mut lab,
+        &format!("{tag}get"),
+        &["authenticate", "sysAccountGet"],
+    );
+    assert_eq!(
+        unqueried.listed::<Value>("Account", &["id"], 10, || true),
+        Err(Error::Denied("x:Account/query was refused".to_owned()))
+    );
 }
 
 const BROKER_PERMISSIONS: [&str; 4] = [
@@ -291,6 +367,7 @@ const BROKER_PERMISSIONS: [&str; 4] = [
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn the_broker_key_reads_the_role_graph_it_evaluates() {
+    let _accounts = creating_accounts();
     let mut lab = Lab::from_environment();
     let tag = unique();
     let client = broker_client(&mut lab, &tag);

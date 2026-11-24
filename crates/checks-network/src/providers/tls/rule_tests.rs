@@ -13,7 +13,7 @@ use std::thread;
 use garrison_testing::http::{answer, json as answer_json, serve};
 use garrison_testing::silent::Silent;
 
-use super::tests::{CLOSED, listener, roots};
+use super::tests::{CLOSED, listener, listener_on, roots};
 use super::*;
 use crate::context::Deadline;
 use crate::providers::dns::domains_tests::twenty_one_domains;
@@ -59,9 +59,11 @@ fn listeners(list: &Value) -> String {
 
 /// One domain whose mail host is `localhost`.
 fn localhost() -> String {
-    answer_json(&json!({"methodResponses": [["x:Domain/get", {"list": [
-        {"id": "b", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 localhost.\n"}
-    ]}, "0"]]}))
+    answer_json(&crate::providers::dns::domains_tests::domains_value(
+        &serde_json::json!([
+            {"id": "b", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 localhost.\n"}
+        ]),
+    ))
 }
 
 /// A way of an endpoint to end without a verdict: what it is, the card,
@@ -232,4 +234,27 @@ fn every_endpoint_without_a_verdict_keeps_the_card_from_ok_and_is_named() {
         }
     }
     assert_eq!(broken, Vec::<String>::new());
+}
+
+/// A listener Stalwart binds to one address, here 127.0.0.2, is probed
+/// there: nothing listens on 127.0.0.1 at its port.
+#[test]
+fn a_listener_bound_to_one_address_is_probed_there() {
+    let certificates = certificates();
+    let port = listener_on(&certificates, "127.0.0.2");
+    let bound = json!([{"protocol": "smtp", "bind": {format!("127.0.0.2:{port}"): true},
+                        "useTls": true, "implicitTls": true}]);
+    let derived = Tls::new(&table("type = \"tls\""))
+        .unwrap()
+        .with_roots(roots(&certificates));
+    let card = card(
+        &derived,
+        vec![listeners(&bound), localhost()],
+        true,
+        Deadline::NONE,
+    );
+    assert_eq!(
+        (card.state, card.findings.clone()),
+        (State::Ok, Vec::<String>::new())
+    );
 }

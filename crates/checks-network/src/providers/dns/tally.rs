@@ -100,9 +100,10 @@ impl Tally {
 /// then what the MTA-STS policy leaves open. What was asked and answered
 /// counts; what was not keeps the domain from being in order, optional as
 /// it may be: Unknown for a needed record, Partial for an optional one. A
-/// policy that stops senders is a warning beside either. A record whose
-/// name is no DNS name can never be published, so a needed one is not as
-/// Stalwart names it.
+/// policy that stops senders is a warning beside either, and where it makes
+/// the warning it is said first, as a notification carries a card's first
+/// finding. A record whose name is no DNS name can never be published, so a
+/// needed one is not as Stalwart names it.
 pub(super) fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>) {
     let (mut state, mut findings) = if tally.records == 0 {
         (
@@ -160,10 +161,12 @@ pub(super) fn summed(tally: &Tally, policy: sts::Outcome) -> (State, Vec<String>
         sts::Outcome::Finding(finding) => {
             // Senders that honour the policy stop, whatever else could not
             // be read or asked.
-            if matches!(state, State::Ok | State::Partial | State::Unknown) {
+            if state == State::Warning {
+                findings.push(finding);
+            } else {
                 state = State::Warning;
+                findings.insert(0, finding);
             }
-            findings.push(finding);
         }
         sts::Outcome::Unasked => {
             if state == State::Ok {

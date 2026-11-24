@@ -215,7 +215,8 @@ fn an_optional_record_the_resolver_does_not_answer_keeps_the_card_from_being_in_
 
 /// A policy that leaves the mail host out, or that cannot be read, stops
 /// the senders that honour it: it is a warning also beside a record that
-/// could not be read, needed or optional.
+/// could not be read, needed or optional, and its finding comes first, as
+/// a notification carries a card's first finding.
 #[test]
 fn a_policy_that_stops_senders_is_a_warning_beside_what_could_not_be_read() {
     use garrison_testing::http::answer;
@@ -256,10 +257,65 @@ fn a_policy_that_stops_senders_is_a_warning_beside_what_could_not_be_read() {
             Some(policy),
         );
         assert_eq!(
-            (domain.state, domain.findings.last().map(String::as_str)),
+            (domain.state, domain.findings.first().map(String::as_str)),
             (State::Warning, Some(said)),
             "{name}: {:?}",
             domain.findings
         );
+        assert!(
+            domain.findings[1..]
+                .iter()
+                .any(|finding| finding.contains("could not be read: the resolver could not")),
+            "{name}: {:?}",
+            domain.findings
+        );
     }
+}
+
+/// An answer cut off over UDP whose question over TCP fails is that
+/// record's: the resolver answered, so it is asked the records after it and
+/// those of the next domain.
+#[test]
+fn a_record_whose_question_over_tcp_fails_is_that_records_alone() {
+    let zone_file =
+        |name: &str| format!("{name}. IN MX 10 mail.{name}.\n{name}. IN TXT \"v=spf1 mx -all\"\n");
+    let mut answers = BTreeMap::new();
+    for name in ["a.test", "b.test"] {
+        answers.insert(
+            (name.to_owned(), Kind::Mx.code()),
+            vec![host(&[0, 10], &format!("mail.{name}"))],
+        );
+        answers.insert(
+            (name.to_owned(), Kind::Txt.code()),
+            vec![text("v=spf1 mx -all")],
+        );
+    }
+    let closed = BTreeMap::from([(("a.test".to_owned(), Kind::Txt.code()), Fault::Closed)]);
+    let (address, stopping) = resolver_faulty(answers, closed);
+    let cards = collected_with(
+        &json!([
+            {"id": "a", "name": "a.test", "dnsZoneFile": zone_file("a.test")},
+            {"id": "b", "name": "b.test", "dnsZoneFile": zone_file("b.test")},
+        ]),
+        address,
+        None,
+    );
+    assert_eq!(stopping.questions().len(), 4);
+    let words = "the resolver's answer is cut off, and the question over TCP failed: the resolver \
+                 closed the connection before it answered";
+    assert_eq!(
+        results(&cards[0]),
+        ["published".to_owned(), format!("not read: {words}")]
+    );
+    assert_eq!(
+        (cards[0].state, cards[0].findings.clone()),
+        (
+            State::Unknown,
+            vec![format!("TXT a.test could not be read: {words}.")]
+        )
+    );
+    assert_eq!(
+        (cards[1].state, results(&cards[1])),
+        (State::Ok, vec!["published".to_owned(); 2])
+    );
 }

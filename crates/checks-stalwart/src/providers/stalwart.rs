@@ -7,15 +7,10 @@ use std::time::Duration;
 
 use garrison_core::json;
 use garrison_core::modules::ModuleId;
-use garrison_core::observations::{Evidence, Field, Format, Kind, Observation, Required, State};
-use garrison_core::recording::{self, QUIET_AFTER};
-use garrison_core::sqlite::reading;
+use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_stalwart::http::MAX_RESPONSE;
-use garrison_stalwart::jmap::{JmapClient, Object};
+use garrison_stalwart::jmap::{JmapClient, Listed, Object};
 use garrison_stalwart::{Error, SUPPORTED};
-use rusqlite::OptionalExtension;
-use serde::Deserialize;
-use serde_json::{Map, json};
 
 use self::answers::{Arguments, MailboxAccount, Milter, SpamClassifier, SpamSettings};
 use super::mailboxes::mailboxes;
@@ -25,10 +20,15 @@ use crate::values::float;
 
 pub mod answers;
 mod milter;
+mod version;
 
-/// The calls of one collection, in the order in which `Answers::read` takes
-/// their answers.
-pub fn calls() -> [(&'static str, Arguments); 7] {
+pub(super) use version::running_version;
+
+/// The calls of one collection's first request, in the order in which
+/// `Answers::read` takes their answers. The accounts come in pages of their
+/// own ([`ACCOUNT_PROPERTIES`]), as many as `max_accounts`: Stalwart gives a
+/// `/get` of all of them the first 500 alone.
+pub fn calls() -> [(&'static str, Arguments); 6] {
     const SINGLETON: Arguments = Arguments::get(Some(&["singleton"]), None);
     [
         ("x:SpamSettings/get", SINGLETON),
@@ -43,15 +43,15 @@ pub fn calls() -> [(&'static str, Arguments); 7] {
                 Some(&["host", "port", "enable", "stages", "tempFailOnError"]),
             ),
         ),
-        (
-            "x:Account/get",
-            Arguments::get(
-                None,
-                Some(&["id", "@type", "emailAddress", "quotas", "usedDiskQuota"]),
-            ),
-        ),
     ]
 }
+
+/// What the mailbox storage reads of each account.
+pub const ACCOUNT_PROPERTIES: [&str; 5] =
+    ["id", "@type", "emailAddress", "quotas", "usedDiskQuota"];
+/// The method the pages of the accounts begin with, as the Management API
+/// card names it where they gave nothing.
+const ACCOUNTS: &str = "x:Account/query";
 
 /// What the calls answered, each as far as an observation shows it. A method
 /// that did not answer leaves its part unknown.
@@ -63,7 +63,6 @@ struct Answers {
     training: Option<u64>,
     queue: Option<u64>,
     milters: Option<Vec<Milter>>,
-    accounts: Option<Vec<MailboxAccount>>,
 }
 
 impl Answers {
@@ -78,13 +77,12 @@ impl Answers {
             training: answers::total(next()),
             queue: answers::total(next()),
             milters: answers::rows(next()),
-            accounts: answers::rows(next()),
         }
     }
 }
 
 /// Permissions the collector's API key needs (see `garrison stalwart setup`).
-pub const REQUIRED_PERMISSIONS: [&str; 10] = [
+pub const REQUIRED_PERMISSIONS: [&str; 12] = [
     "authenticate",
     "sysSpamSettingsGet",
     "sysSpamClassifierGet",
@@ -92,9 +90,13 @@ pub const REQUIRED_PERMISSIONS: [&str; 10] = [
     "sysSpamTrainingSampleQuery",
     "sysQueuedMessageQuery",
     "sysMtaMilterGet",
+    // The mailbox storage reads the accounts in pages a query finds.
     "sysAccountGet",
-    // The `dns` provider reads each domain's expected records.
+    "sysAccountQuery",
+    // The `dns` provider reads each domain's expected records, those of
+    // the first `max_domains` found by a query.
     "sysDomainGet",
+    "sysDomainQuery",
     // The `tls` provider reads which listeners speak TLS.
     "sysNetworkListenerGet",
 ];
@@ -120,22 +122,22 @@ fn unread(error: &Error) -> String {
     }
 }
 
-/// What the Management API card says of the calls of the one request that
-/// gave nothing, in the order of [`calls`]: those Stalwart refused the
+/// What the Management API card says of the calls that gave nothing, each
+/// with its method, in the order they were made: those Stalwart refused the
 /// collector's key, as it refuses every call of a key made before they were
-/// needed, with the setup's advice, and those it answered in a form this
-/// release does not read; nothing where every call answered.
-fn parts_unread(answers: &[Result<Object, Error>]) -> Vec<String> {
+/// needed, with the setup's advice, those it answered in a form this release
+/// does not read, and the accounts' pages where Stalwart did not complete
+/// one; nothing where every call answered.
+fn parts_unread(failed: &[(&str, &Error)]) -> Vec<String> {
     let (mut refused, mut unreadable, mut others) = (Vec::new(), Vec::new(), Vec::new());
-    for ((method, _), answer) in calls().iter().zip(answers) {
-        match answer {
-            Ok(_) => {}
-            Err(Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_)) => {
+    for (method, error) in failed {
+        match error {
+            Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
                 refused.push(*method);
             }
-            Err(Error::Unreadable(why)) => unreadable.push(why.as_str()),
-            // These end the whole request, never one call of it.
-            Err(error @ (Error::Unavailable(_) | Error::Limited(_))) => {
+            Error::Unreadable(why) => unreadable.push(why.as_str()),
+            // These end a whole request: the first one's never reach here.
+            Error::Unavailable(_) | Error::Limited(_) => {
                 others.push(format!("Not readable ({method}): {}.", unread(error)));
             }
         }
@@ -156,53 +158,6 @@ fn parts_unread(answers: &[Result<Object, Error>]) -> Vec<String> {
     }
     findings.extend(others);
     findings
-}
-
-/// The fields of a recorded `server.startup` event that are read.
-#[derive(Deserialize)]
-struct Startup {
-    version: String,
-}
-
-/// The version the running server reported at its last recorded start, and
-/// when that was.
-pub(super) fn running_version(context: &Context<'_>) -> Option<(String, i64)> {
-    let (started, fields): (i64, String) =
-        reading(&context.events_database, Duration::from_secs(2))
-            .ok()
-            .flatten()
-            .and_then(|db| {
-                db.query_row(
-                    "SELECT created_at, fields FROM events WHERE type='server.startup' \
-                     ORDER BY created_at DESC LIMIT 1",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()
-                .ok()
-                .flatten()
-            })?;
-    let Startup { version } = serde_json::from_str(&fields).ok()?;
-    let valid = (1..=40).contains(&version.len())
-        && version
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b".+-".contains(&byte));
-    valid.then_some((version, started))
-}
-
-/// Why a start of Stalwart after `started` may be missing in the event
-/// history, where it may: the receiver does not report, or it lost events
-/// since. `None` says the recorded start is the last one.
-fn later_start_unrecorded(context: &Context<'_>, started: i64) -> Option<String> {
-    let db = reading(&context.events_database, Duration::from_secs(2))
-        .ok()
-        .flatten()?;
-    match recording::uncovered(&db, started, context.now.as_second(), QUIET_AFTER) {
-        Ok(reason) => reason.map(|reason| reason.to_string()),
-        Err(error) => Some(format!(
-            "what the event receiver recorded about itself cannot be read ({error})"
-        )),
-    }
 }
 
 #[derive(Debug)]
@@ -255,54 +210,6 @@ impl Stalwart {
             "Stalwart management API",
         )?
         .with_findings(findings))
-    }
-
-    /// The version from the last recorded `server.startup` event.
-    fn version(context: &Context<'_>) -> Result<Observation, ProviderError> {
-        let found = running_version(context);
-        let scope = if found.is_some() {
-            "Version reported by the running server at its last recorded start."
-        } else {
-            "No server start has been recorded since the event webhook was enabled."
-        };
-        let mut value = Map::new();
-        value.insert("component".into(), json!("Stalwart"));
-        value.insert(
-            "version".into(),
-            json!(found.as_ref().map(|(version, _)| version)),
-        );
-        value.insert(
-            "startedAt".into(),
-            json!(found.as_ref().map(|(_, started)| started)),
-        );
-        // The recorded start is the running server only while every later
-        // start would have been recorded too.
-        let unrecorded = found
-            .as_ref()
-            .and_then(|(_, started)| later_start_unrecorded(context, *started));
-        Ok(Self::observation(
-            context,
-            "version.stalwart",
-            "Stalwart",
-            &[ModuleId::Dashboard, ModuleId::Services],
-            Evidence::Process,
-            if found.is_some() && unrecorded.is_none() {
-                State::Ok
-            } else {
-                State::Unknown
-            },
-            "server.startup event",
-        )?
-        .with_kind(Kind::Version)
-        .with_scope(scope)
-        .with_value(value)
-        .with_findings(
-            unrecorded
-                .map(|reason| format!("A later start of Stalwart may not be recorded: {reason}."))
-                .into_iter()
-                .collect(),
-        )
-        .with_max_age(3600))
     }
 
     fn spam(context: &Context<'_>, answers: &Answers) -> Result<Observation, ProviderError> {
@@ -419,8 +326,27 @@ impl Provider for Stalwart {
                 return Ok(report);
             }
         };
+        // The accounts, as many as `max_accounts`, in requests of their own,
+        // each made while the run has time.
+        let accounts = (!context.deadline.expired()).then(|| {
+            client.listed::<MailboxAccount>(
+                "Account",
+                &ACCOUNT_PROPERTIES,
+                self.max_accounts,
+                || !context.deadline.expired(),
+            )
+        });
         // The calls that answered fill their cards; the others are named.
-        let unanswered = parts_unread(&answers);
+        let requests = calls();
+        let mut failed: Vec<(&str, &Error)> = requests
+            .iter()
+            .zip(&answers)
+            .filter_map(|((method, _), answer)| answer.as_ref().err().map(|error| (*method, error)))
+            .collect();
+        if let Some(Err(error)) = &accounts {
+            failed.push((ACCOUNTS, error));
+        }
+        let unanswered = parts_unread(&failed);
         if !unanswered.is_empty() {
             report
                 .observations
@@ -431,10 +357,15 @@ impl Provider for Stalwart {
         report
             .observations
             .push(self.milter(context, answers.milters.as_deref())?);
-        let accounts = answers.accounts.as_deref();
-        report
-            .observations
-            .push(mailboxes(context, accounts, self.max_accounts)?);
+        let listed: Option<&Listed<MailboxAccount>> =
+            accounts.as_ref().and_then(|read| read.as_ref().ok());
+        let mut storage = mailboxes(context, listed, self.max_accounts)?;
+        if accounts.is_none() {
+            storage
+                .findings
+                .push("Not asked: the collection run's time was used up.".to_owned());
+        }
+        report.observations.push(storage);
         let queue = answers.queue;
         let observation = Self::observation(
             context,
@@ -466,6 +397,8 @@ impl Provider for Stalwart {
 
 #[cfg(test)]
 mod limit_tests;
+#[cfg(test)]
+mod many_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

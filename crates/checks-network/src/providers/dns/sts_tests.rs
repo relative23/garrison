@@ -69,10 +69,9 @@ fn domain_at(at: &str) -> Observation {
     let (port, roots) = policy_server();
     let zone_file = "example.test. IN MX 10 mail.example.test.\n\
                      _mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n";
-    let stalwart = serve(vec![answer_json(
-        &json!({"methodResponses": [["x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
-    )]);
+    let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+        &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+    ))]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&stalwart.url);
@@ -136,10 +135,9 @@ fn a_policy_the_runs_time_does_not_reach_is_not_fetched() {
     let policy_server = Silent::new();
     let zone_file = "example.test. IN MX 10 mail.example.test.\n\
                      _mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n";
-    let stalwart = serve(vec![answer_json(
-        &json!({"methodResponses": [["x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
-    )]);
+    let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+        &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+    ))]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&stalwart.url);
@@ -167,7 +165,7 @@ fn a_policy_the_runs_time_does_not_reach_is_not_fetched() {
 
 /// A policy fetched within the hour is taken from the status database, also
 /// once the run's time is up: one that leaves the mail host out is a
-/// warning beside the records that time left unasked.
+/// warning beside the records that time left unasked, and is said first.
 #[test]
 fn a_kept_policy_that_leaves_the_mail_host_out_is_a_warning_beside_records_not_asked() {
     // Each answer comes 1.2 s after its question; the run's time for its
@@ -186,10 +184,9 @@ fn a_kept_policy_that_leaves_the_mail_host_out_is_a_warning_beside_records_not_a
     let zone_file = "_mta-sts.example.test. IN TXT \"v=STSv1; id=1\"\n\
                      example.test. IN MX 10 mail.example.test.\n\
                      example.test. IN TXT \"v=spf1 mx -all\"\n";
-    let stalwart = serve(vec![answer_json(
-        &json!({"methodResponses": [["x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
-    )]);
+    let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+        &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+    ))]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&stalwart.url);
@@ -220,10 +217,10 @@ fn a_kept_policy_that_leaves_the_mail_host_out_is_a_warning_beside_records_not_a
         (
             State::Warning,
             vec![
-                "1 of its 3 records was not asked: the collection run's time was used up."
-                    .to_owned(),
                 "The MTA-STS policy of example.test does not name mail.example.test: senders \
                  that honour it do not deliver there."
+                    .to_owned(),
+                "1 of its 3 records was not asked: the collection run's time was used up."
                     .to_owned(),
             ]
         )
@@ -366,10 +363,9 @@ fn a_policy_is_fetched_again_once_its_record_changes() {
             "example.test. IN MX 10 mail.example.test.\n\
              _mta-sts.example.test. IN TXT \"{record}\"\n"
         );
-        let stalwart = serve(vec![answer_json(
-            &json!({"methodResponses": [["x:Domain/get",
-            {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}),
-        )]);
+        let stalwart = serve(vec![answer_json(&domains_tests::domains_value(
+            &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+        ))]);
         // Where no policy is due, a server that would never answer.
         let served = policy.map(|policy| serve(vec![garrison_testing::http::answer(200, policy)]));
         let silent = Silent::new();
@@ -399,4 +395,43 @@ fn a_policy_is_fetched_again_once_its_record_changes() {
         assert_eq!(silent.finish(), 0, "{later}: nothing was fetched");
         assert_eq!(policy_result(&domain), json!(result), "{later}");
     }
+}
+
+/// The records at `_mta-sts` count as a set: a resolver that gives them in
+/// another order, as one does that rotates the records of a name, changes
+/// no record, and the policy kept within the hour is used.
+#[test]
+fn a_policy_is_not_fetched_again_for_its_records_in_another_order() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = config(directory.path());
+    let runner = Canned(String::new());
+    let memory = Remembered::default();
+    let records = [
+        "v=STSv1; id=20261124".to_owned(),
+        "some-verification=abc".to_owned(),
+    ];
+    let served = serve(vec![garrison_testing::http::answer(
+        200,
+        "version: STSv1\nmode: enforce\nmx: mail.example.test\nmax_age: 86400\n",
+    )]);
+    let first = Context {
+        memory: &memory,
+        ..crate::testing::context(&config, &runner)
+    };
+    let url = format!("{}/.well-known/mta-sts.txt", served.url);
+    let read = sts::policy(&first, "example.test", &url, None, &records);
+    served.requests();
+    assert_eq!(read.unwrap().unwrap().mode, "enforce");
+    // A minute later, the same records the other way round.
+    let silent = Silent::new();
+    let later = Context {
+        memory: &memory,
+        now: time::Timestamp::from_second(crate::testing::now().as_second() + 60).unwrap(),
+        ..crate::testing::context(&config, &runner)
+    };
+    let swapped = [records[1].clone(), records[0].clone()];
+    let url = format!("{}/.well-known/mta-sts.txt", silent.url);
+    let kept = sts::policy(&later, "example.test", &url, None, &swapped);
+    assert_eq!(silent.finish(), 0, "the policy was fetched again");
+    assert_eq!(kept.unwrap().unwrap().mode, "enforce");
 }

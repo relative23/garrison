@@ -148,8 +148,9 @@ fn a_reading_stalwart_gave_no_mail_hosts_for_is_made_again_in_the_next_run() {
     let options =
         format!("resolver = \"{resolver}\"\nlists = [\"up.example.org\"]\nlists_ipv6 = []");
     let domains = |zone: Option<&str>| {
-        answer_json(&serde_json::json!({"methodResponses": [["x:Domain/get",
-            {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone}]}, "0"]]}))
+        answer_json(&crate::providers::dns::domains_tests::domains_value(
+            &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone}]),
+        ))
     };
     let forbidden = answer_json(
         &serde_json::json!({"methodResponses": [["error", {"type": "forbidden"}, "0"]]}),

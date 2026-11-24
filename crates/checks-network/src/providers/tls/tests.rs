@@ -11,9 +11,9 @@ use crate::testing::{Certificates, certificates, certificates_until, now};
 /// 1024) and nothing on a test host listens on it. A free port that a test
 /// gives back can be bound by another test's server before the connection
 /// is made, which answered a TLS probe with an HTTP test server.
-pub(super) const CLOSED: u16 = 9;
+pub(crate) const CLOSED: u16 = 9;
 
-pub(super) fn roots(certificates: &Certificates) -> RootCertStore {
+pub(crate) fn roots(certificates: &Certificates) -> RootCertStore {
     let mut roots = RootCertStore::empty();
     roots.add(certificates.ca.clone()).unwrap();
     roots
@@ -25,17 +25,23 @@ fn trusted(certificates: &Certificates) -> Arc<RootCertStore> {
 
 /// A TLS listener for `localhost` that serves one connection; with
 /// `smtp`, it first speaks SMTP up to STARTTLS (or refuses it).
-pub(super) fn listener(certificates: &Certificates, smtp: Option<&'static str>) -> u16 {
-    listener_with(certificates, smtp, rustls::DEFAULT_VERSIONS)
+pub(crate) fn listener(certificates: &Certificates, smtp: Option<&'static str>) -> u16 {
+    listener_with(certificates, smtp, rustls::DEFAULT_VERSIONS, "127.0.0.1")
+}
+
+/// A TLS listener for `localhost` bound to `address` alone.
+pub(crate) fn listener_on(certificates: &Certificates, address: &str) -> u16 {
+    listener_with(certificates, None, rustls::DEFAULT_VERSIONS, address)
 }
 
 fn listener_with(
     certificates: &Certificates,
     smtp: Option<&'static str>,
     versions: &'static [&'static rustls::SupportedProtocolVersion],
+    address: &str,
 ) -> u16 {
     let (server, key) = (certificates.server.clone(), certificates.key.clone_key());
-    let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+    let socket = TcpListener::bind((address, 0)).unwrap();
     let port = socket.local_addr().unwrap().port();
     thread::spawn(move || {
         let (mut stream, _) = socket.accept().unwrap();
@@ -97,7 +103,7 @@ static TLS12_ONLY: [&rustls::SupportedProtocolVersion; 1] = [&rustls::version::T
 #[test]
 fn tls_1_2_is_named_as_such() {
     let certificates = certificates();
-    let port = listener_with(&certificates, None, &TLS12_ONLY);
+    let port = listener_with(&certificates, None, &TLS12_ONLY, "127.0.0.1");
     let found = probe(
         "localhost",
         port,
@@ -141,7 +147,7 @@ impl Read for Chunks {
     }
 }
 
-fn read_reply(chunks: Vec<Vec<u8>>) -> io::Result<String> {
+fn read_reply(chunks: Vec<Vec<u8>>) -> Result<String, Failure> {
     reply(&mut Chunks(chunks.into()))
 }
 
@@ -153,8 +159,8 @@ fn a_reply_ends_with_its_last_line_up_to_64_kib() {
         "250 last"
     );
     assert_eq!(
-        read_reply(lines("220 rea")).unwrap_err().to_string(),
-        "SMTP connection closed"
+        read_reply(lines("220 rea")),
+        Err(Failure("SMTP connection closed"))
     );
     // A continued reply of exactly the limit may still end.
     let mut long = b"250-".to_vec();
@@ -166,10 +172,8 @@ fn a_reply_ends_with_its_last_line_up_to_64_kib() {
     );
     long.insert(4, b'x');
     assert_eq!(
-        read_reply(vec![long, b"250 end\r\n".to_vec()])
-            .unwrap_err()
-            .to_string(),
-        "SMTP reply too long"
+        read_reply(vec![long, b"250 end\r\n".to_vec()]),
+        Err(Failure("SMTP reply too long"))
     );
 }
 
@@ -238,6 +242,39 @@ fn certificates_warn_when_fewer_than_14_days_remain() {
         soon.findings[0].ends_with(" — certificate expires in 13 days."),
         "{:?}",
         soon.findings
+    );
+}
+
+/// A notification carries a card's first finding: the probe that failed,
+/// which makes the card Failed, comes before a certificate that expires
+/// soon, whichever endpoint is named first.
+#[test]
+fn a_failed_probe_is_said_before_a_certificate_that_expires_soon() {
+    let soon = certificates_until(2026, 11, 5);
+    let port = listener(&soon, None);
+    let provider = Tls::new(&crate::testing::table(&format!(
+        "type = \"tls\"\nendpoints = [{{ host = \"localhost\", port = {port} }}, \
+         {{ host = \"localhost\", port = {CLOSED} }}]"
+    )))
+    .unwrap()
+    .with_roots(roots(&soon));
+    let directory = tempfile::tempdir().unwrap();
+    let config = crate::testing::config(directory.path());
+    let runner = crate::testing::Canned(String::new());
+    let card = provider
+        .collect(&crate::testing::context(&config, &runner))
+        .unwrap()
+        .observations
+        .remove(0);
+    assert_eq!(
+        (card.state, card.findings),
+        (
+            State::Failed,
+            vec![
+                format!("localhost:{CLOSED} — TLS check failed (connection refused)."),
+                format!("localhost:{port} — certificate expires in 6 days."),
+            ]
+        )
     );
 }
 
@@ -379,11 +416,11 @@ fn endpoints_after_the_first_24_are_named_and_keep_the_card_from_being_in_order(
         answer_json(
             &serde_json::json!({"methodResponses": [["x:NetworkListener/get", {"list": listed}, "0"]]}),
         ),
-        answer_json(
-            &serde_json::json!({"methodResponses": [["x:Domain/get", {"list": [
-            {"id": "b0", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 localhost.\n"}
-        ]}, "0"]]}),
-        ),
+        answer_json(&crate::providers::dns::domains_tests::domains_value(
+            &serde_json::json!([
+                {"id": "b0", "name": "example.test", "dnsZoneFile": "example.test. IN MX 10 localhost.\n"}
+            ]),
+        )),
     ]);
     let provider = Tls::new(&crate::testing::table("type = \"tls\""))
         .unwrap()

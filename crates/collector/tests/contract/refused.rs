@@ -81,7 +81,8 @@ fn a_key_stalwart_refuses_gets_the_setups_advice() {
         }
 
         // Stalwart refuses each of the check's calls to the narrow key, and
-        // the whole request to a key it does not know (401).
+        // the query its accounts' pages begin with, and the whole first
+        // request to a key it does not know (401).
         let stalwart = Stalwart::new(&"type = \"stalwart\"".parse().unwrap()).unwrap();
         let report = collect(&stalwart, &deployment, Some(secret.clone()), None);
         let api = report
@@ -89,7 +90,8 @@ fn a_key_stalwart_refuses_gets_the_setups_advice() {
             .iter()
             .find(|card| card.id == "stalwart.api")
             .unwrap_or_else(|| panic!("{which}: {:?}", report.observations));
-        let methods: Vec<&str> = calls().iter().map(|(method, _)| *method).collect();
+        let mut methods: Vec<&str> = calls().iter().map(|(method, _)| *method).collect();
+        methods.push("x:Account/query");
         let refused = if which == "a narrow key" {
             format!(" to {}", methods.join(", "))
         } else {

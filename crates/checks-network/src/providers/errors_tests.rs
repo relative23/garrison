@@ -1,15 +1,15 @@
 //! The rule of an error's words, held over every card that words one of the
 //! DNS client's errors: each kind reads as the client says it, after the
 //! card's own frame, on its row and in its finding. An error code, an answer
-//! that is malformed or cut off are answers that cannot be used; none reads
-//! as no answer, and no answer reads as none of them.
+//! that is malformed or cut off, and one cut off over UDP whose question
+//! over TCP failed are answers that cannot be used; none reads as no
+//! answer, and no answer reads as none of them.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
 use garrison_core::observations::Observation;
 use garrison_testing::http::{json as answer_json, serve};
-use serde_json::json;
 
 use super::dns::stand_in::{Fault, host, resolver_faulty, text};
 use super::{Dns, Reputation};
@@ -27,12 +27,13 @@ enum Failure {
     Malformed,
 }
 
-const FAILURES: [Failure; 6] = [
+const FAILURES: [Failure; 7] = [
     Failure::Fault(Fault::Silent),
     Failure::Fault(Fault::Code(2)),
     Failure::Fault(Fault::Code(4)),
     Failure::Fault(Fault::Code(5)),
     Failure::Fault(Fault::CutOff),
+    Failure::Fault(Fault::Closed),
     Failure::Malformed,
 ];
 
@@ -45,6 +46,9 @@ fn words(failure: Failure, resolver: SocketAddr) -> String {
         },
         Failure::Fault(Fault::Code(code)) => dns::Error::Code(code),
         Failure::Fault(Fault::CutOff) => dns::Error::CutOff,
+        Failure::Fault(Fault::Closed) => dns::Error::NoTcpAnswer {
+            why: "the resolver closed the connection before it answered".to_owned(),
+        },
         Failure::Malformed => dns::Error::Malformed,
     }
     .to_string()
@@ -118,8 +122,9 @@ fn dns_card() -> Vec<(String, String)> {
             vec![text("v=spf1 mx -all")],
         ),
     ]);
-    let stalwart = answer_json(&json!({"methodResponses": [["x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]}, "0"]]}));
+    let stalwart = answer_json(&crate::providers::dns::domains_tests::domains_value(
+        &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone_file}]),
+    ));
     let mut said = Vec::new();
     for failure in FAILURES {
         let dns = |resolver: SocketAddr| -> Box<dyn Provider> {

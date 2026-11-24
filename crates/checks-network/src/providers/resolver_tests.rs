@@ -40,12 +40,12 @@ fn a_host_that_names_no_resolver_is_named_with_the_option_that_mends_it() {
     .with_resolv_conf(&resolv_conf);
     // The dns check asks Stalwart for its domains first; the reputation
     // check with mail hosts of its own asks Stalwart nothing.
-    let stalwart = serve(vec![answer_json(&serde_json::json!({"methodResponses": [[
-        "x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test",
-                   "dnsZoneFile": "example.test. IN MX 10 mail.example.test.\n"}]},
-        "0"
-    ]]}))]);
+    let stalwart = serve(vec![answer_json(
+        &crate::providers::dns::domains_tests::domains_value(
+            &serde_json::json!([{"id": "b", "name": "example.test",
+                   "dnsZoneFile": "example.test. IN MX 10 mail.example.test.\n"}]),
+        ),
+    )]);
     let mut found: Vec<(String, State, Vec<String>)> = Vec::new();
     for card in cards(&dns, &stalwart.url)
         .into_iter()

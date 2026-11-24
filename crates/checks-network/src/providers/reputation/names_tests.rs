@@ -5,7 +5,6 @@
 
 use garrison_core::observations::State;
 use garrison_testing::http::{json as answer_json, serve};
-use serde_json::json;
 
 use super::tests::{V4, mail_host, rows};
 use super::*;
@@ -105,11 +104,11 @@ fn a_mail_host_of_stalwarts_that_is_no_dns_name_is_left_out_and_named() {
     let long = name_of(254);
     let zone =
         format!("example.test. IN MX 10 mail.example.test.\nexample.test. IN MX 20 {long}.\n");
-    let stalwart = serve(vec![answer_json(&json!({"methodResponses": [[
-        "x:Domain/get",
-        {"list": [{"id": "b", "name": "example.test", "dnsZoneFile": zone}]},
-        "0"
-    ]]}))]);
+    let stalwart = serve(vec![answer_json(
+        &crate::providers::dns::domains_tests::domains_value(
+            &serde_json::json!([{"id": "b", "name": "example.test", "dnsZoneFile": zone}]),
+        ),
+    )]);
     let (resolver, _) = stand_in(mail_host(), None, 64);
     let provider = Reputation::new(&table(&format!(
         "type = \"reputation\"\nresolver = \"{resolver}\"\nlists = [\"list.example.test\"]\n\

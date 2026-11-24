@@ -94,18 +94,14 @@ fn certificate(reason: &CertificateError) -> &'static str {
     }
 }
 
-fn protocol_error(message: &str) -> io::Error {
-    io::Error::other(message.to_owned())
-}
-
 /// The last line of one SMTP reply.
-fn reply(stream: &mut impl Read) -> io::Result<String> {
+fn reply(stream: &mut impl Read) -> Result<String, Failure> {
     let mut data = Vec::new();
     let mut chunk = [0; 4096];
     loop {
-        let read = stream.read(&mut chunk)?;
+        let read = stream.read(&mut chunk).map_err(|error| failure(&error))?;
         if read == 0 {
-            return Err(protocol_error("SMTP connection closed"));
+            return Err(Failure("SMTP connection closed"));
         }
         data.extend_from_slice(&chunk[..read]);
         let text = String::from_utf8_lossy(&data);
@@ -114,22 +110,27 @@ fn reply(stream: &mut impl Read) -> io::Result<String> {
             return Ok(last.to_owned());
         }
         if data.len() > MAX_REPLY {
-            return Err(protocol_error("SMTP reply too long"));
+            return Err(Failure("SMTP reply too long"));
         }
     }
 }
 
-fn starttls(stream: &mut (impl Read + Write), host: &str) -> io::Result<()> {
+/// The greeting, EHLO and STARTTLS: where the listener stops before TLS,
+/// the step it stopped at.
+fn starttls(stream: &mut (impl Read + Write)) -> Result<(), Failure> {
+    let written = |error: io::Error| failure(&error);
     if !reply(stream)?.starts_with("220") {
-        return Err(protocol_error("Unexpected SMTP greeting"));
+        return Err(Failure("refused at the SMTP greeting"));
     }
-    stream.write_all(b"EHLO garrison.invalid\r\n")?;
+    stream
+        .write_all(b"EHLO garrison.invalid\r\n")
+        .map_err(written)?;
     if !reply(stream)?.starts_with("250") {
-        return Err(protocol_error("EHLO rejected"));
+        return Err(Failure("EHLO refused"));
     }
-    stream.write_all(b"STARTTLS\r\n")?;
+    stream.write_all(b"STARTTLS\r\n").map_err(written)?;
     if !reply(stream)?.starts_with("220") {
-        return Err(protocol_error(&format!("STARTTLS not offered by {host}")));
+        return Err(Failure("STARTTLS refused"));
     }
     Ok(())
 }
@@ -172,11 +173,7 @@ pub fn probe(
     let mut stream = connect(address, port, Instant::now() + PROBE)?;
     let io = |error| failure(&error);
     if use_starttls {
-        // A server that answers but refuses STARTTLS is not a network failure.
-        starttls(&mut stream, host).map_err(|error| match error.kind() {
-            io::ErrorKind::Other => Failure("STARTTLS refused"),
-            _ => failure(&error),
-        })?;
+        starttls(&mut stream)?;
     }
     while connection.is_handshaking() {
         connection.complete_io(&mut stream).map_err(io)?;
@@ -233,10 +230,12 @@ fn bare(label: &str, result: &str) -> Vec<Value> {
 }
 
 /// Each endpoint probed while the run has time; the ones after that are
-/// named, not probed, and keep the state from being in order.
+/// named, not probed, and keep the state from being in order. The probes
+/// that failed are said first, then the certificates that expire soon: a
+/// notification carries a card's first finding.
 fn probe_each(endpoints: &[Endpoint], roots: &Arc<RootCertStore>, context: &Context<'_>) -> Probes {
-    let (mut rows, mut findings, mut unchecked) = (Vec::new(), Vec::new(), Vec::new());
-    let (mut lowest, mut failures): (Option<i64>, usize) = (None, 0);
+    let (mut rows, mut failed, mut expiring) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut unchecked, mut lowest): (Vec<String>, Option<i64>) = (Vec::new(), None);
     for endpoint in endpoints {
         let label = format!("{}:{}", endpoint.host, endpoint.port);
         if context.deadline.expired() {
@@ -253,14 +252,13 @@ fn probe_each(endpoints: &[Endpoint], roots: &Arc<RootCertStore>, context: &Cont
             context.now,
         ) {
             Err(Failure(kind)) => {
-                failures += 1;
-                findings.push(format!("{label} — TLS check failed ({kind})."));
+                failed.push(format!("{label} — TLS check failed ({kind})."));
                 rows.push(bare(&label, "failed"));
             }
             Ok(found) => {
                 lowest = Some(lowest.map_or(found.days, |known| known.min(found.days)));
                 if found.days < WARN_DAYS {
-                    findings.push(format!(
+                    expiring.push(format!(
                         "{label} — certificate expires in {} days.",
                         found.days
                     ));
@@ -275,13 +273,15 @@ fn probe_each(endpoints: &[Endpoint], roots: &Arc<RootCertStore>, context: &Cont
             }
         }
     }
-    let state = match (failures, findings.is_empty(), unchecked.len()) {
-        (0, true, 0) => State::Ok,
-        (0, true, left) if left == endpoints.len() => State::Unknown,
-        (0, true, _) => State::Partial,
-        (0, false, _) => State::Warning,
-        _ => State::Failed,
+    let state = match (failed.is_empty(), expiring.is_empty(), unchecked.len()) {
+        (true, true, 0) => State::Ok,
+        (true, true, left) if left == endpoints.len() => State::Unknown,
+        (true, true, _) => State::Partial,
+        (true, false, _) => State::Warning,
+        (false, _, _) => State::Failed,
     };
+    let mut findings = failed;
+    findings.extend(expiring);
     if !unchecked.is_empty() {
         findings.push(format!(
             "Not checked in this run, as its time was used up: {}.",
@@ -480,6 +480,8 @@ impl Provider for Tls {
 #[cfg(test)]
 mod rule_tests;
 #[cfg(test)]
-mod tests;
+mod smtp_tests;
+#[cfg(test)]
+pub(crate) mod tests;
 #[cfg(test)]
 mod time_tests;
