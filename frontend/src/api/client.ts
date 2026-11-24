@@ -77,13 +77,17 @@ function withQuery(path: string, query?: Query): string {
 
 async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
   const write = init.method && init.method !== "GET";
-  // In the modes of the page's preloads (prerender.mjs), so that a first
-  // request takes the answer already on its way. No cache mode of its own:
-  // every answer says Cache-Control: no-store, and Firefox hands a preloaded
-  // answer only to a fetch in the default mode.
+  // A read in the modes of the page's preloads (index.html, prerender.mjs),
+  // so that a first request takes the answer already on its way: a preload
+  // with no CORS setting is a no-cors request with the cookies, and WebKit
+  // hands its answer to no fetch but one of the same mode and credentials, as
+  // Chrome and Firefox do too. Same-origin, its answer reads whole. No cache
+  // mode of its own: every answer says Cache-Control: no-store, and Firefox
+  // hands a preloaded answer only to a fetch in the default mode. A write
+  // keeps the cors mode, whose headers carry the CSRF token.
   const response = await fetch(API + path, {
     ...init,
-    credentials: "same-origin",
+    ...(write ? { credentials: "same-origin" } : { mode: "no-cors", credentials: "include" }),
     signal: signal ?? null,
     headers: {
       Accept: "application/json",

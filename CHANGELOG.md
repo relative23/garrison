@@ -173,6 +173,9 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A page opened in a WebKit browser asks for its first answers once, not
+  twice.** It takes the answers the page starts loading with it, as Chrome
+  and Firefox do; on the Maintenance page that is one check of rights less.
 - **A button that goes once pressed leaves the keyboard in the content.**
   "Show all rows" and "Try again" dropped the focus to the page.
 - **Following a started job costs Stalwart about 30 checks of rights a
