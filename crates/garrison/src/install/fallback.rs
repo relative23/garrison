@@ -95,6 +95,15 @@ fn switched_back(
     }
     let base = Path::new(BASE);
     switch(&base.join("current"), old).map_err(Failure::Before)?;
+    // `previous` as it was before the upgrade, at once: a run killed while
+    // `old` starts leaves the links as they were before it.
+    let previous = base.join("previous");
+    match earlier {
+        Some(earlier) => switch(&previous, earlier).map_err(Failure::Before)?,
+        None => {
+            let _ = std::fs::remove_file(&previous);
+        }
+    }
     install_system_files(old).map_err(Failure::Before)?;
     // Only the release itself knows which schemas it reads. The collector
     // opens its database when its timer runs, after this installer is gone:
@@ -107,12 +116,5 @@ fn switched_back(
             state::unreadable(&checked.stdout)
         )));
     }
-    start(old).map_err(Failure::Start)?;
-    // `previous` as it was before the upgrade.
-    let previous = base.join("previous");
-    if let Some(earlier) = earlier {
-        return switch(&previous, earlier).map_err(Failure::Before);
-    }
-    let _ = std::fs::remove_file(&previous);
-    Ok(())
+    start(old).map_err(Failure::Start)
 }
