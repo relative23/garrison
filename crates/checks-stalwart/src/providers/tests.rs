@@ -144,7 +144,10 @@ fn the_exporter_is_read_with_its_credential() {
     let refused = provider.collect(&context).unwrap();
     assert_eq!(
         refused.observations[0].findings,
-        ["The exporter answered HTTP 401."]
+        [format!(
+            "The exporter refused the collector's scrape credential (HTTP 401). {}",
+            crate::context::SCRAPE_FIX
+        )]
     );
     let request = server.requests().remove(0);
     assert!(request.starts_with("GET /metrics/prometheus HTTP/1.1"));

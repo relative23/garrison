@@ -1031,6 +1031,8 @@ Notable changes for operators and users. The format follows
   address.**
 - **The TLS certificates card says where an SMTP listener stopped before
   TLS**: a closed connection, its greeting, EHLO or STARTTLS.
+- **The metrics exporter's card names what writes a scrape credential that
+  Stalwart refuses**, `garrison stalwart setup`.
 - **A blocklist that gives no verdict keeps the Blocklists card from being
   OK.** A list that refused this resolver, as Spamhaus refuses public ones,
   answered with an error or did not answer at all, showed only in its row:

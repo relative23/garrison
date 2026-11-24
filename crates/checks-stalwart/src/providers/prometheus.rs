@@ -198,7 +198,8 @@ pub fn parse(text: &str) -> BTreeMap<String, f64> {
 
 /// Why the exporter's answer could not be read, by what went wrong. A
 /// refusal of the scrape credential comes as a status, 401 or 403, which
-/// the card names, and not as one of these.
+/// the card names with what writes the credential, and not as one of
+/// these.
 fn unread(error: &Error) -> String {
     match error {
         Error::Unavailable(_) => "The exporter is unavailable.".to_owned(),
@@ -250,8 +251,16 @@ impl Prometheus {
             .timeout(Duration::from_secs(8))
             .send()
             .map_err(|error| unread(&error))?;
-        if answer.status != 200 {
-            return Err(format!("The exporter answered HTTP {}.", answer.status));
+        match answer.status {
+            200 => {}
+            401 | 403 => {
+                return Err(format!(
+                    "The exporter refused the collector's scrape credential (HTTP {}). \
+                     {SCRAPE_FIX}",
+                    answer.status
+                ));
+            }
+            status => return Err(format!("The exporter answered HTTP {status}.")),
         }
         Ok(parse(&String::from_utf8_lossy(&answer.body)))
     }
