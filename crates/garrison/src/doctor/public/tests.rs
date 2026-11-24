@@ -144,7 +144,8 @@ fn the_issuer_stalwart_names_itself_is_the_one_garrison_takes() {
         other.fix.as_deref(),
         Some(
             "Set issuer = \"https://other.example.test\" under [deployment] and restart \
-             garrison-web, or make mail.example.test Stalwart's Default Hostname."
+             garrison-web, or make mail.example.test Stalwart's Default Hostname and reload its \
+             settings."
         )
     );
     // A name garrison.toml would not keep as written: only Stalwart's side mends it.

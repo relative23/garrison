@@ -326,7 +326,7 @@ pub(super) fn issuer(config: &Config) -> Finding {
     let fix = if kept_as_written(&stated) {
         format!(
             "Set issuer = \"{stated}\" under [deployment] and restart garrison-web, or make \
-             {host} Stalwart's Default Hostname."
+             {host} Stalwart's Default Hostname and reload its settings."
         )
     } else {
         format!("Make {host} Stalwart's Default Hostname and reload its settings.")
