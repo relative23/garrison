@@ -1986,8 +1986,8 @@ Notable changes for operators and users. The format follows
   `garrison doctor`'s line of a 502 says whether anything listens on
   `web.port`.
 - **`garrison doctor` reads the port of the SELinux module SELinux has
-  loaded**, no longer that of the file the installer writes before it loads
-  it, and names the `semodule -i` that repeats a load that failed.
+  loaded**, no longer that of the installer's file, and names what loads it
+  for `web.port`.
 - **`garrison doctor` judges the free space where `/var/backups` will be
   made** on a host that has none yet, as the installer does, where it was
   unknown until the first upgrade.
