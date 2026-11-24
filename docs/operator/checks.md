@@ -24,13 +24,17 @@ words: the collector has no API key for Stalwart, and `garrison stalwart
 setup` makes one, also where the file is there.
 
 Every card says when its source was asked ("Checked ..."). Most checks ask in
-every run, and their cards are marked stale when the last run is more than
-three minutes old. Some ask less often, because the answer costs time or the
+every run, and a card is marked stale once its answer is older than the card
+allows: three minutes for the cards of `host`, `host-care`, `systemd`, `http`,
+`dns` and `prometheus`, the queue and the notification channels; fifteen for
+the TLS certificates, the ClamAV signatures, a `receipt`, a backup check, the
+webmail plugins and the mailbox storage; an hour for a version; five minutes
+for the others. Some ask less often, because the answer costs time or the
 source should not be asked every minute: the pending updates, the blocklists
-and reverse names, the release lists, the sign-in page, the test messages
-and the counts from the event history. Their cards carry the time of the
-answer they are made from, however often the collector has run since, and
-are marked stale once a new answer is three minutes overdue.
+and reverse names, the release lists, the sign-in page, the test messages and
+the counts from the event history. Their cards carry the time of the answer
+they are made from, however often the collector has run since, and are marked
+stale once a new answer is three minutes overdue.
 
 `garrison detect --format toml` prints entries for what the host runs, with
 the paths it found (for ClamAV, from the units or the distribution's
@@ -42,23 +46,23 @@ observation the checks report is in [observation ids](observations.md).
 |---|---|---|
 | `host` | `disk_path` (`/`), `proc` (`/proc`, for tests), `modules` | Memory, load, disk, uptime |
 | `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path` (with `disk`), `firewall_units`, `root` (`/`, for tests), `modules` | What the host needs from its operator; see below |
-| `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; an alias, such as `sshd.service`, shows the state of the unit it names and names that unit ("Alias of"). Timers show their schedule and next run. For one-shot jobs see below |
+| `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` (`max_age_hours` 1 to 8760, with `expect = "idle"`) | Unit states; an alias, such as `sshd.service`, shows the state of the unit it names and names that unit ("Alias of"). Timers show their schedule and next run. For one-shot jobs see below |
 | `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `max_domains` (20, at most 100), `modules` | Certificate validity per endpoint; see below |
 | `mail-flow` | `checks` (default: all of `spam`, `milter`, `authentication`, `tls`) | A week of the recorded events in numbers; see below |
-| `stalwart` | `milter_host`, `milter_port`, `max_accounts` (1000, at most 20 000: how many of Stalwart's accounts the mailbox storage reads, the oldest first) | Spam settings, classifier, milter, queue, mailbox storage, running version |
-| `prometheus` | `path` | Native counters and gauges for the dashboard |
+| `stalwart` | `milter_host`, `milter_port` (0: none; one milter to look at alone, by host and port), `max_accounts` (1000, at most 20 000: how many of Stalwart's accounts the mailbox storage reads, the oldest first) | Spam settings, classifier, milter, queue, mailbox storage, running version |
+| `prometheus` | `path` (`/metrics/prometheus`: where Stalwart's exporter answers) | Native counters and gauges for the dashboard |
 | `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
 | `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning, and so is one dated more than five minutes ahead of the host's clock, whose age is not known; where both are there the newer one counts, also for the dashboard's signature age |
-| `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30), `verify_days` (0: not expected), `restore_days` (0), `path`, `modules` | What the backup tool reported of its repository; see below |
+| `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30, 1 to 8784), `verify_days` (0: not expected; at most 366), `restore_days` (0; at most 366), `path`, `modules` | What the backup tool reported of its repository; see below |
 | `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity: a bundle (`plugins/<id>.js`) that does not match the SHA-256 in `plugins/registry.json` is a failure. A plugin whose bundle cannot be checked, as one the registry does not list or lists twice, gives no hash for, or whose bundle is missing, a link, unreadable or larger than 2 MiB, is named with why; the card is then Partial, or Unknown where no bundle could be checked, as without `plugins`, which name the plugins to check, or where `admin_directory` holds no `plugins/registry.json`, and the card then names that option |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
 | `version-command` | `component`, `command`, `pattern` (its first group, `( )`, is the version), `modules` | Installed version from a command; it runs in the collector's sandbox, so a program that compiles code at run time (a JIT) fails there. Only its standard output is read, so a version written to standard error, as `nginx -v` writes it, is not found; a card without a version says why |
 | `reputation` | `hosts` (default: the mail hosts Stalwart names), `max_domains` (20, at most 100), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
-| `senders` | `min_recipients` (50), `factor` (5), `burst` (100), `bounces` (10), `modules` | The sender addresses that send unusually much; see below |
-| `releases` | `products` (`garrison`, `stalwart`; default both) | Whether a newer release exists; see below |
+| `senders` | `min_recipients` (50), `factor` (5), `burst` (100), `bounces` (10), each 1 to 1 000 000, `modules` | The sender addresses that send unusually much; see below |
+| `releases` | `products` (`garrison`, `stalwart`; default both), `api` (`https://api.github.com`; an `https://` address of a mirror that answers as it does) | Whether a newer release exists; see below |
 | `sign-in` | `modules` | Whether Stalwart's sign-in page loads under the issuer's name, with its scripts and style sheets; see below |
-| `mail-test` | `recipient`, `sender` (default: none, as a bounce is sent), `host` (`127.0.0.1`), `port` (25), `every_hours` (24), `macro_document` (false) | Test messages through the mail server itself; see below |
-| `receipt` | `id`, `title`, `path`, `modules`, `date`, `max_age_hours`, `fields`, `ok_when`, `rows`, `columns`, `row_date`, `ok_rows`, `scope` | Results that other jobs write as JSON |
+| `mail-test` | `recipient`, `sender` (default: none, as a bounce is sent), `host` (`127.0.0.1`), `port` (25), `every_hours` (24, 1 to 168), `macro_document` (false) | Test messages through the mail server itself; see below |
+| `receipt` | `id`, `title`, `path`, `modules`, `date`, `max_age_hours` (0: no limit; at most 9600), `fields`, `ok_when`, `rows`, `columns`, `row_date`, `ok_rows`, `scope` | Results that other jobs write as JSON |
 
 ## `host-care`
 

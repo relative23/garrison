@@ -132,14 +132,19 @@ uses it for this run and stores it nowhere. From a script, pass the
 administrator as JSON, `{"username": "...", "secret": "..."}` or
 `{"apiKey": "..."}`: on standard input with `--admin-credential -`, or in a
 root-only file with `--admin-credential FILE`, which it offers to delete
-afterwards when it runs at a terminal.
+afterwards when it runs at a terminal. `--skip-metrics` leaves the
+Prometheus exporter and its credential as they are; `--webhook-url` and
+`--allow-network` are for test setups, since the event receiver accepts
+loopback only.
 
 This creates, and on repeated runs updates where it differs from what was
 asked:
 
 - a signed webhook that sends selected events to Garrison, with a header
   (`X-Garrison-Key`) that names its signature key by a hash, since Stalwart
-  shows no key,
+  shows no key; setup makes the key from 48 random bytes, and one written
+  by hand into its file must be as long and as random, since the hash lets
+  whoever may read Stalwart's webhooks test guesses of a short one,
 - two read-only API keys (broker, collector) usable only from loopback,
 - the Prometheus exporter with its own scrape credential,
 - Garrison as a registered OAuth client: sign-in only, no access to mail,

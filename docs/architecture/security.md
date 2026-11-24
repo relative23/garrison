@@ -22,7 +22,7 @@ incoming message while the filter judges it.
 | Stalwart → milter | Optional (`[milter]`). Loopback listener under a user of its own that can read the configuration and nothing of Garrison's state; the unit may reach loopback only and has no writable path. A message is held in memory while it is judged and then dropped; the journal gets the kind of finding, never a sender, recipient, subject or file name. Limits on frame size, message size, unpacked size, archive depth and connections at once, and one bound on what the messages of all connections hold together, keep crafted or many large messages from exhausting memory: a message that finds no room is deferred, not passed. A scan's work grows with the size of the message alone, whatever its archives' headers claim, and the filter answers within 20 seconds of a message's end. A message it could not scan completely gets what `on_incomplete` says, never the answer of a clean one. The parsers are fuzzed. Stalwart is told of the filter only once it answers, and the filter moves or stops only after Stalwart has read the change. |
 | Local users → files | One system user per service; state directories 0700/0750; credentials via systemd `LoadCredential=`; under `/proc` the web service, the receiver and the macro filter see their own process and nothing else (`ProtectProc=invisible`, `ProcSubset=pid`), since that is all they read there, though its `net/` still lists the host's sockets, as they share the host's network; policy root-owned 0640 for the broker group; backups contain no sessions or credentials. `garrison.toml` is 0644, since the macro filter and the broker read it as users of their own, so it holds no secret: a notification address that is one (an ntfy topic that takes no token, a webhook with its key in the address) is kept in a credential file it names, and the status database, which the group `garrison` reads, keeps only that file's name for the watch; so is the key of Spamhaus' Data Query Service (`collector.dqs_key`), which only the question to the list carries, and the first collection run of this release clears what earlier releases kept of either in the status database, free pages included, as a later run does with an address once it is kept in a file; `garrison doctor` warns of a channel without a token whose address is written in `garrison.toml`, and check-config and doctor of a list that holds its key there. |
 | Service users → root commands | `backup`, `self-check`, `restore` and `install --rollback --restore-state` follow no links in the state directories; a database holding anything but tables and indexes is not read; a restored file is created new, owned like its directory and renamed into place; the access policy is created new as root's with the broker's group, never through a link `broker.policy` names. Services read each other's databases the same way. |
-| Collector → outside | Only what an operator configured, and nothing about the installation: the `releases` provider asks GitHub's public release list once a day; `[notifications]` sends the title and first finding of a check to the channels named there and to no other: an ntfy topic, a webhook, a mailbox through the named mail server (signed in, with the certificate checked for that name), each over TLS with a secret read as a systemd credential, and an error that names only the server of a channel's address, never the rest of it; the `dns` provider asks this host's resolver for the names Stalwart lists, each question with a random number from a port the system chose, and reads only an answer that carries that number and repeats the question; every length in an answer is checked (fuzz target `dns_answer`), and where a domain publishes an MTA-STS record it fetches that domain's policy file; the `reputation` provider, off in the example configuration, asks the named blocklists about the mail hosts' addresses through this host's resolver, so those lists learn the addresses; the `tls` provider connects to Stalwart's listeners on this host; the `mail-test` provider hands its test messages to the SMTP listener at the configured IP address, loopback by default, and to the one recipient named. |
+| Collector → outside | Only what an operator configured, and nothing about the installation: the `releases` provider asks GitHub's public release list, or the mirror its `api` names, once a day; `[notifications]` sends the title and first finding of a check to the channels named there and to no other: an ntfy topic, a webhook, a mailbox through the named mail server (signed in, with the certificate checked for that name), each over TLS with a secret read as a systemd credential, and an error that names only the server of a channel's address, never the rest of it; the `dns` provider asks this host's resolver for the names Stalwart lists, each question with a random number from a port the system chose, and reads only an answer that carries that number and repeats the question; every length in an answer is checked (fuzz target `dns_answer`), and where a domain publishes an MTA-STS record it fetches that domain's policy file; the `reputation` provider, off in the example configuration, asks the named blocklists about the mail hosts' addresses through this host's resolver, so those lists learn the addresses; the `tls` provider connects to Stalwart's listeners on this host; the `mail-test` provider hands its test messages to the SMTP listener at the configured IP address, loopback by default, and to the one recipient named. |
 | Other jobs → status | A receipt counts only when only root (or the collector itself) can change it; otherwise its observation is Unknown. |
 
 ## Authorization logic
@@ -78,49 +78,18 @@ brokers never repeat a job; pending jobs become "uncertain".
 
 ## Known limits
 
-- The macro filter reads documents by their structure, not by running them: it
-  misses what an archive with a password hides, a document in zip archives
-  nested more than three deep, Excel 4.0 macro sheets in an old `.xls` file,
-  the macros of an old `.ppt` file and archive formats other than zip. It
-  looks for the document without reading the message's structure: it reads the
-  message as it stands, decodes the base64 of the whole message (ignoring
-  every byte outside the alphabet, RFC 2045 section 6.8, so junk, boundaries
-  and headers around a base64 body fall away) in each way the decoders of PHP,
-  Python, Perl, Thunderbird, GLib (Evolution), GMime 3 (Geary, Balsa), MimeKit
-  and Jakarta Mail read a `=` in it, undoes quoted-printable (also taking `=`
-  before a lone CR for a soft break, as Thunderbird and PHP do) and reads what
-  comes of it in the same ways where that undid an `=XX`, and reads a uuencode
-  block wherever it stands, by the characters, line lengths and `begin` lines
-  a mail program takes. A body wrapped again in a transfer encoding (a
-  base64-encoded forwarded message with its own base64 attachment) is read as
-  a message in turn, three encodings deep as archives are opened three deep.
-  Where a part begins or ends, how deeply it is nested and how its headers are
-  written are never read to decide this, so no boundary trick, depth or header
-  hides a document the scan would otherwise find. It does not read base64 as
-  Node's mail parsers do (libbase64, postal-mime), which begin anew after
-  every `=`, nor as Node's `Buffer` does with `-` and `_` for `+` and `/`, nor
-  as GMime 2.6 does, nor base64 with `=` in it under quoted-printable that
-  only soft line breaks wrap as the programs do that count `=`;
-  quoted-printable that is not well formed it undoes as its standard has it,
-  which some programs do not. How Outlook and Apple Mail decode is not known.
-  It reads one message at a time, so a document split over the fragments of a
-  message/partial is not seen. It does not decode yEnc or BinHex, which a mail
-  program may take from a body: a message that holds a block of either, a part
-  that declares a transfer encoding the filter does not decode, and nesting
-  deeper than three are incomplete, below, not a clean message. Anyone who can
-  reach its loopback port can ask it about a message, as with any milter.
-- A message the macro filter could not scan completely is taken all the same
-  unless the operator chose otherwise: one larger than `max_message_mib`, one
-  whose archives unpack to more than 16 MiB a file or 64 MiB together or are
-  compressed by another method than deflate (bzip2, LZMA and the like), one
-  with a part that declares a transfer encoding the filter does not decode (or
-  a body that quotes such a header line, as a forwarded raw message does: the
-  filter cannot tell it from a real one), a uuencode block begun and not
-  ended, or a body nested in more than three transfer encodings, one that
-  needs more decoding than 48 times its size (a message attached as base64
-  inside another, with a quoted-printable part and an attachment of its own,
-  does), and one whose scan was not done within 20 seconds. By default
-  (`on_incomplete = "tag"`) it arrives with the header
+- The macro filter reads documents by their structure, not by running them,
+  and looks for them without reading the message's structure, so no
+  boundary, nesting depth or header hides a document it would otherwise
+  find. What it does not see is listed under
+  [configuration](../operator/configuration.md#milter): among it an archive
+  with a password, a document in zip archives nested more than three deep,
+  archive formats other than zip, and base64 as some mail programs read it;
+  how Outlook and Apple Mail decode is not known. Anyone who can reach its
+  loopback port can ask it about a message, as with any milter.
+- A message the macro filter could not scan completely, as the same section
+  lists, is taken all the same unless the operator chose otherwise. By
+  default (`on_incomplete = "tag"`) it arrives with the header
   `X-Garrison-Scan: unscanned`, and it is up to a Sieve rule or the mail
   program to act on that; `"defer"` and `"refuse"` keep it out.
 - A flood of sign-in callbacks from more than 4096 networks within a minute
