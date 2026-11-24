@@ -157,6 +157,33 @@ scenario_upgrade_killed() {
     check "nothing is left unfinished after it either" 'test ! -e /opt/garrison/unfinished.json'
 }
 
+scenario_switch_back_failed_early() {
+    step "An upgrade killed before it switched, then a switch back that fails: current stays at the release that ran"
+    upgraded
+    hanging=$(hanging_release)
+    # The web service takes three seconds to stop, so that the kill comes
+    # while the services stop, before current names the new release.
+    inside 'mkdir -p /etc/systemd/system/garrison-web.service.d &&
+        printf "[Service]\nExecStop=/bin/sleep 3\n" > /etc/systemd/system/garrison-web.service.d/acceptance-slow.conf &&
+        systemctl daemon-reload'
+    killed_at '/root/hanging/bin/garrison install' 'test -e /opt/garrison/unfinished.json' 0 'did not start'
+    check "the killed upgrade had not switched current" "$(current_is "$new")"
+    # The release that ran does not start either, for as long as the flag is there.
+    inside 'rm /etc/systemd/system/garrison-web.service.d/acceptance-slow.conf &&
+        printf "[Service]\nExecStartPre=+/bin/sh -c \"! test -e /run/garrison-acceptance-fail\"\n" \
+            > /etc/systemd/system/garrison-web.service.d/acceptance-fail.conf &&
+        systemctl daemon-reload && touch /run/garrison-acceptance-fail'
+    refused "the switch back the next run begins fails" '/root/release/bin/garrison install' \
+        "did not start either"
+    check "and leaves current at the release that ran" "$(current_is "$new")"
+    inside 'rm /run/garrison-acceptance-fail /etc/systemd/system/garrison-web.service.d/acceptance-fail.conf &&
+        rmdir /etc/systemd/system/garrison-web.service.d && systemctl daemon-reload'
+    installer '/root/release/bin/garrison install'
+    running "after the switch back that failed early" "$new"
+    check "nothing is left unfinished after the switch back that failed early" \
+        'test ! -e /opt/garrison/unfinished.json'
+}
+
 scenario_upgrade_resumed() {
     step "An upgrade with garrison upgrade killed once current named the new release, then garrison upgrade again"
     # The release before the one under test runs again, installed from its

@@ -122,7 +122,8 @@ fn kept_by(release: &Path) -> Step<PathBuf> {
 /// state and stay up, and `previous` names `earlier` again. Where that
 /// fails, nothing of a release that is not current keeps running, and the
 /// links are set so that `install --rollback --restore-state` is the second
-/// attempt; the error says so.
+/// attempt; the error says so. Where `current` did not name `attempted` yet,
+/// it stays at `old`: the rollback takes its target from the record.
 pub(super) fn switch_back(
     old: &Path,
     earlier: Option<&Path>,
@@ -135,6 +136,8 @@ pub(super) fn switch_back(
         previous: earlier.map(Path::to_owned),
         backup: backup.to_owned(),
     });
+    let base = Path::new(BASE);
+    let switched = std::fs::canonicalize(base.join("current")).ok().as_deref() == Some(attempted);
     let mut returned = state::Returned::default();
     switched_back(old, earlier, backup, record.as_ref(), &mut returned).map_err(|failure| {
         stop_services();
@@ -144,8 +147,12 @@ pub(super) fn switch_back(
         if let Some(record) = &record {
             let _ = unfinished::write(record);
         }
-        let kept = switch(&Path::new(BASE).join("current"), attempted)
-            .and_then(|()| switch(&Path::new(BASE).join("previous"), old));
+        let kept = if switched {
+            switch(&base.join("current"), attempted)
+                .and_then(|()| switch(&base.join("previous"), old))
+        } else {
+            switch(&base.join("current"), old)
+        };
         let what = match failure {
             Failure::Before(error) => format!("switching back to {} failed ({error})", name(old)),
             Failure::Start(error) => format!("the previous release did not start either ({error})"),

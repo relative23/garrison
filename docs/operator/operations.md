@@ -165,8 +165,8 @@ stopped, the installer switches back by itself:
    what it was before the upgrade.
 
 If the old release does not start either, the installer says so and stops
-what did start. `/opt/garrison/current` then still names the new release and
-`previous` the old one, so that
+what did start. `/opt/garrison/current` then still names the new release,
+where the upgrade had switched to it, and `previous` the old one, so that
 
 ```sh
 sudo /opt/garrison/current/bin/garrison install --rollback --restore-state
