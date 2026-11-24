@@ -59,7 +59,8 @@ nix = { version = "0.31.3", default-features = false, features = ["socket"] }
 # Test certificates are made at run time; no key material is stored. Tests only.
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
 rusqlite ={ version = "0.41.1", features = ["backup", "bundled", "hooks"] }
-rustix = { version = "1.1.5", features = ["fs", "net", "process"] }
+# The time feature reads CLOCK_MONOTONIC, which systemd times a unit's start by.
+rustix = { version = "1.1.5", features = ["fs", "net", "process", "time"] }
 # TLS probes and mail submission (checks, collector, doctor), with ring and the
 # system's trust store.
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }

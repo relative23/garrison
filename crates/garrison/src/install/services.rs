@@ -155,21 +155,17 @@ pub(super) fn as_installed(milter: bool) -> bool {
     })
 }
 
-/// When `file` last changed, in microseconds since boot as systemd times a
-/// start: its age by the wall clock, back from the time since boot. That
-/// time counts a suspend in, so a change seems later than it was, and a
-/// start soon after it may pass for one before it, never the reverse.
+/// When `file` last changed, in microseconds of the clock systemd times a
+/// start by (`CLOCK_MONOTONIC`): its age by the wall clock, back from now. A
+/// file dated ahead of the wall clock changed now.
 fn changed_at(file: &Path) -> Option<u64> {
     let modified = fs::metadata(file).ok()?.modified().ok()?;
-    // Dated ahead of the clock: changed now.
     let age = u64::try_from(modified.elapsed().unwrap_or_default().as_micros()).ok()?;
-    let uptime = fs::read_to_string("/proc/uptime").ok()?;
-    let (seconds, hundredths) = uptime.split_whitespace().next()?.split_once('.')?;
-    let now = seconds
-        .parse::<u64>()
+    let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+    let now = u64::try_from(now.tv_sec)
         .ok()?
         .checked_mul(1_000_000)?
-        .checked_add(hundredths.parse::<u64>().ok()?.checked_mul(10_000)?)?;
+        .checked_add(u64::try_from(now.tv_nsec).ok()? / 1_000)?;
     Some(now.saturating_sub(age))
 }
 
@@ -288,18 +284,19 @@ mod tests {
         assert!(!installed(&steady, &ENABLE, false, None));
     }
 
-    /// A file changed just now is dated by the time since boot as it is;
-    /// one dated ahead of the clock counts as changed now; none, unknown.
+    /// A file changed just now is dated now on the clock systemd times a
+    /// start by; one dated ahead of the wall clock counts as changed now;
+    /// none, unknown.
     #[test]
     fn a_change_is_dated_on_the_clock_of_a_start() {
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("garrison.toml");
         assert_eq!(changed_at(&file), None);
         fs::write(&file, "schema = 1\n").unwrap();
-        let uptime = fs::read_to_string("/proc/uptime").unwrap();
-        let now: f64 = uptime.split_whitespace().next().unwrap().parse().unwrap();
+        let clock = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+        let now = u128::try_from(clock.tv_sec).unwrap() * 1_000_000
+            + u128::try_from(clock.tv_nsec).unwrap() / 1_000;
         let changed = changed_at(&file).unwrap();
-        let now = std::time::Duration::from_secs_f64(now).as_micros();
         assert!(u128::from(changed) <= now + 1_000_000, "{changed} {now}");
         assert!(u128::from(changed) + 2_000_000 >= now, "{changed} {now}");
         let ahead = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
