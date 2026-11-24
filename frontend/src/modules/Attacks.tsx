@@ -107,6 +107,12 @@ function Accounts({ accounts }: { accounts: Summary["accounts"] }) {
   );
 }
 
+const REASONS = ["abuse", "authentication", "loiter", "scan"] as const;
+
+function isReason(reason: string): reason is (typeof REASONS)[number] {
+  return (REASONS as readonly string[]).includes(reason);
+}
+
 function Bans({ bans }: { bans: Summary["bans"] }) {
   const { t } = useTranslation();
   return (
@@ -124,7 +130,8 @@ function Bans({ bans }: { bans: Summary["bans"] }) {
           <TableRow key={`${ban.at}-${ban.address}-${ban.reason}`}>
             <TableCell className="whitespace-nowrap">{dateTime(ban.at)}</TableCell>
             <TableCell className="wrap-anywhere">{ban.address}</TableCell>
-            <TableCell>{t(`attacks.reason.${ban.reason}`)}</TableCell>
+            {/* A reason this build does not know is shown as the server named it. */}
+            <TableCell>{isReason(ban.reason) ? t(`attacks.reason.${ban.reason}`) : ban.reason}</TableCell>
           </TableRow>
         ))}
       </TableBody>

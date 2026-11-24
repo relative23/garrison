@@ -173,6 +173,8 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **A ban reason the page does not know is shown as the server named it.**
+  A page loaded before an upgrade that adds one showed "attacks.reason.…".
 - **An empty Recent jobs list no longer says that the audit holds no job.**
   It lists the recent jobs of the actions your profile grants, and says so.
 - **A job whose result is uncertain is announced as a warning.** The

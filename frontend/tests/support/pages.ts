@@ -45,7 +45,7 @@ export function answers(): Record<string, Route> {
     [`GET sessions/${DETAIL}`]: { body: { summary: smtpSession({ spanId: DETAIL }), events: [event()], truncated: false } },
     "GET attacks": { body: attacks() },
     "GET destinations": { body: destinations() },
-    "GET actions": { body: catalog() },
+    "GET actions": { body: catalog({ jobs: [job({ id: "f".repeat(32), status: "succeeded", message: "Done." })] }) },
     [`GET actions/jobs/${job().id}`]: { body: job({ status: "running", message: "Started" }) },
     "POST actions": { status: 202, body: { job: job(), replayed: false } },
     "PUT preferences": (call: Call) => ({ body: call.body }),
