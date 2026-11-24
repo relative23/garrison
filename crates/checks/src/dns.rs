@@ -448,4 +448,6 @@ pub fn ask(server: SocketAddr, name: &str, kind: Kind) -> Result<Answer, Error> 
 #[cfg(test)]
 mod root_tests;
 #[cfg(test)]
+mod tcp_tests;
+#[cfg(test)]
 mod tests;

@@ -1,0 +1,108 @@
+//! The questions the DNS client asks again over TCP, where the answer over
+//! UDP was cut off.
+
+use std::net::{TcpListener, UdpSocket};
+use std::thread;
+
+use super::tests::{FINE, answer, txt};
+use super::*;
+
+#[test]
+fn an_answer_cut_off_over_udp_is_asked_for_again_over_tcp() {
+    // One port for both, as a resolver has it. A port that is free for UDP
+    // may be taken for TCP by another test, so the pair is looked for.
+    let (udp, tcp) = (0..50)
+        .find_map(|_| {
+            let udp = UdpSocket::bind("127.0.0.1:0").ok()?;
+            let tcp = TcpListener::bind(udp.local_addr().ok()?).ok()?;
+            Some((udp, tcp))
+        })
+        .expect("a port that is free for UDP and TCP");
+    let server = udp.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let mut buffer = [0; 512];
+        let (length, client) = udp.recv_from(&mut buffer).unwrap();
+        let question = buffer[..length].to_vec();
+        udp.send_to(&answer(&question, [0x83, 0x80], &[]), client)
+            .unwrap();
+        let (mut stream, _) = tcp.accept().unwrap();
+        let mut size = [0; 2];
+        stream.read_exact(&mut size).unwrap();
+        let mut asked = vec![0; usize::from(u16::from_be_bytes(size))];
+        stream.read_exact(&mut asked).unwrap();
+        assert_eq!(asked, question);
+        let full = answer(&question, FINE, &[(16, txt(&["v=spf1 mx -all"]))]);
+        stream
+            .write_all(&u16::try_from(full.len()).unwrap().to_be_bytes())
+            .unwrap();
+        stream.write_all(&full).unwrap();
+    });
+    assert_eq!(
+        ask(server, "example.test", Kind::Txt),
+        Ok(Answer::Records(vec!["v=spf1 mx -all".to_owned()]))
+    );
+    handle.join().unwrap();
+    // Nothing listens there.
+    let silent = UdpSocket::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let error = ask(silent, "example.test", Kind::Txt).unwrap_err();
+    assert!(
+        matches!(error, Error::NoAnswer { server, .. } if server == silent),
+        "{error:?}"
+    );
+    // Something takes the question and says nothing: its time runs out.
+    let quiet = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let error = ask(quiet.local_addr().unwrap(), "example.test", Kind::Txt).unwrap_err();
+    let waited = format!(
+        "{} did not answer: no answer within 3 s",
+        quiet.local_addr().unwrap()
+    );
+    assert_eq!(error.to_string(), format!("the resolver {waited}"));
+}
+
+/// An answer cut off over UDP is asked for over TCP: where nothing listens
+/// for TCP, the resolver did not answer; where TCP cuts it off as well, it
+/// is cut off.
+#[test]
+fn the_question_over_tcp_has_no_answer_or_one_cut_off_again() {
+    let cut = |question: &[u8]| answer(question, [0x83, 0x80], &[]);
+    // No listener for TCP on the UDP port: the connection is refused.
+    let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let server = udp.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let mut buffer = [0; 512];
+        let (length, client) = udp.recv_from(&mut buffer).unwrap();
+        udp.send_to(&cut(&buffer[..length]), client).unwrap();
+    });
+    let error = ask(server, "example.test", Kind::Txt).unwrap_err();
+    assert!(matches!(error, Error::NoAnswer { .. }), "{error:?}");
+    handle.join().unwrap();
+    // TCP answers, cut off again.
+    let (udp, tcp) = (0..50)
+        .find_map(|_| {
+            let udp = UdpSocket::bind("127.0.0.1:0").ok()?;
+            let tcp = TcpListener::bind(udp.local_addr().ok()?).ok()?;
+            Some((udp, tcp))
+        })
+        .expect("a port that is free for UDP and TCP");
+    let server = udp.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let mut buffer = [0; 512];
+        let (length, client) = udp.recv_from(&mut buffer).unwrap();
+        udp.send_to(&cut(&buffer[..length]), client).unwrap();
+        let (mut stream, _) = tcp.accept().unwrap();
+        let mut size = [0; 2];
+        stream.read_exact(&mut size).unwrap();
+        let mut asked = vec![0; usize::from(u16::from_be_bytes(size))];
+        stream.read_exact(&mut asked).unwrap();
+        let again = cut(&asked);
+        stream
+            .write_all(&u16::try_from(again.len()).unwrap().to_be_bytes())
+            .unwrap();
+        stream.write_all(&again).unwrap();
+    });
+    assert_eq!(ask(server, "example.test", Kind::Txt), Err(Error::CutOff));
+    handle.join().unwrap();
+}
