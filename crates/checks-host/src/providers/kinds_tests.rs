@@ -282,7 +282,8 @@ fn plugins(at: &dyn Fn(&str) -> PathBuf) -> Vec<Seen> {
 
 /// Every check of this crate where it cannot look: its source missing or
 /// unreadable, cut by a limit, or of a form it does not know. None of their
-/// cards may be in order, and every check of the crate has such a case.
+/// cards may be in order, an Unknown one says why, and every check of the
+/// crate has such a case.
 #[test]
 fn no_card_is_in_order_where_its_check_could_not_look() {
     let work = tempfile::tempdir().unwrap();
@@ -303,4 +304,14 @@ fn no_card_is_in_order_where_its_check_could_not_look() {
         })
         .collect();
     assert_eq!(in_order, Vec::<String>::new());
+    let unsaid: Vec<String> = seen
+        .iter()
+        .flat_map(|(kind, what, cards)| {
+            cards
+                .iter()
+                .filter(|card| card.state == State::Unknown && card.findings.is_empty())
+                .map(move |card| format!("{kind}, {what}: {} does not say why", card.id))
+        })
+        .collect();
+    assert_eq!(unsaid, Vec::<String>::new());
 }

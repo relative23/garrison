@@ -4,6 +4,7 @@ mod backupcheck;
 mod hidden;
 mod host;
 mod hostcare;
+mod ran;
 mod receipt;
 mod systemd;
 mod version;

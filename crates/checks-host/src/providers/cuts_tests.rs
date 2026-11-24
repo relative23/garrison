@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use super::kinds_tests::{Missing, cards, file};
 use super::*;
-use crate::testing::table;
+use crate::testing::{Canned, table};
 
 /// The limits in this crate's code, before each file's tests: every
 /// `const MAX_…` and `const MOST…`, and every `.take(…)`, by its file below
@@ -99,6 +99,12 @@ fn cuts(at: &dyn Fn(&str) -> PathBuf) -> Vec<(&'static str, String)> {
     );
     let whole = format!("ok_when = {{ key = \"result\", equals = [\"{log}\"] }}");
     let condition = cards(&receipt("long.json", &whole), &Missing).remove(0);
+    let version = VersionCommand::new(&table(
+        "component = \"C\"\ncommand = [\"/usr/bin/c\", \"--version\"]",
+    ))
+    .unwrap();
+    let late = Canned(format!("{}c 1.2.3\n", "x".repeat(4096)));
+    let searched = cards(&version, &late).remove(0);
     vec![
         (
             "the rows past a list receipt's table",
@@ -116,13 +122,18 @@ fn cuts(at: &dyn Fn(&str) -> PathBuf) -> Vec<(&'static str, String)> {
             "a condition on a text past 300 characters",
             format!("{:?} {:?}", condition.state, condition.findings),
         ),
+        (
+            "a version past 4096 characters of output",
+            format!("{:?} {:?}", searched.state, searched.findings),
+        ),
     ]
 }
 
 /// Every limit in this crate's code that cuts what a card shows says what
 /// it left out: the rows of a list receipt past its table, a text
-/// past 300 characters, which a condition still compares whole, and the
-/// packages past five that need a restart. A limit that refuses a source
+/// past 300 characters, which a condition still compares whole, the
+/// packages past five that need a restart, and a version command's output
+/// past the part that is searched. A limit that refuses a source
 /// whole leaves its card Unknown, never cut. A new limit fails here until it
 /// is named below with what it does.
 #[test]
@@ -148,6 +159,12 @@ fn every_cut_says_what_it_left_out() {
             (
                 "a condition on a text past 300 characters",
                 "Ok []".to_owned()
+            ),
+            (
+                "a version past 4096 characters of output",
+                "Unknown [\"The first 4096 characters of the output of /usr/bin/c hold nothing \
+                 that `pattern` finds.\"]"
+                    .to_owned()
             ),
         ]
     );
@@ -186,7 +203,7 @@ fn every_cut_says_what_it_left_out() {
         (
             "providers/version.rs",
             "const MAX_OUTPUT",
-            "the card is Unknown where it cuts",
+            "the part of the output searched: Unknown, named, below",
         ),
         ("providers/version.rs", ".take(MAX_OUTPUT)", "the same cut"),
         (

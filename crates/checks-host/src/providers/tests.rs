@@ -343,3 +343,77 @@ fn a_plugin_registry_that_cannot_be_read_says_why() {
         );
     }
 }
+
+/// A command's exit code and output, or the error of running it.
+type Given = Result<(Option<i32>, String), fn() -> std::io::Error>;
+
+/// Answers every command with an output or an error, as given.
+struct Gives(Given);
+
+impl crate::command::Runner for Gives {
+    fn run(&self, _: &[&str]) -> std::io::Result<crate::command::Output> {
+        match &self.0 {
+            Ok((code, stdout)) => Ok(crate::command::Output {
+                code: *code,
+                stdout: stdout.clone(),
+            }),
+            Err(error) => Err(error()),
+        }
+    }
+}
+
+/// A version command that gives no version says why: it could not be run,
+/// did not finish in the collector's time for a command, ended with a
+/// status or by a signal, wrote nothing to the output that is read, or
+/// nothing that `pattern` finds there, within the part that is read.
+#[test]
+fn a_version_command_without_a_version_says_why() {
+    let provider = VersionCommand::new(&table(
+        "component = \"C\"\ncommand = [\"/usr/bin/c\", \"--version\"]",
+    ))
+    .unwrap();
+    let output = |code: Option<i32>, text: &str| Gives(Ok((code, text.to_owned())));
+    let cases = [
+        (
+            Gives(Err(|| std::io::Error::from_raw_os_error(2))),
+            "/usr/bin/c could not be run: No such file or directory (os error 2).",
+        ),
+        (
+            Gives(Err(|| {
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "command timed out")
+            })),
+            "/usr/bin/c did not finish within 8 seconds and was ended.",
+        ),
+        (
+            output(Some(2), "c 1.2.3\n"),
+            "/usr/bin/c exited with status 2.",
+        ),
+        (output(None, ""), "/usr/bin/c was ended by a signal."),
+        (
+            output(Some(0), ""),
+            "/usr/bin/c wrote nothing to its standard output, the only output that is read.",
+        ),
+        (
+            output(Some(0), "c, a build of today\n"),
+            "The output of /usr/bin/c holds nothing that `pattern` finds.",
+        ),
+        (
+            output(Some(0), &format!("{}c 1.2.3\n", "x".repeat(4096))),
+            "The first 4096 characters of the output of /usr/bin/c hold nothing that \
+             `pattern` finds.",
+        ),
+    ];
+    let directory = tempfile::tempdir().unwrap();
+    let config = config(directory.path());
+    for (runner, said) in cases {
+        let card = provider
+            .collect(&context(&config, &runner))
+            .unwrap()
+            .observations
+            .remove(0);
+        assert_eq!(
+            (card.state, card.findings),
+            (State::Unknown, vec![said.to_owned()])
+        );
+    }
+}
