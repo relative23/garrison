@@ -7,8 +7,8 @@
 # another user put in the policy's folder, takes no lock that is not its own
 # and waits for none that another process holds, makes a missing folder the
 # broker can read, names what a role lacks where none of Stalwart's
-# qualifies, and its profiles follow `[[actions]]`, which the broker takes
-# once it restarts.
+# qualifies, and its profiles follow `[[actions]]`, which the broker and the
+# web service take once the installer ran again.
 # They use that script's helpers and its `new`.
 # shellcheck disable=SC2154
 
@@ -170,17 +170,23 @@ scenario_access_actions() {
     inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.actions &&
         printf "\n[[actions]]\nid = \"run_other\"\ntitle = \"Run another check\"\ndescription = \"Starts the test unit.\"\nconfirmation = \"RUN OTHER\"\nunit = \"acceptance-check.service\"\noperation = \"start\"\ncooldown_seconds = 0\ntimeout_seconds = 30\noperator = true\n" \
             >> /etc/garrison/garrison.toml'
-    says "update gives the administrator profile an action added later" \
+    web_started='systemctl show -p ActiveEnterTimestampMonotonic --value garrison-web'
+    inside "$web_started > /root/web-started"
+    says "update gives the administrator profile an action added later, and says to run the installer" \
         '/opt/garrison/current/bin/garrison access update' "Profile administrator: run_other added."
-    inside "sh -c 'garrison polkit-rule > /etc/polkit-1/rules.d/50-garrison.rules' && systemctl restart garrison-broker"
-    check "the broker offers it once it restarts with the polkit rule written again" "$catalog | grep -q run_other"
+    # As update says: the installer writes the polkit rule and restarts the
+    # broker and the web service, which both read the actions when they start.
+    installer '/root/release/bin/garrison install'
+    check "the broker offers it once the installer ran again" "$catalog | grep -q run_other"
+    check "the installer restarted the web service with the broker" \
+        "test \"\$($web_started)\" != \"\$(cat /root/web-started)\""
     inside 'cat /root/garrison.toml.actions > /etc/garrison/garrison.toml'
     refused "a policy that names an action garrison.toml no longer has says what takes it out" \
         '/opt/garrison/current/bin/garrison access list' "run \`garrison access update\`, which takes it out"
     says "update takes it out" '/opt/garrison/current/bin/garrison access update' "Profile administrator: run_other taken out."
     check "and the installer's check of the configuration takes the policy again" \
         '/opt/garrison/current/bin/garrison check-config && ! grep -q run_other /etc/garrison/access-policy.json'
-    inside "sh -c 'garrison polkit-rule > /etc/polkit-1/rules.d/50-garrison.rules' && systemctl restart garrison-broker &&
-        rm /root/garrison.toml.actions /root/garrison.toml.commands"
+    installer '/root/release/bin/garrison install'
+    inside 'rm /root/garrison.toml.actions /root/garrison.toml.commands /root/web-started'
     running "after the actions changed" "$new"
 }
