@@ -1,7 +1,8 @@
 #!/bin/sh
 # What only a real host shows: Garrison under the distribution's mandatory
 # access control as shipped (SELinux enforcing on the RHEL family, AppArmor
-# elsewhere), behind nginx with TLS, back after a reboot, and upgraded there.
+# elsewhere), behind nginx with TLS, back after a reboot, upgraded there, and
+# reading a place under /home that a drop-in shows the collector.
 #
 #   HOST=vm DISTRO=almalinux-10 [ARCH=aarch64] scripts/acceptance-host.sh \
 #       dist/previous-x86_64.tar.gz dist/garrison-<version>-x86_64.tar.gz
@@ -93,6 +94,16 @@ mac=$(inside 'if command -v getenforce >/dev/null 2>&1; then getenforce;
     elif aa-status --enabled 2>/dev/null; then echo AppArmor; else echo none; fi')
 echo "      access control: $mac"
 
+undenied() {
+    found=$(denials)
+    if [ -n "$found" ]; then
+        echo "FAIL  $1: the access control denied something"
+        echo "$found" | tail -n 20
+        exit 1
+    fi
+    echo "ok    $1: no denial by $mac"
+}
+
 through_nginx() {
     check "$1: the interface answers through nginx with TLS" \
         'curl -sk --resolve admin.example.test:443:127.0.0.1 https://admin.example.test/api/session |
@@ -103,13 +114,7 @@ through_nginx() {
     check "$1: the Stalwart host answers /metrics/ with 404" \
         'test "$(curl -sk -o /dev/null -w "%{http_code}" --resolve mail.example.test:443:127.0.0.1 \
             https://mail.example.test/metrics/prometheus)" = 404'
-    found=$(denials)
-    if [ -n "$found" ]; then
-        echo "FAIL  $1: the access control denied something"
-        echo "$found" | tail -n 20
-        exit 1
-    fi
-    echo "ok    $1: no denial by $mac"
+    undenied "$1"
 }
 
 step "Behind nginx"
@@ -142,5 +147,51 @@ names "current is the release under test" current "$(inside 'cat /root/release/V
 names "previous is the release it upgraded from" previous "$(inside 'cat /root/previous/VERSION')"
 services upgraded
 through_nginx upgraded
+
+step "A place under /home, shown to the collector as checks.md says"
+# The collector's unit hides /home. The drop-in of checks.md shows it one
+# folder there read-only at another place: here a job's receipt, and an empty
+# folder of a file system mounted at /home for that file system's free space.
+inside 'truncate -s 512M /var/home.img &&
+    { mkfs.ext4 -q -F /var/home.img 2>/dev/null || mkfs.xfs -q /var/home.img; } &&
+    mount -o loop /var/home.img /home &&
+    { ! command -v restorecon >/dev/null 2>&1 || restorecon -R /home; } &&
+    mkdir -p /home/backup /home/.garrison-disk /srv/garrison/backup /srv/garrison/home-disk &&
+    printf "{\"date\": \"%s\", \"result\": \"passed\"}\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        > /home/backup/last-run.json &&
+    chmod 644 /home/backup/last-run.json &&
+    mkdir -p /etc/systemd/system/garrison-collect.service.d &&
+    printf "[Service]\nBindReadOnlyPaths=%s\nBindReadOnlyPaths=%s\n" \
+        /home/backup:/srv/garrison/backup /home/.garrison-disk:/srv/garrison/home-disk \
+        > /etc/systemd/system/garrison-collect.service.d/home.conf &&
+    systemctl daemon-reload &&
+    sed -i "s|^type = \"host\"\$|&\ndisk_path = \"/srv/garrison/home-disk\"|" /etc/garrison/garrison.toml &&
+    cat >> /etc/garrison/garrison.toml <<EOF
+[[providers]]
+type = "receipt"
+id = "home-backup"
+title = "Backup under /home"
+path = "/srv/garrison/backup/last-run.json"
+modules = ["backups"]
+max_age_hours = 30
+ok_when = { key = "result", equals = ["passed"] }
+EOF'
+inside_input 'cat > /root/card.sh' <<'SQL'
+sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT value FROM snapshots,
+    json_each(document, '\$.observations') WHERE snapshots.id = (SELECT max(id) FROM snapshots)
+    AND json_extract(value, '\$.id') = '$1'"
+SQL
+check "check-config takes the two places" \
+    '/opt/garrison/current/bin/garrison --config /etc/garrison/garrison.toml check-config'
+check "with the drop-in a collection run succeeds" \
+    'systemctl reset-failed garrison-collect.service; systemctl start garrison-collect.service'
+check "the collector reads the receipt of /home where the drop-in shows it" \
+    'sh /root/card.sh receipt.home-backup | grep "\"state\":\"ok\""'
+check "the host card measures the file system mounted at /home" \
+    'sh /root/card.sh host.resources | grep -F "statvfs(/srv/garrison/home-disk)" |
+        grep "\"label\":\"Disk total\",\"value\":$(($(stat -f -c "%b * %S" /home)))[,}]"'
+check "root sees nothing of /home at the two places" \
+    'test -z "$(ls -A /srv/garrison/backup)" && test -z "$(ls -A /srv/garrison/home-disk)"'
+undenied "a place under /home"
 
 step "Accepted: Garrison runs under $mac, behind nginx, and after a reboot"
