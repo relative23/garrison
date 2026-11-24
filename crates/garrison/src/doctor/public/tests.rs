@@ -220,11 +220,8 @@ fn a_502_names_the_restart_where_nothing_listens_on_web_port() {
          Connection: close\r\n\r\n{gateway}",
         gateway.len()
     );
-    let silent = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    // Held, so that no stand-in started below is given it.
+    let (_held, silent) = super::super::silent_port();
     let listening = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     for (port, fix) in [
         (silent, "systemctl restart garrison-web.service"),

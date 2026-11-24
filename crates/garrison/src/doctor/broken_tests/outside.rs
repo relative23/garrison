@@ -106,11 +106,8 @@ pub(super) fn nginx_answers_502() -> Broken {
     let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
     config.deployment.public_origin.clone_from(&server.url);
     // Where nothing listens, as before garrison-web was restarted.
-    config.web.port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let (_held, port) = super::super::silent_port();
+    config.web.port = port;
     let found = public::interface(&config, &roots);
     server.finish();
     Broken {

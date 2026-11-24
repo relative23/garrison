@@ -262,15 +262,6 @@ fn answering_milter() -> u16 {
     port
 }
 
-/// A port of this host where nothing listens.
-fn silent_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 /// What doctor says of the macro milter where garrison.toml has the filter
 /// on `port`, or has no `[milter]`, Stalwart answers its milters with
 /// `answer`, and the collector's key is there.
@@ -345,7 +336,12 @@ fn reached(host: &str, port: u16, milters: &[u16]) -> bool {
 fn no_entry_stalwart_asks_in_vain_goes_unsaid() {
     let filter = answering_milter();
     let other = answering_milter();
-    let (old, gone, elsewhere) = (silent_port(), silent_port(), silent_port());
+    // Held, so that no stand-in for Stalwart started below is given one.
+    let ((_old, old), (_gone, gone), (_elsewhere, elsewhere)) = (
+        super::super::silent_port(),
+        super::super::silent_port(),
+        super::super::silent_port(),
+    );
     let named = |id: &str, host: &str, port: u16| {
         let mut entry = row(id, port, true);
         entry["host"] = json!(host);
