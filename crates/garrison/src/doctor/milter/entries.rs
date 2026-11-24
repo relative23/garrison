@@ -280,11 +280,7 @@ mod tests {
                 },
             );
         });
-        let silent = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        let (_held, silent) = crate::doctor::silent_port();
         let stored = read(&json!([
             {"id": "a", "host": "127.0.0.1", "port": milter},
             {"id": "b", "host": "0.0.0.0", "port": milter},

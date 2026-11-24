@@ -174,11 +174,8 @@ pub(super) fn milter_on_another_port() -> Broken {
             },
         );
     });
-    let old = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    // Held, so that the stand-in for Stalwart is not given it.
+    let (_held, old) = super::super::silent_port();
     let stalwart = serve(vec![json(&serde_json::json!({"methodResponses": [[
         "x:MtaMilter/get",
         {"list": [{"id": "m", "host": "127.0.0.1", "port": old,
