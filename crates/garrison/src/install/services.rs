@@ -240,13 +240,7 @@ fn installed(shown: &str, shipped: &[&str], milter: bool, changed: Option<u64>) 
             })
             .unwrap_or_default()
     };
-    let value = |block: &str, key: &str| {
-        block
-            .lines()
-            .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
-            .unwrap_or_default()
-            .to_owned()
-    };
+    let value = settle::property;
     let enabled = shipped.iter().all(|id| {
         value(unit(id), "UnitFileState") == "enabled" && value(unit(id), "ActiveState") == "active"
     });

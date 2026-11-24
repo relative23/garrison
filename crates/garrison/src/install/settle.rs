@@ -26,15 +26,18 @@ pub(super) fn settle(milter: bool) -> Step {
     Ok(())
 }
 
+/// The value `systemctl show` gave `key` in `shown`; empty where it gave none.
+pub(super) fn property<'a>(shown: &'a str, key: &str) -> &'a str {
+    shown
+        .lines()
+        .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+        .unwrap_or_default()
+}
+
 /// Why `systemctl show -p ActiveState -p NRestarts` describes `unit` as one
 /// that did not stay up.
 pub(super) fn unsettled(unit: &str, properties: &str) -> Option<State> {
-    let value = |key: &str| {
-        properties
-            .lines()
-            .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
-            .unwrap_or_default()
-    };
+    let value = |key: &str| property(properties, key);
     let seconds = SETTLE.as_secs();
     match (value("ActiveState"), value("NRestarts")) {
         ("active", "0") => None,
