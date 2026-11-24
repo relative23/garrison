@@ -48,6 +48,22 @@ fn root() -> PathBuf {
         .to_owned()
 }
 
+/// What `cargo metadata` says of the workspace at `root`, asked with
+/// `arguments` beside its format and `--locked`.
+fn metadata(root: &Path, arguments: &[&str]) -> Result<serde_json::Value, String> {
+    let output =
+        std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+            .args(["metadata", "--format-version", "1", "--locked"])
+            .args(arguments)
+            .current_dir(root)
+            .output()
+            .map_err(|error| format!("cannot run cargo metadata: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+}
+
 fn report(name: &str, problems: Result<Vec<String>, String>) -> bool {
     match problems {
         Ok(problems) if problems.is_empty() => {

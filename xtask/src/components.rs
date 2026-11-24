@@ -5,7 +5,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -55,23 +54,7 @@ fn lock_checksums(root: &Path) -> Result<BTreeMap<(String, String), String>, Str
 
 /// The third-party crates that `garrison` links for `target`, without build tools.
 pub(crate) fn crates(root: &Path, target: &str) -> Result<Vec<Component>, String> {
-    let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-        .args([
-            "metadata",
-            "--format-version",
-            "1",
-            "--locked",
-            "--filter-platform",
-            target,
-        ])
-        .current_dir(root)
-        .output()
-        .map_err(|error| format!("cannot run cargo metadata: {error}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
-    }
-    let metadata: Value =
-        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+    let metadata = crate::metadata(root, &["--filter-platform", target])?;
     let packages: Vec<&Value> = metadata["packages"]
         .as_array()
         .into_iter()
