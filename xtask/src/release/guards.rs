@@ -63,8 +63,24 @@ fn release_line(program: &str, line: u32, later: bool, need: &str) -> Result<(),
     fits(program, &found, line, later, need)
 }
 
+/// The archive is packed with options only GNU tar has; another tar refuses
+/// them, or orders and dates the files its own way.
+fn gnu_tar(found: &str) -> Result<(), String> {
+    let first = found.lines().next().unwrap_or_default();
+    if first.contains("GNU tar") {
+        Ok(())
+    } else {
+        Err(format!(
+            "tar: found {first:?}, need GNU tar for a reproducible archive"
+        ))
+    }
+}
+
 /// The tools on `PATH` are the pinned ones.
 pub(super) fn tools() -> Result<(), String> {
+    let tar = output(Command::new("tar").arg("--version"))
+        .map_err(|error| format!("tar is required (GNU tar): {error}"))?;
+    gnu_tar(&tar)?;
     require("zig", "version", ZIG)?;
     require("cargo-zigbuild", "--version", ZIGBUILD)?;
     release_line(
@@ -201,6 +217,15 @@ pub(super) fn signed_by_no_release_key(root: &Path, signatures: &[PathBuf]) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_gnu_tar_packs_the_archive() {
+        assert_eq!(gnu_tar("tar (GNU tar) 1.35\nCopyright (C) 2023"), Ok(()));
+        for other in ["bsdtar 3.7.4 - libarchive 3.7.4 zlib/1.3", ""] {
+            let refused = gnu_tar(other).unwrap_err();
+            assert!(refused.contains("need GNU tar"), "{refused}");
+        }
+    }
 
     /// A repository of its own in a temporary folder, with one commit: a
     /// README and a .gitignore that ignores `dist/`. Git runs without the

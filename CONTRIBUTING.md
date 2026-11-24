@@ -519,8 +519,8 @@ SBOM in `sbom.cdx.json` (also written next to the archive) and `SHA256SUMS`.
 `cargo xtask sbom` prints the SBOM without a build. The same commit yields
 the same archive; before it builds anything, `cargo xtask release` refuses
 other Zig or cargo-zigbuild versions and a Node.js of another release line
-than 24, because they are part of the build like the compiler, and an npm
-older than 11.
+than 24, because they are part of the build like the compiler, an npm
+older than 11 and a tar that is not GNU tar.
 
 ### Signing releases
 
