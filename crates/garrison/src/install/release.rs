@@ -9,10 +9,9 @@ use super::files::{Step, announce, copy_tree, exchange, fresh_folder, io, lock, 
 use super::requirements::{base_shown, preflight, room, size, state_size};
 use super::services::{check_config, start, stop_services};
 use super::system::{install_system_files, protect_policy};
-use super::unfinished::{self, Unfinished};
 use super::{
     BACKUPS, BASE, CONFIG, LAST, LOCK, cli, command, configured, fallback, here, housekeeping,
-    rollback, verify,
+    name, rollback, verify,
 };
 use crate::say;
 
@@ -85,7 +84,7 @@ fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
                 "backup failed: {said}; {}, the release that runs, makes the backup before the \
                  upgrade and cannot load {CONFIG}/garrison.toml: take out the settings it does \
                  not know, upgrade, then put them back",
-                unfinished::name(&running)
+                name(&running)
             ));
         }
         return Err(format!("backup failed: {said}"));
@@ -187,19 +186,12 @@ pub(super) fn install() -> Step {
     let _held = lock(Path::new(LOCK))?;
     let base = Path::new(BASE);
     let current = base.join("current");
-    // An upgrade that an earlier run began goes on, or is switched back first.
-    let resumed = fallback::before_install(&version)?;
-    let (old, earlier) = match &resumed {
-        Some(resumed) => (Some(resumed.from.clone()), resumed.previous.clone()),
-        None => (
-            fs::canonicalize(&current).ok(),
-            fs::canonicalize(base.join("previous")).ok(),
-        ),
-    };
-    let configured = resumed.is_some() || configured(old.is_some());
+    let old = fs::canonicalize(&current).ok();
+    let earlier = fs::canonicalize(base.join("previous")).ok();
+    let configured = configured(old.is_some());
     // Room for the release and, before an upgrade, the backup of the state.
     let mut needs = vec![(base, size(&here))];
-    if old.is_some() && configured && resumed.is_none() {
+    if old.is_some() && configured {
         needs.push((Path::new(BACKUPS), state_size()));
     }
     room(&needs, "the installation")?;
@@ -217,34 +209,14 @@ pub(super) fn install() -> Step {
             .map_err(|error| format!("{error}; the running release was not touched"))?;
         // A configuration the new release refuses leaves the running one
         // alone. Its warnings follow as it starts.
-        check_config(&release, false).map_err(|error| match &resumed {
-            Some(resumed) => format!(
-                "{error}; the upgrade from {} is still unfinished: run this installer again once \
-                 check-config passes",
-                unfinished::name(&resumed.from)
-            ),
-            None => format!("{error}; the running release was not touched"),
-        })?;
-        backup = Some(match &resumed {
-            // The state may be the new release's by now.
-            Some(resumed) => resumed.backup.clone(),
-            None => backup_state(&current, changed.is_some())?,
-        });
+        check_config(&release, false)
+            .map_err(|error| format!("{error}; the running release was not touched"))?;
+        backup = Some(backup_state(&current, changed.is_some())?);
         // Compared with the state --restore-state returns to, the one from
         // before the upgrade to this release: a reinstall keeps it, and the
         // previous release still cannot read what this one migrated.
         restore = fs::canonicalize(Path::new(BACKUPS).join(LAST))
             .is_ok_and(|last| rollback::schema_rises(&last));
-        // From here on, a run that is killed leaves an upgrade that the
-        // next run finishes.
-        if let (Some(from), Some(backup)) = (changed, &backup) {
-            unfinished::write(&Unfinished::Upgrade {
-                from: from.to_owned(),
-                to: release.clone(),
-                previous: earlier.clone(),
-                backup: backup.clone(),
-            })?;
-        }
         stop_services();
     }
     if let Err(error) = switch_to(&release, changed, configured) {
@@ -257,10 +229,7 @@ pub(super) fn install() -> Step {
             Some(old) => {
                 announce("Start failed; switching back to the previous release.");
                 match fallback::switch_back(old, earlier.as_deref(), &release, backup.as_deref()) {
-                    Ok(()) => match unfinished::done() {
-                        Ok(()) => "the previous release is running".to_owned(),
-                        Err(error) => format!("the previous release is running, but {error}"),
-                    },
+                    Ok(()) => "the previous release is running".to_owned(),
                     Err(failure) => failure,
                 }
             }
@@ -270,7 +239,6 @@ pub(super) fn install() -> Step {
             "The new release did not start ({error}); {outcome}. See the journal."
         ));
     }
-    unfinished::done()?;
     if !configured {
         return first_install_help();
     }

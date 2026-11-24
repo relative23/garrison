@@ -27,13 +27,11 @@ mod rollback;
 mod selinux;
 mod services;
 mod settle;
-mod stale;
 #[cfg(test)]
 mod stand_in;
 mod state;
 mod system;
 mod toml_text;
-mod unfinished;
 mod uninstall;
 mod verify;
 
@@ -47,7 +45,6 @@ use requirements::{base_shown, preflight};
 pub(crate) use restore::run_restore;
 use services::{start, stop_services};
 use system::{install_system_files, protect_policy};
-use unfinished::Seen;
 pub(crate) use uninstall::run_uninstall;
 
 pub(crate) const BASE: &str = "/opt/garrison";
@@ -127,9 +124,6 @@ pub(crate) fn start_installed() -> Step {
     preflight()?;
     base_shown()?;
     let _held = lock(Path::new(LOCK))?;
-    if let Seen::Holds(record) | Seen::Failed(record) = unfinished::read()? {
-        return Err(record.not_started());
-    }
     let current = io(
         fs::canonicalize(Path::new(BASE).join("current")),
         &Path::new(BASE).join("current"),
@@ -137,17 +131,17 @@ pub(crate) fn start_installed() -> Step {
     protect_policy()?;
     install_system_files(&current)?;
     start(&current)?;
-    announce(&format!(
-        "Garrison {} is running.",
-        current.file_name().unwrap_or_default().to_string_lossy()
-    ));
+    announce(&format!("Garrison {} is running.", name(&current)));
     Ok(())
 }
 
-/// The release that an upgrade an earlier run did not finish began from,
-/// for `garrison upgrade` to compare an archive with.
-pub(crate) fn upgrading_from() -> Option<PathBuf> {
-    unfinished::upgrading_from()
+/// A release's name: its folder's.
+pub(super) fn name(release: &Path) -> String {
+    release
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
 }
 
 pub(crate) fn run_installer(rollback_requested: bool, with_state: bool) -> u8 {
