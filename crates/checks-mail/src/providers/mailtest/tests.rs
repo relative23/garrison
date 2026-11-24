@@ -364,10 +364,26 @@ fn a_refusal_without_a_harmless_message_taken_beside_it_is_not_tested() {
 
 #[test]
 fn the_greeting_and_the_message_id_name_the_host_without_its_port() {
-    for (origin, host) in [
-        ("https://garrison.example.org:8443", "garrison.example.org"),
-        ("https://[2001:db8::1]:8443", "[2001:db8::1]"),
-        ("https://garrison.example.org", "garrison.example.org"),
+    // An address greets as an address literal (RFC 5321, 4.1.3), as a
+    // notification does; the Message-ID keeps it as it is.
+    for (origin, greeting, host) in [
+        (
+            "https://garrison.example.org:8443",
+            "garrison.example.org",
+            "garrison.example.org",
+        ),
+        (
+            "https://[2001:db8::1]:8443",
+            "[IPv6:2001:db8::1]",
+            "[2001:db8::1]",
+        ),
+        (
+            "https://garrison.example.org",
+            "garrison.example.org",
+            "garrison.example.org",
+        ),
+        ("https://192.0.2.1:8443", "[192.0.2.1]", "192.0.2.1"),
+        ("https://192.0.2.1", "[192.0.2.1]", "192.0.2.1"),
     ] {
         let (port, handle) = server([
             "250 2.0.0 Message queued with id a.",
@@ -382,7 +398,7 @@ fn the_greeting_and_the_message_id_name_the_host_without_its_port() {
         let sessions = handle.join().unwrap();
         for session in &sessions {
             assert!(
-                session.starts_with(&format!("EHLO {host}\r\n")),
+                session.starts_with(&format!("EHLO {greeting}\r\n")),
                 "{origin}: {session}"
             );
             assert!(

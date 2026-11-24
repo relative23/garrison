@@ -59,6 +59,20 @@ fn host(origin: &str) -> &str {
     }
 }
 
+/// What the session greets with: the host, or an address as an address
+/// literal, `[192.0.2.1]` or `[IPv6:2001:db8::1]` (RFC 5321, 4.1.3), as a
+/// notification greets.
+fn greeting(host: &str) -> String {
+    match host
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
+        Some(address) => format!("[IPv6:{address}]"),
+        None if host.parse::<std::net::Ipv4Addr>().is_ok() => format!("[{host}]"),
+        None => host.to_owned(),
+    }
+}
+
 /// `Message queued with id 4b786a616e00000.` names the queue ID in hex; the
 /// event history writes it as a number.
 pub(super) fn queue_id(reply: &str) -> Option<String> {
@@ -104,7 +118,7 @@ impl MailTest {
         });
         let steps = [
             (None, 220),
-            (Some(format!("EHLO {name}\r\n")), 250),
+            (Some(format!("EHLO {}\r\n", greeting(name))), 250),
             (Some(format!("MAIL FROM:<{}>\r\n", self.sender)), 250),
             (Some(format!("RCPT TO:<{}>\r\n", self.recipient)), 250),
             (Some("DATA\r\n".to_owned()), 354),
