@@ -124,6 +124,7 @@ pub(crate) fn start_installed() -> Step {
     preflight()?;
     base_shown()?;
     let _held = lock(Path::new(LOCK))?;
+    leftover()?;
     let current = io(
         fs::canonicalize(Path::new(BASE).join("current")),
         &Path::new(BASE).join("current"),
@@ -142,6 +143,41 @@ pub(super) fn name(release: &Path) -> String {
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned()
+}
+
+/// Installers built before 0.2.0 from the development branch left
+/// `unfinished.json` for the next run. Nothing reads it any more: each run
+/// that holds the lock names one it finds and removes it.
+pub(super) fn leftover() -> Step {
+    if let Some(line) = leftover_in(Path::new(BASE))? {
+        announce(&line);
+    }
+    Ok(())
+}
+
+fn leftover_in(base: &Path) -> Step<Option<String>> {
+    let path = base.join("unfinished.json");
+    let Ok(text) = fs::read(&path) else {
+        return Ok(None);
+    };
+    io(fs::remove_file(&path), &path)?;
+    let record: serde_json::Value = serde_json::from_slice(&text).unwrap_or_default();
+    let release = |key: &str| record[key].as_str().map(|path| name(Path::new(path)));
+    let named = match (record["command"].as_str(), release("from"), release("to")) {
+        (Some(command @ ("upgrade" | "rollback")), Some(from), Some(to)) => {
+            format!("an unfinished {command} from {from} to {to}")
+        }
+        (Some("restore"), ..) => format!(
+            "an unfinished restore from {}",
+            record["source"].as_str().unwrap_or("a backup")
+        ),
+        _ => "a run it could not say".to_owned(),
+    };
+    Ok(Some(format!(
+        "{} named {named}; nothing reads it any more: it was removed, and nothing was done on its \
+         word.",
+        path.display()
+    )))
 }
 
 pub(crate) fn run_installer(rollback_requested: bool, with_state: bool) -> u8 {
@@ -177,5 +213,42 @@ mod tests {
         let named = garrison_testing::config_text(config, "http://127.0.0.1:9");
         fs::write(config.join("garrison.toml"), named).unwrap();
         assert_eq!(policy_in(config), config.join("policy.json"));
+    }
+
+    /// A record as the development branch's installers wrote it, of each
+    /// kind, and one that cannot be read: named once, removed, and then
+    /// there is nothing more to say.
+    #[test]
+    fn a_record_an_earlier_installer_left_is_named_and_removed() {
+        let directory = tempfile::tempdir().unwrap();
+        let base = directory.path();
+        assert_eq!(leftover_in(base), Ok(None));
+        for (record, named) in [
+            (
+                r#"{"command": "upgrade", "from": "/opt/garrison/releases/0.1.2",
+                    "to": "/opt/garrison/releases/0.2.0", "previous": null,
+                    "backup": "/var/backups/garrison/pre-upgrade-20261124T080000",
+                    "written": {"boot": "b", "starts": {}}}"#,
+                "an unfinished upgrade from 0.1.2 to 0.2.0",
+            ),
+            (
+                r#"{"command": "rollback", "from": "/opt/garrison/releases/0.2.0",
+                    "to": "/opt/garrison/releases/0.1.2", "previous": null, "state": null}"#,
+                "an unfinished rollback from 0.2.0 to 0.1.2",
+            ),
+            (
+                r#"{"command": "restore", "source": "/root/kept",
+                    "kept": "/var/backups/garrison/pre-restore-20261124T080000"}"#,
+                "an unfinished restore from /root/kept",
+            ),
+            ("not a record", "a run it could not say"),
+        ] {
+            fs::write(base.join("unfinished.json"), record).unwrap();
+            let said = leftover_in(base).unwrap().unwrap();
+            assert!(said.contains(&format!(" named {named}; ")), "{said}");
+            assert!(said.ends_with("nothing was done on its word."), "{said}");
+            assert!(!base.join("unfinished.json").exists());
+            assert_eq!(leftover_in(base), Ok(None));
+        }
     }
 }

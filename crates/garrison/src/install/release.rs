@@ -11,7 +11,7 @@ use super::services::{check_config, start, stop_services};
 use super::system::{install_system_files, protect_policy};
 use super::{
     BACKUPS, BASE, CONFIG, LAST, LOCK, cli, command, configured, fallback, here, housekeeping,
-    name, rollback, verify,
+    leftover, name, rollback, verify,
 };
 use crate::say;
 
@@ -184,6 +184,7 @@ pub(super) fn install() -> Step {
     let here = here()?;
     let version = verify::verify(&here)?;
     let _held = lock(Path::new(LOCK))?;
+    leftover()?;
     let base = Path::new(BASE);
     let current = base.join("current");
     let old = fs::canonicalize(&current).ok();

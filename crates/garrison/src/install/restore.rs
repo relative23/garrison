@@ -47,6 +47,7 @@ fn restore(from: &Path) -> Step {
     preflight()?;
     super::requirements::base_shown()?;
     let _held = lock(Path::new(LOCK))?;
+    super::leftover()?;
     let source = backup_at(from)?;
     let link = Path::new(BASE).join("current");
     let current = io(fs::canonicalize(&link), &link)?;

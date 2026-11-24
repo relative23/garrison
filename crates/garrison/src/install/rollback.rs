@@ -132,6 +132,7 @@ pub(super) fn rollback(with_state: bool) -> Step {
     preflight()?;
     super::requirements::base_shown()?;
     let _held = lock(Path::new(LOCK))?;
+    super::leftover()?;
     let base = Path::new(BASE);
     let Plan {
         target,
