@@ -180,7 +180,7 @@
   when: garrison_setup is not skipped and garrison_setup.rc == 0
 
 # Where garrison.toml keeps the policy, read by the release being installed
-# as its broker will read it.
+# as its broker will read it; init writes one only where none is there.
 - name: The access policy
   ansible.builtin.command:
     argv: ["/root/{{ garrison_name }}/bin/garrison", access, list]
@@ -192,23 +192,22 @@
   ansible.builtin.command:
     argv: ["/root/{{ garrison_name }}/bin/garrison", access, init]
   register: garrison_access
-  when: "'is missing: `garrison access init` makes it' in garrison_policy.stderr"
+  failed_when: false
+  when: garrison_policy.rc != 0
 
-# A policy that binds no role and no account lets nobody sign in, which
-# access init also fails on.
 - name: Someone may sign in
   ansible.builtin.assert:
     that: >-
-      garrison_policy.rc == 0 and (
+      garrison_access.rc | default(1) == 0 or garrison_policy.rc == 0 and (
       (garrison_policy.stdout | from_json).roleBindings | length > 0
       or (garrison_policy.stdout | from_json).subjects | length > 0)
     fail_msg: >-
-      {{ garrison_policy.stderr | trim if garrison_policy.rc != 0 else
-      'The access policy binds no role and no account, so nobody can sign in:
-      bind the role of your administrators with garrison access bind-role
-      <role-id> --profile administrator, then run the play again.' }}
+      {{ (garrison_access.stderr or garrison_policy.stderr) | trim if garrison_policy.rc != 0
+      else 'The access policy binds no role and no account, so nobody can sign in: bind the
+      role of your administrators with garrison access bind-role <role-id> --profile
+      administrator, then run the play again.' }}
     quiet: true
-  when: garrison_access is skipped and not ansible_check_mode
+  when: not ansible_check_mode
 
 - name: What the installer last finished with
   ansible.builtin.slurp:
