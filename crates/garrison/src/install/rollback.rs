@@ -13,7 +13,8 @@ use rustix::fs::{Gid, Uid};
 use super::files::{Step, announce, io, lock, switch};
 use super::system::install_system_files;
 use super::{
-    BACKUPS, BASE, CONFIG, LAST, LOCK, cli, precheck, preflight, start, state, stop_services,
+    BACKUPS, BASE, CONFIG, LAST, LOCK, cli, precheck, preflight, start, state, states,
+    stop_services,
 };
 
 /// Whether this release will raise the schema of a database whose copy from
@@ -35,15 +36,10 @@ fn restore_source(name: &str) -> Step<PathBuf> {
     let last = Path::new(BACKUPS).join(LAST);
     let source = match fs::canonicalize(&last) {
         Ok(source) if source.is_dir() => source,
-        _ => {
-            return Err(format!(
-                "There is no state from before an upgrade to restore ({}); nothing was changed.",
-                last.display()
-            ));
-        }
+        _ => return Err(states::no_state(&last)),
     };
     match state::unsuited(&source, name) {
-        Some(reason) => Err(format!("{reason} Nothing was changed.")),
+        Some(refusal) => Err(refusal),
         None => Ok(source),
     }
 }
@@ -53,21 +49,15 @@ fn restore_source(name: &str) -> Step<PathBuf> {
 /// today's configuration as `target` reads it, and every copy fits beside
 /// the database it replaces. Returns the policy's owner.
 fn state_fits(target: &Path, source: &Path, comes_back: bool) -> Step<(Uid, Gid)> {
-    let refused = |reason: String| format!("{reason} Nothing was changed.");
-    let owner = state::policy_owner().map_err(refused)?;
+    let owner = state::policy_owner()?;
     let settings = Path::new(CONFIG).join("garrison.toml");
     let config = config::load(&settings)
-        .map_err(|error| refused(format!("Cannot load {}: {error}.", settings.display())))?;
+        .map_err(|error| states::unchanged(states::unloadable(&settings, error)))?;
     if comes_back {
-        precheck::policy_place(&config).map_err(refused)?;
+        precheck::policy_place(&config)?;
         if let Err(said) = precheck::policy_comes_back(target, source)? {
-            return Err(format!(
-                "The access policy from before the upgrade, in {}, does not suit {}, as {}'s \
-                 check-config says:\n{said}\nNothing was changed.",
-                source.display(),
-                settings.display(),
-                target.file_name().unwrap_or_default().to_string_lossy()
-            ));
+            let release = super::name(target);
+            return Err(states::rollback_policy(source, &settings, &release, &said));
         }
     }
     precheck::copies_fit(source, &config, &[], "the rollback")?;
@@ -79,8 +69,7 @@ fn state_fits(target: &Path, source: &Path, comes_back: bool) -> Step<(Uid, Gid)
 fn restore_state(source: &Path, owner: (Uid, Gid), restored: &mut state::Returned) -> Step {
     // The configured state directories, which need not be the defaults.
     let settings = Path::new(CONFIG).join("garrison.toml");
-    let config = config::load(&settings)
-        .map_err(|error| format!("Cannot load {}: {error}", settings.display()))?;
+    let config = config::load(&settings).map_err(|error| states::unloadable(&settings, error))?;
     state::restore_all(source, &config, owner, restored)
 }
 
@@ -120,7 +109,7 @@ fn plan(base: &Path, installer: Option<PathBuf>) -> Step<Plan> {
         &base.join("current"),
     )?;
     let Ok(target) = fs::canonicalize(base.join("previous")) else {
-        return Err("There is no previous release to return to.".into());
+        return Err(states::no_previous());
     };
     if target != current {
         return Ok(Plan {
@@ -139,11 +128,7 @@ fn plan(base: &Path, installer: Option<PathBuf>) -> Step<Plan> {
             current,
             left,
         }),
-        None => Err(format!(
-            "There is no other release to return to: {BASE}/previous names the release \
-             {BASE}/current names. A rollback cut short is finished by the installer its first \
-             line named."
-        )),
+        None => Err(states::no_other_release()),
     }
 }
 
@@ -170,35 +155,29 @@ pub(super) fn rollback(with_state: bool) -> Step {
     // Where the state brings its access policy, that one is judged instead.
     let comes_back = source.as_deref().is_some_and(precheck::brings_policy);
     if let Err(said) = precheck::configuration(&target, comes_back)? {
-        return Err(format!(
-            "{name} cannot load {CONFIG}/garrison.toml:\n{said}\n\
-             Remove the settings {name} does not know, or put back the file from \
-             before the upgrade ({BACKUPS}/{LAST}/etc/garrison.toml), then roll back."
-        ));
+        return Err(states::rollback_unloadable(&name, &said));
     }
     // After a schema change only the pre-upgrade copies suit the previous
     // release, and only its own self-check knows which schemas it reads.
     if !with_state {
         let checked = cli(&target, &["self-check"])?;
         if !checked.status.success() {
-            return Err(format!(
-                "{name} cannot read the current data, as its self-check says of {}. Roll back \
-                 with --restore-state to return to the data from before the upgrade.",
-                state::unreadable(&checked.stdout)
-            ));
+            let unreadable = state::unreadable(&checked.stdout);
+            return Err(states::rollback_unreadable(&name, &unreadable));
         }
     }
     let source = match source {
         Some(source) => Some((source.clone(), state_fits(&target, &source, comes_back)?)),
         None => None,
     };
-    announce(&format!(
-        "Rolling back to {name}; if this is interrupted, run it again: {} install --rollback{}",
+    let again = format!(
+        "{} install --rollback{}",
         left.join("bin/garrison").display(),
         if with_state { " --restore-state" } else { "" }
-    ));
+    );
+    announce(&states::rolling_back(&name, &again).to_string());
     // The system files of the target protect the policy as it is.
-    super::system::protect_policy().map_err(|error| format!("{error}. Nothing was changed."))?;
+    super::system::protect_policy().map_err(states::unchanged)?;
     stop_services();
     let restoring = source
         .as_ref()
@@ -206,28 +185,23 @@ pub(super) fn rollback(with_state: bool) -> Step {
     let mut restored = state::Returned::default();
     if let Err(error) = roll_back_to(&target, &left, restoring, &mut restored) {
         // What went back stays: a release that starts now runs on it.
-        let back = restoring.map_or_else(String::new, |(source, _)| restored.said(source));
+        let back = restoring.and_then(|(source, _)| restored.said(source));
         if current == target {
             stop_services();
-            return Err(format!(
-                "The rollback failed ({error}); {name} is stopped.{back} See the journal."
-            ));
+            return Err(states::rollback_stopped(&error, &name, back.as_ref()));
         }
         // Garrison is stopped now: back to the release that ran, and running.
         announce("Rollback failed; starting the release that ran before.");
         switch(&base.join("current"), &current)?;
         switch(&base.join("previous"), &target)?;
         install_system_files(&current)?;
-        let outcome = if start(&current).is_ok() {
-            "the release that ran before is running again"
+        return Err(if start(&current).is_ok() {
+            states::rollback_returned(&error, back.as_ref())
         } else {
-            "the release that ran before did not start either"
-        };
-        return Err(format!(
-            "The rollback failed ({error}); {outcome}.{back} See the journal."
-        ));
+            states::rollback_neither(&error, back.as_ref())
+        });
     }
-    announce(&format!("Rolled back to {name}."));
+    announce(&states::rolled_back(&name).to_string());
     Ok(())
 }
 
@@ -259,7 +233,7 @@ mod tests {
         assert!(plan(&base, installer("0.2")).is_err(), "no current release");
         link("current", "0.2");
         let refused = plan(&base, installer("0.2")).err().unwrap();
-        assert_eq!(refused, "There is no previous release to return to.");
+        assert_eq!(refused, states::no_previous());
         // Begun: whichever installer runs it.
         link("previous", "0.1");
         for name in ["0.1", "0.2"] {
@@ -278,10 +252,7 @@ mod tests {
             None,
         ] {
             let refused = plan(&base, binary.clone()).err().unwrap();
-            assert!(
-                refused.contains("is finished by the installer"),
-                "{binary:?}"
-            );
+            assert_eq!(refused, states::no_other_release(), "{binary:?}");
         }
     }
 

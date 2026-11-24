@@ -13,7 +13,8 @@ use std::io::ErrorKind;
 use std::os::unix::fs::symlink;
 use std::path::Path;
 
-use super::BASE;
+use super::{BASE, states};
+use crate::state::State;
 
 pub(super) const LINK: &str = "/usr/bin/garrison";
 
@@ -30,28 +31,17 @@ pub(super) fn ours(link: &Path) -> bool {
 
 /// Make the link at `link`, and say whether it was made now. `Err` says why
 /// there is none, for the operator to read; it never ends an installation.
-pub(super) fn link(link: &Path) -> Result<bool, String> {
+pub(super) fn link(link: &Path) -> Result<bool, State> {
     if ours(link) {
         return Ok(false);
     }
     let full = target();
     match fs::symlink_metadata(link) {
-        Ok(_) => Err(format!(
-            "{} is something else and was left alone; Garrison's command is {full}.",
-            link.display()
-        )),
-        Err(error) if error.kind() == ErrorKind::NotFound => {
-            symlink(&full, link).map(|()| true).map_err(|error| {
-                format!(
-                    "{} could not be made ({error}); Garrison's command is {full}.",
-                    link.display()
-                )
-            })
-        }
-        Err(error) => Err(format!(
-            "{}: {error}; Garrison's command is {full}.",
-            link.display()
-        )),
+        Ok(_) => Err(states::link_taken(link, &full)),
+        Err(error) if error.kind() == ErrorKind::NotFound => symlink(&full, link)
+            .map(|()| true)
+            .map_err(|error| states::link_failed(link, error, &full)),
+        Err(error) => Err(states::link_failed(link, error, &full)),
     }
 }
 
@@ -90,8 +80,7 @@ mod tests {
         let file = directory.path().join("garrison");
         fs::write(&file, "another program").unwrap();
         let refused = link(&file).unwrap_err();
-        assert!(refused.contains("is something else"), "{refused}");
-        assert!(refused.ends_with("Garrison's command is /opt/garrison/current/bin/garrison."));
+        assert_eq!(refused, states::link_taken(&file, &target()));
         assert_eq!(fs::read_to_string(&file).unwrap(), "another program");
         assert!(!ours(&file));
 
@@ -110,6 +99,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let missing = directory.path().join("no-such-directory/garrison");
         let refused = link(&missing).unwrap_err();
-        assert!(refused.contains("could not be made"), "{refused}");
+        let absent = std::io::Error::from_raw_os_error(rustix::io::Errno::NOENT.raw_os_error());
+        assert_eq!(refused, states::link_failed(&missing, absent, &target()));
     }
 }

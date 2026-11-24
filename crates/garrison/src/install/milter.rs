@@ -19,8 +19,9 @@ use garrison_stalwart::jmap::JmapClient;
 
 use super::files::{Step, announce, run};
 use super::system::unit_file;
-use super::{CONFIG, SYSTEMCTL};
+use super::{CONFIG, SYSTEMCTL, states};
 use crate::doctor::milter::entries::{self, Entry};
+use crate::state::State;
 use crate::units;
 
 /// Why Stalwart may still ask the filter that the configuration no longer
@@ -30,43 +31,36 @@ fn still_asked(
     configuration: &Path,
     loaded: Option<&Config>,
     listening: Option<&[u16]>,
-    entries: impl FnOnce(&Config) -> Result<Vec<Entry>, String>,
-) -> Option<String> {
+    entries: impl FnOnce(&Config) -> Result<Vec<Entry>, State>,
+) -> Option<State> {
     // A filter that does not run answers nobody, stopped or not.
     let listening = listening?;
     if listening.is_empty() {
-        return Some(format!("where {} listens cannot be seen", units::MILTER));
+        return Some(states::milter_unseen(units::MILTER));
     }
     let Some(config) = loaded else {
-        return Some(format!(
-            "{} does not load, so Stalwart's milters cannot be asked",
-            configuration.join("garrison.toml").display()
+        return Some(states::milter_unloaded(
+            &configuration.join("garrison.toml"),
         ));
     };
     match entries(config) {
         Ok(stored) => entries::ours(&stored, None, listening)
             .into_iter()
             .find(|entry| entry.asked())
-            .map(|entry| {
-                format!(
-                    "Stalwart asks its milter entry {} at {}, where the filter listens",
-                    entry.id,
-                    entry.address()
-                )
-            }),
-        Err(why) => Some(format!("Stalwart's milters could not be asked ({why})")),
+            .map(|entry| states::milter_asked(&entry.id, &entry.address())),
+        Err(why) => Some(states::milter_unasked(&why)),
     }
 }
 
 /// Stalwart's milters, as the collector's API key reads them.
-pub(super) fn stalwart_entries(config: &Config) -> Result<Vec<Entry>, String> {
+pub(super) fn stalwart_entries(config: &Config) -> Result<Vec<Entry>, State> {
     let key = Credentials::new(&config.credentials_directory)
         .read_secret(&config.collector.native_key)
-        .map_err(|error| format!("the collector's API key: {error}"))?;
+        .map_err(|error| states::io("the collector's API key", error))?;
     JmapClient::new(&config.deployment.stalwart_url, &key)
         .with_timeout(Duration::from_secs(10))
         .get::<Entry>("MtaMilter", None, &["id", "host", "port", "enable"])
-        .map_err(|error| error.to_string())
+        .map_err(|error| states::io("Stalwart", error))
 }
 
 /// Whether the unit starts with the release. Where the configuration does
@@ -87,10 +81,7 @@ pub(super) fn runs() -> bool {
         listening.as_deref(),
         stalwart_entries,
     ) {
-        Some(why) => announce(&format!(
-            "The macro milter, which the configuration no longer has, keeps running: {why}. Run \
-             `garrison stalwart setup`: it takes the filter out of Stalwart and stops it."
-        )),
+        Some(why) => announce(&states::milter_kept(&why).to_string()),
         None => {
             let _ = run(SYSTEMCTL, &["disable", "--now", units::MILTER]);
         }
@@ -110,11 +101,9 @@ pub(super) fn forgotten(configuration: &Path) -> Step {
     ) else {
         return Ok(());
     };
-    Err(format!(
-        "Stalwart still asks Garrison's macro milter about every message, as far as this host \
-         can tell, and would defer mail without it: {why}; nothing was changed. Remove the \
-         [milter] section from {}, run `garrison stalwart setup` and uninstall then.",
-        configuration.join("garrison.toml").display()
+    Err(states::milter_still_asked(
+        &why,
+        &configuration.join("garrison.toml"),
     ))
 }
 
@@ -137,7 +126,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let configuration = directory.path();
         let config = garrison_testing::config(configuration, "http://127.0.0.1:9");
-        let unasked = |_: &Config| -> Result<Vec<Entry>, String> { panic!("asked Stalwart") };
+        let unasked = |_: &Config| -> Result<Vec<Entry>, State> { panic!("asked Stalwart") };
         // Not running: nothing to keep, and Stalwart is not even asked.
         assert_eq!(
             still_asked(configuration, Some(&config), None, unasked),
@@ -163,20 +152,21 @@ mod tests {
             let said = still_asked(configuration, Some(&config), Some(listening), |_| {
                 Ok(entries(&stored))
             });
-            assert!(
-                said.is_some_and(|said| said.contains(&format!("entry m at {host}:8096"))),
-                "{host}"
-            );
+            let entry = states::milter_asked("m", &format!("{host}:8096"));
+            assert_eq!(said, Some(entry), "{host}");
         }
         // Where that cannot be told, the filter counts as asked.
-        let refused = |_: &Config| Err("Stalwart did not answer".to_owned());
-        let said = still_asked(configuration, Some(&config), Some(listening), refused).unwrap();
-        assert!(
-            said.contains("could not be asked (Stalwart did not answer)"),
-            "{said}"
+        let silent = || states::io("Stalwart", "did not answer");
+        let refused = |_: &Config| Err(silent());
+        let said = still_asked(configuration, Some(&config), Some(listening), refused);
+        assert_eq!(said, Some(states::milter_unasked(&silent())));
+        assert_eq!(
+            still_asked(configuration, None, Some(listening), unasked),
+            Some(states::milter_unloaded(
+                &configuration.join("garrison.toml")
+            ))
         );
-        assert!(still_asked(configuration, None, Some(listening), unasked).is_some());
-        let unseen = still_asked(configuration, Some(&config), Some(&[]), unasked).unwrap();
-        assert!(unseen.contains("cannot be seen"), "{unseen}");
+        let unseen = still_asked(configuration, Some(&config), Some(&[]), unasked);
+        assert_eq!(unseen, Some(states::milter_unseen(units::MILTER)));
     }
 }

@@ -152,16 +152,13 @@ fn a_purge_says_where_it_cannot_find_the_policy() {
     fs::write(&settings, &text).unwrap();
     assert_eq!(policy_unknown(&settings), None);
     fs::write(&settings, format!("nonsense_setting = 1\n{text}")).unwrap();
-    let said = policy_unknown(&settings).unwrap();
-    assert!(
-        said.starts_with(&format!(
-            "{} does not load, so an access policy it names outside /etc/garrison is not \
-             removed (",
-            settings.display()
-        )),
-        "{said}"
+    let error = garrison_core::config::load(&settings).unwrap_err();
+    // The configuration's own error names the setting it refuses.
+    assert!(error.to_string().contains("nonsense_setting"), "{error}");
+    assert_eq!(
+        policy_unknown(&settings),
+        Some(states::policy_unknown(&settings, error))
     );
-    assert!(said.contains("nonsense_setting"), "{said}");
 }
 
 /// A purge takes only files: a folder or a link that `broker.policy`

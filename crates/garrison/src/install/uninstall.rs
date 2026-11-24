@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 
 use super::files::{Step, announce, io, lock, must, run};
 use super::requirements::root_with_systemctl;
-use super::{BACKUPS, BASE, CONFIG, LOCK, SYSTEMCTL, UNITS, command};
+use super::{BACKUPS, BASE, CONFIG, LOCK, SYSTEMCTL, UNITS, command, states};
+use crate::state::State;
 
 const USERS: [&str; 5] = [
     "garrison-milter",
@@ -119,16 +120,12 @@ fn policy_files(policy: &Path) -> Vec<PathBuf> {
 /// Where `settings` is there and does not load, a purge cannot tell where
 /// it keeps the access policy: one kept outside CONFIG is left, and this
 /// says so.
-fn policy_unknown(settings: &Path) -> Option<String> {
+fn policy_unknown(settings: &Path) -> Option<State> {
     if !settings.exists() {
         return None;
     }
     let error = garrison_core::config::load(settings).err()?;
-    Some(format!(
-        "{} does not load, so an access policy it names outside {CONFIG} is not removed \
-         ({error}); remove it yourself if there is one.",
-        settings.display()
-    ))
+    Some(states::policy_unknown(settings, error))
 }
 
 fn snippets(root: &Path) -> Vec<PathBuf> {
@@ -196,10 +193,7 @@ fn nginx_stays_valid(snippets: &[PathBuf]) -> Step {
         return Ok(());
     }
     if !Path::new(UNSHARE).exists() {
-        return Err(format!(
-            "{UNSHARE} (util-linux) is needed to test nginx without Garrison's snippets; \
-             nothing was changed"
-        ));
+        return Err(states::needs_unshare(UNSHARE));
     }
     let copy = Path::new(NGINX_CHECK);
     let _ = fs::remove_dir_all(copy);
@@ -237,11 +231,8 @@ fn nginx_stays_valid(snippets: &[PathBuf]) -> Step {
     if test.status.success() {
         return Ok(());
     }
-    Err(format!(
-        "nginx would not start without Garrison's snippets; nothing was changed. Remove the \
-         `include /etc/nginx/snippets/garrison…` lines from your server blocks first:\n{}",
-        String::from_utf8_lossy(&test.stderr).trim()
-    ))
+    let said = String::from_utf8_lossy(&test.stderr);
+    Err(states::nginx_invalid(said.trim()))
 }
 
 fn remove(item: &Item) -> Step {
@@ -284,7 +275,7 @@ fn uninstall(purge: bool, dry_run: bool) -> Step {
             announce(&format!("Would remove {}", item.describe()));
         }
         if let Some(unknown) = &unknown {
-            announce(unknown);
+            announce(&unknown.to_string());
         }
         return Ok(());
     }
@@ -293,7 +284,7 @@ fn uninstall(purge: bool, dry_run: bool) -> Step {
         remove(item)?;
     }
     if let Some(unknown) = &unknown {
-        announce(unknown);
+        announce(&unknown.to_string());
     }
     must(SYSTEMCTL, &["daemon-reload"])?;
     if run(SYSTEMCTL, &["is-active", "--quiet", "nginx"])
@@ -317,8 +308,8 @@ fn uninstall(purge: bool, dry_run: bool) -> Step {
 pub(crate) fn run_uninstall(purge: bool, dry_run: bool) -> u8 {
     match uninstall(purge, dry_run) {
         Ok(()) => 0,
-        Err(error) => {
-            crate::complain(&error);
+        Err(refusal) => {
+            crate::complain(&refusal.to_string());
             1
         }
     }

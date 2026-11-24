@@ -6,7 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use super::files::{Step, announce, io, must, put, relabel, run};
-use super::{CONFIG, SYSTEMCTL, UNITS, cli, command};
+use super::{CONFIG, SYSTEMCTL, UNITS, cli, command, states};
 
 fn nginx_files() -> Vec<(String, Vec<u8>)> {
     let mut found: Vec<(String, Vec<u8>)> = fs::read_dir("/etc/nginx/snippets")
@@ -35,10 +35,8 @@ fn reload_nginx() -> Step {
     }
     let test = run("/usr/sbin/nginx", &["-t"])?;
     if !test.status.success() {
-        announce(&format!(
-            "nginx -t failed; snippets updated but nginx was not reloaded:\n{}",
-            String::from_utf8_lossy(&test.stderr)
-        ));
+        let said = String::from_utf8_lossy(&test.stderr);
+        announce(&states::nginx_not_reloaded(said.trim()).to_string());
         return Ok(());
     }
     must(SYSTEMCTL, &["reload", "nginx"])?;
@@ -48,7 +46,7 @@ fn reload_nginx() -> Step {
 
 /// Write what a command of `release` prints where it succeeds, and say
 /// whether that changed the file; where it fails, why, in the command's own
-/// words.
+/// words, which a state then carries.
 fn write_output(
     release: &Path,
     command: &[&str],
@@ -79,7 +77,7 @@ fn write_or_say(
         Ok(wrote) => Ok(wrote),
         Err(reason) => {
             if Path::new(CONFIG).join("garrison.toml").exists() {
-                announce(&unwritten(target, command, &reason));
+                announce(&states::unwritten(target, command, &reason).to_string());
             }
             Ok(false)
         }
@@ -89,14 +87,6 @@ fn write_or_say(
 /// A file of the release as a system file, where it differs.
 fn copy_to(source: &Path, target: &Path) -> Step<bool> {
     put(target, &io(fs::read(source), source)?, 0o644)
-}
-
-fn unwritten(target: &Path, command: &[&str], reason: &str) -> String {
-    format!(
-        "{} was not written, since `garrison {}` failed: {reason}",
-        target.display(),
-        command.join(" ")
-    )
 }
 
 /// Where a unit of Garrison's is installed.
@@ -134,7 +124,7 @@ pub(super) fn install_system_files(release: &Path) -> Step<bool> {
     }
     match command::link(Path::new(command::LINK)) {
         Ok(made) => changed |= made,
-        Err(reason) => announce(&reason),
+        Err(reason) => announce(&reason.to_string()),
     }
     if Path::new("/etc/nginx").is_dir() {
         io(
@@ -197,14 +187,7 @@ fn protect(policy: &Path) -> Step<bool> {
         return Ok(false);
     }
     if metadata.uid() != 0 {
-        return Err(format!(
-            "{}, the access policy that broker.policy names, belongs to the user with ID {}, \
-             not to root: the installer makes no other user's file the policy, and the broker \
-             takes none. Where it is the policy you mean, `chown root {}` and run this again",
-            policy.display(),
-            metadata.uid(),
-            policy.display()
-        ));
+        return Err(states::policy_foreign(policy, metadata.uid()));
     }
     let group = crate::access::group_id("garrison-broker");
     if group.is_none_or(|group| metadata.gid() == group) && metadata.mode() & 0o7777 == 0o640 {
@@ -215,7 +198,7 @@ fn protect(policy: &Path) -> Step<bool> {
         Some(rustix::fs::Uid::ROOT),
         group.map(rustix::fs::Gid::from_raw),
     )
-    .map_err(|error| format!("{}: {error}", policy.display()))?;
+    .map_err(|error| states::io(policy.display(), error))?;
     io(
         file.set_permissions(fs::Permissions::from_mode(0o640)),
         policy,
@@ -270,14 +253,6 @@ mod tests {
             "polkit.addRule(rule);\n"
         );
         assert_eq!(installed.len(), 1);
-        assert_eq!(
-            unwritten(&target, &["polkit-rule"], &reason),
-            format!(
-                "{} was not written, since `garrison polkit-rule` failed: Cannot load \
-                 /etc/garrison/garrison.toml: unknown key nonsense",
-                target.display()
-            )
-        );
     }
 
     /// Only a regular file that `broker.policy` names, reached without a
@@ -311,14 +286,8 @@ mod tests {
         fs::write(&policy, "{}").unwrap();
         fs::set_permissions(&policy, fs::Permissions::from_mode(0o644)).unwrap();
         let refused = protect(&policy).unwrap_err();
-        assert!(
-            refused.contains("not to root: the installer makes no other user's file the policy"),
-            "{refused}"
-        );
-        assert!(
-            refused.contains(&format!("`chown root {}`", policy.display())),
-            "{refused}"
-        );
+        let owner = rustix::process::getuid().as_raw();
+        assert_eq!(refused, states::policy_foreign(&policy, owner));
         assert_eq!(
             fs::metadata(&policy).unwrap().permissions().mode() & 0o777,
             0o644

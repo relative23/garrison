@@ -1,14 +1,128 @@
-//! Every state the installer, the rollback, the restore and the
-//! uninstallation report: their one constructor each.
+//! Every state the installer reports: its one constructor each. Those of
+//! the rollback, the restore and the uninstallation are in `states/back.rs`.
 
 use std::fmt::Display;
+use std::path::Path;
+use std::process::ExitStatus;
 
+use super::CONFIG;
 use crate::state::State;
+
+mod back;
+mod start;
+pub(super) use back::*;
+pub(super) use start::*;
 
 /// What the system said of `what`, a file, a folder, a link or a command:
 /// a failure the installer does not tell apart from others.
 pub(super) fn io(what: impl Display, error: impl Display) -> State {
     State::new("install-io", format!("{what}: {error}"))
+}
+
+/// A command that ran and failed, in its own words.
+pub(super) fn failed(program: &str, arguments: &[&str], said: &str) -> State {
+    io(
+        format_args!("{program} {} failed", arguments.join(" ")),
+        said,
+    )
+}
+
+/// A refusal before the running release stopped, whose sentence has no
+/// full stop yet, with that said: the same state.
+pub(super) fn untouched(state: State) -> State {
+    State {
+        text: format!("{}; the running release was not touched", state.text),
+        ..state
+    }
+}
+
+/// A refusal before anything changed, whose sentence has no full stop yet,
+/// with that said: the same state.
+pub(super) fn unchanged(state: State) -> State {
+    State {
+        text: format!("{}. Nothing was changed.", state.text),
+        ..state
+    }
+}
+
+pub(super) fn busy() -> State {
+    State::new(
+        "install-busy",
+        "Another garrison install is already running; try again when it has finished.",
+    )
+}
+
+pub(super) fn not_root() -> State {
+    State::new("install-not-root", "Run as root.")
+}
+
+pub(super) fn tool_missing(program: &str) -> State {
+    State::new("install-tool-missing", format!("{program} is required."))
+}
+
+pub(super) fn old_systemd(version: u32, needed: u32) -> State {
+    State::new(
+        "install-old-systemd",
+        format!("systemd {version} is too old: Garrison's units need systemd {needed} or newer."),
+    )
+}
+
+pub(super) fn systemd_unknown() -> State {
+    State::new(
+        "install-systemd-unknown",
+        "`systemctl --version` names no systemd version.",
+    )
+}
+
+pub(super) fn old_polkit(version: &str) -> State {
+    State::new(
+        "install-old-polkit",
+        format!("polkit {version} has no JavaScript rules: Garrison needs polkit 0.106 or newer."),
+    )
+}
+
+pub(super) fn no_polkit() -> State {
+    State::new(
+        "install-no-polkit",
+        "polkit is required for service actions, with JavaScript rules (polkit 0.106 or newer, \
+         /etc/polkit-1/rules.d).",
+    )
+}
+
+/// `why`: the units' account of the place they hide.
+pub(super) fn base_hidden(why: &str) -> State {
+    State::new(
+        "install-base-hidden",
+        format!("{why}; nothing was changed."),
+    )
+}
+
+/// Bytes `free` in `directory` and `wanted` there, for `what`, such as "the
+/// installation".
+pub(super) fn no_room(directory: &Path, free: u64, what: &str, wanted: u64) -> State {
+    State::new(
+        "install-no-room",
+        format!(
+            "{} has {} MiB free and {what} needs {} MiB; nothing was changed.",
+            directory.display(),
+            free >> 20,
+            wanted >> 20
+        ),
+    )
+}
+
+/// The copies from before an upgrade that a switch back would put back.
+pub(super) fn copies_no_room(directory: &Path, free: u64, wanted: u64) -> State {
+    State::new(
+        "install-copies-no-room",
+        format!(
+            "{} has {} MiB free and the copies from before the upgrade need {} MiB there; free \
+             space there",
+            directory.display(),
+            free >> 20,
+            wanted.div_ceil(1 << 20)
+        ),
+    )
 }
 
 pub(super) fn sums_missing() -> State {
@@ -36,6 +150,8 @@ pub(super) fn sums_twice(name: &str) -> State {
     )
 }
 
+/// A file of the release, or one met while copying it, that is a link or
+/// anything else but a regular file.
 pub(super) fn not_a_file(name: impl Display) -> State {
     State::new(
         "install-not-a-file",
@@ -61,6 +177,36 @@ pub(super) fn bad_version(version: &str) -> State {
     State::new(
         "install-bad-version",
         format!("VERSION {version:?} is not a release version; nothing was installed."),
+    )
+}
+
+/// What a record an earlier installer left named.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Recorded<'a> {
+    /// An upgrade or a rollback, with the releases it went from and to.
+    Switch(&'a str, String, String),
+    Restore(Option<&'a str>),
+    Unknown,
+}
+
+pub(super) fn record_removed(path: &Path, recorded: &Recorded<'_>) -> State {
+    let named = match recorded {
+        Recorded::Switch(command, from, to) => {
+            format!("an unfinished {command} from {from} to {to}")
+        }
+        Recorded::Restore(source) => format!(
+            "an unfinished restore from {}",
+            source.unwrap_or("a backup")
+        ),
+        Recorded::Unknown => "a run it could not say".to_owned(),
+    };
+    State::new(
+        "install-record-removed",
+        format!(
+            "{} named {named}; nothing reads it any more: it was removed, and nothing was done on \
+             its word.",
+            path.display()
+        ),
     )
 }
 
@@ -91,67 +237,189 @@ fn back(state: State, rollback: Option<&str>) -> State {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// The first installation's last words: what to do before the next run.
+pub(super) fn not_configured(target: &Path, command: &str) -> State {
+    State::new(
+        "install-not-configured",
+        format!(
+            "The release is installed, but Garrison is not configured yet.
 
-    #[test]
-    fn every_state_of_the_installer_says_its_line() {
-        let back = Some("garrison install --rollback");
-        crate::state::table(
-            &[include_str!("states.rs")],
-            &[
-                (
-                    io("/opt/garrison", "Permission denied (os error 13)"),
-                    "/opt/garrison: Permission denied (os error 13) [install-io]",
-                ),
-                (
-                    sums_missing(),
-                    "SHA256SUMS is missing; this is not a complete release. [install-sums-missing]",
-                ),
-                (
-                    sums_malformed(),
-                    "SHA256SUMS is malformed. [install-sums-malformed]",
-                ),
-                (
-                    sums_outside("../VERSION"),
-                    "SHA256SUMS lists \"../VERSION\", which is no file of a release; nothing was \
-                     installed. [install-sums-outside]",
-                ),
-                (
-                    sums_twice("VERSION"),
-                    "SHA256SUMS lists VERSION twice; nothing was installed. [install-sums-twice]",
-                ),
-                (
-                    not_a_file("static/etc"),
-                    "static/etc is not a regular file; nothing was installed. [install-not-a-file]",
-                ),
-                (
-                    checksum_mismatch("static/index.html"),
-                    "Checksum mismatch for static/index.html; nothing was installed. \
-                     [install-checksum-mismatch]",
-                ),
-                (
-                    unlisted("static/extra.js"),
-                    "static/extra.js is not listed in SHA256SUMS; nothing was installed. \
-                     [install-unlisted]",
-                ),
-                (
-                    bad_version("../../etc"),
-                    "VERSION \"../../etc\" is not a release version; nothing was installed. \
-                     [install-bad-version]",
-                ),
-                (
-                    running("0.2.0", back),
-                    "Garrison 0.2.0 is running. [install-running]\n      Roll back with: \
-                     garrison install --rollback",
-                ),
-                (
-                    as_installed("0.2.0", None),
-                    "Garrison 0.2.0 is running as installed; nothing was changed. \
-                     [install-as-installed]",
-                ),
-            ],
-        );
-    }
+  1. Edit {target} (origins, providers, actions).
+     `garrison detect` shows what this host runs, and
+     `garrison modules` chooses the modules this installation offers.
+  2. Create the Stalwart objects (webhook, API keys, metrics):
+       garrison stalwart setup        (asks for a Stalwart administrator)
+  3. Create the access policy:   garrison access init
+  4. Check everything:           garrison check-config
+  5. Run the installer again to start the services.
+  6. Give Garrison a host name of its own (never Stalwart's):
+     `garrison nginx` prints its server block and the lines for Stalwart's.
+     Add
+       include /etc/nginx/snippets/garrison-stalwart-server*.conf;
+     to every server block that proxies to Stalwart: it keeps the metrics
+     exporter that step 2 turns on off the internet.
+
+The command is available as {command}.",
+            target = target.display(),
+        ),
+    )
 }
+
+pub(super) fn config_refused() -> State {
+    State::new("install-config-refused", "check-config failed")
+}
+
+/// `why`: the running release's own words.
+pub(super) fn backup_failed(why: impl Display) -> State {
+    State::new("install-backup-failed", format!("backup failed: {why}"))
+}
+
+/// The running release makes the backup, and a setting only the new one
+/// knows keeps it from loading the configuration.
+pub(super) fn backup_unloadable(said: &str, running: &str) -> State {
+    State::new(
+        "install-backup-unloadable",
+        format!(
+            "backup failed: {said}; {running}, the release that runs, makes the backup before the \
+             upgrade and cannot load {CONFIG}/garrison.toml: take out the settings it does not \
+             know, upgrade, then put them back"
+        ),
+    )
+}
+
+/// `said`: what `nginx -t` said.
+pub(super) fn nginx_not_reloaded(said: &str) -> State {
+    State::new(
+        "install-nginx-not-reloaded",
+        format!("nginx -t failed; snippets updated but nginx was not reloaded:\n{said}"),
+    )
+}
+
+/// `reason`: what the command said.
+pub(super) fn unwritten(target: &Path, command: &[&str], reason: &str) -> State {
+    State::new(
+        "install-unwritten",
+        format!(
+            "{} was not written, since `garrison {}` failed: {reason}",
+            target.display(),
+            command.join(" ")
+        ),
+    )
+}
+
+pub(super) fn policy_foreign(policy: &Path, owner: u32) -> State {
+    let policy = policy.display();
+    State::new(
+        "install-policy-foreign",
+        format!(
+            "{policy}, the access policy that broker.policy names, belongs to the user with ID \
+             {owner}, not to root: the installer makes no other user's file the policy, and the \
+             broker takes none. Where it is the policy you mean, `chown root {policy}` and run \
+             this again"
+        ),
+    )
+}
+
+/// `command`: where Garrison's command is without the link.
+pub(super) fn link_taken(link: &Path, command: &str) -> State {
+    State::new(
+        "install-link-taken",
+        format!(
+            "{} is something else and was left alone; Garrison's command is {command}.",
+            link.display()
+        ),
+    )
+}
+
+pub(super) fn link_failed(link: &Path, error: impl Display, command: &str) -> State {
+    State::new(
+        "install-link-failed",
+        format!(
+            "{} could not be made ({error}); Garrison's command is {command}.",
+            link.display()
+        ),
+    )
+}
+
+/// `said`: what semodule said, where it said anything.
+pub(super) fn selinux_failed(said: Option<&str>, status: ExitStatus) -> State {
+    let said = said.map_or_else(
+        || format!("`semodule -i` said nothing and ended with {status}"),
+        ToOwned::to_owned,
+    );
+    State::new(
+        "install-selinux-failed",
+        format!(
+            "The SELinux module did not load, so nginx may not reach Garrison: {said}. `setsebool \
+             -P httpd_can_network_connect 1` allows it more broadly."
+        ),
+    )
+}
+
+/// `why`: what keeps the filter on the port it listens on.
+pub(super) fn milter_held(why: &State, port: u16) -> State {
+    State::new(
+        "install-milter-held",
+        format!(
+            "The macro filter stays on the port it listens on, which garrison.toml no longer \
+             names: {why}. `garrison stalwart setup` moves it to port {port}."
+        ),
+    )
+}
+
+pub(super) fn milter_asked(id: &str, address: &str) -> State {
+    State::new(
+        "install-milter-asked",
+        format!("Stalwart asks its milter entry {id} at {address}"),
+    )
+}
+
+pub(super) fn milter_unasked(why: &State) -> State {
+    State::new(
+        "install-milter-unasked",
+        format!("Stalwart's milters could not be asked ({why})"),
+    )
+}
+
+pub(super) fn milter_unseen(unit: &str) -> State {
+    State::new(
+        "install-milter-unseen",
+        format!("where {unit} listens cannot be seen"),
+    )
+}
+
+pub(super) fn milter_unloaded(settings: &Path) -> State {
+    State::new(
+        "install-milter-unloaded",
+        format!(
+            "{} does not load, so Stalwart's milters cannot be asked",
+            settings.display()
+        ),
+    )
+}
+
+/// `why`: what may still ask the filter the configuration no longer has.
+pub(super) fn milter_kept(why: &State) -> State {
+    State::new(
+        "install-milter-kept",
+        format!(
+            "The macro milter, which the configuration no longer has, keeps running: {why}. Run \
+             `garrison stalwart setup`: it takes the filter out of Stalwart and stops it."
+        ),
+    )
+}
+
+pub(super) fn milter_still_asked(why: &State, settings: &Path) -> State {
+    State::new(
+        "install-milter-still-asked",
+        format!(
+            "Stalwart still asks Garrison's macro milter about every message, as far as this host \
+             can tell, and would defer mail without it: {why}; nothing was changed. Remove the \
+             [milter] section from {}, run `garrison stalwart setup` and uninstall then.",
+            settings.display()
+        ),
+    )
+}
+
+#[cfg(test)]
+mod tests;

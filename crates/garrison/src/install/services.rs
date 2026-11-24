@@ -9,8 +9,9 @@ use garrison_core::config;
 
 use super::files::{Step, announce, io, must, run};
 use super::system::unit_file;
-use super::{CONFIG, SYSTEMCTL, UNITS, cli, milter, settle};
+use super::{CONFIG, SYSTEMCTL, UNITS, cli, milter, settle, states};
 use crate::doctor::milter::entries::{self, Entry};
+use crate::state::State;
 use crate::units;
 
 pub(super) const ENABLE: [&str; 5] = [
@@ -50,7 +51,7 @@ pub(super) fn check_config(release: &Path, warnings: bool) -> Step {
             String::from_utf8_lossy(&check.stdout),
             String::from_utf8_lossy(&check.stderr)
         ));
-        return Err("check-config failed".into());
+        return Err(states::config_refused());
     }
     let said = String::from_utf8_lossy(&check.stderr);
     if warnings && !said.trim().is_empty() {
@@ -132,11 +133,7 @@ fn filter_held() -> bool {
     let Some(why) = held(filter.port, &listening, asked) else {
         return false;
     };
-    announce(&format!(
-        "The macro filter stays on the port it listens on, which garrison.toml no longer names: \
-         {why}. `garrison stalwart setup` moves it to port {}.",
-        filter.port
-    ));
+    announce(&states::milter_held(&why, filter.port).to_string());
     true
 }
 
@@ -146,8 +143,8 @@ fn filter_held() -> bool {
 fn held(
     port: u16,
     listening: &[u16],
-    entries: impl FnOnce() -> Result<Vec<Entry>, String>,
-) -> Option<String> {
+    entries: impl FnOnce() -> Result<Vec<Entry>, State>,
+) -> Option<State> {
     let left: Vec<u16> = listening
         .iter()
         .copied()
@@ -160,14 +157,8 @@ fn held(
         Ok(entries) => entries
             .iter()
             .find(|entry| entry.asked() && left.iter().any(|old| entry.asks(*old)))
-            .map(|entry| {
-                format!(
-                    "Stalwart asks its milter entry {} at {}",
-                    entry.id,
-                    entry.address()
-                )
-            }),
-        Err(why) => Some(format!("Stalwart's milters could not be asked ({why})")),
+            .map(|entry| states::milter_asked(&entry.id, &entry.address())),
+        Err(why) => Some(states::milter_unasked(&why)),
     }
 }
 
@@ -268,7 +259,7 @@ fn installed(shown: &str, shipped: &[&str], milter: bool, changed: Option<u64>) 
     };
     let steady = [units::WEB, units::INGEST, units::BROKER]
         .into_iter()
-        .all(|id| settle::unsettled(unit(id)).is_none() && since(id));
+        .all(|id| settle::unsettled(id, unit(id)).is_none() && since(id));
     let filter = value(unit(units::MILTER), "ActiveState") == "active";
     enabled && steady && filter == milter && (!milter || since(units::MILTER))
 }
@@ -285,19 +276,16 @@ mod tests {
     /// asks the port it leaves.
     #[test]
     fn the_filter_stays_where_stalwart_asks_it() {
-        let read = |list: serde_json::Value| -> Result<Vec<Entry>, String> {
+        let read = |list: serde_json::Value| -> Result<Vec<Entry>, State> {
             Ok(serde_json::from_value(list).unwrap())
         };
-        let unasked = || -> Result<Vec<Entry>, String> { panic!("asked Stalwart") };
+        let unasked = || -> Result<Vec<Entry>, State> { panic!("asked Stalwart") };
         assert_eq!(held(8097, &[], unasked), None);
         assert_eq!(held(8097, &[8097], unasked), None);
         let said = held(8097, &[8096], || {
             read(json!([{"id": "m1", "host": "127.0.0.1", "port": 8096, "enable": true}]))
         });
-        assert_eq!(
-            said.as_deref(),
-            Some("Stalwart asks its milter entry m1 at 127.0.0.1:8096")
-        );
+        assert_eq!(said, Some(states::milter_asked("m1", "127.0.0.1:8096")));
         for others in [
             json!([{"id": "m1", "host": "127.0.0.1", "port": 8096, "enable": {"match": {}, "else": "false"}}]),
             json!([{"id": "m1", "host": "10.0.0.5", "port": 8096}]),
@@ -310,11 +298,9 @@ mod tests {
                 "{others}"
             );
         }
-        let refused = held(8097, &[8096], || Err("Stalwart did not answer".to_owned()));
-        assert_eq!(
-            refused.as_deref(),
-            Some("Stalwart's milters could not be asked (Stalwart did not answer)")
-        );
+        let silent = || states::io("Stalwart", "did not answer");
+        let refused = held(8097, &[8096], || Err(silent()));
+        assert_eq!(refused, Some(states::milter_unasked(&silent())));
     }
 
     fn block(id: &str, file: &str, state: &str, restarts: u32) -> String {

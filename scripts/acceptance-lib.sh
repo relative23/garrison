@@ -314,6 +314,18 @@ if command -v ncat >/dev/null 2>&1; then
 fi
 exec socat -t 10 - "UNIX-CONNECT:$1"
 CONNECT
+    # The one test of what a command reported: the name of a state, which
+    # never changes, in the brackets it is printed in after its sentence.
+    inside_input 'cat > /usr/local/bin/acceptance-state && chmod 755 /usr/local/bin/acceptance-state' <<'STATE'
+#!/bin/sh
+# acceptance-state FILE STATE...: FILE says one of the states named.
+file=$1
+shift
+for state in "$@"; do
+    grep -q -F -- "[$state]" "$file" && exit 0
+done
+exit 1
+STATE
     copy_in "$previous" /root/previous.tar.gz
     copy_in "$release" /root/release.tar.gz
     inside 'cd /root && mkdir previous release &&

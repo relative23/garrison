@@ -41,7 +41,7 @@ scenario_rotation() {
     check "the failed rotation names the run that finishes it" \
         'grep -q -F "Run \`garrison stalwart setup --rotate\` again once this is mended." /root/rotation.log'
     inside 'rm /root/stand-in-refuses /root/keys-before-rotation /root/broker-key-before /root/rotation.log'
-    says "setup again once Stalwart takes the keys" "$setup" "Settings reloaded."
+    says_words "setup again once Stalwart takes the keys" "$setup" "Settings reloaded."
     check "the receiver holds the signature key of its file" \
         'test "$(cat /run/credentials/garrison-ingest.service/webhook-signature-key)" = \
             "$(cat /etc/garrison/credentials/webhook-signature-key)"'
@@ -67,7 +67,9 @@ scenario_milter_asked() {
     inside 'printf "%s" "{\"id\": \"m1\", \"host\": \"127.0.0.1\", \"port\": 8096, \"enable\": true}" \
             > /root/stand-in-milters && cat /root/garrison.toml.milter > /etc/garrison/garrison.toml'
     says "the next installer run says why the filter keeps running" '/root/release/bin/garrison install' \
-        "keeps running: Stalwart asks its milter entry m1 at 127.0.0.1:8096"
+        install-milter-kept
+    check "and that Stalwart asks its entry there" \
+        'acceptance-state /root/answer install-milter-asked && grep -q -F "m1 at 127.0.0.1:8096" /root/answer'
     check "and the filter runs on" 'systemctl is-active --quiet garrison-milter.service'
     inside 'rm /root/stand-in-milters'
     installer '/root/release/bin/garrison install'
@@ -87,7 +89,8 @@ scenario_milter_port() {
     inside 'printf "%s" "{\"id\": \"m1\", \"host\": \"127.0.0.1\", \"port\": 8096, \"enable\": true}" \
             > /root/stand-in-milters && printf "port = 8097\n" >> /etc/garrison/garrison.toml'
     says "the next installer run leaves the filter where Stalwart asks it, and names setup" \
-        '/root/release/bin/garrison install' "\`garrison stalwart setup\` moves it to port 8097"
+        '/root/release/bin/garrison install' install-milter-held
+    check "and the port setup moves it to" 'grep -q -F "port 8097" /root/answer'
     check "and the filter still answers there" 'ncat -z 127.0.0.1 8096 && ! ncat -z 127.0.0.1 8097'
     inside 'rm /root/stand-in-milters'
     installer '/root/release/bin/garrison install'

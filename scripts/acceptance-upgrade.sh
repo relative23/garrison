@@ -73,10 +73,9 @@ refused() {
 # say that nothing was changed, stop nothing and leave no unpacked tree.
 unchanged() {
     pid=$(inside 'systemctl show -p MainPID --value garrison-web.service')
-    if ! inside "$2" > "$cases/output" 2>&1 ||
-        ! grep -q -- "is running as installed; nothing was changed." "$cases/output"; then
+    if ! inside "{ $2; } > /root/answer 2>&1" || ! inside 'acceptance-state /root/answer install-as-installed'; then
         echo "FAIL  $1: it did not say that nothing was changed"
-        cat "$cases/output"
+        inside 'cat /root/answer' || true
         exit 1
     fi
     if [ "$(inside 'systemctl show -p MainPID --value garrison-web.service')" != "$pid" ] ||

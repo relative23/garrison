@@ -2,8 +2,9 @@
 //! and falls over at once would otherwise pass as started and restart
 //! forever.
 
-use super::SYSTEMCTL;
 use super::files::{Step, run};
+use super::{SYSTEMCTL, states};
+use crate::state::State;
 use crate::units;
 
 const SETTLE: std::time::Duration = std::time::Duration::from_secs(8);
@@ -18,49 +19,46 @@ pub(super) fn settle(milter: bool) -> Step {
             SYSTEMCTL,
             &["show", "-p", "ActiveState", "-p", "NRestarts", unit],
         )?;
-        if let Some(reason) = unsettled(&String::from_utf8_lossy(&output.stdout)) {
-            return Err(format!(
-                "{unit} {reason} within {} s of starting",
-                SETTLE.as_secs()
-            ));
+        if let Some(unsettled) = unsettled(unit, &String::from_utf8_lossy(&output.stdout)) {
+            return Err(unsettled);
         }
     }
     Ok(())
 }
 
-/// Why `systemctl show -p ActiveState -p NRestarts` describes a unit that did not stay up.
-pub(super) fn unsettled(properties: &str) -> Option<String> {
+/// Why `systemctl show -p ActiveState -p NRestarts` describes `unit` as one
+/// that did not stay up.
+pub(super) fn unsettled(unit: &str, properties: &str) -> Option<State> {
     let value = |key: &str| {
         properties
             .lines()
             .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
             .unwrap_or_default()
     };
+    let seconds = SETTLE.as_secs();
     match (value("ActiveState"), value("NRestarts")) {
         ("active", "0") => None,
-        ("active", restarts) => Some(format!("restarted {restarts} times")),
-        (state, _) => Some(format!(
-            "is {}",
-            if state.is_empty() { "unknown" } else { state }
-        )),
+        ("active", restarts) => Some(states::restarting(unit, restarts, seconds)),
+        (state, _) => Some(states::not_active(unit, state, seconds)),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::unsettled;
+    use super::{states, unsettled};
 
     #[test]
     fn a_service_must_stay_active_without_restarts() {
-        assert_eq!(unsettled("NRestarts=0\nActiveState=active\n"), None);
+        let web = "garrison-web.service";
+        assert_eq!(unsettled(web, "NRestarts=0\nActiveState=active\n"), None);
         assert_eq!(
-            unsettled("ActiveState=active\nNRestarts=2\n").unwrap(),
-            "restarted 2 times"
+            unsettled(web, "ActiveState=active\nNRestarts=2\n"),
+            Some(states::restarting(web, "2", 8))
         );
         assert_eq!(
-            unsettled("ActiveState=activating\nNRestarts=1\n").unwrap(),
-            "is activating"
+            unsettled(web, "ActiveState=activating\nNRestarts=1\n"),
+            Some(states::not_active(web, "activating", 8))
         );
-        assert_eq!(unsettled("").unwrap(), "is unknown");
+        assert_eq!(unsettled(web, ""), Some(states::not_active(web, "", 8)));
     }
 }
