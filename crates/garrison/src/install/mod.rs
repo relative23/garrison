@@ -201,7 +201,10 @@ fn backup_state(current: &Path, upgrade: bool) -> Step<PathBuf> {
     Ok(target)
 }
 
-/// The configuration without credentials, which have their own protected backup.
+/// The configuration without credentials, which have their own protected
+/// backup. Each file keeps its mode, at most 0644, so that one put back from
+/// the copy with its mode is read as before; the backup's folder is root's
+/// alone.
 fn copy_config(source: &Path, target: &Path) -> Step {
     io(fs::create_dir_all(target), target)?;
     for entry in io(fs::read_dir(source), source)?.flatten() {
@@ -212,7 +215,8 @@ fn copy_config(source: &Path, target: &Path) -> Step {
         if from.is_dir() {
             copy_config(&from, &to)?;
         } else {
-            place(&from, &to, 0o600)?;
+            let mode = io(fs::metadata(&from), &from)?.permissions().mode() & 0o644;
+            place(&from, &to, mode)?;
         }
     }
     Ok(())
@@ -443,6 +447,35 @@ pub(crate) fn run_installer(rollback_requested: bool, with_state: bool) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The copy of the configuration in a backup keeps the modes the
+    /// services read it by, so that a file put back from it with its mode,
+    /// as with `mv` or `cp -p`, is read again; the credentials stay out.
+    #[test]
+    fn a_configuration_copy_keeps_the_modes_of_its_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let (source, target) = (directory.path().join("etc"), directory.path().join("copy"));
+        fs::create_dir_all(source.join("credentials")).unwrap();
+        fs::write(source.join("garrison.toml"), "schema = 1\n").unwrap();
+        fs::write(source.join("private.toml"), "kept = true\n").unwrap();
+        fs::write(source.join("credentials/broker-native-key"), "secret").unwrap();
+        let set = |name: &str, mode: u32| {
+            fs::set_permissions(source.join(name), fs::Permissions::from_mode(mode)).unwrap();
+        };
+        set("garrison.toml", 0o644);
+        set("private.toml", 0o600);
+        copy_config(&source, &target).unwrap();
+        let mode = |name: &str| {
+            fs::metadata(target.join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(mode("garrison.toml"), 0o644);
+        assert_eq!(mode("private.toml"), 0o600);
+        assert!(!target.join("credentials").exists());
+    }
 
     #[test]
     fn the_policy_is_where_the_configuration_names_it() {

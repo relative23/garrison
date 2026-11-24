@@ -1695,6 +1695,9 @@ Notable changes for operators and users. The format follows
 - **A restore that was interrupted is finished by running it again**, and
   names the copy of the state its first run made; where Garrison ran since,
   it copies the state as it is first.
+- **`garrison.toml` put back from the copy in a backup before an upgrade is
+  read by the services again**, also where it was moved or copied with its
+  mode: the copy keeps the file's mode.
 - **A switch back after a failed upgrade that finds no room for a database's
   copy says so and puts nothing back**, where it said that the previous
   release did not start either; it also names what went back and what was
