@@ -144,8 +144,9 @@ This creates, and on repeated runs updates:
   among Stalwart's milters (step 10).
 
 All secrets go to `/etc/garrison/credentials/` (mode 0600), which is root's:
-run setup as root. Where it cannot write there, it stops before it asks for
-the administrator, and nothing is changed.
+run setup as root. A file there that other users may read gets a new
+secret, since its old one may have been seen. Where it cannot write there,
+it stops before it asks for the administrator, and nothing is changed.
 
 At the end it tries both keys from this host. Stalwart in Docker or Podman
 must use the host network (`--network host`, or `network_mode: host` with

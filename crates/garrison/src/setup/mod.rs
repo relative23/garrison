@@ -481,3 +481,5 @@ pub(crate) fn run(config: &Config, command: &Command) -> u8 {
 
 #[cfg(test)]
 mod call_tests;
+#[cfg(test)]
+mod kept_tests;

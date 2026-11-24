@@ -4,14 +4,14 @@
 use std::path::Path;
 
 use garrison_collector::run::ScrapeCredential;
-use garrison_core::files::{atomic_write, read_bounded};
+use garrison_core::files::{Privacy, atomic_write, read_private};
 use garrison_stalwart::jmap::{Get, Got};
 
 use super::objects::{Exporter, Metrics, Secret, Set, StoredMetrics};
 use super::{Admin, random};
 
 /// The credential's file, as the collector reads it.
-const FILE: &str = "metrics-credential";
+pub(super) const FILE: &str = "metrics-credential";
 
 /// What `ensure_metrics` did, and a new credential for its file.
 pub(super) struct Exported {
@@ -21,11 +21,12 @@ pub(super) struct Exported {
     pub(super) new_credential: Option<String>,
 }
 
-/// The credential the file at `path` holds, as the collector reads it: an
-/// empty one, as the installer keeps where setup wrote none, one of a line
-/// end alone and one that holds something else hold none.
-fn read(path: &Path) -> Option<ScrapeCredential> {
-    read_bounded(path, 16384)
+/// The credential the file at `path` holds, as the collector reads it, in
+/// a file of this user's that no other user may read: an empty one, as the
+/// installer keeps where setup wrote none, one of a line end alone, one
+/// that holds something else and one that others may read hold none.
+pub(super) fn read(path: &Path) -> Option<ScrapeCredential> {
+    read_private(path, 16384, Privacy::Owned)
         .ok()
         .and_then(|data| ScrapeCredential::read(&data))
 }
@@ -100,6 +101,8 @@ pub(super) fn keep(directory: &Path, document: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use garrison_testing::http::{json, serve};
     use serde_json::{Value, json};
 
@@ -125,18 +128,19 @@ mod tests {
             std::fs::write(&path, written).unwrap();
             assert!(read(&path).is_none(), "{written:?}");
         }
-        std::fs::write(&path, r#"{"username": "garrison", "secret": "s"}"#).unwrap();
+        garrison_testing::write_private(&path, br#"{"username": "garrison", "secret": "s"}"#);
         assert!(read(&path).is_some());
     }
 
     /// What `ensure_metrics` does where Stalwart's exporter is Garrison's and
-    /// the file holds `written`: the step, the secret Stalwart was given, and
-    /// the new credential for the file, if any; the file itself is left to
-    /// `keep`.
-    fn exported(written: &str, rotate: bool) -> (String, String, Option<Value>) {
+    /// the file holds `written` at `mode`: the step, the secret Stalwart was
+    /// given, and the new credential for the file, if any; the file itself
+    /// is left to `keep`.
+    fn exported(written: &str, mode: u32, rotate: bool) -> (String, String, Option<Value>) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join(FILE);
-        std::fs::write(&path, written).unwrap();
+        garrison_testing::write_private(&path, written.as_bytes());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
         let stored = json(&json!({"methodResponses": [["x:Metrics/get", {"list": [{
             "id": "singleton", "prometheus": {"@type": "Enabled", "authUsername": "garrison"}}]}, "0"]]}));
         let set = json(&json!({"methodResponses": [["x:Metrics/set",
@@ -165,7 +169,7 @@ mod tests {
     /// given and the file is to take.
     #[test]
     fn a_credential_file_that_holds_none_gets_one_where_the_exporter_is_garrisons() {
-        let (step, secret, new) = exported("\n", false);
+        let (step, secret, new) = exported("\n", 0o600, false);
         assert_eq!(
             step,
             "enabled Prometheus exporter -> DIR/metrics-credential"
@@ -180,19 +184,38 @@ mod tests {
     fn stalwart_is_given_the_credential_its_file_holds() {
         let held = r#"{"username": "garrison", "secret": "the-scrape-secret"}"#;
         assert_eq!(
-            exported(held, false),
+            exported(held, 0o600, false),
             (
                 "updated Prometheus exporter (credential unchanged)".to_owned(),
                 "the-scrape-secret".to_owned(),
                 None
             )
         );
-        let (step, secret, new) = exported(held, true);
+        let (step, secret, new) = exported(held, 0o600, true);
         assert_eq!(
             step,
             "enabled Prometheus exporter -> DIR/metrics-credential"
         );
         assert_ne!(secret, "the-scrape-secret");
         assert_eq!(new, Some(json!({"username": "garrison", "secret": secret})));
+    }
+
+    /// A credential whose file other users may read may have been seen:
+    /// Stalwart is given a new one, which `keep` writes for this user alone,
+    /// where setup once kept the file as it was and called it unchanged.
+    #[test]
+    fn a_credential_file_others_may_read_gets_a_new_one() {
+        let held = r#"{"username": "garrison", "secret": "the-scrape-secret"}"#;
+        let (step, secret, new) = exported(held, 0o644, false);
+        assert_eq!(
+            step,
+            "enabled Prometheus exporter -> DIR/metrics-credential"
+        );
+        assert_ne!(secret, "the-scrape-secret");
+        assert_eq!(new, Some(json!({"username": "garrison", "secret": secret})));
+        let directory = tempfile::tempdir().unwrap();
+        keep(directory.path(), held).unwrap();
+        let mode = std::fs::metadata(directory.path().join(FILE)).unwrap();
+        assert_eq!(mode.permissions().mode() & 0o777, 0o600);
     }
 }

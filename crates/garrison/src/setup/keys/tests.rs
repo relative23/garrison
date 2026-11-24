@@ -94,6 +94,45 @@ fn a_key_file_that_holds_no_key_gets_a_new_one() {
     );
 }
 
+/// A key whose file other users may read may have been seen: it gets a new
+/// key, written for this user alone, and the old one goes, where setup once
+/// kept it and said "secret unchanged". So the cards that name setup as
+/// the fix for such a file are right.
+#[test]
+fn a_key_file_others_may_read_gets_a_new_key() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join(COLLECTOR.file);
+    garrison_testing::write_private(&file, format!("{OLD}\n").as_bytes());
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let set = json(&json!({"methodResponses": [["x:ApiKey/set",
+        {"created": {"new": {"id": "fresh", "secret": NEW}}, "updated": {"old": null}}, "0"]]}));
+    let server = serve(vec![listed("b", &["old"]), set]);
+    let admin = Admin {
+        url: format!("{}/jmap/", server.url),
+        authorization: "Bearer admin".to_owned(),
+    };
+    let networks = Enabled::of(["127.0.0.1/32"]);
+    let done = ensure(&admin, directory.path(), &COLLECTOR, &networks, false).unwrap();
+    server.requests();
+    let step = done
+        .step
+        .replace(&directory.path().display().to_string(), "DIR");
+    let replaced: Vec<String> = done.replaced.iter().map(|key| key.id.clone()).collect();
+    assert_eq!(
+        (step.as_str(), replaced, done.made),
+        (
+            "created API key 'garrison collector' -> DIR/collector-native-key",
+            vec!["old".to_owned()],
+            true
+        )
+    );
+    let written = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        (std::fs::read_to_string(&file).unwrap(), written),
+        (format!("{NEW}\n"), 0o600)
+    );
+}
+
 /// Where Stalwart has two keys of the description, as after a rotation
 /// that was stopped before it removed the old one, no run can tell which
 /// the file holds: a plain run makes one anew and replaces both, where

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use garrison_core::config::Config;
-use garrison_core::files::{self, Form, Holds, Privacy};
+use garrison_core::files::{self, Privacy};
 use garrison_core::json;
 use garrison_stalwart::http::Request;
 
@@ -29,11 +29,13 @@ pub(super) struct Key {
 }
 
 /// Whether the file at `path` holds a key as the service that reads it
-/// takes one. An empty file, one of a line end alone and one that holds
-/// something else hold none: setup makes a key there, as where the file is
-/// missing, since a key kept in such a file leaves its service with none.
+/// takes one, in a file of this user's that no other user may read. An
+/// empty file, one of a line end alone, one that holds something else and
+/// one that others may read hold none: setup makes a key there, as where
+/// the file is missing, since a key kept in such a file leaves its service
+/// with none, or with one that others may have seen.
 pub(super) fn holds_key(path: &Path) -> bool {
-    files::holds(path, Form::Token).is_ok_and(|held| held == Holds::Secret)
+    files::read_secret(path, Privacy::Owned).is_ok()
 }
 
 /// A key that a new one replaces, in the account that holds it: the

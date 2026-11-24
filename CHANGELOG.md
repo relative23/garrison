@@ -1549,6 +1549,8 @@ Notable changes for operators and users. The format follows
 - **A `garrison stalwart setup` that fails no longer takes the receiver
   down.** It restarts a service only for a secret it wrote anew, and never
   onto a key file that holds no key.
+- **`garrison stalwart setup` gives a key or credential whose file other
+  users may read a new secret, in a file that only its owner reads.**
 - **Setup run as another administrator keeps, or with `--rotate`
   removes, the API keys the one before made.** They stayed valid, also
   after a rotation.
