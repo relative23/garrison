@@ -120,6 +120,10 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.miniz_oxide]
 opt-level = 3
+# The macro filter's own scan is timed by its tests as a message's time
+# bounds it; unoptimized it is several times slower than what is shipped.
+[profile.dev.package.garrison-milter]
+opt-level = 3
 
 [profile.release]
 codegen-units = 1
