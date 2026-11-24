@@ -198,3 +198,48 @@ fn an_issuer_is_kept_as_written_only_in_the_form_garrison_toml_keeps() {
         assert_eq!(kept_as_written(text), kept, "{text}");
     }
 }
+
+/// nginx answers 502: where nothing listens on web.port, as before the web
+/// service was restarted after a change of the port, doctor names the
+/// restart; where something does, the lines that name nginx's include or
+/// the SELinux module.
+#[test]
+fn a_502_names_the_restart_where_nothing_listens_on_web_port() {
+    let gateway = "<html>Bad gateway</html>";
+    let answer = format!(
+        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\
+         Connection: close\r\n\r\n{gateway}",
+        gateway.len()
+    );
+    let silent = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let listening = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    for (port, fix) in [
+        (silent, "systemctl restart garrison-web.service"),
+        (
+            listening.local_addr().unwrap().port(),
+            "the lines above name an include or an SELinux module",
+        ),
+    ] {
+        let server = garrison_testing::tls::serve_until(vec![answer.clone()], 2036, 1, 1);
+        let roots = std::sync::Arc::new(server.roots.clone());
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+        config.deployment.public_origin.clone_from(&server.url);
+        config.web.port = port;
+        let found = interface(&config, &roots);
+        server.finish();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0]
+                .fix
+                .as_deref()
+                .is_some_and(|text| text.contains(fix)),
+            "{}",
+            found[0].line()
+        );
+    }
+}

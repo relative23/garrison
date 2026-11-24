@@ -4,7 +4,9 @@
 //! Stalwart's public hosts, which must not serve its metrics. And the issuer
 //! Stalwart names itself, asked of its own listener.
 
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::sync::Arc;
+use std::time::Duration;
 
 use garrison_collector::providers::signin;
 use garrison_collector::providers::tls::probe;
@@ -94,18 +96,30 @@ pub(super) fn interface(config: &Config, roots: &Arc<RootCertStore>) -> Vec<Find
             findings
         }
         // What nginx answers where it does not reach the web service.
-        Ok(answer) if matches!(answer.status, 502..=504) => vec![Finding::fail(
-            format!(
-                "{url} answers {}: nginx does not reach Garrison's web service on \
-                 127.0.0.1:{}",
-                answer.status, config.web.port
-            ),
-            format!(
-                "`systemctl status {}` says whether it runs; the lines above name an include or \
-                 an SELinux module for another port.",
-                crate::units::WEB
-            ),
-        )],
+        Ok(answer) if matches!(answer.status, 502..=504) => {
+            let port = config.web.port;
+            let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+            let fix = if TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok() {
+                format!(
+                    "Something listens on 127.0.0.1:{port}: the lines above name an include or an \
+                     SELinux module for another port."
+                )
+            } else {
+                format!(
+                    "Nothing listens on 127.0.0.1:{port}: `systemctl restart {0}` starts the web \
+                     service on web.port, and `systemctl status {0}` says why it does not run.",
+                    crate::units::WEB
+                )
+            };
+            vec![Finding::fail(
+                format!(
+                    "{url} answers {}: nginx does not reach Garrison's web service on \
+                     127.0.0.1:{port}",
+                    answer.status
+                ),
+                fix,
+            )]
+        }
         Ok(answer) => vec![Finding::fail(
             format!(
                 "{url} answers {} instead of Garrison's answer to a visitor",

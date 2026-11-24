@@ -115,8 +115,9 @@ pub(crate) fn settings(config: &Config, include: Option<&str>) -> Vec<Unfollowed
             ),
             fix: format!(
                 "Run the installer again, which under SELinux also loads the module for the \
-                 port; without SELinux, writing the include anew does as well: sudo sh -c \
-                 'garrison nginx --snippet > {}' && sudo nginx -t && sudo systemctl reload nginx",
+                 port; without SELinux, restarting garrison-web and writing the include anew \
+                 does as well: sudo systemctl restart garrison-web && sudo sh -c 'garrison \
+                 nginx --snippet > {}' && sudo nginx -t && sudo systemctl reload nginx",
                 nginx::SNIPPET
             ),
         });
@@ -237,6 +238,15 @@ mod tests {
         );
         assert!(
             found[0].fix.contains("garrison nginx --snippet"),
+            "{}",
+            found[0].fix
+        );
+        // garrison-web takes web.port when it starts; nginx would send to
+        // a port nothing listens on yet.
+        assert!(
+            found[0]
+                .fix
+                .contains("sudo systemctl restart garrison-web && sudo sh -c"),
             "{}",
             found[0].fix
         );

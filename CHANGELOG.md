@@ -1865,6 +1865,10 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` tries the broker's and the collector's API keys with
   Stalwart**, as their services use them, and fails one Stalwart no longer
   knows, with which nobody can sign in, with the setup that makes a new one.
+- **The warning of nginx's include for another port restarts `garrison-web`
+  in its way without the installer**, which left nginx answering 502, and
+  `garrison doctor`'s line of a 502 says whether anything listens on
+  `web.port`.
 
 ## [0.1.2] - 2026-11-13
 
