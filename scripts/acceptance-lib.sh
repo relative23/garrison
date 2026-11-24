@@ -231,9 +231,10 @@ finish_host() {
     # A stand-in for Stalwart that knows one administrator token: subject 1, native
     # account b, role e. Any other token is invalid, as in production. With it the
     # broker authorizes a request as usual, so an action runs through polkit and
-    # systemctl for real. It also answers what `garrison stalwart setup` asks:
-    # the API keys it makes are kept in /root/stand-in-keys, and refused while
-    # /root/stand-in-refuses exists.
+    # systemctl for real. It also answers what `garrison stalwart setup` asks
+    # and shows what it wrote, without the secrets: the API keys it makes with
+    # their permissions in /root/stand-in-keys, refused while
+    # /root/stand-in-refuses exists, its other objects in /root/stand-in-objects.
     inside_input 'cat > /root/stalwart-stub.sh' <<'STUB'
 read -r method path rest
 length=0
@@ -255,6 +256,15 @@ respond() {
     answer="{\"methodResponses\": [[\"$1\", {\"accountId\": \"b\", \"list\": [$2], \"notFound\": []}, \"0\"]], \"sessionState\": \"0\"}"
 }
 answered() { answer="{\"methodResponses\": [[\"$1\", $2, \"0\"]], \"sessionState\": \"0\"}"; }
+rights() { printf %s "$body" | grep -o '"permissions":{"@type":"Replace","permissions":{[^}]*}}' || echo '"permissions":{}'; }
+# The object a /set created or updated, under its kind.
+keep() {
+    set -- "$(printf %s "$body" | sed -n 's/.*\/set",{"[a-z]*":{"\([^"]*\)":{\(.*\)}}},"0"\]\]}$/\1 \2/p')"
+    [ -n "$1" ] || return 0
+    mkdir -p /root/stand-in-objects
+    printf '{"id": "%s", %s}\n' "$(echo "${1%% *}" | sed "s/^new$/$kind-1/")" "${1#* }" |
+        sed 's/,"signatureKey":{[^}]*}//; s/,"authSecret":{[^}]*}//' > "/root/stand-in-objects/$kind"
+}
 case "$method $path" in
     "GET /auth/userinfo")
         if [ "$authorization" = "Bearer acceptance-token-0123456789abcdef" ]; then
@@ -270,6 +280,7 @@ case "$method $path" in
         fi ;;
     "POST /jmap/")
         call=$(printf %s "$body" | grep -o 'x:[A-Za-z]*/[a-z]*' | head -n 1)
+        kind=${call#x:}; kind=${kind%/*}
         case "$body" in
             *x:Account/get*) respond x:Account/get '{"id": "b", "@type": "User", "memberTenantId": null,
                 "roles": {"@type": "Custom", "roleIds": {"e": true}}, "permissions": {"@type": "Inherit"}}' ;;
@@ -278,23 +289,27 @@ case "$method $path" in
             *x:Role/get*) respond x:Role/get '{"id": "e", "roleIds": {}, "memberTenantId": null, "disabledPermissions": {},
                 "enabledPermissions": {"authenticate": true, "sysActionCreate": true, "sysRoleUpdate": true}}' ;;
             *x:ApiKey/get*)
-                respond "$call" "$(sed 's/^\([^ ]*\) \(.*\)$/{"id": "\1", "description": "\2", "allowedIps": {"127.0.0.1": true, "::1": true}, "createdAt": "2026-11-24T00:00:00Z", "expiresAt": null, "permissions": {"@type": "Replace", "permissions": {"authenticate": true}}, "secret": "kept"}/' \
+                respond "$call" "$(sed 's/^\([^ ]*\) \([^ ]*\) \(.*\)$/{"id": "\1", "description": "\3", "allowedIps": {"127.0.0.1": true, "::1": true}, "createdAt": "2026-11-24T00:00:00Z", "expiresAt": null, \2, "secret": "kept"}/' \
                     /root/stand-in-keys 2>/dev/null | paste -s -d , -)" ;;
             *x:ApiKey/set*'"create"'*)
                 id=k$(date +%s%N)
-                printf '%s %s\n' "$id" "$(printf %s "$body" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')" \
+                printf '%s %s %s\n' "$id" "$(rights)" "$(printf %s "$body" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')" \
                     >> /root/stand-in-keys
                 answered "$call" "{\"created\": {\"new\": {\"id\": \"$id\", \"secret\": \"stand-in-$id-secret\"}}}" ;;
+            *x:ApiKey/set*'"update"'*)
+                id=$(printf %s "$body" | sed -n 's/.*"update":{"\([^"]*\)".*/\1/p')
+                sed -i "s|^$id [^ ]* |$id $(rights) |" /root/stand-in-keys
+                answered "$call" '{}' ;;
             *x:ApiKey/set*'"destroy"'*)
                 for id in $(cut -d ' ' -f 1 /root/stand-in-keys); do
                     case $body in *"\"$id\""*) sed -i "/^$id /d" /root/stand-in-keys ;; esac
                 done
                 answered "$call" '{}' ;;
-            *x:WebHook/get*) respond "$call" '{"id": "w1", "httpHeaders": {"X-Garrison": "events"}}' ;;
+            *x:WebHook/get*) respond "$call" "$(cat /root/stand-in-objects/WebHook 2>/dev/null || echo '{"id": "w1", "httpHeaders": {"X-Garrison": "events"}}')" ;;
             # The milters a scenario puts in /root/stand-in-milters.
             *x:MtaMilter/get*) respond "$call" "$(cat /root/stand-in-milters 2>/dev/null)" ;;
-            */get*) respond "$call" '' ;;
-            */set*) answered "$call" '{}' ;;
+            */get*) respond "$call" "$(cat "/root/stand-in-objects/$kind" 2>/dev/null)" ;;
+            */set*) keep; answered "$call" '{}' ;;
         esac ;;
 esac
 printf 'HTTP/1.1 %s\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' "$status" "${#answer}" "$answer"

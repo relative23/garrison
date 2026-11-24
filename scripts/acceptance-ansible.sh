@@ -194,20 +194,20 @@ nothing_secret() {
 # what the role and the scenarios left in /root.
 fresh() {
     if ! inside '/opt/garrison/current/bin/garrison uninstall --purge >/dev/null &&
-        rm -rf /root/garrison-* /root/stand-in-keys'; then
+        rm -rf /root/garrison-* /root/stand-in-keys /root/stand-in-objects'; then
         echo "FAIL  Garrison is taken off the host for the next scenario"
         exit 1
     fi
 }
 
-# Setup fails at its last step, after it wrote every key file: the stand-in
-# refuses the keys' sessions, as Stalwart refuses a key it does not take.
+# Setup fails once it made a key and wrote its file: the stand-in refuses the
+# keys' sessions, as Stalwart refuses a key it does not take.
 scenario_setup_refused() {
     step "A setup that fails says why and shows no secret"
     inside 'cd /etc/garrison/credentials && rm webhook-signature-key collector-native-key broker-native-key &&
         touch /root/stand-in-refuses'
     # At -vvv a task without no_log shows what went in on its standard input.
-    stops "$newer" "Stalwart does not take the API key it just made" -vvv
+    stops "$newer" "Stalwart does not take the API key in broker-native-key" -vvv
     nothing_secret
     inside 'rm /root/stand-in-refuses'
     play "$newer"
@@ -227,7 +227,7 @@ acceptance_config: |
   policy = "/etc/garrison/policy/access.json"
 VARS
     play "$newer" -e "@$work/elsewhere.yml"
-    said "Stalwart accepts both API keys from this host"
+    said "Stalwart is set up as asked; nothing was changed."
     check "the installer took the policy there" \
         '/opt/garrison/current/bin/garrison check-config 2>/dev/null | grep -q "Access policy valid: /etc/garrison/policy/access.json"'
     services "with the policy kept elsewhere"
