@@ -162,26 +162,45 @@ fn a_key_file_that_holds_no_key_gets_a_new_one() {
     );
 }
 
-/// A kept key whose rights Stalwart shows as setup gives them, its networks
-/// without the prefix of a single address as Stalwart shows them, is left
-/// as it is, and only tried.
+/// A kept key whose rights Stalwart shows as setup gives them is left as
+/// it is, and only tried: its networks as setup wrote them or as Stalwart
+/// 1.1.0 shows them, a single address without its prefix. One with other
+/// rights is updated.
 #[test]
 fn a_kept_key_with_its_rights_is_left_as_it_is() {
     let directory = tempfile::tempdir().unwrap();
-    let held = json(
-        &json!({"methodResponses": [["x:ApiKey/get", {"accountId": "b", "list": [{
-        "id": "old", "description": "garrison collector", "secret": "****",
-        "permissions": {"@type": "Replace", "permissions": {"authenticate": true}},
-        "allowedIps": {"127.0.0.1": true}}]}, "0"]]}),
-    );
-    let answers = vec![held, session("b"), answer(200, "{}")];
-    let written = format!("{OLD}\n");
-    let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
-    assert_eq!(outcome, Ok(false));
-    assert_eq!(
-        named(&requests),
-        ["x:ApiKey/get", "GET /jmap/session", "GET /jmap/session"]
-    );
+    for (shown, rights, changed) in [
+        ("127.0.0.1", json!({"authenticate": true}), false),
+        ("127.0.0.1/32", json!({"authenticate": true}), false),
+        (
+            "127.0.0.1",
+            json!({"authenticate": true, "sysAccountGet": true}),
+            true,
+        ),
+    ] {
+        let held = json(
+            &json!({"methodResponses": [["x:ApiKey/get", {"accountId": "b",
+            "list": [{"id": "old", "description": "garrison collector", "secret": "****",
+            "permissions": {"@type": "Replace", "permissions": rights},
+            "allowedIps": {shown: true}}]}, "0"]]}),
+        );
+        let mut answers = vec![held, session("b")];
+        if changed {
+            answers.push(done("x:ApiKey/set"));
+        }
+        answers.push(answer(200, "{}"));
+        let written = format!("{OLD}\n");
+        let (outcome, requests) =
+            settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
+        assert_eq!(outcome, Ok(changed), "{shown}");
+        let update = changed.then_some("x:ApiKey/set update");
+        let asked: Vec<&str> = ["x:ApiKey/get", "GET /jmap/session"]
+            .into_iter()
+            .chain(update)
+            .chain(["GET /jmap/session"])
+            .collect();
+        assert_eq!(named(&requests), asked, "{shown}");
+    }
 }
 
 /// A key whose file other users may read may have been seen: it gets a new

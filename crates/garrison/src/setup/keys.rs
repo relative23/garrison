@@ -257,7 +257,7 @@ pub(super) fn settle(
             allowed_ips: &as_shown(networks),
             ..rights()
         };
-        let changed = !stored.holds(&shown);
+        let changed = !stored.holds(&rights()) && !stored.holds(&shown);
         if changed {
             let update = Set::update(&kept.id, rights());
             admin.set_in("x:ApiKey/set", kept.account.as_deref(), &update)?;
@@ -291,8 +291,8 @@ pub(super) fn settle(
     Ok(true)
 }
 
-/// `networks` as Stalwart shows a key's: a single address without its
-/// prefix (measured on Stalwart 1.1.0).
+/// `networks` as Stalwart 1.1.0 shows a key's: a single address without
+/// its prefix. A key that Stalwart shows as setup wrote it is held as well.
 fn as_shown(networks: &Enabled) -> Enabled {
     Enabled::of(networks.names().map(|network| {
         let single = if network.contains(':') { "/128" } else { "/32" };
