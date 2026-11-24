@@ -17,14 +17,22 @@ const PKACTION: &str = "/usr/bin/pkaction";
 /// Left free after the installation, for the services' own writes.
 const SPARE: u64 = 64 << 20;
 
-pub(super) fn preflight() -> Step {
+/// What an uninstallation needs: root and systemctl. Neither polkit nor a
+/// systemd that knows the units' settings, which only a start needs.
+pub(super) fn root_with_systemctl() -> Step {
     if !rustix::process::geteuid().is_root() {
         return Err("Run as root.".into());
     }
-    for tool in [SYSTEMCTL, "/usr/bin/systemd-sysusers"] {
-        if !Path::new(tool).exists() {
-            return Err(format!("{tool} is required."));
-        }
+    if !Path::new(SYSTEMCTL).exists() {
+        return Err(format!("{SYSTEMCTL} is required."));
+    }
+    Ok(())
+}
+
+pub(super) fn preflight() -> Step {
+    root_with_systemctl()?;
+    if !Path::new("/usr/bin/systemd-sysusers").exists() {
+        return Err("/usr/bin/systemd-sysusers is required.".into());
     }
     let output = run(SYSTEMCTL, &["--version"])?;
     match systemd_version(&String::from_utf8_lossy(&output.stdout)) {

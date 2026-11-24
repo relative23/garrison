@@ -11,7 +11,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::files::{Step, announce, io, lock, must, run};
-use super::{BACKUPS, BASE, CONFIG, LOCK, SYSTEMCTL, UNITS, command, preflight};
+use super::requirements::root_with_systemctl;
+use super::{BACKUPS, BASE, CONFIG, LOCK, SYSTEMCTL, UNITS, command};
 
 const USERS: [&str; 5] = [
     "garrison-milter",
@@ -235,7 +236,7 @@ fn remove(item: &Item) -> Step {
 }
 
 fn uninstall(purge: bool, dry_run: bool) -> Step {
-    preflight()?;
+    root_with_systemctl()?;
     let _held = lock(Path::new(LOCK))?;
     let root = Path::new("/");
     let items = plan(root, purge, module_loaded(), &super::policy());

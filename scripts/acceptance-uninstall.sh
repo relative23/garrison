@@ -97,4 +97,13 @@ check "the new installation starts from the example configuration" \
     'grep -q "garrison.example.org" /etc/garrison/garrison.toml'
 check "the service users exist again" 'getent passwd garrison-broker >/dev/null'
 
+step "A purge where polkit's rules folder is gone"
+# As after `apt purge polkitd`: uninstalling needs neither polkit nor its folder.
+inside 'mv /etc/polkit-1/rules.d /root/polkit-rules.away'
+installer '/root/release/bin/garrison uninstall --purge > /root/purge-without-polkit.log 2>&1' ||
+    { inside 'cat /root/purge-without-polkit.log'; echo "FAIL  a purge without polkit's rules folder"; exit 1; }
+echo "ok    a purge without polkit's rules folder"
+check "it removed the program and the configuration" 'test ! -e /opt/garrison && test ! -e /etc/garrison'
+inside 'mv /root/polkit-rules.away /etc/polkit-1/rules.d && rm -f /etc/polkit-1/rules.d/50-garrison.rules'
+
 step "Accepted: uninstalling keeps what it should and a purge leaves nothing"
