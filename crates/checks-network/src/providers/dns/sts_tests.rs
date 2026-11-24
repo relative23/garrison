@@ -400,3 +400,42 @@ fn a_policy_is_fetched_again_once_its_record_changes() {
         assert_eq!(policy_result(&domain), json!(result), "{later}");
     }
 }
+
+/// The records at `_mta-sts` count as a set: a resolver that gives them in
+/// another order, as one does that rotates the records of a name, changes
+/// no record, and the policy kept within the hour is used.
+#[test]
+fn a_policy_is_not_fetched_again_for_its_records_in_another_order() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = config(directory.path());
+    let runner = Canned(String::new());
+    let memory = Remembered::default();
+    let records = [
+        "v=STSv1; id=20261124".to_owned(),
+        "some-verification=abc".to_owned(),
+    ];
+    let served = serve(vec![garrison_testing::http::answer(
+        200,
+        "version: STSv1\nmode: enforce\nmx: mail.example.test\nmax_age: 86400\n",
+    )]);
+    let first = Context {
+        memory: &memory,
+        ..crate::testing::context(&config, &runner)
+    };
+    let url = format!("{}/.well-known/mta-sts.txt", served.url);
+    let read = sts::policy(&first, "example.test", &url, None, &records);
+    served.requests();
+    assert_eq!(read.unwrap().unwrap().mode, "enforce");
+    // A minute later, the same records the other way round.
+    let silent = Silent::new();
+    let later = Context {
+        memory: &memory,
+        now: time::Timestamp::from_second(crate::testing::now().as_second() + 60).unwrap(),
+        ..crate::testing::context(&config, &runner)
+    };
+    let swapped = [records[1].clone(), records[0].clone()];
+    let url = format!("{}/.well-known/mta-sts.txt", silent.url);
+    let kept = sts::policy(&later, "example.test", &url, None, &swapped);
+    assert_eq!(silent.finish(), 0, "the policy was fetched again");
+    assert_eq!(kept.unwrap().unwrap().mode, "enforce");
+}

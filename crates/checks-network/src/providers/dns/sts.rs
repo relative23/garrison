@@ -31,8 +31,8 @@ struct Fetched {
     /// fetches it.
     #[serde(default)]
     unasked: bool,
-    /// The domain's record for the policy when it was fetched: once that
-    /// changes, the policy is fetched again, as a sender takes a record
+    /// The domain's records for the policy when it was fetched, sorted: once
+    /// they change, the policy is fetched again, as a sender takes a record
     /// with another id for a new policy (RFC 8461, 3.1). None where an
     /// earlier release kept it.
     #[serde(default)]
@@ -106,6 +106,10 @@ pub(super) fn policy(
     record: &[String],
 ) -> Option<Result<Policy, String>> {
     let key = format!("dns.sts.{domain}");
+    // A set: a resolver may give the records of a name in any order.
+    let mut record = record.to_vec();
+    record.sort_unstable();
+    let record = record.as_slice();
     let wait = |_, fetched: &Fetched| {
         if fetched.unasked || fetched.record.as_deref() != Some(record) {
             0
