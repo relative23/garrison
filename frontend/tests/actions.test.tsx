@@ -268,7 +268,17 @@ describe("maintenance actions", () => {
     serve({ "GET actions": { body: catalog({ actions: [], jobs: [] }) } });
     renderView(<Actions />);
     expect(await screen.findByText("Your profile grants no maintenance actions.")).toBeTruthy();
-    expect(screen.getByText("No jobs in the retained audit.")).toBeTruthy();
+    expect(screen.getByText("No recent job of an action your profile grants.")).toBeTruthy();
+  });
+
+  it("say of an empty list what it lists, not that the audit holds no job", async () => {
+    // The broker lists the user's actions' jobs among the audit's newest:
+    // twenty newer jobs of another profile's actions leave the list empty.
+    serve({ "GET actions": { body: catalog({ jobs: [] }) } });
+    renderView(<Actions />);
+    await loaded();
+    expect(screen.getByText("No recent job of an action your profile grants.")).toBeTruthy();
+    expect(screen.queryByText(/audit/)).toBeNull();
   });
 
   it("offer a retry when the catalog cannot be loaded", async () => {

@@ -173,6 +173,8 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **An empty Recent jobs list no longer says that the audit holds no job.**
+  It lists the recent jobs of the actions your profile grants, and says so.
 - **A job whose result is uncertain is announced as a warning.** The
   Maintenance page showed it in the same calm tile as a success, though its
   row in Recent jobs says it is not known.

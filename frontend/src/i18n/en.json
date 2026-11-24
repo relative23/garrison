@@ -15,7 +15,7 @@
     "cancel": "Cancel",
     "confirm": "Type <phrase/> to confirm.",
     "cooldown": "Cooldown {{duration}}",
-    "empty": "No jobs in the retained audit.",
+    "empty": "No recent job of an action your profile grants.",
     "intro": "Each action starts or restarts one reviewed system service. Closing this page does not stop a running job, and a timed-out observation is reported as \"uncertain\" rather than retried.",
     "job": "Job {{id}}: {{status}} — {{message}}",
     "noActions": "Your profile grants no maintenance actions.",
