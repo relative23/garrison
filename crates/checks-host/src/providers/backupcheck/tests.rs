@@ -17,7 +17,7 @@ fn at(ago: i64) -> String {
 /// A report whose newest snapshot was made and listed an hour ago.
 fn report() -> Value {
     json!({
-        "tool": "restic", "repository": "/srv/restic", "problem": null,
+        "tool": "restic", "repository": "/srv/restic", "repositoryId": "477c", "problem": null,
         "snapshots": {"at": at(3600), "count": 14, "newest": at(3700), "sizeBytes": 52_428_800},
         "verify": {"at": at(2 * DAY), "ok": true, "detail": "no errors were found"},
         "restore": {"at": at(3 * DAY), "ok": true, "detail": "/var/vmail/a: 12 files, 4096 bytes"},
@@ -199,6 +199,30 @@ fn a_missing_report_and_one_that_others_can_write_are_unknown() {
         ["The repository's state is not known: the report is one of restic."]
     );
     assert_eq!(borg.title, "borg repository");
+}
+
+/// An earlier release kept a check and a restore whatever repository they
+/// were of, and wrote no ID: its report shows neither. One this release
+/// wrote without an ID holds its own run's, which it shows.
+#[test]
+fn a_report_an_earlier_release_wrote_shows_no_check_or_restore() {
+    let mut earlier = report();
+    earlier.as_object_mut().unwrap().remove("repositoryId");
+    let observation = observed(Some(&earlier), 0o644, "verify_days = 8");
+    assert_eq!(field(&observation, "Last integrity check"), &Value::Null);
+    assert_eq!(field(&observation, "Last test restore"), &Value::Null);
+    assert_eq!(field(&observation, "Snapshots"), &json!(14));
+    assert_eq!(
+        observation.findings,
+        ["No integrity check has been reported; one is expected every 8 days."]
+    );
+    let mut unknown = report();
+    unknown["repositoryId"] = Value::Null;
+    let observation = observed(Some(&unknown), 0o644, "");
+    assert_eq!(
+        field(&observation, "Last integrity check"),
+        &json!("passed")
+    );
 }
 
 #[test]

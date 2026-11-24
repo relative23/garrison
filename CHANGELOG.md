@@ -619,25 +619,9 @@ Notable changes for operators and users. The format follows
   the broker, as [access](docs/operator/access.md#when-the-actions-change)
   says, which also says what `init --force` drops and how the policy file
   is written.
-- **A backup's card shows that repository's check and restore alone.**
-  `garrison backup-check` kept the last integrity check and test restore of
-  the report before it, whatever repository or tool that report was of: a
-  run for another repository under the same report, as with a changed
-  `RESTIC_REPOSITORY` or `--repo`, another disk mounted at the
-  repository's place or a `RESTIC_REPOSITORY_FILE` that now names another
-  one, or with borg under restic's `--report`, showed the old repository's
-  check and restore as the new one's, and the card was in order on their
-  times. The report now holds the repository's own ID, which restic gives
-  with `restic cat config` (one more call a run) and borg with its listing,
-  and the two are kept only from a report of the same tool and the same ID,
-  whatever the repository's name. Otherwise the run starts without them and
-  says why, and so does a run for which the tool gives no ID; the card then
-  says that none has been reported where one is expected. A report that an
-  earlier release wrote holds no ID: its check and restore are kept once
-  where tool and name are the same, and the ID is recorded with them. The
-  report names a repository that restic reads from the file
-  `RESTIC_REPOSITORY_FILE` names by that file, also beside an empty
-  `RESTIC_REPOSITORY`, which restic takes for none.
+- **A backup's card shows only that repository's own integrity check and
+  test restore.** After the upgrade, a card that expects them warns until
+  the next `garrison backup-check` run with `--verify` or `--restore`.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year
