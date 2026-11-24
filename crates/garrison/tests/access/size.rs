@@ -91,3 +91,27 @@ fn no_command_writes_a_policy_larger_than_the_broker_reads() {
         )
     );
 }
+
+/// The broker and `garrison access` read the policy to one bound, each with
+/// a constant of its own: a policy of 64 KiB is one for both, and a byte
+/// more is none for either.
+#[test]
+fn the_commands_and_the_broker_read_the_policy_to_one_bound() {
+    let directory = prepared();
+    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    let broker = garrison_authz::Authority::new(&config, garrison_testing::credentials(&config));
+    let path = directory.path().join("policy.json");
+    let document = garrison_testing::policy_document().to_string();
+    for size in [MOST, MOST + 1] {
+        let padded = document.clone() + &" ".repeat(size - document.len());
+        garrison_testing::write_private(&path, padded.as_bytes());
+        // update reads the policy as every command that changes it does.
+        let updated = run(directory.path(), &["access", "update"]);
+        assert_eq!(
+            (broker.policy().is_ok(), updated.status.success()),
+            (size == MOST, size == MOST),
+            "{size}: {}",
+            text(&updated.stderr)
+        );
+    }
+}

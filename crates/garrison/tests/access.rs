@@ -138,9 +138,9 @@ fn init_without_an_administrator_role_writes_the_profiles_to_bind_one_to() {
         text(&init.stderr),
         "No native administrator role with full administrative rights was found, so the \
          policy binds no role and nobody can sign in yet. The administrator profile requires \
-         authenticate, sysAccountUpdate, sysDomainUpdate, sysRoleUpdate and sysActionCreate.\n\
+         authenticate, sysAccountUpdate, sysActionCreate, sysDomainUpdate and sysRoleUpdate.\n\
          Stalwart's default administrator role weak (Weak) lacks sysAccountUpdate, \
-         sysDomainUpdate, sysRoleUpdate and sysActionCreate: give the role those rights in the \
+         sysActionCreate, sysDomainUpdate and sysRoleUpdate: give the role those rights in the \
          native administration (Roles), then run garrison access bind-role weak --profile \
          administrator. As it is, it meets none of the profiles.\n"
     );

@@ -49,7 +49,7 @@ fn a_role_that_lacks_a_right_its_profile_requires_is_said_so() {
         text(&init.stderr),
         "No native administrator role with full administrative rights was found, so the policy \
          binds no role and nobody can sign in yet. The administrator profile requires \
-         authenticate, sysAccountUpdate, sysDomainUpdate, sysRoleUpdate and sysActionCreate.\n\
+         authenticate, sysAccountUpdate, sysActionCreate, sysDomainUpdate and sysRoleUpdate.\n\
          Stalwart's default administrator role admin (Administrators) lacks sysRoleUpdate: \
          give the role that right in the native administration (Roles), then run garrison \
          access bind-role admin --profile administrator. As it is, it meets the profiles \
@@ -194,7 +194,7 @@ fn init_force_keeps_a_policy_that_reads_where_no_role_qualifies() {
 
 /// What the administrator profile requires, as init says it.
 const REQUIRES: &str = "The administrator profile requires authenticate, sysAccountUpdate, \
-                        sysDomainUpdate, sysRoleUpdate and sysActionCreate.";
+                        sysActionCreate, sysDomainUpdate and sysRoleUpdate.";
 
 /// What init says of the role `lacking` gives.
 const ADMIN_LACKS: &str = "Stalwart's default administrator role admin (Administrators) lacks \

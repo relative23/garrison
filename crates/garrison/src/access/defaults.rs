@@ -305,19 +305,9 @@ pub(super) fn named(identifier: &str, candidate: &Candidate) -> String {
     }
 }
 
-/// What of `required` `rights` does not hold, in order.
+/// What of `required` `rights` does not hold.
 fn lacking(required: &BTreeSet<String>, rights: &BTreeSet<String>) -> Vec<String> {
-    ADMIN_PERMISSIONS
-        .iter()
-        .map(|name| (*name).to_owned())
-        .chain(required.iter().cloned())
-        .filter(|name| required.contains(name) && !rights.contains(name))
-        .fold(Vec::new(), |mut names, name| {
-            if !names.contains(&name) {
-                names.push(name);
-            }
-            names
-        })
+    required.difference(rights).cloned().collect()
 }
 
 /// The profiles whose required rights `rights` holds.
@@ -349,7 +339,7 @@ fn as_it_is(meets: &[String]) -> String {
 
 /// The rights the administrator profile requires, as a sentence.
 pub(super) fn requires() -> String {
-    let required: Vec<String> = ADMIN_PERMISSIONS.map(str::to_owned).to_vec();
+    let required: Vec<String> = strings(&ADMIN_PERMISSIONS).into_iter().collect();
     format!("The administrator profile requires {}.", listed(&required))
 }
 

@@ -124,10 +124,7 @@ impl Folder {
             }
         })?);
         let status = rustix::fs::fstat(&file).map_err(|error| failed(&path, error))?;
-        if !file
-            .metadata()
-            .map_err(|error| failed(&path, error))?
-            .is_file()
+        if rustix::fs::FileType::from_raw_mode(status.st_mode) != rustix::fs::FileType::RegularFile
         {
             return Err(format!(
                 "{} is not a file, so not the lock of `garrison access`: remove it, then run \
