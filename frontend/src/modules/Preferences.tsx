@@ -2,6 +2,7 @@
 // hiding a module from the menu neither revokes access nor stops any service.
 import { useState, type FormEvent, type ReactNode } from "react";
 
+import type { Preferences as Saved } from "../api/client";
 import { WriteFailure } from "../components/Failure";
 import { Notice } from "../components/Status";
 import { Button } from "../components/ui/button";
@@ -64,25 +65,51 @@ export function PreferencesHead() {
   );
 }
 
+/** What the form shows, and the saved settings it last followed. */
+interface Form {
+  followed: Saved;
+  theme: Theme;
+  hidden: Set<string>;
+  showSwitch: boolean;
+}
+
+function formOf(saved: Saved): Form {
+  return { followed: saved, theme: saved.theme, hidden: new Set(saved.hiddenModules), showSwitch: saved.showSwitch };
+}
+
+function same(a: Saved, b: Saved): boolean {
+  return a.theme === b.theme && a.showSwitch === b.showSwitch && [...a.hiddenModules].sort().join() === [...b.hiddenModules].sort().join();
+}
+
+/** `form` once the saved settings changed from those it followed to `saved`,
+ * as another tab or the header's theme button saves them: a setting the user
+ * has not changed here takes the saved value, one they changed stays theirs. */
+function follow(form: Form, saved: Saved): Form {
+  const before = form.followed;
+  const pick = <T,>(mine: T, was: T, now: T) => (mine === was ? now : mine);
+  const ids = new Set([...before.hiddenModules, ...saved.hiddenModules, ...form.hidden]);
+  const hidden = [...ids].filter((id) => pick(form.hidden.has(id), before.hiddenModules.includes(id), saved.hiddenModules.includes(id)));
+  return {
+    followed: saved,
+    theme: pick(form.theme, before.theme, saved.theme),
+    hidden: new Set(hidden),
+    showSwitch: pick(form.showSwitch, before.showSwitch, saved.showSwitch),
+  };
+}
+
 export function Preferences() {
   const { t } = useTranslation();
   const { session, saving, updatePreferences } = useApp();
-  const [theme, setTheme] = useState<Theme>(session.preferences.theme);
-  // The header button saves a theme too; the choice here follows it.
-  const [savedTheme, setSavedTheme] = useState(session.preferences.theme);
-  if (savedTheme !== session.preferences.theme) {
-    setSavedTheme(session.preferences.theme);
-    setTheme(session.preferences.theme);
-  }
-  const [hidden, setHidden] = useState(new Set(session.preferences.hiddenModules));
-  const [showSwitch, setShowSwitch] = useState(session.preferences.showSwitch);
+  const [form, setForm] = useState(() => formOf(session.preferences));
+  if (!same(form.followed, session.preferences)) setForm(follow(form, session.preferences));
+  const { theme, hidden, showSwitch } = form;
   // The settings were saved, or why the last save failed.
   const [result, setResult] = useState<{ error: Error | null } | null>(null);
   const toggle = (id: string) => {
     const next = new Set(hidden);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    setHidden(next);
+    setForm({ ...form, hidden: next });
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -99,7 +126,7 @@ export function Preferences() {
   };
   return (
     <form className={FORM} onSubmit={save}>
-      <ThemeCard theme={theme} onChange={setTheme} />
+      <ThemeCard theme={theme} onChange={(chosen) => setForm({ ...form, theme: chosen })} />
       <Card>
         <CardHeader>
           <CardTitle>{t("preferences.menu")}</CardTitle>
@@ -119,7 +146,7 @@ export function Preferences() {
           <CardDescription>{t("preferences.switchHint")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <Choice type="checkbox" name="showSwitch" checked={showSwitch} onChange={() => setShowSwitch(!showSwitch)}>
+          <Choice type="checkbox" name="showSwitch" checked={showSwitch} onChange={() => setForm({ ...form, showSwitch: !showSwitch })}>
             {t("preferences.showSwitch")}
           </Choice>
         </CardContent>

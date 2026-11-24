@@ -173,6 +173,9 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- **Saving the settings no longer undoes what another tab saved.** A
+  setting not changed on the open Settings page follows a save made
+  meanwhile in another tab or with the header's theme button.
 - **A request that fails is said in Garrison's words, never the browser's.**
   A list or summary that could not be refreshed says that it shows what was
   read last, and a failed save, sign-out, start or theme switch gives its
