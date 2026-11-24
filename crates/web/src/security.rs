@@ -274,6 +274,15 @@ impl Gate {
             .map_err(ApiError::from)
     }
 
+    /// The visitor's session where it may use it: with `web.bind_client_ip`
+    /// only from the address it was signed in from, and from another as if
+    /// signed out.
+    pub fn bound_session(&self, visitor: &Visitor) -> ApiResult<Option<Session>> {
+        let session = self.session(visitor)?;
+        Ok(session
+            .filter(|session| !self.bind_client_ip || session.client_ip == visitor.client_ip()))
+    }
+
     /// The session's grant, if it was confirmed within the cache time.
     fn fresh(&self, session: &Session) -> Option<Grant> {
         let (at, grant) = self.cached().get(&session.id_hash).cloned()?;
@@ -282,10 +291,7 @@ impl Gate {
 
     pub fn caller(&self, visitor: &Visitor) -> ApiResult<Caller> {
         let unknown = || ApiError::new(401, "Sign-in required");
-        let session = self.session(visitor)?.ok_or_else(unknown)?;
-        if self.bind_client_ip && session.client_ip != visitor.client_ip() {
-            return Err(unknown());
-        }
+        let session = self.bound_session(visitor)?.ok_or_else(unknown)?;
         if let Some(grant) = self.fresh(&session) {
             return Ok(Caller { session, grant });
         }

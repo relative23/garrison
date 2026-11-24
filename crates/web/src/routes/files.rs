@@ -133,7 +133,7 @@ fn themed(name: &str, theme: Theme) -> Vec<String> {
 async fn page(app: Arc<App>, visitor: Visitor, headers: &HeaderMap, view: &str) -> Response {
     let reader = Arc::clone(&app);
     let visit = tokio::task::spawn_blocking(move || {
-        let session = reader.gate.session(&visitor)?;
+        let session = reader.gate.bound_session(&visitor)?;
         Ok::<_, ApiError>(session.map(|session| chosen_theme(&reader, &session.subject)))
     })
     .await;

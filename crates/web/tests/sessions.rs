@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 
 use axum::http::{Method, StatusCode};
 use serde_json::json;
-use support::{Client, ORIGIN, Setup, application, grant, refused, setup, setup_with_cache};
+use support::{
+    Client, ORIGIN, Setup, application, grant, refused, setup, setup_with, setup_with_cache,
+};
 
 const SESSION_COOKIE: &str = "__Host-garrison_session";
 
@@ -272,6 +274,75 @@ async fn a_logout_that_could_not_end_the_session_says_so() {
         setup.client.get(&api("session")).await.json(),
         json!({"session": null})
     );
+}
+
+/// With `web.bind_client_ip`, the session's cookie from another client
+/// address is answered as if signed out, the switch row's question and the
+/// page drawn for a path too, and the session goes on from its own address. A sign-out, which needs the
+/// session's CSRF token, ends it from any address.
+#[tokio::test]
+async fn a_bound_session_is_signed_out_elsewhere_and_goes_on_at_its_address() {
+    let mut setup = setup_with(Duration::from_secs(5), |config| {
+        config.web.bind_client_ip = true;
+    });
+    let (home, away) = ("192.0.2.1", "198.51.100.7");
+    let pages = setup.directory.path().join("static/pages");
+    std::fs::create_dir_all(&pages).unwrap();
+    std::fs::write(pages.join("sign-in.html"), "sign-in").unwrap();
+    std::fs::write(pages.join("dashboard.html"), "the frame").unwrap();
+    let client = &mut setup.client;
+    let login = client.get_from("/auth/login", home).await;
+    let location = url::Url::parse(login.header("location")).unwrap();
+    let state = location
+        .query_pairs()
+        .find(|(key, _)| key == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    let callback =
+        format!("/auth/callback?state={state}&code=code-admin&iss=https%3A%2F%2Fmail.example.test");
+    assert_eq!(
+        client.get_from(&callback, home).await.header("location"),
+        "/admin/"
+    );
+    let csrf = client.get_from(&api("session"), home).await.json()["session"]["csrf"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let writing = [("origin", ORIGIN), ("x-csrf-token", csrf.as_str())];
+    let on = json!({"theme": "system", "hiddenModules": [], "showSwitch": true});
+    let saved = client
+        .send_from(home, Method::PUT, &api("preferences"), &writing, Some(on))
+        .await;
+    assert_eq!(saved.status, StatusCode::OK);
+    for (address, signed_in) in [(away, false), (home, true)] {
+        let session = client.get_from(&api("session"), address).await.json();
+        assert_eq!(session["session"].is_object(), signed_in, "{address}");
+        assert_eq!(
+            client.get_from(&api("switch"), address).await.json(),
+            json!({"show": signed_in}),
+            "{address}"
+        );
+        let status = client.get_from(&api("status"), address).await.status;
+        let expected = if signed_in {
+            StatusCode::OK
+        } else {
+            StatusCode::UNAUTHORIZED
+        };
+        assert_eq!(status, expected, "{address}");
+        let page = client.get_from("/admin/", address).await.body;
+        let expected = if signed_in { "the frame" } else { "sign-in" };
+        assert_eq!(String::from_utf8_lossy(&page), expected, "{address}");
+    }
+    let cookies = client.cookies.clone();
+    let out = client
+        .send_from(away, Method::POST, &api("logout"), &writing, None)
+        .await;
+    assert_eq!(out.json(), json!({"ok": true}));
+    client.cookies = cookies;
+    let after = client.get_from(&api("session"), home).await.json();
+    assert_eq!(after, json!({"session": null}));
+    assert_eq!(*setup.provider.revoked.lock().unwrap(), ["admin-token"]);
 }
 
 #[tokio::test]

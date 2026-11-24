@@ -255,7 +255,7 @@ async fn save_preferences(
 )]
 async fn switch(State(app): State<Arc<App>>, visitor: Visitor) -> ApiResult<Response> {
     let stalwart = crate::switch::origin(&app.config.deployment.admin_url);
-    let show = blocking(move || match app.gate.session(&visitor)? {
+    let show = blocking(move || match app.gate.bound_session(&visitor)? {
         Some(session) => app
             .store
             .preferences(&session.subject)
