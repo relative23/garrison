@@ -11,9 +11,9 @@ use crate::fetch::{self, Answer, Failed, Roots};
 /// it finds; `None` judges by the clock.
 #[derive(Clone, Copy, Debug)]
 pub struct Asking<'a> {
-    pub roots: &'a Roots,
-    pub deadline: Deadline,
-    pub at: Option<Timestamp>,
+    pub(crate) roots: &'a Roots,
+    pub(crate) deadline: Deadline,
+    pub(crate) at: Option<Timestamp>,
 }
 
 impl<'a> Asking<'a> {

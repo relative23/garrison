@@ -14,7 +14,7 @@ use crate::context::{Context, ProviderError};
 use crate::values::{round_one, text};
 
 /// A mailbox at or above this share of its quota is reported as a warning.
-pub const FULL_PERCENT: f64 = 90.0;
+pub(crate) const FULL_PERCENT: f64 = 90.0;
 const MAX_ADDRESS: usize = 254;
 
 struct Row {
@@ -53,7 +53,7 @@ impl Row {
 
 /// The card of the `accounts` read, the first `max_accounts` of Stalwart's
 /// at the most; none where they could not be read.
-pub fn mailboxes(
+pub(crate) fn mailboxes(
     context: &Context<'_>,
     accounts: Option<&Listed<MailboxAccount>>,
     max_accounts: usize,

@@ -47,7 +47,7 @@ pub fn calls() -> [(&'static str, Arguments); 6] {
 }
 
 /// What the mailbox storage reads of each account.
-pub const ACCOUNT_PROPERTIES: [&str; 5] =
+pub(crate) const ACCOUNT_PROPERTIES: [&str; 5] =
     ["id", "@type", "emailAddress", "quotas", "usedDiskQuota"];
 /// The method the pages of the accounts begin with, as the Management API
 /// card names it where they gave nothing.
