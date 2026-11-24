@@ -416,6 +416,37 @@ fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
 }
 
 #[test]
+fn the_greeting_and_the_message_id_name_the_host_without_its_port() {
+    for (origin, host) in [
+        ("https://garrison.example.org:8443", "garrison.example.org"),
+        ("https://[2001:db8::1]:8443", "[2001:db8::1]"),
+        ("https://garrison.example.org", "garrison.example.org"),
+    ] {
+        let (port, handle) = server([
+            "250 2.0.0 Message queued with id a.",
+            "250 2.0.0 Message queued with id b.",
+        ]);
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = config(directory.path());
+        config.deployment.public_origin = origin.to_owned();
+        let runner = Canned(String::new());
+        let context = crate::testing::context(&config, &runner);
+        provider(port).collect(&context).unwrap();
+        let sessions = handle.join().unwrap();
+        for session in &sessions {
+            assert!(
+                session.starts_with(&format!("EHLO {host}\r\n")),
+                "{origin}: {session}"
+            );
+            assert!(
+                session.contains(&format!("@{host}>\r\n")),
+                "{origin}: {session}"
+            );
+        }
+    }
+}
+
+#[test]
 fn replies_queue_ids_and_options() {
     let mut several = BufReader::new(&b"250-first\r\n250-second\r\n250 last line\r\n"[..]);
     assert_eq!(reply(&mut several), Ok((250, "250 last line".to_owned())));

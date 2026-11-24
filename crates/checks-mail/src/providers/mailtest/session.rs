@@ -48,6 +48,17 @@ pub(super) fn reply(reader: &mut impl BufRead) -> Result<(u16, String), String> 
     }
 }
 
+/// This installation's host as `public_origin` names it, without its
+/// scheme and port: a greeting and a Message-ID name a host, never a port
+/// (RFC 5321, 4.1.1.1; RFC 5322, 3.6.4). An IPv6 address keeps its brackets.
+fn host(origin: &str) -> &str {
+    let name = origin.split_once("://").map_or(origin, |(_, name)| name);
+    match name.strip_prefix('[') {
+        Some(rest) => rest.find(']').map_or(name, |end| &name[..end + 2]),
+        None => name.rsplit_once(':').map_or(name, |(host, _)| host),
+    }
+}
+
 /// `Message queued with id 4b786a616e00000.` names the queue ID in hex; the
 /// event history writes it as a number.
 pub(super) fn queue_id(reply: &str) -> Option<String> {
@@ -78,10 +89,7 @@ impl MailTest {
             Err(error) => return failed(format!("no session: {error}")),
         };
         let mut reader = BufReader::new(Timed::new(stream, until, TIMEOUT));
-        let origin = &context.deployment.public_origin;
-        let name = origin
-            .split_once("://")
-            .map_or(origin.as_str(), |(_, host)| host);
+        let name = host(&context.deployment.public_origin);
         let message = test.message(&Envelope {
             from: if self.sender.is_empty() {
                 &self.recipient
