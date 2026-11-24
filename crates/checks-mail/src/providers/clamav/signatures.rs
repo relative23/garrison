@@ -23,6 +23,37 @@ const STALE_AFTER_HOURS: f64 = 48.0;
 const AHEAD_HOURS: f64 = 5.0 / 60.0;
 
 impl Clamav {
+    /// Why no listed signature file was found, where a look at `name` was
+    /// `refused` for another reason than that it is not there: another path
+    /// mends only files that are not there.
+    fn none_found(&self, refused: Option<(&String, std::io::Error)>) -> String {
+        let directory = self.database.display();
+        match refused {
+            Some((name, error)) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                let path = self.database.join(name);
+                let folder = path
+                    .ancestors()
+                    .skip(1)
+                    .find(|folder| std::fs::symlink_metadata(folder).is_ok())
+                    .unwrap_or(&self.database)
+                    .display();
+                format!(
+                    "The signature files in {directory} cannot be looked for: the collector's \
+                     user may not search the folder {folder}; let every user search it (chmod \
+                     o+x {folder})."
+                )
+            }
+            Some((_, error)) => {
+                format!("The signature files in {directory} cannot be looked for: {error}.")
+            }
+            None => format!(
+                "None of the listed signature files is in {directory}: set `database_directory` \
+                 to clamd's, which `garrison detect --format toml` names, or `signatures` to the \
+                 files it holds."
+            ),
+        }
+    }
+
     /// The card of the signature files, and the age in hours of the newest
     /// daily database that it judges, which the dashboard's gauge shows.
     pub(super) fn signatures(
@@ -38,9 +69,17 @@ impl Clamav {
         // The newest daily database and its age in hours: the one file that
         // changes every day, and so the one that shows whether updates arrive.
         let mut daily: Option<(&str, f64)> = None;
+        // Why a look at a file failed where the file may be there.
+        let mut refused = None;
         for name in &self.signatures {
-            let Ok(info) = std::fs::metadata(self.database.join(name)) else {
-                continue;
+            let info = match std::fs::metadata(self.database.join(name)) {
+                Ok(info) => info,
+                Err(error) => {
+                    if error.kind() != std::io::ErrorKind::NotFound {
+                        refused.get_or_insert((name, error));
+                    }
+                    continue;
+                }
             };
             // The modification time with its fraction, in seconds.
             #[allow(clippy::cast_precision_loss)]
@@ -65,14 +104,7 @@ impl Clamav {
             format,
         };
         let (state, finding) = if rows.is_empty() {
-            (
-                State::Unknown,
-                Some(format!(
-                    "None of the listed signature files is in {}: set `database_directory` to \
-                     clamd's, which `garrison detect --format toml` names.",
-                    self.database.display()
-                )),
-            )
+            (State::Unknown, Some(self.none_found(refused)))
         } else {
             current(daily)
         };

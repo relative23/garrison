@@ -89,7 +89,8 @@ fn signatures_that_were_not_updated_for_two_days_are_a_warning() {
             State::Unknown,
             vec![format!(
                 "None of the listed signature files is in {}: set `database_directory` to \
-                 clamd's, which `garrison detect --format toml` names.",
+                 clamd's, which `garrison detect --format toml` names, or `signatures` to the \
+                 files it holds.",
                 directory.path().display()
             )]
         )
@@ -202,5 +203,45 @@ fn the_refresh_log_keeps_only_the_files_the_card_lists() {
         ]),
         "{} names kept",
         log.len()
+    );
+}
+
+#[test]
+fn signature_files_in_a_folder_the_collector_may_not_search_are_not_called_missing() {
+    use std::os::unix::fs::PermissionsExt;
+    // clamd's own folder, which only its mode keeps the collector's user out
+    // of: the files are there, and no other `database_directory` mends it.
+    let directory = tempfile::tempdir().unwrap();
+    let closed = directory.path().join("closed");
+    std::fs::create_dir(&closed).unwrap();
+    for name in ["daily.cld", "main.cvd"] {
+        std::fs::write(closed.join(name), "signatures").unwrap();
+    }
+    let provider = Clamav::new(&table(&format!(
+        "type = \"clamav\"\nmilter_config = \"{0}/milter.conf\"\nclamd_config = \"{0}/scan.conf\"\n\
+         database_directory = \"{1}\"",
+        directory.path().display(),
+        closed.display()
+    )))
+    .unwrap();
+    let config = config(directory.path());
+    let runner = Canned(String::new());
+    let context = context(&config, &runner);
+    std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let card = provider
+        .collect(&context)
+        .map(|mut report| report.observations.remove(1));
+    std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let card = card.unwrap();
+    let folder = closed.display();
+    assert_eq!(
+        (card.state, card.findings),
+        (
+            State::Unknown,
+            vec![format!(
+                "The signature files in {folder} cannot be looked for: the collector's user may \
+                 not search the folder {folder}; let every user search it (chmod o+x {folder})."
+            )]
+        )
     );
 }

@@ -546,7 +546,8 @@ Unknown; a policy that was read stays a warning where only clamd's file
 cannot be read. One that is not there names its option and
 `garrison detect --format toml`, which prints where this host keeps it, as
 the card "Signature databases" does where none of its files is in
-`database_directory`. `garrison check-config` takes for `expect_on_infected` only
+`database_directory`; where the collector's user may not search that
+folder, the card says so instead. `garrison check-config` takes for `expect_on_infected` only
 `Accept`, `Reject`, `Defer`, `Blackhole` and `Quarantine`, and for
 `expect_on_fail` only the first three.
 

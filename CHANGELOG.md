@@ -309,7 +309,8 @@ Notable changes for operators and users. The format follows
 - **The ClamAV cards name the setting for a file they do not find.** A
   missing configuration file, or a signature directory without the listed
   files, names its option and `garrison detect --format toml`, which prints
-  where this host keeps it.
+  where this host keeps it; a directory the collector may not search is
+  named as such.
 - **A daily signature database dated ahead of the clock is a warning.** The
   Signature databases card called it current however long updates had
   stopped; it now says that one of the two clocks is wrong.
