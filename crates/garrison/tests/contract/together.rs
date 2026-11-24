@@ -76,38 +76,45 @@ impl Capture {
 /// opens a session, and is refused once that one key no longer allows this
 /// host.
 pub(super) fn assert_keys_held(lab: &Lab, credentials: &Path, gateway: &str, context: &str) {
-    assert_keys_held_in(lab, None, credentials, gateway, context);
+    assert_keys_held_in(lab, &[None], credentials, gateway, context);
 }
 
-/// `assert_keys_held` for the keys of `account`, or of the lab's
-/// administrator where that is `None`.
+/// `assert_keys_held` for the keys of all of `accounts` together, each the
+/// lab's administrator's own where it is `None`: one key of each
+/// description in all of them.
 pub(super) fn assert_keys_held_in(
     lab: &Lab,
-    account: Option<&str>,
+    accounts: &[Option<&str>],
     credentials: &Path,
     gateway: &str,
     context: &str,
 ) {
     // Without an accountId, Stalwart takes the administrator's own.
-    let within = |mut arguments: Value| {
+    let within = |account: Option<&str>, mut arguments: Value| {
         if let Some(account) = account {
             arguments["accountId"] = json!(account);
         }
         arguments
     };
-    let listed = lab.call("x:ApiKey/get", &within(json!({"ids": null})));
+    let listed: Vec<(Option<&str>, Value)> = accounts
+        .iter()
+        .flat_map(|account| {
+            let listed = lab.call("x:ApiKey/get", &within(*account, json!({"ids": null})));
+            let keys = listed["list"].as_array().unwrap().clone();
+            keys.into_iter().map(move |key| (*account, key))
+        })
+        .collect();
     for (name, description) in [
         ("broker-native-key", "garrison broker"),
         ("collector-native-key", "garrison collector"),
     ] {
-        let keys: Vec<&Value> = listed["list"]
-            .as_array()
-            .unwrap()
+        let keys: Vec<&(Option<&str>, Value)> = listed
             .iter()
-            .filter(|key| key["description"] == description)
+            .filter(|(_, key)| key["description"] == description)
             .collect();
         assert_eq!(keys.len(), 1, "{context}: keys '{description}': {keys:?}");
-        let id = keys[0]["id"].as_str().unwrap();
+        let (account, key) = keys[0];
+        let id = key["id"].as_str().unwrap();
         let secret = fs::read_to_string(credentials.join(name)).unwrap();
         assert_eq!(key_status(&lab.url, &secret), 200, "{context}: {name}");
         let networks = |gateway: Option<&str>| {
@@ -115,7 +122,7 @@ pub(super) fn assert_keys_held_in(
             if let Some(gateway) = gateway {
                 networks[gateway] = json!(true);
             }
-            within(json!({"update": {id: {"allowedIps": networks}}}))
+            within(*account, json!({"update": {id: {"allowedIps": networks}}}))
         };
         lab.call("x:ApiKey/set", &networks(None));
         let narrowed = key_status(&lab.url, &secret);
@@ -171,6 +178,40 @@ pub(super) fn assert_exporter_held(lab: &Lab, credentials: &Path, context: &str)
         200,
         "{context}: the exporter refuses its file's credential"
     );
+}
+
+/// Where the configuration has the macro filter at `port`, one of
+/// Stalwart's entries asks it there, and setup's note names that entry;
+/// where it has none, no entry asks there and no note is left.
+pub(super) fn assert_milter_held(
+    lab: &Lab,
+    credentials: &Path,
+    port: u16,
+    configured: bool,
+    context: &str,
+) {
+    let entries = lab.call("x:MtaMilter/get", &json!({"ids": null}));
+    let asking: Vec<String> = entries["list"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["host"] == "127.0.0.1" && entry["port"] == port)
+        .map(|entry| entry["id"].as_str().unwrap().to_owned())
+        .collect();
+    let note = fs::read_to_string(credentials.join("stalwart-milter-id"))
+        .ok()
+        .map(|id| id.trim().to_owned());
+    if configured {
+        assert_eq!(asking.len(), 1, "{context}: entries for the filter");
+        assert_eq!(note.as_ref(), asking.first(), "{context}: setup's note");
+    } else {
+        assert_eq!(
+            asking,
+            Vec::<String>::new(),
+            "{context}: entries for the filter"
+        );
+        assert_eq!(note, None, "{context}: setup's note");
+    }
 }
 
 /// All three.

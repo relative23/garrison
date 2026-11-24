@@ -28,6 +28,7 @@ mod clients;
 mod keys;
 mod milter;
 mod refused;
+mod scene;
 mod stopper;
 mod stops;
 mod together;
@@ -208,7 +209,6 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
     ] {
         assert!(credentials.join(name).is_file(), "{name}");
     }
-
     let again = run(
         directory.path(),
         &[

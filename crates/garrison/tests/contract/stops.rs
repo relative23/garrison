@@ -1,14 +1,31 @@
 //! Wherever `garrison stalwart setup` stops, the next run brings Stalwart and
 //! the credentials directory together. The test stops it at each of its
 //! requests to Stalwart in turn, in three ways (interrupted, the answer
-//! lost, Stalwart unreachable from there on), in a first setup, a rotation,
-//! and a plain run that makes the broker's and the receiver's keys anew
-//! because their files hold none while the services still run with the old
-//! ones. From each stop, the next plain run and, from the same stop again,
-//! the next `--rotate` must succeed and leave both places agreeing
-//! (`together`). A running service must never be left holding another
-//! secret than its file without a run having named its restart, and a run
-//! that fails must name the run that mends it.
+//! lost, Stalwart unreachable from there on), in each kind of run that
+//! `scene::Kind` names: a first setup, also one with the macro filter, a
+//! rotation, also one where the administrator's account holds as many API
+//! keys as Stalwart takes, a plain run after the key files were emptied,
+//! one as a second administrator, and one after the filter's section was
+//! taken out. From each stop, the next plain run and, from the same stop
+//! again, the next `--rotate` must succeed and leave both places agreeing
+//! (`together`).
+//!
+//! The running services are the broker and the receiver, each holding what
+//! its file held when it last started. A run that fails names the run that
+//! mends it. A run names the restart of each service whose file it wrote
+//! anew, and a service whose restart it names finds a secret in its file
+//! that it can start with and that Stalwart takes. A run that ends by
+//! itself leaves the broker with a key Stalwart takes, or says that the
+//! broker goes without one until setup makes it.
+//!
+//! Not held here: what root alone does (the restart itself, and the look at
+//! the copies systemd keeps, which a user cannot read); whether Stalwart
+//! still signs with the running receiver's key between a stopped run and
+//! the next, as after a lost answer to the reload, which only a delivery
+//! shows (the next run mends it, and Stalwart sends a refused batch again
+//! for an hour); a configuration changed between a stopped run and the
+//! next, such as `[milter]` taken out after a stop that entered the filter;
+//! and two installations of Garrison against one Stalwart.
 
 use std::any::Any;
 use std::fs;
@@ -17,59 +34,96 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::Instant;
 
-use garrison_testing::config_text;
 use garrison_testing::lab::Lab;
 use serde_json::json;
 
+use super::keys::key_status;
+use super::scene::{HELD, KINDS, Kind, Scene, holding};
 use super::stopper::{Stop, Stopper};
-use super::together::{Capture, assert_exporter_held, assert_keys_held, assert_webhook_held};
-use super::{Setup, forget, lab, text};
+use super::together::{
+    Capture, assert_exporter_held, assert_keys_held_in, assert_milter_held, assert_webhook_held,
+};
+use super::{Setup, lab, text};
 
-/// What a stopped run is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
-    /// The first setup: nothing in Stalwart or the folder, no service runs.
-    First,
-    /// `--rotate` while the services run with the secrets of the files.
-    Rotation,
-    /// A plain run after the broker's key file and the signature key's file
-    /// were emptied while the services run with systemd's copies of the
-    /// keys they held.
-    Emptied,
+/// The units of the services that hold the secrets of `HELD`, as setup
+/// names their restarts.
+const UNITS: [&str; 2] = ["garrison-broker", "garrison-ingest"];
+
+/// Whether a run restarted `unit` or said to restart it.
+fn names_the_restart(said: &str, unit: &str) -> bool {
+    said.lines().any(|line| {
+        (line.contains("Restart ") || line.contains(" restarted")) && line.contains(unit)
+    })
 }
 
-/// The files of the secrets the running services hold.
-const HELD: [&str; 2] = ["broker-native-key", "webhook-signature-key"];
-
-/// Whether a run restarted the services or said to restart them.
-fn names_the_restart(output: &str) -> bool {
-    output.contains("Restart garrison-ingest and garrison-broker")
-        || output.contains("garrison-ingest and garrison-broker restarted")
+/// For each service whose restart a run named: whether its file holds a
+/// secret it can start with that Stalwart takes (the broker's key opens a
+/// session, Stalwart signs with the receiver's key), what is wrong where
+/// not; from then on it holds what its file holds.
+fn restarted(
+    lab: &Lab,
+    credentials: &Path,
+    capture: &Capture,
+    said: &str,
+    held: &mut Option<[String; 2]>,
+    context: &str,
+) -> Vec<String> {
+    let mut faults = Vec::new();
+    for (index, unit) in UNITS.iter().enumerate() {
+        if !names_the_restart(said, unit) {
+            continue;
+        }
+        let secret = fs::read_to_string(credentials.join(HELD[index])).unwrap_or_default();
+        let usable = if secret.trim().len() < 16 {
+            Err("a file that holds no key")
+        } else if index == 0 {
+            let taken = key_status(&lab.url, &secret) == 200;
+            taken.then_some(()).ok_or("a key Stalwart does not take")
+        } else {
+            let signs = || assert_webhook_held(lab, credentials, capture, context);
+            std::panic::catch_unwind(AssertUnwindSafe(signs))
+                .map_err(|_| "a signature key Stalwart does not sign with")
+        };
+        if let Err(onto) = usable {
+            faults.push(format!("{unit} was restarted onto {onto}"));
+        }
+        if let Some(held) = held {
+            held[index] = secret;
+        }
+    }
+    faults
 }
 
-/// The secrets of the held files as the folder holds them now.
-fn holding(credentials: &Path) -> Vec<String> {
-    HELD.iter()
-        .map(|name| fs::read_to_string(credentials.join(name)).unwrap_or_default())
-        .collect()
+/// After a run that ended by itself: the running broker holds a key
+/// Stalwart takes, or the run said that it goes without one.
+fn broker_unsaid(lab: &Lab, held: Option<&[String; 2]>, said: &str) -> Option<String> {
+    let held = held?;
+    let told = said.contains("the broker checks no user's rights until setup makes its key");
+    let taken = key_status(&lab.url, &held[0]) == 200;
+    (!taken && !told).then(|| {
+        "the broker holds a key Stalwart no longer takes, and the run did not say so".to_owned()
+    })
 }
 
-/// A setup run through a relay that stops it at request `at`: the request
-/// it stopped at, if it got so far, what it said, and what it asked.
+/// A setup run of `kind` through a relay that stops it at request `at`:
+/// the request it stopped at, if it got so far, what it said, and what it
+/// asked.
 fn stopped(
+    scene: &Scene,
     setup: &Setup,
     lab: &Lab,
+    kind: Kind,
     at: usize,
     stop: Stop,
-    more: &[&str],
 ) -> (Option<String>, Output, Vec<String>) {
     let stopper = Stopper::new(&lab.url, at, stop);
     let settings = setup.directory.join("garrison.toml");
-    fs::write(&settings, config_text(&setup.directory, &stopper.url)).unwrap();
+    let relayed = scene.settings(&setup.directory, &stopper.url, kind.milter());
+    fs::write(&settings, relayed).unwrap();
     let child = Command::new(env!("CARGO_BIN_EXE_garrison"))
         .arg("--config")
         .arg(&settings)
-        .args(setup.arguments(more))
+        .args(setup.arguments(kind.arguments()))
         .env_remove("CREDENTIALS_DIRECTORY")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -78,30 +132,9 @@ fn stopped(
         .unwrap();
     stopper.watch(child.id());
     let output = child.wait_with_output().unwrap();
-    fs::write(&settings, config_text(&setup.directory, &lab.url)).unwrap();
+    let direct = scene.settings(&setup.directory, &lab.url, kind.milter());
+    fs::write(&settings, direct).unwrap();
     (stopper.stopped(), output, stopper.asked())
-}
-
-/// Bring the lab and the folder to where a stopped run of `kind` starts,
-/// and say what the running services hold, where any run.
-fn start(kind: Kind, setup: &Setup, lab: &Lab) -> Result<Option<Vec<String>>, String> {
-    let credentials = setup.directory.join("credentials");
-    if kind == Kind::First {
-        forget(lab, &credentials);
-        return Ok(None);
-    }
-    // The others start where both places agree.
-    let ready = setup.run(&[]);
-    if ready.status.code() != Some(0) {
-        return Err(format!("the run before the stop failed: {}", text(&ready)));
-    }
-    let held = holding(&credentials);
-    if kind == Kind::Emptied {
-        for name in HELD {
-            fs::write(credentials.join(name), "").unwrap();
-        }
-    }
-    Ok(Some(held))
 }
 
 /// How a stop and the run after it went.
@@ -116,6 +149,7 @@ enum Outcome {
 
 /// One stop and the run after it.
 fn mended(
+    scene: &Scene,
     setup: &Setup,
     lab: &Lab,
     capture: &Capture,
@@ -124,37 +158,38 @@ fn mended(
 ) -> Outcome {
     let (kind, stop, at) = scenario;
     let credentials = setup.directory.join("credentials");
-    let mut held = match start(kind, setup, lab) {
+    let mut held = match scene.start(kind, setup, lab) {
         Ok(held) => held,
         Err(why) => return Outcome::Unready(format!("{kind:?} at request {at}: {why}")),
     };
-    let rotate: &[&str] = if kind == Kind::Rotation {
-        &["--rotate"]
-    } else {
-        &[]
-    };
-    let (request, output, asked) = stopped(setup, lab, at, stop, rotate);
+    let (request, output, asked) = stopped(scene, setup, lab, kind, at, stop);
     let Some(request) = request else {
         return Outcome::Past;
     };
-    let context = format!(
-        "{kind:?} stopped {stop:?} at request {at} ({request}), then {}",
-        if next.is_empty() {
-            "a plain run"
-        } else {
-            "--rotate"
-        }
-    );
+    let then = if next.is_empty() {
+        "a plain run"
+    } else {
+        "--rotate"
+    };
+    let context = format!("{kind:?} stopped {stop:?} at request {at} ({request}), then {then}");
     let said = text(&output);
     let mut faults = Vec::new();
     // A run that fails names the run that mends it; one may go on past a
-    // lost answer, as where it asks whose a file's key is.
-    let failed = output.status.code() == Some(1);
-    if failed && !said.contains("Run `garrison stalwart setup") {
+    // lost answer.
+    if output.status.code() == Some(1) && !said.contains("Run `garrison stalwart setup") {
         faults.push("the failed run names no run that mends it".to_owned());
     }
-    if held.is_some() && names_the_restart(&said) {
-        held = Some(holding(&credentials));
+    faults.extend(restarted(
+        lab,
+        &credentials,
+        capture,
+        &said,
+        &mut held,
+        &context,
+    ));
+    // An interrupted run says nothing more; the next run mends what it left.
+    if stop != Stop::Interrupted {
+        faults.extend(broker_unsaid(lab, held.as_ref(), &said));
     }
     let next_run = setup.run(next);
     let said_next = text(&next_run);
@@ -163,24 +198,41 @@ fn mended(
         faults.push("the next run failed".to_owned());
         return Outcome::Done(Err(format!("{context}: {}\n{shown}", faults.join("; "))));
     }
-    if held.is_some() && names_the_restart(&said_next) {
-        held = Some(holding(&credentials));
-    }
+    faults.extend(restarted(
+        lab,
+        &credentials,
+        capture,
+        &said_next,
+        &mut held,
+        &context,
+    ));
+    let accounts = scene.accounts(kind);
+    let milter = || {
+        if kind.about_the_milter() {
+            assert_milter_held(lab, &credentials, scene.port, kind.milter(), &context);
+        }
+    };
     // Each check on its own, so that every fault of a stop is named.
-    let checks: [&dyn Fn(); 3] = [
-        &|| assert_keys_held(lab, &credentials, &setup.gateway, &context),
+    let checks: [&dyn Fn(); 4] = [
+        &|| assert_keys_held_in(lab, &accounts, &credentials, &setup.gateway, &context),
         &|| assert_webhook_held(lab, &credentials, capture, &context),
         &|| assert_exporter_held(lab, &credentials, &context),
+        &milter,
     ];
     for check in checks {
         if let Err(panic) = std::panic::catch_unwind(AssertUnwindSafe(check)) {
             faults.push(said_by(&*panic));
         }
     }
-    if held.is_some_and(|held| held != holding(&credentials)) {
-        faults.push(
-            "a running service holds a replaced secret, and no run named its restart".to_owned(),
-        );
+    if let Some(held) = &held {
+        let files = holding(&credentials);
+        for (index, unit) in UNITS.iter().enumerate() {
+            if held[index] != files[index] {
+                faults.push(format!(
+                    "{unit} holds a replaced secret, and no run named its restart"
+                ));
+            }
+        }
     }
     if !faults.is_empty() {
         return Outcome::Done(Err(format!("{context}: {}\n{shown}", faults.join("; "))));
@@ -195,6 +247,22 @@ fn said_by(panic: &(dyn Any + Send)) -> String {
         .cloned()
         .or_else(|| panic.downcast_ref::<&str>().map(|text| (*text).to_owned()))
         .unwrap_or_default()
+}
+
+/// The first request to stop a run of `kind` at: for the macro filter's
+/// kinds the first that asks about the filter's entry, since those before
+/// it are the requests of runs that the other kinds stop.
+fn first_stop(scene: &Scene, setup: &Setup, lab: &Lab, kind: Kind) -> usize {
+    if !kind.about_the_milter() {
+        return 1;
+    }
+    scene.start(kind, setup, lab).unwrap();
+    let (_, output, asked) = stopped(scene, setup, lab, kind, usize::MAX, Stop::Lost);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output));
+    let first = asked
+        .iter()
+        .position(|asked| asked.starts_with("x:MtaMilter"));
+    first.unwrap() + 1
 }
 
 /// The lab's limits of requests and of failed sign-ins, raised: Stalwart
@@ -223,7 +291,7 @@ fn raise_limits(lab: &Lab) {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn every_stop_of_setup_is_mended_by_the_next_run() {
-    let (_guard, lab) = lab();
+    let (_guard, mut lab) = lab();
     raise_limits(&lab);
     let now = lab.call("x:Http/get", &json!({"ids": ["singleton"]}))["list"][0].clone();
     println!(
@@ -233,16 +301,20 @@ fn every_stop_of_setup_is_mended_by_the_next_run() {
     let capture = Capture::start();
     let setup = Setup::new(&lab, &capture.url);
     let credentials = setup.directory.join("credentials");
+    let mut scene = Scene::new(&mut lab);
     let began = Instant::now();
     let (mut stops, mut failures) = (0, Vec::new());
-    for kind in [Kind::First, Kind::Rotation, Kind::Emptied] {
+    for kind in KINDS {
+        scene.enter(kind, &setup, &mut lab);
+        let from = first_stop(&scene, &setup, &lab, kind);
+        let before = stops;
         for stop in [Stop::Interrupted, Stop::Lost, Stop::Unreachable] {
-            // Setup asks Stalwart some fifteen times; far more is a fault.
-            'requests: for at in 1..=64 {
+            // Setup asks Stalwart some twenty times; far more is a fault.
+            'requests: for at in from..=64 {
                 for next in [&[][..], &["--rotate"][..]] {
                     let scenario = (kind, stop, at);
                     let tried = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                        mended(&setup, &lab, &capture, scenario, next)
+                        mended(&scene, &setup, &lab, &capture, scenario, next)
                     }));
                     let outcome = tried.unwrap_or_else(|panic| {
                         Outcome::Done(Err(format!("{scenario:?}: {}", said_by(&*panic))))
@@ -253,7 +325,7 @@ fn every_stop_of_setup_is_mended_by_the_next_run() {
                         Outcome::Done(Err(failure)) => Some(failure),
                         Outcome::Unready(failure) => {
                             failures.push(failure);
-                            forget(&lab, &credentials);
+                            scene.forget(&lab, &credentials);
                             break 'requests;
                         }
                     };
@@ -261,21 +333,23 @@ fn every_stop_of_setup_is_mended_by_the_next_run() {
                     if let Some(failure) = failure {
                         failures.push(failure);
                         // The next stop starts from nothing again.
-                        forget(&lab, &credentials);
+                        scene.forget(&lab, &credentials);
                     }
                     assert!(at < 64, "setup asked Stalwart more than 63 times");
                 }
             }
         }
+        println!("{kind:?}: {} stops from request {from}", stops - before);
+        scene.leave(&mut lab);
     }
-    forget(&lab, &credentials);
+    scene.forget(&lab, &credentials);
     println!(
         "{stops} stops in {} s, {} not mended",
         began.elapsed().as_secs(),
         failures.len()
     );
-    // Some 250 stops: fewer would mean the relay stopped too little.
-    assert!(stops >= 200, "only {stops} stops");
+    // Some 500 stops: fewer would mean the relay stopped too little.
+    assert!(stops >= 400, "only {stops} stops");
     assert!(
         failures.is_empty(),
         "{} of {stops} stops not mended:\n\n{}",
