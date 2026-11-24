@@ -53,10 +53,10 @@ Notable changes for operators and users. The format follows
   names and TLS certificates cards say that Stalwart did not give its
   domains, the Management API card that it refused `x:Account/query`, and
   the Spam and ham by domain card that it did not give its accounts.
-- **The first play of the Ansible role runs the installer and, where
-  `garrison_stalwart_admin` is set, `garrison stalwart setup`, also on a host
-  that an earlier release's role set up.** Stalwart must answer then, and that
-  administrator must still work.
+- **The first play of the Ansible role runs `garrison stalwart setup`, where
+  `garrison_stalwart_admin` is set, also on a host that an earlier release's
+  role set up.** Stalwart must answer then, and that administrator must still
+  work.
 
 ### Added
 
@@ -2095,8 +2095,8 @@ Notable changes for operators and users. The format follows
   it failed; the Stalwart administrator's credential stays out of the output.
 - **The Ansible role unpacks a release again where a play that stopped left
   it unpacked in part.**
-- **The Ansible role runs the installer again until it has finished with the
-  play's release and configuration**, so that the next play starts Garrison
+- **The Ansible role runs the installer in every play, which changes nothing
+  where the release runs as installed**, so that the next play starts Garrison
   where one stopped after the first install or its installer did not finish.
 - **The Ansible role runs `garrison stalwart setup` again where setup did
   not finish or `garrison.toml` changed since, and finds the access policy

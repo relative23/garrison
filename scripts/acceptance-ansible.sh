@@ -1,15 +1,16 @@
 #!/bin/sh
 # The Ansible role (deploy/ansible) against a virtual machine: a first
-# installation, a second run that changes nothing, an upgrade by version, and
-# plays that stop on the way, each finished by the next play.
+# installation, a second run and a dry run that change nothing, an upgrade by
+# version, and plays that stop on the way or find the host changed, each
+# finished by the next play.
 #
 #   HOST=vm [DISTRO=debian-13] [ANSIBLE=ansible-playbook] [SCENARIOS="..."] \
 #       scripts/acceptance-ansible.sh OUT-DIR
 #
 # OUT-DIR is what scripts/signed-releases.sh wrote; the role checks those
 # archives against their throwaway key. The host and the stand-in for
-# Stalwart: scripts/acceptance-lib.sh. SCENARIOS names the plays that stop on
-# the way, run in that order after the upgrade.
+# Stalwart: scripts/acceptance-lib.sh. SCENARIOS names the scenarios, run in
+# that order after the upgrade.
 set -eu
 
 out=$(cd "$1" && pwd)
@@ -37,13 +38,15 @@ printf 'vm ansible_host=127.0.0.1 ansible_port=%s ansible_user=root ansible_ssh_
 # The stand-in names no administrator role for `access init` to bind, so the
 # play writes the policy that init writes where Stalwart names one, unless a
 # scenario sets acceptance_policy to false. acceptance_config is added to the
-# configuration.
+# configuration; acceptance_ignore_errors is the play's ignore_errors.
 cat > "$work/site.yml" <<EOF
 - hosts: vm
   become: true
+  ignore_errors: "{{ acceptance_ignore_errors }}"
   vars:
     acceptance_policy: true
     acceptance_config: ""
+    acceptance_ignore_errors: false
   pre_tasks:
     - name: The unit the test action starts
       ansible.builtin.copy:
@@ -334,6 +337,58 @@ scenario_upgrade_failed() {
     unchanged "a further run changes nothing" "$newer"
 }
 
+# garrison.toml changed and installed by hand: the play puts the role's file
+# back and installs it, so that the hand's action is gone again.
+scenario_hand_changed() {
+    step "A configuration changed by hand is put back into force"
+    inside "cp /etc/systemd/system/acceptance-check.service /etc/systemd/system/acceptance-hand.service &&
+        printf '%s\n' '[[actions]]' 'id = \"run_by_hand\"' 'title = \"Run a check by hand\"' \
+            'description = \"Starts the hand test unit.\"' 'confirmation = \"RUN BY HAND\"' \
+            'unit = \"acceptance-hand.service\"' 'operation = \"start\"' 'cooldown_seconds = 0' \
+            'timeout_seconds = 30' >> /etc/garrison/garrison.toml &&
+        /root/garrison-$newer-$arch/bin/garrison install </dev/null >/dev/null"
+    check "the installer run by hand took the hand's action" \
+        'grep -q acceptance-hand.service /etc/polkit-1/rules.d/50-garrison.rules'
+    play "$newer"
+    check "the play put the role's configuration back into force" \
+        '! grep -q acceptance-hand.service /etc/polkit-1/rules.d/50-garrison.rules'
+    services "after a configuration changed by hand"
+    unchanged "a further run changes nothing" "$newer"
+}
+
+# The play's archive built again with one more file, as a test archive can be
+# under one version: the play unpacks it and installs what it holds.
+scenario_rebuilt() {
+    step "An archive of the same version built again is installed"
+    name=garrison-$newer-$arch
+    rm -rf "$work/rebuilt" && mkdir "$work/rebuilt" && tar -xzf "$release" -C "$work/rebuilt"
+    echo rebuilt > "$work/rebuilt/$name/docs/acceptance-rebuilt.txt"
+    (cd "$work/rebuilt/$name" && sha256sum docs/acceptance-rebuilt.txt >> SHA256SUMS)
+    tar -czf "$work/archives/$name.tar.gz" -C "$work/rebuilt" "$name"
+    minisign -S -s "$out/test.key" -m "$work/archives/$name.tar.gz" -t "garrison $newer $arch" \
+        </dev/null >/dev/null
+    play "$newer"
+    check "the play installed the archive built again" \
+        'test -f /opt/garrison/current/share/docs/acceptance-rebuilt.txt'
+    services "after an archive built again"
+    unchanged "a further run changes nothing" "$newer"
+}
+
+# A play that goes on past a failed task, as one with ignore_errors does to
+# reach the other hosts: the next play runs again the installer whose start
+# failed, and Garrison runs.
+scenario_ignored() {
+    step "An installer that failed under ignore_errors runs again in the next play"
+    edit='{"acceptance_config": "# changed by a play under ignore_errors"}'
+    unstartable
+    play "$newer" -e "$edit" -e '{"acceptance_ignore_errors": true}'
+    said "did not start"
+    startable
+    play "$newer" -e "$edit"
+    services "after an installer that failed under ignore_errors"
+    unchanged "a further run changes nothing" "$newer" -e "$edit"
+}
+
 # The stand-in for Stalwart, which systemd-run started, once the guest
 # restarted.
 stand_in_again() {
@@ -392,13 +447,16 @@ services "installed by the role"
 
 step "A second run changes nothing"
 unchanged "a second run changes nothing" "$older"
+unchanged "a dry run changes nothing" "$older" --check
 
 step "A new version upgrades"
 play "$newer"
 check "the role upgraded to $newer" "test \"\$(cat /opt/garrison/current/VERSION)\" = '$newer'"
 services "upgraded by the role"
 
-for scenario in ${SCENARIOS:-setup_refused policy_elsewhere no_room upgrade_failed unbound unpack_cut first_unfinished restart}; do
+all="setup_refused policy_elsewhere no_room upgrade_failed hand_changed rebuilt ignored
+    unbound unpack_cut first_unfinished restart"
+for scenario in ${SCENARIOS:-$all}; do
     "scenario_$scenario"
 done
 

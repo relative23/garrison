@@ -1,9 +1,10 @@
 ---
 # Install, configure and upgrade Garrison; the play needs `become: true`.
 # Every task can run again: a second run changes only what changed, and a run
-# that stopped anywhere is finished by the next. What the installer and setup
-# last finished with is kept in /opt/garrison, which goes with an
-# uninstallation; each record is taken away before its step runs again.
+# that stopped anywhere is finished by the next. The installer runs in every
+# play and says itself whether it changed anything. What setup last finished
+# with is kept in /opt/garrison, which goes with an uninstallation, and is
+# taken away before setup runs again.
 
 - name: The release and the addresses are named
   ansible.builtin.assert:
@@ -81,27 +82,18 @@
     remote_src: true
   when: garrison_unpacked.rc != 0
 
-- name: The running release
-  ansible.builtin.slurp:
-    src: /opt/garrison/current/VERSION
-  register: garrison_running
-  failed_when: false
-
-- name: Its version
-  ansible.builtin.set_fact:
-    garrison_installed: "{{ (garrison_running.content | default('')) | b64decode | trim }}"
-
-# The first install makes /etc/garrison in its last step: until it is there,
-# that install has not finished.
-- name: The configuration's folder
+# The first install makes a release current and, in its last step,
+# /etc/garrison: until both are there, it has not finished.
+- name: What a first install leaves
   ansible.builtin.stat:
-    path: /etc/garrison
-  register: garrison_etc
+    path: "{{ item }}"
+  loop: [/opt/garrison/current/VERSION, /etc/garrison]
+  register: garrison_first
 
 - name: The release is installed (the first time, it starts nothing)
   ansible.builtin.command:
     cmd: "/root/{{ garrison_name }}/bin/garrison install"
-  when: garrison_installed | length == 0 or not garrison_etc.stat.exists
+  when: garrison_first.results | rejectattr('stat.exists') | list | length > 0
 
 - name: The configuration
   ansible.builtin.template:
@@ -209,38 +201,14 @@
     quiet: true
   when: not ansible_check_mode
 
-- name: What the installer last finished with
-  ansible.builtin.slurp:
-    src: /opt/garrison/ansible-installed
-  register: garrison_finished
-  failed_when: false
-
-- name: Whether the installer is due
-  ansible.builtin.set_fact:
-    garrison_install_due: >-
-      {{ garrison_installed != garrison_version
-      or (garrison_finished.content | default('') | b64decode | trim)
-      != garrison_version ~ ' ' ~ garrison_config.checksum }}
-
-- name: The record of a finished installation goes first
-  ansible.builtin.file:
-    path: /opt/garrison/ansible-installed
-    state: absent
-  when: garrison_install_due | bool
-
+# The installer reads what is there and does what is left: it changes
+# nothing, and says so, where this release runs as installed with this
+# configuration.
 - name: Garrison runs this release with this configuration
   ansible.builtin.command:
     cmd: "/root/{{ garrison_name }}/bin/garrison install"
-  when: garrison_install_due | bool
-
-- name: The installer finished with this release and this configuration
-  ansible.builtin.copy:
-    content: "{{ garrison_version }} {{ garrison_config.checksum }}\n"
-    dest: /opt/garrison/ansible-installed
-    owner: root
-    group: root
-    mode: "0644"
-  when: garrison_install_due | bool
+  register: garrison_install
+  changed_when: "'is running as installed; nothing was changed.' not in garrison_install.stdout"
 
 - name: garrison doctor
   ansible.builtin.command:
