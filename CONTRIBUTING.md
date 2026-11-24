@@ -523,8 +523,8 @@ in a checkout of the tag, such as `git worktree add --detach
 ../garrison-v0.1.3 v0.1.3`. `--rehearsal` builds any tree for tests, as
 `scripts/signed-releases.sh` does, and says so in its output. It still
 checks the tools, and it removes the signatures again and fails when a key
-that `deploy/signing/keys.txt` named in any commit made them, since
-installations trust those keys. Never publish a rehearsal.
+that `deploy/signing/keys.txt` named in the history of the commit it builds
+made them, since installations trust those keys. Never publish a rehearsal.
 
 The binaries are static (musl), so they run on any Linux of their architecture.
 Each archive holds `bin/garrison`, the interface in `static/`, `deploy/`,
