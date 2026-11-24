@@ -1,9 +1,15 @@
+use std::os::unix::fs::PermissionsExt;
+
 use super::super::Level;
-use super::super::states::files::private as private_state;
 use super::*;
 
-/// A check's path that the collector's unit hides from it is named, as
-/// root may read what the collector may not.
+/// The mode of the file at `path`, as doctor shows it.
+fn mode(path: &Path) -> u32 {
+    fs::metadata(path).unwrap().mode() & 0o777
+}
+
+/// A check's path that the collector's unit hides from it is named, in
+/// check-config's words, as root may read what the collector may not.
 #[test]
 fn a_checks_path_the_collector_cannot_see_is_named() {
     let directory = tempfile::tempdir().unwrap();
@@ -14,22 +20,12 @@ fn a_checks_path_the_collector_cannot_see_is_named() {
             .parse()
             .unwrap(),
     );
+    let providers = garrison_collector::build(&check.collector.providers).unwrap();
+    let mut hidden = units::hidden_paths(&providers);
+    assert_eq!(hidden.len(), 1);
+    let named = Finding::fail(states::path_hidden(hidden.remove(0)));
     let found = files(&check);
-    let named = found
-        .iter()
-        .find(|finding| {
-            finding
-                .state
-                .text
-                .starts_with("providers[bulwark].admin_directory")
-        })
-        .unwrap();
-    assert_eq!(named.level, Level::Fail, "{}", named.line());
-    assert!(
-        named.line().contains("Paths the collector cannot see"),
-        "{}",
-        named.line()
-    );
+    assert!(found.contains(&named), "{found:?}");
 }
 
 /// Each fix names what makes the file, or what gives it owner and mode.
@@ -37,41 +33,19 @@ fn a_checks_path_the_collector_cannot_see_is_named() {
 fn each_file_names_what_makes_it_and_what_keeps_it_private() {
     let directory = tempfile::tempdir().unwrap();
     let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
-    let fix = |found: &[Finding], what: &str| {
-        let finding = found
-            .iter()
-            .find(|finding| finding.state.text.starts_with(what))
-            .unwrap_or_else(|| panic!("{what}"));
-        finding.state.fix.clone().unwrap()
-    };
     let missing = files(&config);
     for name in KEYS {
-        assert_eq!(
-            fix(&missing, &format!("{name} is missing")),
-            "Run `garrison stalwart setup`, which makes it.",
-            "{name}"
-        );
+        let path = config.credentials_directory.join(name);
+        let said = Finding::fail(states::missing(name, &path, states::SETUP));
+        assert!(missing.contains(&said), "{name}: {missing:?}");
     }
     // A file that is this user's.
     let key = config.credentials_directory.join("broker-native-key");
     fs::create_dir_all(&config.credentials_directory).unwrap();
     fs::write(&key, garrison_testing::NATIVE_KEY).unwrap();
     let present = files(&config);
-    assert_eq!(
-        fix(&present, &format!("{} is not root-owned", key.display())),
-        format!(
-            "Make it root's with mode 600: chown root {0} && chmod 600 {0}",
-            key.display()
-        )
-    );
-}
-
-/// The finding that starts with `what`.
-fn starting<'a>(findings: &'a [Finding], what: &str) -> &'a Finding {
-    findings
-        .iter()
-        .find(|finding| finding.state.text.starts_with(what))
-        .unwrap_or_else(|| panic!("no finding {what}: {findings:?}"))
+    let open = Finding::fail(states::open(&key, mode(&key)));
+    assert!(present.contains(&open), "{present:?}");
 }
 
 /// Every file the units load is judged empty as its service reads it: a key
@@ -101,12 +75,12 @@ fn every_file_the_units_load_is_judged_empty_as_it_is_read() {
                 "{name}"
             );
             let found = files(&config);
-            let finding = starting(&found, &format!("{name} is empty, so "));
-            assert_eq!(finding.level, Level::Fail, "{name}");
+            let empty = Finding::fail(states::no_key(name, Lacks::Empty, &path));
+            assert!(found.contains(&empty), "{name}: {found:?}");
         } else if optional.contains(&name) {
             let read = read_optional_secret(&path, Privacy::Owned, Form::Token);
             assert!(matches!(read, Ok(None)), "{name}");
-            let kept = Finding::ok(private_state(name, 0o600));
+            let kept = Finding::ok(states::private(name, 0o600));
             let judged = judged(
                 name,
                 &Held::Lacking(Lacks::Empty),
@@ -114,7 +88,7 @@ fn every_file_the_units_load_is_judged_empty_as_it_is_read() {
                 reader(&config, name),
                 kept,
             );
-            assert_eq!(judged.level, Level::Ok, "{name}: {}", judged.line());
+            assert_eq!(judged, Finding::ok(states::empty(name, 0o600)), "{name}");
         } else {
             panic!(
                 "{name} is loaded by the units, but neither a key setup writes nor a file that may be empty"
@@ -133,37 +107,32 @@ fn a_key_file_that_holds_no_key_fails_with_what_makes_one() {
     let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
     fs::create_dir_all(&config.credentials_directory).unwrap();
     for (name, unit) in [
-        ("webhook-signature-key", "garrison-ingest.service"),
-        ("collector-native-key", "garrison-collect.service"),
-        ("broker-native-key", "garrison-broker.service"),
+        ("webhook-signature-key", units::INGEST),
+        ("collector-native-key", units::COLLECT),
+        ("broker-native-key", units::BROKER),
     ] {
+        // The unit its line names, as the one that has no key.
+        assert!(
+            units::SECRETS
+                .iter()
+                .any(|(_, loading, loaded)| *loaded == name && *loading == [unit]),
+            "{name}"
+        );
         let path = config.credentials_directory.join(name);
         for (written, lacks) in [
-            ("", "is empty"),
-            ("\n", "is empty"),
-            ("short\n", "holds something other than a key"),
+            ("", Lacks::Empty),
+            ("\n", Lacks::Empty),
+            ("short\n", Lacks::Other),
         ] {
             garrison_testing::write_private(&path, written.as_bytes());
             let found = files(&config);
-            let finding = starting(&found, &format!("{name} "));
-            assert_eq!(
-                (
-                    finding.level,
-                    finding.state.text.as_str(),
-                    finding.state.fix.as_deref()
-                ),
-                (
-                    Level::Fail,
-                    format!("{name} {lacks}, so {unit} has no key: {}", path.display()).as_str(),
-                    Some("Run `garrison stalwart setup`, which makes it.")
-                ),
-                "{name} {written:?}"
-            );
+            let said = Finding::fail(states::no_key(name, lacks, &path));
+            assert!(found.contains(&said), "{name} {written:?}: {found:?}");
         }
         garrison_testing::write_private(&path, garrison_testing::NATIVE_KEY.as_bytes());
         let found = files(&config);
-        let kept = starting(&found, &format!("{} is not root-owned", path.display()));
-        assert_eq!(kept.level, Level::Fail, "{name}");
+        let open = Finding::fail(states::open(&path, 0o600));
+        assert!(found.contains(&open), "{name}: {found:?}");
     }
 }
 
@@ -177,31 +146,21 @@ fn a_file_the_units_load_is_named_where_it_is_missing() {
     let found = files(&config);
     for name in ["metrics-credential", "ntfy-token", "notify-webhook-url"] {
         let path = config.credentials_directory.join(name);
-        let missing = starting(&found, &format!("{name} is missing"));
-        assert_eq!(missing.level, Level::Fail, "{name}");
+        let missing = Finding::fail(states::missing_empty(name, &path));
+        assert!(found.contains(&missing), "{name}: {found:?}");
+    }
+    // Their lines name the units that start only with them.
+    for (name, loading) in [
+        ("metrics-credential", &[units::COLLECT][..]),
+        ("ntfy-token", &[units::COLLECT, units::WATCH]),
+    ] {
         assert!(
-            missing.state.text.contains("garrison-collect.service"),
-            "{}",
-            missing.state.text
-        );
-        assert_eq!(
-            missing.state.fix.as_deref(),
-            Some(
-                format!(
-                    "Make it, empty, which means none: install -m 600 /dev/null {}",
-                    path.display()
-                )
-                .as_str()
-            ),
+            units::SECRETS
+                .iter()
+                .any(|(_, loaders, loaded)| *loaded == name && *loaders == loading),
             "{name}"
         );
     }
-    assert!(
-        starting(&found, "ntfy-token is missing")
-            .state
-            .text
-            .contains("garrison-watch.service")
-    );
 }
 
 /// A file that may be empty is in order empty where nothing reads it;
@@ -212,67 +171,28 @@ fn a_file_the_units_load_is_named_where_it_is_missing() {
 fn an_empty_file_is_in_order_unless_the_configuration_reads_it() {
     let directory = tempfile::tempdir().unwrap();
     let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
-    let kept = || Finding::ok(private_state("metrics-credential", 0o600));
-    let unread = judged(
-        "metrics-credential",
-        &Held::Lacking(Lacks::Empty),
-        0o600,
-        reader(&config, "metrics-credential"),
-        kept(),
-    );
-    assert_eq!(
-        (unread.level, unread.state.text.as_str()),
-        (
-            Level::Ok,
-            "metrics-credential is empty, which means none (600)"
-        )
-    );
+    let name = "metrics-credential";
+    let kept = || Finding::ok(states::private(name, 0o600));
+    let empty = Held::Lacking(Lacks::Empty);
+    let unread = judged(name, &empty, 0o600, reader(&config, name), kept());
+    assert_eq!(unread, Finding::ok(states::empty(name, 0o600)));
     let mut prometheus = toml::Table::new();
     prometheus.insert("type".into(), "prometheus".into());
     config.collector.providers.push(prometheus);
-    let read = judged(
-        "metrics-credential",
-        &Held::Lacking(Lacks::Empty),
-        0o600,
-        reader(&config, "metrics-credential"),
-        kept(),
-    );
-    assert_eq!(read.level, Level::Fail, "{}", read.line());
+    assert_eq!(reader(&config, name), Some(Reader::Prometheus));
+    let read = judged(name, &empty, 0o600, reader(&config, name), kept());
     assert_eq!(
-        read.state.text,
-        "metrics-credential is empty, but the prometheus check reads Stalwart's exporter with it"
-    );
-    assert!(
-        read.state
-            .fix
-            .as_deref()
-            .unwrap()
-            .starts_with("Run `garrison stalwart setup`, which writes it"),
-        "{}",
-        read.line()
+        read,
+        Finding::fail(states::unusable(name, Lacks::Empty, &Reader::Prometheus))
     );
     // Filled, it is judged by owner and mode alone.
-    let filled = judged(
-        "metrics-credential",
-        &Held::Usable,
-        0o600,
-        reader(&config, "metrics-credential"),
-        kept(),
-    );
-    assert_eq!(filled.state.text, "metrics-credential is private (600)");
+    let filled = judged(name, &Held::Usable, 0o600, reader(&config, name), kept());
+    assert_eq!(filled, kept());
     // Missing where it is read, it is named with how to fill it.
+    let path = config.credentials_directory.join(name);
     let found = files(&config);
-    let missing = starting(&found, "metrics-credential is missing");
-    assert!(
-        missing
-            .state
-            .fix
-            .as_deref()
-            .unwrap()
-            .starts_with("Run `garrison stalwart setup`, which writes it"),
-        "{}",
-        missing.line()
-    );
+    let missing = Finding::fail(states::missing_read(name, &path, &Reader::Prometheus));
+    assert!(found.contains(&missing), "{found:?}");
     // The notification channels' files are judged with the channels.
     assert_eq!(reader(&config, "ntfy-token"), None);
 }
@@ -283,46 +203,36 @@ fn an_empty_file_is_in_order_unless_the_configuration_reads_it() {
 fn the_dqs_key_is_read_where_a_list_written_without_it_is_asked() {
     let directory = tempfile::tempdir().unwrap();
     let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
-    assert_eq!(reader(&config, "spamhaus-dqs-key"), None);
+    let name = "spamhaus-dqs-key";
+    assert_eq!(reader(&config, name), None);
     let reputation: toml::Table = "type = \"reputation\"\nhosts = [\"mail.example.test\"]\n\
          lists = [\"zen.dq.spamhaus.net\"]\nlists_ipv6 = []"
         .parse()
         .unwrap();
     config.collector.providers.push(reputation);
-    assert_eq!(reader(&config, "spamhaus-dqs-key"), None);
+    assert_eq!(reader(&config, name), None);
     config.collector.dqs_key = Some(garrison_core::credentials::SecretSource::Credential(
-        "spamhaus-dqs-key".into(),
+        name.into(),
     ));
-    let path = config.credentials_directory.join("spamhaus-dqs-key");
+    let path = config.credentials_directory.join(name);
+    let dqs = Reader::Dqs {
+        zone: "zen.dq.spamhaus.net".into(),
+        path: path.clone(),
+    };
+    assert_eq!(reader(&config, name).as_ref(), Some(&dqs));
     let found = files(&config);
-    let missing = starting(&found, "spamhaus-dqs-key is missing");
-    assert_eq!(missing.level, Level::Fail);
-    assert_eq!(
-        missing.state.fix.as_deref(),
-        Some(
-            format!(
-                "Write the key into it (zen.dq.spamhaus.net is asked with it): install -m 600 \
-                 /dev/null {0} && sh -c 'cat > {0}', then paste the key and press Enter and \
-                 Ctrl-D.",
-                path.display()
-            )
-            .as_str()
-        )
-    );
+    let missing = Finding::fail(states::missing_read(name, &path, &dqs));
+    assert!(found.contains(&missing), "{found:?}");
     let empty = judged(
-        "spamhaus-dqs-key",
+        name,
         &Held::Lacking(Lacks::Empty),
         0o600,
-        reader(&config, "spamhaus-dqs-key"),
-        Finding::ok(private_state("spamhaus-dqs-key", 0o600)),
+        reader(&config, name),
+        Finding::ok(states::private(name, 0o600)),
     );
     assert_eq!(
-        (empty.level, empty.state.text.as_str()),
-        (
-            Level::Fail,
-            "spamhaus-dqs-key is empty, but the reputation check asks a list of Spamhaus' \
-             Data Query Service with it"
-        )
+        empty,
+        Finding::fail(states::unusable(name, Lacks::Empty, &dqs))
     );
 }
 
@@ -337,7 +247,7 @@ fn a_file_its_reader_takes_for_none_fails_where_the_configuration_reads_it() {
     let directory = tempfile::tempdir().unwrap();
     let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
     fs::create_dir_all(&config.credentials_directory).unwrap();
-    let kept = || Finding::ok(private_state("kept", 0o600));
+    let kept = || Finding::ok(states::private("kept", 0o600));
     let metrics = config.credentials_directory.join("metrics-credential");
     let mut prometheus = toml::Table::new();
     prometheus.insert("type".into(), "prometheus".into());
@@ -353,17 +263,12 @@ fn a_file_its_reader_takes_for_none_fails_where_the_configuration_reads_it() {
         let reads = reader(&config, "metrics-credential");
         let found = judged("metrics-credential", &held, 0o600, reads, kept());
         assert_eq!(
-            (
-                found.level,
-                found.state.text.as_str(),
-                found.state.fix.as_deref()
-            ),
-            (
-                Level::Fail,
-                "metrics-credential holds no credential, but the prometheus check reads \
-                 Stalwart's exporter with it",
-                Some(garrison_collector::context::SCRAPE_FIX)
-            ),
+            found,
+            Finding::fail(states::unusable(
+                "metrics-credential",
+                Lacks::NoCredential,
+                &Reader::Prometheus
+            )),
             "{written}"
         );
     }
@@ -378,6 +283,10 @@ fn a_file_its_reader_takes_for_none_fails_where_the_configuration_reads_it() {
         "spamhaus-dqs-key".into(),
     ));
     let key = config.credentials_directory.join("spamhaus-dqs-key");
+    let dqs = Reader::Dqs {
+        zone: "zen.dq.spamhaus.net".into(),
+        path: key.clone(),
+    };
     for written in [
         "two words".to_owned(),
         "a-hyphen".to_owned(),
@@ -388,16 +297,10 @@ fn a_file_its_reader_takes_for_none_fails_where_the_configuration_reads_it() {
         assert_eq!(held, Held::Lacking(Lacks::NoKey), "{written}");
         let reads = reader(&config, "spamhaus-dqs-key");
         let found = judged("spamhaus-dqs-key", &held, 0o600, reads, kept());
-        assert_eq!(found.level, Level::Fail, "{written}");
-        assert!(
-            found
-                .state
-                .fix
-                .as_deref()
-                .unwrap()
-                .starts_with("Write the key into it"),
-            "{}",
-            found.line()
+        assert_eq!(
+            found,
+            Finding::fail(states::unusable("spamhaus-dqs-key", Lacks::NoKey, &dqs)),
+            "{written}"
         );
     }
     garrison_testing::write_private(&key, b"abcdefghijklmnopqrstuvwxyz");
@@ -429,60 +332,30 @@ fn a_file_that_may_be_empty_is_judged_whole() {
     let name = "metrics-credential";
     let path = config.credentials_directory.join(name);
     let judged = |config: &Config| optional_of(config, name, me);
-    let missing = judged(&config);
-    assert_eq!(missing.level, Level::Fail, "{}", missing.line());
-    assert!(
-        missing
-            .state
-            .text
-            .starts_with("metrics-credential is missing"),
-        "{}",
-        missing.state.text
+    assert_eq!(reader(&config, name), Some(Reader::Prometheus));
+    assert_eq!(
+        judged(&config),
+        Finding::fail(states::missing_read(name, &path, &Reader::Prometheus))
     );
     fs::create_dir_all(&config.credentials_directory).unwrap();
-    for (written, said) in [
-        (
-            &b""[..],
-            "metrics-credential is empty, but the prometheus check reads Stalwart's exporter with it",
-        ),
-        (
-            &b"garrison:a-password\n"[..],
-            "metrics-credential holds no credential, but the prometheus check reads Stalwart's exporter \
-             with it",
-        ),
+    for (written, lacks) in [
+        (&b""[..], Lacks::Empty),
+        (&b"garrison:a-password\n"[..], Lacks::NoCredential),
     ] {
         garrison_testing::write_private(&path, written);
-        let found = judged(&config);
         assert_eq!(
-            (found.level, found.state.text.as_str()),
-            (Level::Fail, said)
+            judged(&config),
+            Finding::fail(states::unusable(name, lacks, &Reader::Prometheus)),
+            "{written:?}"
         );
     }
     let credential = br#"{"username": "garrison", "secret": "a-password"}"#;
     garrison_testing::write_private(&path, credential);
-    assert_eq!(
-        judged(&config).level,
-        Level::Ok,
-        "{}",
-        judged(&config).line()
-    );
-    fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
-    let open = judged(&config);
-    assert_eq!(open.level, Level::Fail, "{}", open.line());
-    assert!(
-        open.state
-            .text
-            .contains("is not root-owned with mode 600 or less"),
-        "{}",
-        open.state.text
-    );
+    assert_eq!(judged(&config), Finding::ok(states::private(name, 0o600)));
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(judged(&config), Finding::fail(states::open(&path, 0o644)));
     // Where nothing reads it, empty is in order.
     config.collector.providers.clear();
     garrison_testing::write_private(&path, b"");
-    assert_eq!(
-        judged(&config).level,
-        Level::Ok,
-        "{}",
-        judged(&config).line()
-    );
+    assert_eq!(judged(&config), Finding::ok(states::empty(name, 0o600)));
 }
