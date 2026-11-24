@@ -1,8 +1,10 @@
 //! OAuth 2.0 Authorization Code with PKCE (S256), scope `openid` only.
 //!
 //! The state and the PKCE verifier of a sign-in live only in the browser's
-//! `HttpOnly` login cookie. A request that is not signed in writes nothing on the
-//! server, so nobody can fill a table and lock other users out of signing in.
+//! `HttpOnly` login cookie, so a sign-in that is begun stores nothing on the
+//! server. A callback with the state of its cookie, which anyone can make,
+//! counts in the bounded budget of `attempts`, and a flood of them from more
+//! networks than it counts is the security model's known limit.
 //!
 //! A browser comes to these routes, not the interface's requests: whatever
 //! keeps a sign-in from its session sends it back to the sign-in page with a
@@ -223,7 +225,15 @@ async fn callback(
     let Some((expected, verifier)) = cookie.split_once('.') else {
         return failure();
     };
-    if state.is_empty() || !constant_time::eq(state, expected) || !is_verifier(verifier) {
+    // Another sign-in's callback, as of one begun before in this browser or
+    // one a page made up, leaves the login cookie to its own.
+    if state.is_empty() || !constant_time::eq(state, expected) {
+        return redirect(&format!(
+            "{INTERFACE}/?login_error={}",
+            Ended::Failed.reason()
+        ));
+    }
+    if !is_verifier(verifier) {
         return failure();
     }
     // Only a matching state reaches Stalwart, so only it uses the budget.

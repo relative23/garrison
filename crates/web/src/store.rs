@@ -2,7 +2,8 @@
 //!
 //! Session identifiers are stored only as SHA-256 digests, so a copy of the
 //! database cannot be replayed as a cookie. The stored access token carries only
-//! the `openid` scope and expires with the session.
+//! the `openid` scope, and a session's row goes only once Stalwart answered
+//! the revocation of its token (`App::end_ended_sessions`).
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -151,11 +152,6 @@ impl WebStore {
         self.db.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn purge(db: &Connection, at: i64) -> rusqlite::Result<()> {
-        db.execute("DELETE FROM sessions WHERE expires_at <= ?", [at])?;
-        Ok(())
-    }
-
     pub fn create(&self, new: &NewSession<'_>) -> Result<(String, Session), StoreError> {
         let identifier = random_token(32)?;
         let at = now();
@@ -168,9 +164,7 @@ impl WebStore {
             client_ip: new.client_ip.map(str::to_owned),
             expires_at: at + new.lifetime,
         };
-        let db = self.db();
-        Self::purge(&db, at)?;
-        db.execute(
+        self.db().execute(
             "INSERT INTO sessions VALUES(?,?,?,?,?,?,?,?)",
             params![
                 session.id_hash,
@@ -194,7 +188,7 @@ impl WebStore {
         Ok(db
             .query_row(
                 "SELECT id_hash,subject,email,token,csrf,client_ip,expires_at FROM sessions \
-                 WHERE id_hash=? AND expires_at > ?",
+                 WHERE id_hash=?1 AND expires_at > ?2 AND created_at <= ?2",
                 params![digest(identifier), now()],
                 |row| {
                     Ok(Session {
@@ -221,6 +215,31 @@ impl WebStore {
                 |row| row.get(0),
             )
             .optional()?)
+    }
+
+    /// End a session now but keep its row, whose token is still to be
+    /// revoked: no cookie finds it any more.
+    pub fn end(&self, id_hash: &str) -> Result<(), StoreError> {
+        self.db().execute(
+            "UPDATE sessions SET expires_at=min(expires_at,?) WHERE id_hash=?",
+            params![now(), id_hash],
+        )?;
+        Ok(())
+    }
+
+    /// The digest and token of at most `limit` sessions that have ended,
+    /// those that ended first first. A session dated ahead of the clock, as
+    /// one signed in while it ran ahead, began at a time not known: it has
+    /// ended too, as no cookie finds it.
+    pub fn ended(&self, limit: u16) -> Result<Vec<(String, String)>, StoreError> {
+        let db = self.db();
+        let mut statement = db.prepare(
+            "SELECT id_hash,token FROM sessions WHERE expires_at <= ?1 OR created_at > ?1 \
+             ORDER BY expires_at LIMIT ?2",
+        )?;
+        let rows =
+            statement.query_map(params![now(), limit], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     pub fn preferences(&self, subject: &str) -> Result<Preferences, StoreError> {

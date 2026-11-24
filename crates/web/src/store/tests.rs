@@ -125,16 +125,62 @@ fn a_session_lasts_its_lifetime_from_now() {
     assert_eq!(store.get(&expired).unwrap(), None);
 }
 
+/// A session that has ended keeps its row, which no cookie finds, until its
+/// token is revoked: a new session does not take it away.
 #[test]
-fn expired_sessions_are_removed() {
+fn ended_sessions_wait_for_their_tokens_revocation() {
     let (store, _directory) = store();
-    store.create(&new_session(-1)).unwrap();
-    store.create(&new_session(600)).unwrap();
-    let count: i64 = store
+    let (_, late) = store.create(&new_session(-5)).unwrap();
+    let (_, early) = store.create(&new_session(-60)).unwrap();
+    let (cookie, live) = store.create(&new_session(600)).unwrap();
+    let ended = |limit| {
+        let ended: Vec<String> = store
+            .ended(limit)
+            .unwrap()
+            .into_iter()
+            .map(|(id_hash, _)| id_hash)
+            .collect();
+        ended
+    };
+    assert_eq!(ended(10), [early.id_hash.clone(), late.id_hash.clone()]);
+    assert_eq!(ended(1), std::slice::from_ref(&early.id_hash));
+    assert_eq!(
+        store.ended(1).unwrap()[0].1,
+        "secret-token-0123456789",
+        "with its token"
+    );
+    // A session ended now, as one whose revocation Stalwart did not answer.
+    store.end(&live.id_hash).unwrap();
+    assert_eq!(store.get(&cookie).unwrap(), None);
+    assert_eq!(ended(10).len(), 3);
+    // An end later than the one a session has does not extend it.
+    store.end(&early.id_hash).unwrap();
+    assert_eq!(ended(1), std::slice::from_ref(&early.id_hash));
+}
+
+/// A session signed in while the clock ran ahead, then the clock put
+/// right: how long ago it began is not known, so it has ended, and its
+/// token is to be revoked, as when its time is over.
+#[test]
+fn a_session_dated_ahead_of_the_clock_has_ended() {
+    let (store, _directory) = store();
+    let (cookie, session) = store.create(&new_session(1800)).unwrap();
+    store
         .db()
-        .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+        .execute(
+            "UPDATE sessions SET created_at = created_at + 86400, \
+             expires_at = expires_at + 86400",
+            [],
+        )
         .unwrap();
-    assert_eq!(count, 1, "creating purges expired sessions");
+    assert_eq!(store.get(&cookie).unwrap(), None);
+    let ended: Vec<String> = store
+        .ended(10)
+        .unwrap()
+        .into_iter()
+        .map(|(id_hash, _)| id_hash)
+        .collect();
+    assert_eq!(ended, [session.id_hash]);
 }
 
 #[test]

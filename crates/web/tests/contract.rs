@@ -1,8 +1,9 @@
 //! The sign-in that the web service relies on, against the pinned Stalwart and
 //! with the OAuth client registered the way `stalwart setup` registers it:
 //! PKCE is required, the redirect must match exactly, a code works once, the
-//! answer names the issuer, the token is good for sign-in only, and revocation
-//! ends it. The last test is an early warning for the row that
+//! answer names the issuer, the token is good for sign-in only, revocation
+//! ends it and that sign-in alone, and no refresh token of it serves. The
+//! sidebar test is an early warning for the row that
 //! `frontend/public/stalwart-switch.js` adds to Stalwart's WebUI. Run with the
 //! variables of `cargo xtask lab start`:
 //! `cargo test --workspace --test contract -- --ignored`.
@@ -282,6 +283,107 @@ fn the_webui_still_has_the_sidebar_the_switch_row_is_built_for() {
         assert!(
             names(&panel, word),
             "the Stalwart WebUI no longer has {what}; look at the switch row"
+        );
+    }
+}
+
+/// A form posted to one of Stalwart's OAuth endpoints, as the web service
+/// posts it.
+fn posted(lab: &Lab, path: &str, form: &str) -> garrison_stalwart::http::Response {
+    let url = format!("{}{path}", lab.url);
+    Request::post(&url, form.as_bytes())
+        .header("Host", "mail.example.test")
+        .header("X-Forwarded-Proto", "https")
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .send()
+        .unwrap()
+}
+
+impl SignIn {
+    /// A sign-in to Garrison's client: the access token Stalwart gives for
+    /// its code, and the refresh token where it gives one.
+    fn tokens(&self) -> (String, Option<String>) {
+        let (client, callback) = (client_id(&self.origin), redirect_uri(&self.origin));
+        let verifier = random_hex(32);
+        let params = self.returned(&query(&self.origin, &callback, "openid", Some(&verifier)));
+        let form = form_urlencoded::Serializer::new(String::new())
+            .append_pair("grant_type", "authorization_code")
+            .append_pair("code", &params["code"])
+            .append_pair("client_id", &client)
+            .append_pair("redirect_uri", &callback)
+            .append_pair("code_verifier", &verifier)
+            .finish();
+        let answer = posted(&self.lab, "/auth/token", &form);
+        assert_eq!(answer.status, 200);
+        let token: Value = serde_json::from_slice(&answer.body).unwrap();
+        let text = |key: &str| token[key].as_str().map(str::to_owned);
+        (text("access_token").unwrap(), text("refresh_token"))
+    }
+}
+
+/// What ends a sign-in's token before its hour is up: its revocation, which
+/// the web service asks for whenever a session ends, by its time too. It
+/// ends that token alone, not another sign-in of the account. Asked again,
+/// or for a token Stalwart never issued, Stalwart answers as it does for one
+/// it ends, so that a revocation asked again until Stalwart answers comes to
+/// an end. The refresh token Stalwart gives with a sign-in serves neither
+/// Garrison's client nor another: the access token is all a sign-in leaves
+/// that acts as its user.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn a_revocation_ends_its_own_sign_in_and_no_refresh_token_serves() {
+    let mut sign_in = lab();
+    let client = client_id(&sign_in.origin);
+    let provider = Provider::new(&sign_in.lab.url, ISSUER);
+    let ((first, refresh), (second, _)) = (sign_in.tokens(), sign_in.tokens());
+    let subject = |token: &str| {
+        provider
+            .userinfo(token, None)
+            .map(|identity| identity.subject)
+    };
+    assert!(subject(&first).is_ok());
+    assert_eq!(subject(&first), subject(&second));
+    provider.revoke(&client, &first).unwrap();
+    assert!(matches!(subject(&first), Err(Error::InvalidToken(_))));
+    assert!(
+        subject(&second).is_ok(),
+        "another sign-in of the account goes on"
+    );
+    let revoking = |token: &str| {
+        let form = form_urlencoded::Serializer::new(String::new())
+            .append_pair("token", token)
+            .append_pair("client_id", &client)
+            .finish();
+        posted(&sign_in.lab, "/auth/revoke", &form).status
+    };
+    assert_eq!((revoking(&first), revoking(&random_hex(24))), (200, 200));
+    let other = format!("https://{}.example.test/oauth-client.json", unique());
+    sign_in.lab.create(
+        "OAuthClient",
+        &json!({
+            "clientId": other,
+            "description": "Another client, with the refresh grant Stalwart gives by default",
+            "redirectUris": {format!("https://{}.example.test/callback", unique()): true},
+            "postLogoutRedirectUris": {},
+            "scopes": {},
+        }),
+    );
+    for client_id in refresh
+        .iter()
+        .flat_map(|_| [client.as_str(), other.as_str()])
+    {
+        let form = form_urlencoded::Serializer::new(String::new())
+            .append_pair("grant_type", "refresh_token")
+            .append_pair("refresh_token", refresh.as_deref().unwrap_or_default())
+            .append_pair("client_id", client_id)
+            .finish();
+        let answer = posted(&sign_in.lab, "/auth/token", &form);
+        let body: Value = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        assert!(
+            answer.status != 200 && body.get("access_token").is_none(),
+            "{client_id}: {} {body}",
+            answer.status
         );
     }
 }

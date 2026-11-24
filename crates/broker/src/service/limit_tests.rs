@@ -18,7 +18,8 @@ pub(super) const TOKEN: &str = "token-0123456789abcdef";
 const LIMITED: &str =
     "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
-/// The lines the broker writes to its journal in this test binary.
+/// The lines the broker writes to its journal in this test binary, the
+/// authority's among them.
 struct Journal(Mutex<Vec<String>>);
 
 impl log::Log for Journal {
@@ -27,7 +28,8 @@ impl log::Log for Journal {
     }
 
     fn log(&self, record: &log::Record<'_>) {
-        if record.target().starts_with("garrison_broker") {
+        let target = record.target();
+        if target.starts_with("garrison_broker") || target.starts_with("garrison_authz") {
             let line = format!("{} {}", record.level(), record.args());
             self.0
                 .lock()

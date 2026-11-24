@@ -25,6 +25,17 @@ const NEWEST_EVENT_AGE: i64 = 300;
 /// A configuration that passes validation, then moved to the preview's own
 /// loopback origin, where the issuer is the preview too.
 pub(crate) fn config(work: &Path, port: u16, issuer_path: &str) -> Result<Config, Failure> {
+    with_providers(work, port, issuer_path, "")
+}
+
+/// The same with `providers`, `[[providers]]` tables as garrison.toml
+/// writes them.
+pub(crate) fn with_providers(
+    work: &Path,
+    port: u16,
+    issuer_path: &str,
+    providers: &str,
+) -> Result<Config, Failure> {
     let work = work.display();
     let text = format!(
         r#"
@@ -83,7 +94,8 @@ operation = "start"
 cooldown_seconds = 300
 timeout_seconds = 180
 operator = true
-"#
+
+{providers}"#
     );
     let mut config = config::from_text(&text)?;
     // Browsers keep Secure cookies over plain HTTP for `localhost` only.

@@ -275,6 +275,7 @@ fn a_broker_that_cannot_check_rights_ends_no_session() {
     .with_cache_time(Duration::ZERO)
     .revoking_with(move |_| {
         counted.fetch_add(1, Ordering::SeqCst);
+        true
     });
     let (identifier, _) = store
         .create(&NewSession {

@@ -8,9 +8,10 @@
 //! native roles.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
-use garrison_core::config::Config;
+use garrison_core::config::{self, Config};
 use garrison_core::credentials::{Credentials, SecretSource, made_by_setup};
 use garrison_core::modules::ModuleId;
 use garrison_core::{files, time};
@@ -20,7 +21,7 @@ use garrison_stalwart::permissions::{Native, account_rights};
 
 use crate::Error;
 use crate::grant::Grant;
-use crate::policy::{Capabilities, Policy, parse_policy};
+use crate::policy::{Capabilities, Policy, named_actions, parse_policy};
 
 /// The policy is small; anything larger is not a policy.
 const MAX_POLICY: usize = 65536;
@@ -38,6 +39,11 @@ pub struct Authority {
     action_ids: BTreeSet<String>,
     /// The installation's modules; nobody is granted another one.
     modules: BTreeSet<ModuleId>,
+    /// The configuration file as it is now, which may name actions the
+    /// running broker was not started with.
+    configuration: Option<PathBuf>,
+    /// The actions of the policy granted to nobody that the journal named.
+    warned: Mutex<BTreeSet<String>>,
 }
 
 impl Authority {
@@ -57,7 +63,20 @@ impl Authority {
                 .map(|action| action.id.clone())
                 .collect(),
             modules: config.modules.clone(),
+            configuration: None,
+            warned: Mutex::default(),
         }
+    }
+
+    /// The authority of a broker that runs with `config` read from `path`:
+    /// a policy may also name an action the file has gained since, which
+    /// `garrison access update` gives the profiles, and is no broken setup
+    /// for it. Such an action is granted to nobody until the broker starts
+    /// anew, since it runs no unit it was not started with.
+    #[must_use]
+    pub fn reading_actions_from(mut self, path: &Path) -> Self {
+        self.configuration = Some(path.to_owned());
+        self
     }
 
     pub fn action_ids(&self) -> BTreeSet<&str> {
@@ -68,7 +87,59 @@ impl Authority {
     pub fn policy(&self) -> Result<Policy, Error> {
         let raw = files::read_protected(&self.policy_path, MAX_POLICY)
             .map_err(|error| Error::Misconfigured(format!("Garrison access policy: {error}")))?;
-        Ok(parse_policy(&raw, &self.action_ids())?)
+        let served = self.action_ids();
+        let named = named_actions(&raw);
+        let unserved: BTreeSet<&str> = named.difference(&served).copied().collect();
+        let Some(path) = self
+            .configuration
+            .as_deref()
+            .filter(|_| !unserved.is_empty())
+        else {
+            return Ok(parse_policy(&raw, &served)?);
+        };
+        let current = config::load(path).map_err(|error| {
+            Error::Misconfigured(format!(
+                "the access policy names {}, which this broker was not started with, and {} does \
+                 not load: {error}",
+                list(&unserved),
+                path.display()
+            ))
+        })?;
+        let mut known = served.clone();
+        known.extend(
+            current
+                .broker
+                .actions
+                .iter()
+                .map(|action| action.id.as_str()),
+        );
+        let mut policy = parse_policy(&raw, &known)?;
+        for profile in policy.profiles.values_mut() {
+            profile.actions.retain(|id| served.contains(id.as_str()));
+        }
+        self.say_unserved(&unserved);
+        Ok(policy)
+    }
+
+    /// Say once of each action in `unserved` that it is granted to nobody
+    /// until the broker starts anew.
+    fn say_unserved(&self, unserved: &BTreeSet<&str>) {
+        let mut said = self.warned.lock().unwrap_or_else(PoisonError::into_inner);
+        let new: BTreeSet<&str> = unserved
+            .iter()
+            .copied()
+            .filter(|id| !said.contains(*id))
+            .collect();
+        if new.is_empty() {
+            return;
+        }
+        log::warn!(
+            "The access policy names {}, which garrison.toml has gained since the broker started: \
+             it is offered to nobody until the installer runs again, which writes its polkit rule \
+             and restarts the broker and the web service",
+            list(&new)
+        );
+        said.extend(new.iter().map(|id| (*id).to_owned()));
     }
 
     /// A client for the management API with the broker's read-only key. An
@@ -178,6 +249,11 @@ impl Authority {
             checked_at: time::now_isoformat(),
         })
     }
+}
+
+/// Action IDs as a list in a sentence.
+fn list(ids: &BTreeSet<&str>) -> String {
+    ids.iter().copied().collect::<Vec<&str>>().join(", ")
 }
 
 /// `error` with what met it, where that tells something: Stalwart's rate

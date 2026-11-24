@@ -18,6 +18,7 @@ use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use garrison_broker::client::BrokerClient;
 use garrison_core::config::{Config, Database};
@@ -63,6 +64,29 @@ pub fn application(config: Config, static_directory: PathBuf) -> Result<Arc<App>
     ))
 }
 
+/// How often the sessions that have ended are looked for, and how long
+/// after a round that could not end them all the next one waits, so that a
+/// Stalwart that does not answer is not asked every second.
+const ROUND: Duration = Duration::from_secs(1);
+const AGAIN: Duration = Duration::from_secs(60);
+
+/// End the sessions that have ended, with their tokens, within a second of
+/// their end and for as long as the service runs; where Stalwart did not
+/// answer, a minute later again.
+pub async fn end_sessions_on_time(app: Arc<App>) {
+    let mut wait = ROUND;
+    loop {
+        tokio::time::sleep(wait).await;
+        let round = Arc::clone(&app);
+        let ended = tokio::task::spawn_blocking(move || round.end_ended_sessions()).await;
+        wait = if matches!(ended, Ok(true)) {
+            ROUND
+        } else {
+            AGAIN
+        };
+    }
+}
+
 /// Serve on 127.0.0.1 until SIGTERM or SIGINT.
 pub fn run(config: Config, static_directory: PathBuf) -> Result<(), Error> {
     let port = config.web.port;
@@ -72,6 +96,7 @@ pub fn run(config: Config, static_directory: PathBuf) -> Result<(), Error> {
         .enable_all()
         .build()?;
     runtime.block_on(async move {
+        tokio::spawn(end_sessions_on_time(Arc::clone(&app)));
         let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
         log::info!("Web service listening on 127.0.0.1:{port}");
         garrison_core::systemd::ready();

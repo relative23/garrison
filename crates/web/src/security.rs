@@ -147,9 +147,9 @@ pub struct Gate {
     revoke: Option<Revoker>,
 }
 
-/// What revokes a token at the provider. It reports nothing back: a
-/// revocation that could not be confirmed is logged where it is made.
-type Revoker = Box<dyn Fn(&str) + Send + Sync>;
+/// What revokes a token at the provider: whether the provider answered. A
+/// revocation it did not answer is logged where it is made.
+type Revoker = Box<dyn Fn(&str) -> bool + Send + Sync>;
 
 impl std::fmt::Debug for Gate {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -183,7 +183,7 @@ impl Gate {
 
     /// The gate with what revokes the token of a session that ends here.
     #[must_use]
-    pub fn revoking_with(mut self, revoke: impl Fn(&str) + Send + Sync + 'static) -> Self {
+    pub fn revoking_with(mut self, revoke: impl Fn(&str) -> bool + Send + Sync + 'static) -> Self {
         self.revoke = Some(Box::new(revoke));
         self
     }
@@ -243,21 +243,27 @@ impl Gate {
         self.cache.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// End a session: its grant is forgotten, its row deleted and, with
-    /// `revoke`, its token revoked at the provider.
+    /// End a session: its grant is forgotten, its token revoked at the
+    /// provider with `revoke`, and its row deleted.
     ///
-    /// Only a deleted row is an ended session, and a row that could not be
-    /// deleted is an error: whoever holds a copy of the cookie could go on
-    /// using it. The token is revoked either way, so that such a session is
-    /// one whose token Stalwart no longer takes.
+    /// A row the store does not end is an error: whoever holds a copy of
+    /// the cookie could go on using it. The token is revoked either way, so
+    /// that such a session is one whose token Stalwart no longer takes. A
+    /// token Stalwart did not answer the revocation of keeps its row, ended,
+    /// so that it is asked again (`App::end_ended_sessions`).
     pub fn end(&self, session: &Session, revoke: bool) -> ApiResult<()> {
         self.cached().remove(&session.id_hash);
-        let deleted = self.store.delete(&session.id_hash);
-        if let (true, Some(revoker)) = (revoke, &self.revoke) {
-            revoker(&session.token);
-        }
-        deleted.map(drop).map_err(|error| {
-            log::error!("A session could not be deleted: {error}");
+        let revoked = match (revoke, &self.revoke) {
+            (true, Some(revoker)) => revoker(&session.token),
+            _ => true,
+        };
+        let ended = if revoked {
+            self.store.delete(&session.id_hash).map(drop)
+        } else {
+            self.store.end(&session.id_hash)
+        };
+        ended.map_err(|error| {
+            log::error!("A session could not be ended: {error}");
             ApiError::new(503, "The session could not be ended here; sign out again.")
         })
     }
@@ -268,6 +274,15 @@ impl Gate {
             .map_err(ApiError::from)
     }
 
+    /// The visitor's session where it may use it: with `web.bind_client_ip`
+    /// only from the address it was signed in from, and from another as if
+    /// signed out.
+    pub fn bound_session(&self, visitor: &Visitor) -> ApiResult<Option<Session>> {
+        let session = self.session(visitor)?;
+        Ok(session
+            .filter(|session| !self.bind_client_ip || session.client_ip == visitor.client_ip()))
+    }
+
     /// The session's grant, if it was confirmed within the cache time.
     fn fresh(&self, session: &Session) -> Option<Grant> {
         let (at, grant) = self.cached().get(&session.id_hash).cloned()?;
@@ -276,10 +291,7 @@ impl Gate {
 
     pub fn caller(&self, visitor: &Visitor) -> ApiResult<Caller> {
         let unknown = || ApiError::new(401, "Sign-in required");
-        let session = self.session(visitor)?.ok_or_else(unknown)?;
-        if self.bind_client_ip && session.client_ip != visitor.client_ip() {
-            return Err(unknown());
-        }
+        let session = self.bound_session(visitor)?.ok_or_else(unknown)?;
         if let Some(grant) = self.fresh(&session) {
             return Ok(Caller { session, grant });
         }

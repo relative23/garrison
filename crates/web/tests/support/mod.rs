@@ -10,6 +10,7 @@ pub(crate) mod rights;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -119,8 +120,11 @@ impl Broker for FakeBroker {
 
 #[derive(Default)]
 pub(crate) struct FakeProvider {
+    /// The tokens whose revocation the provider answered.
     pub(crate) revoked: Mutex<Vec<String>>,
     pub(crate) verifiers: Mutex<Vec<String>>,
+    /// Whether it answers no revocation, as Stalwart that is away.
+    pub(crate) away: AtomicBool,
 }
 
 /// The provider as the application holds it; the test keeps the other handle.
@@ -153,6 +157,9 @@ impl Identity for Shared {
     }
 
     fn revoke(&self, _: &str, token: &str) -> Result<(), Error> {
+        if self.0.away.load(Ordering::SeqCst) {
+            return Err(Error::Unavailable("Stalwart is unavailable".into()));
+        }
         self.0.revoked.lock().unwrap().push(token.into());
         Ok(())
     }
@@ -191,8 +198,9 @@ fn application_parts(
         .map(|action| action.id.clone())
         .collect();
     let broker: Arc<dyn Broker> = Arc::clone(broker) as Arc<dyn Broker>;
+    let bound = config.web.bind_client_ip;
     let gate =
-        Gate::new(Arc::clone(&store), broker, ORIGIN.into(), ids, false).with_cache_time(cache);
+        Gate::new(Arc::clone(&store), broker, ORIGIN.into(), ids, bound).with_cache_time(cache);
     let static_directory = config.web.state_directory.parent().unwrap().join("static");
     let app = App::new(
         config.clone(),
@@ -205,8 +213,14 @@ fn application_parts(
 }
 
 pub(crate) fn setup_with_cache(cache: Duration) -> Setup {
+    setup_with(cache, |_| {})
+}
+
+/// The setup with `change` made to its configuration first.
+pub(crate) fn setup_with(cache: Duration, change: impl FnOnce(&mut Config)) -> Setup {
     let directory = tempfile::tempdir().unwrap();
-    let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
+    change(&mut config);
     let static_directory = directory.path().join("static");
     std::fs::create_dir_all(static_directory.join("assets")).unwrap();
     std::fs::write(
@@ -281,10 +295,22 @@ impl Client {
     /// A GET as nginx forwards it for a client at `address`: from loopback,
     /// with the one header that names the client.
     pub(crate) async fn get_from(&mut self, uri: &str, address: &str) -> Answer {
+        self.send_from(address, Method::GET, uri, &[], None).await
+    }
+
+    /// A request as nginx forwards it for a client at `address`.
+    pub(crate) async fn send_from(
+        &mut self,
+        address: &str,
+        method: Method,
+        uri: &str,
+        headers: &[(&str, &str)],
+        body: Option<Value>,
+    ) -> Answer {
         let nginx = SocketAddr::from((Ipv4Addr::LOCALHOST, 40000));
-        let headers = [("x-garrison-client-ip", address)];
-        self.send_by(Some(nginx), Method::GET, uri, &headers, None)
-            .await
+        let mut all = vec![("x-garrison-client-ip", address)];
+        all.extend_from_slice(headers);
+        self.send_by(Some(nginx), method, uri, &all, body).await
     }
 
     async fn send_by(

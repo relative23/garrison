@@ -371,21 +371,31 @@ fn outgoing_message(events: &mut Events, number: i64) {
 /// The event batches of the busy server, oldest first, each small enough for
 /// the receiver.
 pub(crate) fn events(now: i64) -> Vec<Vec<Value>> {
+    made(now, true, 9_000, 7_000)
+}
+
+/// A week of the busy server's mail alone, `incoming` sessions and
+/// `outgoing` messages of it, as the cards that count mail read it.
+#[cfg(test)]
+pub(crate) fn mail_alone(now: i64, incoming: i64, outgoing: i64) -> Vec<Vec<Value>> {
+    made(now, false, incoming, outgoing)
+}
+
+fn made(now: i64, attacks: bool, incoming: i64, outgoing: i64) -> Vec<Vec<Value>> {
     let mut events = Events {
         now,
         random: Random(0x9e37_79b9_7f4a_7c15),
         list: Vec::new(),
     };
-    events.add(
-        19 * DAY + 5 * 3600,
-        "server.startup",
-        json!({"version": "1.1.0"}),
-    );
-    sign_in_attacks(&mut events);
-    for number in 0..9_000 {
+    if attacks {
+        let started = json!({"version": "1.1.0"});
+        events.add(19 * DAY + 5 * 3600, "server.startup", started);
+        sign_in_attacks(&mut events);
+    }
+    for number in 0..incoming {
         incoming_session(&mut events, number);
     }
-    for number in 0..7_000 {
+    for number in 0..outgoing {
         outgoing_message(&mut events, number);
     }
     for day in 0..7 {
