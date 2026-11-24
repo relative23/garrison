@@ -5,6 +5,7 @@
 // Helpers fail the test by panicking, like the tests themselves.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::io::Read;
 use std::net::TcpListener;
 use std::os::unix::net::UnixDatagram;
 use std::os::unix::process::ExitStatusExt;
@@ -93,6 +94,46 @@ fn ready(notify: &UnixDatagram) {
     assert_eq!(&message[..length], b"READY=1");
 }
 
+/// `command` started with ports of its own, once it reports ready: its
+/// directory, its process and the ports of the web service and of the
+/// receiver. A port the system gives another program between the test's
+/// pick and the service's bind ends the service before it serves, with the
+/// system's error 98 (EADDRINUSE); it is then started with other ports.
+fn serving(command: &str) -> (tempfile::TempDir, Child, u16, u16) {
+    for _ in 0..5 {
+        let (web, ingest) = (free_port(), free_port());
+        let directory = prepared(web, ingest);
+        let (mut child, notify) = start(directory.path(), command);
+        notify
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let deadline = Instant::now() + PATIENCE;
+        let mut message = [0; 64];
+        loop {
+            if let Ok(length) = notify.recv(&mut message) {
+                assert_eq!(&message[..length], b"READY=1");
+                return (directory, child, web, ingest);
+            }
+            if child.try_wait().unwrap().is_some() {
+                let mut said = String::new();
+                child
+                    .stderr
+                    .take()
+                    .unwrap()
+                    .read_to_string(&mut said)
+                    .unwrap();
+                assert!(said.contains("(os error 98)"), "{said}");
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the service did not report ready"
+            );
+        }
+    }
+    panic!("five times another program took a port the service was given")
+}
+
 /// Wait for the process to end. One still running after `PATIENCE` is killed
 /// and fails the test instead of letting it hang.
 fn ended(mut child: Child, waiting_for: &str) -> ExitStatus {
@@ -131,10 +172,7 @@ fn agent() -> ureq::Agent {
 
 #[test]
 fn the_ingest_service_stores_a_signed_batch_and_stops_cleanly() {
-    let port = free_port();
-    let directory = prepared(free_port(), port);
-    let (child, notify) = start(directory.path(), "ingest");
-    ready(&notify);
+    let (directory, child, _, port) = serving("ingest");
     let base = format!("http://127.0.0.1:{port}");
     let body = json!({"events": [{"id": "1", "createdAt": "2026-10-29T10:00:00Z", "type": "auth.failed", "data": {}}]}).to_string();
     let signature = garrison_ingest::app::signature(b"signature-key-0123456789", body.as_bytes());
@@ -155,10 +193,7 @@ fn the_ingest_service_stores_a_signed_batch_and_stops_cleanly() {
 
 #[test]
 fn the_web_service_answers_and_stops_cleanly() {
-    let port = free_port();
-    let directory = prepared(port, free_port());
-    let (child, notify) = start(directory.path(), "web");
-    ready(&notify);
+    let (_directory, child, port, _) = serving("web");
     let base = format!("http://127.0.0.1:{port}");
     let mut session = agent().get(&format!("{base}/api/session")).call().unwrap();
     assert_eq!(session.status().as_u16(), 200);
@@ -237,7 +272,7 @@ fn a_collection_run_beside_one_under_way_ends_without_collecting() {
     let mut said = String::new();
     let stderr = child.stderr.take().unwrap();
     let status = ended(child, "the collection run did not end");
-    std::io::Read::read_to_string(&mut { stderr }, &mut said).unwrap();
+    Read::read_to_string(&mut { stderr }, &mut said).unwrap();
     assert!(status.success(), "{said}");
     assert!(
         said.contains("Another collection run is under way; this one ends without collecting"),

@@ -69,6 +69,19 @@ fn drain(mut pipe: impl Read + Send + 'static) -> JoinHandle<Vec<u8>> {
     })
 }
 
+/// A port of this host where nothing answers, for as long as the socket
+/// held for it lives: bound there without listening, it refuses every
+/// connection, and the system gives the port to no listener started
+/// meanwhile, as it would give one dropped.
+pub(crate) fn silent_port() -> (std::os::fd::OwnedFd, u16) {
+    use rustix::net::{AddressFamily, SocketType, bind, getsockname, socket};
+    use std::net::{Ipv4Addr, SocketAddrV4};
+    let held = socket(AddressFamily::INET, SocketType::STREAM, None).unwrap();
+    bind(&held, &SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let bound = SocketAddrV4::try_from(getsockname(&held).unwrap()).unwrap();
+    (held, bound.port())
+}
+
 pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
