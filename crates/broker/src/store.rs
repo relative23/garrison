@@ -10,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
 const RETENTION_SECONDS: i64 = 30 * 86400;
-pub const MAX_JOBS: i64 = 1000;
+pub(crate) const MAX_JOBS: i64 = 1000;
 const COLUMNS: &str = "id,action_id,actor,actor_email,request_id,status,created_at,\
                        started_at,finished_at,message,may_still_run";
 
@@ -36,7 +36,7 @@ const MIGRATIONS: [Migration; 1] = [&[
 ]];
 
 /// Seconds since the epoch, as the job timestamps are stored.
-pub fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     time::now().as_second()
 }
 
@@ -66,7 +66,7 @@ impl JobStatus {
         JobStatus::Uncertain,
     ];
 
-    pub const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             JobStatus::Queued => "queued",
             JobStatus::Running => "running",
@@ -77,7 +77,7 @@ impl JobStatus {
     }
 
     /// Accepted and not finished yet.
-    pub const fn is_pending(self) -> bool {
+    pub(crate) const fn is_pending(self) -> bool {
         matches!(self, JobStatus::Queued | JobStatus::Running)
     }
 }
@@ -100,19 +100,19 @@ impl FromSql for JobStatus {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Job {
-    pub id: String,
-    pub action_id: String,
+    pub(crate) id: String,
+    pub(crate) action_id: String,
     /// The OIDC subject that asked for the job.
-    pub actor: String,
+    pub(crate) actor: String,
     /// The subject's address when it asked; empty if Stalwart named none.
-    pub actor_email: String,
-    pub request_id: String,
+    pub(crate) actor_email: String,
+    pub(crate) request_id: String,
     pub status: JobStatus,
     /// Seconds since the epoch, like the two times after it.
-    pub created_at: i64,
-    pub started_at: Option<i64>,
-    pub finished_at: Option<i64>,
-    pub message: String,
+    pub(crate) created_at: i64,
+    pub(crate) started_at: Option<i64>,
+    pub(crate) finished_at: Option<i64>,
+    pub(crate) message: String,
     /// The operation may still be running although its record is finished.
     pub may_still_run: bool,
 }
@@ -134,7 +134,7 @@ impl Job {
         })
     }
 
-    pub fn view(&self) -> JobView {
+    pub(crate) fn view(&self) -> JobView {
         JobView {
             id: self.id.clone(),
             action_id: self.action_id.clone(),
@@ -169,12 +169,12 @@ pub struct JobView {
 
 /// A change to a job record; only these fields ever change.
 #[derive(Clone, Debug, Default)]
-pub struct Change<'a> {
-    pub status: Option<JobStatus>,
-    pub started_at: Option<i64>,
-    pub finished_at: Option<i64>,
-    pub message: Option<&'a str>,
-    pub may_still_run: Option<bool>,
+pub(crate) struct Change<'a> {
+    pub(crate) status: Option<JobStatus>,
+    pub(crate) started_at: Option<i64>,
+    pub(crate) finished_at: Option<i64>,
+    pub(crate) message: Option<&'a str>,
+    pub(crate) may_still_run: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -201,7 +201,7 @@ impl JobStore {
     /// Expire old records, but keep anything that may still be running.
     /// Each record leaves by its own date alone: another's, which a clock
     /// that ran behind may have written, takes none out early.
-    pub fn prune(&self) -> rusqlite::Result<()> {
+    pub(crate) fn prune(&self) -> rusqlite::Result<()> {
         self.db.execute(
             "DELETE FROM jobs WHERE created_at < ? AND may_still_run=0 \
              AND status NOT IN ('queued','running')",
@@ -215,7 +215,7 @@ impl JobStore {
         self.db.query_row(&sql, [value], Job::from_row).optional()
     }
 
-    pub fn by_request(&self, request_id: &str) -> rusqlite::Result<Option<Job>> {
+    pub(crate) fn by_request(&self, request_id: &str) -> rusqlite::Result<Option<Job>> {
         self.one("request_id", request_id)
     }
 
@@ -234,7 +234,7 @@ impl JobStore {
 
     /// The jobs recorded last first, as [`JobStore::latest_created`] takes
     /// the newest, whatever their dates say after the clock went back.
-    pub fn recent(&self, limit: i64) -> rusqlite::Result<Vec<Job>> {
+    pub(crate) fn recent(&self, limit: i64) -> rusqlite::Result<Vec<Job>> {
         self.many(
             &format!("SELECT {COLUMNS} FROM jobs ORDER BY rowid DESC LIMIT ?"),
             Some(limit),
@@ -242,7 +242,7 @@ impl JobStore {
     }
 
     /// Jobs that are queued, running or may still be running.
-    pub fn active(&self) -> rusqlite::Result<Vec<Job>> {
+    pub(crate) fn active(&self) -> rusqlite::Result<Vec<Job>> {
         self.many(
             &format!(
                 "SELECT {COLUMNS} FROM jobs WHERE status IN ('queued','running') OR may_still_run=1"
@@ -258,7 +258,7 @@ impl JobStore {
     /// gives, as a damaged or hand-edited audit may hold, was created at no
     /// time, so it is not the newest: it holds no action back, and the job
     /// before it still does.
-    pub fn latest_created(&self, action_id: Option<&str>) -> rusqlite::Result<Option<i64>> {
+    pub(crate) fn latest_created(&self, action_id: Option<&str>) -> rusqlite::Result<Option<i64>> {
         let (first, last) = (
             time::Timestamp::MIN.as_second(),
             time::Timestamp::MAX.as_second(),
@@ -285,7 +285,7 @@ impl JobStore {
             .query_row("SELECT count(*) FROM jobs", [], |row| row.get(0))
     }
 
-    pub fn insert(&self, job: &Job) -> rusqlite::Result<()> {
+    pub(crate) fn insert(&self, job: &Job) -> rusqlite::Result<()> {
         // SQLite numbers a row one past the greatest, but after a row of the
         // greatest integer, which counting never reaches, at random: such a
         // row moves to follow the others, so that the rows keep the order in
@@ -314,7 +314,7 @@ impl JobStore {
         Ok(())
     }
 
-    pub fn update(&self, identifier: &str, change: &Change<'_>) -> rusqlite::Result<()> {
+    pub(crate) fn update(&self, identifier: &str, change: &Change<'_>) -> rusqlite::Result<()> {
         // COALESCE keeps every field the change leaves out.
         self.db.execute(
             "UPDATE jobs SET status=COALESCE(?,status), started_at=COALESCE(?,started_at), \

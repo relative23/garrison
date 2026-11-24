@@ -239,7 +239,7 @@ fn serve(
 ///
 /// Call this before any other thread starts: taking over the socket clears
 /// systemd's `LISTEN_*` variables from the environment.
-pub fn listener(socket_path: &Path) -> io::Result<UnixListener> {
+pub(crate) fn listener(socket_path: &Path) -> io::Result<UnixListener> {
     let activated = std::env::var("LISTEN_PID").ok() == Some(std::process::id().to_string())
         && std::env::var("LISTEN_FDS").ok().as_deref() == Some("1");
     if activated && let Some(listener) = listenfd::ListenFd::from_env().take_unix_listener(0)? {

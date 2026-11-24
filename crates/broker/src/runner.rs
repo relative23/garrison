@@ -7,7 +7,9 @@
 
 use std::collections::BTreeMap;
 use std::io;
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use garrison_core::command;
@@ -39,7 +41,7 @@ pub trait Runner: Send + Sync {
 
 /// Runs actions through `systemctl`.
 #[derive(Clone, Debug)]
-pub struct SystemdRunner {
+pub(crate) struct SystemdRunner {
     systemctl: PathBuf,
 }
 
@@ -53,7 +55,8 @@ impl Default for SystemdRunner {
 
 impl SystemdRunner {
     /// A runner that calls another `systemctl`, such as a test double.
-    pub fn with_systemctl(systemctl: &Path) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_systemctl(systemctl: &Path) -> Self {
         SystemdRunner {
             systemctl: systemctl.to_owned(),
         }
