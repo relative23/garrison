@@ -94,12 +94,21 @@ fn ready(notify: &UnixDatagram) {
     assert_eq!(&message[..length], b"READY=1");
 }
 
-/// `command` started with ports of its own, once it reports ready: its
-/// directory, its process and the ports of the web service and of the
-/// receiver. A port the system gives another program between the test's
-/// pick and the service's bind ends the service before it serves, with the
-/// system's error 98 (EADDRINUSE); it is then started with other ports.
-fn serving(command: &str) -> (tempfile::TempDir, Child, u16, u16) {
+/// A service that reported ready, with the ports it was given.
+struct Serving {
+    directory: tempfile::TempDir,
+    child: Child,
+    /// Open as long as the service runs, as systemd keeps its socket.
+    _notify: UnixDatagram,
+    web: u16,
+    ingest: u16,
+}
+
+/// `command` started with ports of its own, once it reports ready. A port
+/// the system gives another program between the test's pick and the
+/// service's bind ends the service before it serves, with the system's
+/// error 98 (EADDRINUSE); it is then started with other ports.
+fn serving(command: &str) -> Serving {
     for _ in 0..5 {
         let (web, ingest) = (free_port(), free_port());
         let directory = prepared(web, ingest);
@@ -112,7 +121,13 @@ fn serving(command: &str) -> (tempfile::TempDir, Child, u16, u16) {
         loop {
             if let Ok(length) = notify.recv(&mut message) {
                 assert_eq!(&message[..length], b"READY=1");
-                return (directory, child, web, ingest);
+                return Serving {
+                    directory,
+                    child,
+                    _notify: notify,
+                    web,
+                    ingest,
+                };
             }
             if child.try_wait().unwrap().is_some() {
                 let mut said = String::new();
@@ -172,8 +187,8 @@ fn agent() -> ureq::Agent {
 
 #[test]
 fn the_ingest_service_stores_a_signed_batch_and_stops_cleanly() {
-    let (directory, child, _, port) = serving("ingest");
-    let base = format!("http://127.0.0.1:{port}");
+    let service = serving("ingest");
+    let base = format!("http://127.0.0.1:{}", service.ingest);
     let body = json!({"events": [{"id": "1", "createdAt": "2026-10-29T10:00:00Z", "type": "auth.failed", "data": {}}]}).to_string();
     let signature = garrison_ingest::app::signature(b"signature-key-0123456789", body.as_bytes());
     let mut answer = agent()
@@ -187,14 +202,20 @@ fn the_ingest_service_stores_a_signed_batch_and_stops_cleanly() {
         stored,
         json!({"status": "stored", "stored": 1, "skipped": 0})
     );
-    assert_eq!(stop(child), Some(0));
-    assert!(directory.path().join("ingest/events.sqlite").is_file());
+    assert_eq!(stop(service.child), Some(0));
+    assert!(
+        service
+            .directory
+            .path()
+            .join("ingest/events.sqlite")
+            .is_file()
+    );
 }
 
 #[test]
 fn the_web_service_answers_and_stops_cleanly() {
-    let (_directory, child, port, _) = serving("web");
-    let base = format!("http://127.0.0.1:{port}");
+    let service = serving("web");
+    let base = format!("http://127.0.0.1:{}", service.web);
     let mut session = agent().get(&format!("{base}/api/session")).call().unwrap();
     assert_eq!(session.status().as_u16(), 200);
     assert_eq!(
@@ -207,7 +228,7 @@ fn the_web_service_answers_and_stops_cleanly() {
         503,
         "no interface is built next to the test binary"
     );
-    assert_eq!(stop(child), Some(0));
+    assert_eq!(stop(service.child), Some(0));
 }
 
 #[test]
