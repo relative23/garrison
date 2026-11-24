@@ -416,6 +416,10 @@ Notable changes for operators and users. The format follows
   notification, which could hold a webhook's whole address and key.** The
   first collection run clears it from the status database; renew a key
   that showed there.
+- **A notification mail's sender is one mailbox, also where
+  `public_origin` is an IPv6 address or names a port.** Its name was not
+  quoted, so a mail program could read the From line as a group or find no
+  address in it.
 - **A state that a page does not know no longer stops it or reads as OK.**
   A page opened before an upgrade that brings a new state of a check failed
   on such a state and showed its error instead of its checks, and the

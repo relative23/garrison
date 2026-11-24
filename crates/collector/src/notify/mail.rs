@@ -94,6 +94,22 @@ fn header(value: &str) -> String {
     }
 }
 
+/// A display name as one word: a quoted string, since a phrase of atoms
+/// takes no colon or bracket, which a port and an IPv6 address bring (RFC
+/// 5322, 3.2.3), or an encoded word for text beyond ASCII, which may not
+/// stand within one (RFC 2047, 5).
+fn display_name(value: &str) -> String {
+    let line: String = value
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect();
+    if line.is_ascii() {
+        format!("\"{}\"", line.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        header(&line)
+    }
+}
+
 /// This installation's host from `name`, as `public_origin` names it,
 /// without its port: a greeting and a Message-ID name a host, never a port
 /// (RFC 5321, 4.1.1.1; RFC 5322, 3.6.4).
@@ -120,7 +136,7 @@ pub fn message(mail: &Mail, name: &str, subject: &str, text: &str, now: time::Ti
          MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\
          Content-Transfer-Encoding: base64\r\n\r\n{body}\r\n",
         host = host_name(name),
-        sender = header(&format!("Garrison on {name}")),
+        sender = display_name(&format!("Garrison on {name}")),
         from = mail.from,
         to = mail.to,
         subject = header(subject),

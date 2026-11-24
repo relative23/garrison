@@ -129,10 +129,9 @@ fn a_message_is_submitted_signed_in_and_its_text_arrives_as_written() {
     let end = lines.iter().position(|line| line == ".").unwrap();
     let (headers, body) =
         lines[5..end].split_at(lines[5..end].iter().position(String::is_empty).unwrap());
-    assert!(
-        headers
-            .contains(&"From: Garrison on garrison.example.org <garrison@example.test>".to_owned())
-    );
+    assert!(headers.contains(
+        &"From: \"Garrison on garrison.example.org\" <garrison@example.test>".to_owned()
+    ));
     assert!(headers.contains(&"Subject: Garrison on garrison.example.org: 1 failed".to_owned()));
     assert!(headers.contains(&"Auto-Submitted: auto-generated".to_owned()));
     assert!(headers.contains(&"Date: Thu, 29 Oct 2026 12:00:00 +0000".to_owned()));
@@ -369,4 +368,51 @@ fn an_origin_with_a_port_greets_with_its_host_alone() {
         lines.contains(&"Subject: Garrison on garrison.example.org:8443: test".to_owned()),
         "{lines:?}"
     );
+}
+
+/// The sender's name is one quoted word, so that the From line names one
+/// mailbox whatever `public_origin` names: a port or an IPv6 address, whose
+/// colons and brackets would make a group of it or no address at all (RFC
+/// 5322, 3.2.3 and 3.4). A name beyond ASCII is an encoded word.
+#[test]
+fn the_from_line_names_one_mailbox_for_every_origin() {
+    let from = |name: &str| {
+        message(&mail(465), name, "x", "y", now())
+            .lines()
+            .find(|line| line.starts_with("From: "))
+            .unwrap()
+            .to_owned()
+    };
+    for (name, line) in [
+        (
+            "garrison.example.org",
+            r#"From: "Garrison on garrison.example.org" <garrison@example.test>"#,
+        ),
+        (
+            "garrison.example.org:8443",
+            r#"From: "Garrison on garrison.example.org:8443" <garrison@example.test>"#,
+        ),
+        (
+            "192.0.2.1:8443",
+            r#"From: "Garrison on 192.0.2.1:8443" <garrison@example.test>"#,
+        ),
+        (
+            "[2001:db8::1]",
+            r#"From: "Garrison on [2001:db8::1]" <garrison@example.test>"#,
+        ),
+        (
+            "[2001:db8::1]:8443",
+            r#"From: "Garrison on [2001:db8::1]:8443" <garrison@example.test>"#,
+        ),
+        (
+            r#"a"b\c"#,
+            r#"From: "Garrison on a\"b\\c" <garrison@example.test>"#,
+        ),
+        (
+            "bücher.example",
+            "From: =?utf-8?B?R2Fycmlzb24gb24gYsO8Y2hlci5leGFtcGxl?= <garrison@example.test>",
+        ),
+    ] {
+        assert_eq!(from(name).trim_end(), line, "{name}");
+    }
 }
