@@ -47,17 +47,15 @@ Notable changes for operators and users. The format follows
   `https://hooks.example.org?key=…`, on which nothing ever went out, is
   refused by `check-config`, and with it the upgrade. Write
   `https://hooks.example.org/?key=…`.
-- Run `garrison stalwart setup` again after the upgrade: the collector's key
-  needs `sysDomainQuery` and `sysAccountQuery` now, to find the domains and
-  accounts the checks read. Until then the DNS records, Blocklists, Reverse
-  names and TLS certificates cards say that Stalwart did not give its
-  domains, and the Management API card that it refused `x:Account/query`.
+- **Run `garrison stalwart setup` again after the upgrade, as `garrison
+  doctor` says.** Until then the collector's key lacks `sysDomainQuery` and
+  `sysAccountQuery`, and the DNS records, Blocklists, Reverse names, TLS
+  certificates, Mailbox storage and Spam and ham by domain cards stay
+  Unknown without a notification.
 - **The first play of the Ansible role runs the installer and, where
   `garrison_stalwart_admin` is set, `garrison stalwart setup`, also on a host
   that an earlier release's role set up.** Stalwart must answer then, and that
   administrator must still work.
-  domains, the Management API card that it refused `x:Account/query`, and
-  the Spam and ham by domain card that it did not give its accounts.
 
 ### Added
 
