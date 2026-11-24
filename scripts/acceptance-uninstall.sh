@@ -86,6 +86,9 @@ installer '/root/release/bin/garrison install > /root/install-beside.log 2>&1'
 check "another program named garrison is left alone" \
     'test "$(cat /usr/bin/garrison)" = "another program" &&
         grep -q "/usr/bin/garrison is something else and was left alone" /root/install-beside.log'
+check "the first installation's steps name the include that keeps Stalwart's exporter private" \
+    'grep -q "include /etc/nginx/snippets/garrison-stalwart-server\*.conf;" /root/install-beside.log &&
+        grep -q "garrison nginx" /root/install-beside.log'
 inside 'rm /usr/bin/garrison'
 installer '/root/release/bin/garrison install'
 check "the next installation makes the link" \

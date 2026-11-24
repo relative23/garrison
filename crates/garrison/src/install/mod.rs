@@ -256,11 +256,12 @@ The release is installed, but Garrison is not configured yet.
   3. Create the access policy:   garrison access init
   4. Check everything:           garrison check-config
   5. Run the installer again to start the services.
-  6. Give Garrison a host name of its own (never Stalwart's) and include
-     /etc/nginx/snippets/garrison.conf in that HTTPS server block.
-     Optional, for a \"Switch to Garrison WebUI\" row in the Stalwart WebUI: add
-     include /etc/nginx/snippets/garrison-stalwart-switch*.conf;
-     inside the location that serves the Stalwart WebUI (/admin/).
+  6. Give Garrison a host name of its own (never Stalwart's):
+     `garrison nginx` prints its server block and the lines for Stalwart's.
+     Add
+       include /etc/nginx/snippets/garrison-stalwart-server*.conf;
+     to every server block that proxies to Stalwart: it keeps the metrics
+     exporter that step 2 turns on off the internet.
 
 The command is available as {command}.",
         target = target.display(),
