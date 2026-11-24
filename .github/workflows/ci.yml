@@ -191,6 +191,9 @@ jobs:
         run: |
           eval "$(cargo xtask lab start "$STALWART")"
           cargo test --workspace --locked --test contract -- --ignored
+      - name: What Stalwart logged last, where a contract test failed
+        if: failure()
+        run: docker logs --tail 300 garrison-lab-stalwart
       - if: always()
         run: cargo xtask lab stop
 
@@ -216,5 +219,8 @@ jobs:
           echo "Stalwart's newest release is $newest."
           eval "$(cargo xtask lab start newest)"
           cargo test --workspace --locked --test contract -- --ignored
+      - name: What Stalwart logged last, where a contract test failed
+        if: failure()
+        run: docker logs --tail 300 garrison-lab-stalwart
       - if: always()
         run: cargo xtask lab stop
