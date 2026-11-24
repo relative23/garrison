@@ -33,6 +33,7 @@ mod state;
 mod system;
 mod toml_text;
 mod uninstall;
+mod unpack;
 mod verify;
 
 use std::fs;

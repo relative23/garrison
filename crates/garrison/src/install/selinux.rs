@@ -50,21 +50,21 @@ fn loaded() -> bool {
     })
 }
 
-/// Load the module for the configured web port where SELinux is in use. A
-/// failure warns instead of stopping the installation: Garrison itself runs,
-/// and the warning names the broader way out. The file of the module as
-/// last loaded is written only after a load that succeeded, so that the
-/// next run tries again after one that failed.
-pub(super) fn install() -> Step {
+/// Load the module for the configured web port where SELinux is in use, and
+/// say whether it was loaded now. A failure warns instead of stopping the
+/// installation: Garrison itself runs, and the warning names the broader way
+/// out. The file of the module as last loaded is written only after a load
+/// that succeeded, so that the next run tries again after one that failed.
+pub(super) fn install() -> Step<bool> {
     if !enabled() {
-        return Ok(());
+        return Ok(false);
     }
     let port = config::load(&Path::new(CONFIG).join("garrison.toml"))
         .map_or(DEFAULT_PORT, |config| config.web.port);
     let text = module(port);
     let path = Path::new(MODULE);
     if loaded() && fs::read_to_string(path).is_ok_and(|current| current == text) {
-        return Ok(());
+        return Ok(false);
     }
     let loading = Path::new(LOADING);
     if let Some(folder) = loading.parent() {
@@ -76,7 +76,7 @@ pub(super) fn install() -> Step {
     ));
     let output = run(SEMODULE, &["-i", LOADING])?;
     if output.status.success() {
-        return io(fs::rename(loading, path), path);
+        return io(fs::rename(loading, path), path).map(|()| true);
     }
     let _ = fs::remove_file(loading);
     announce(&format!(
@@ -84,7 +84,7 @@ pub(super) fn install() -> Step {
          `setsebool -P httpd_can_network_connect 1` allows it more broadly.",
         said(&output)
     ));
-    Ok(())
+    Ok(false)
 }
 
 /// What semodule said of a load that failed, or how it ended where it said
