@@ -11,6 +11,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{PoisonError, RwLock, RwLockReadGuard};
 
 use garrison_stalwart::Error;
 use garrison_stalwart::ids::account_id_for_subject;
@@ -57,6 +58,16 @@ fn fetch(lab: &Lab, account_id: &str) -> (Account, BTreeMap<String, Role>, Authe
         roles,
         read(&authentication["list"][0]),
     )
+}
+
+/// The tests that create or remove accounts hold this shared while they
+/// run, their clean-up included; the test that counts every account of the
+/// server holds it alone: Stalwart lists the newest accounts first, so one
+/// added or removed meanwhile moves the others across a page.
+static ACCOUNTS: RwLock<()> = RwLock::new(());
+
+fn creating_accounts() -> RwLockReadGuard<'static, ()> {
+    ACCOUNTS.read().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn domain_id(lab: &Lab) -> String {
@@ -119,6 +130,7 @@ fn assert_equal(lab: &Lab, user: &User) -> BTreeSet<String> {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn default_admin_and_user_roles() {
+    let _accounts = creating_accounts();
     let mut lab = Lab::from_environment();
     for kind in ["Admin", "User"] {
         let user = make_user(
@@ -133,6 +145,7 @@ fn default_admin_and_user_roles() {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn custom_roles_with_inheritance_and_denial() {
+    let _accounts = creating_accounts();
     let mut lab = Lab::from_environment();
     let tag = unique();
     let parent = lab.create(
@@ -172,6 +185,7 @@ fn custom_roles_with_inheritance_and_denial() {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn account_level_overrides() {
+    let _accounts = creating_accounts();
     let mut lab = Lab::from_environment();
     for mode in ["Merge", "Replace"] {
         let user = make_user(
@@ -227,6 +241,7 @@ fn account_level_overrides() {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn oidc_subject_maps_to_account_id() {
+    let _accounts = creating_accounts();
     let mut lab = Lab::from_environment();
     let user = make_user(
         &mut lab,
@@ -295,6 +310,7 @@ fn keyed(lab: &mut Lab, tag: &str, permissions: &[&str]) -> JmapClient {
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn objects_beyond_the_500_of_one_get_are_listed_in_pages() {
+    let _alone = ACCOUNTS.write().unwrap_or_else(PoisonError::into_inner);
     let mut lab = Lab::from_environment();
     let tag = unique();
     let domain = domain_id(&lab);
@@ -351,6 +367,7 @@ const BROKER_PERMISSIONS: [&str; 4] = [
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn the_broker_key_reads_the_role_graph_it_evaluates() {
+    let _accounts = creating_accounts();
     let mut lab = Lab::from_environment();
     let tag = unique();
     let client = broker_client(&mut lab, &tag);
