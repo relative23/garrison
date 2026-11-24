@@ -347,15 +347,28 @@ fn the_selinux_module_is_judged_by_the_port_it_lets_nginx_reach() {
     assert!(on(&none, Some(Ok(cil(8091))), 8091).is_none());
 }
 
-/// Where the disk of a folder cannot be asked, the line says why.
+/// A folder not made yet, as /var/backups before the first backup on a
+/// distribution that has none, is judged by the disk of the nearest folder
+/// of it that exists, as the installer's room check judges it; where the
+/// disk cannot be asked, the line says why.
 #[test]
-fn free_space_that_cannot_be_asked_is_unknown_with_why() {
-    let found = room("/garrison-test-folder-that-is-not-there");
+fn free_space_is_judged_where_a_folder_will_be_made() {
+    let missing = room("/var/garrison-test-folder-that-is-not-there/backups");
+    assert_ne!(missing.level, Level::Unknown, "{}", missing.line());
+    assert!(
+        missing.what.starts_with(
+            "/var/garrison-test-folder-that-is-not-there/backups does not exist yet; /var, \
+             where it will be made, has "
+        ),
+        "{}",
+        missing.what
+    );
+    let found = room("/proc/self/status/garrison");
     assert_eq!(found.level, Level::Unknown, "{}", found.line());
     assert!(
         found
             .what
-            .starts_with("free space of /garrison-test-folder-that-is-not-there: "),
+            .starts_with("free space of /proc/self/status/garrison: "),
         "{}",
         found.what
     );

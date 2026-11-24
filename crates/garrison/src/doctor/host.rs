@@ -172,21 +172,36 @@ pub(super) fn synchronized(answer: Option<&str>) -> Finding {
     }
 }
 
-/// The room left on the disk of `path`.
+/// The room left on the disk of `path`, or, where it is not made yet, of
+/// the nearest folder of it that exists, where it will be made: the
+/// installer's room check judges it so.
 pub(super) fn room(path: &str) -> Finding {
-    match rustix::fs::statvfs(path) {
-        Ok(stat) => {
-            let free = stat.f_bavail.saturating_mul(stat.f_frsize) >> 20;
-            if free >= 1024 {
-                Finding::ok(format!("{path} has {free} MiB free"))
-            } else {
-                Finding::warn(
-                    format!("{path} has only {free} MiB free"),
-                    "Databases and backups grow; make room before the next upgrade.",
-                )
+    let mut at = Path::new(path);
+    let stat = loop {
+        match rustix::fs::statvfs(at) {
+            Ok(stat) => break stat,
+            Err(rustix::io::Errno::NOENT) if at.parent().is_some() => {
+                at = at.parent().unwrap_or(at);
             }
+            Err(error) => return Finding::unknown(format!("free space of {path}: {error}")),
         }
-        Err(error) => Finding::unknown(format!("free space of {path}: {error}")),
+    };
+    let free = stat.f_bavail.saturating_mul(stat.f_frsize) >> 20;
+    let shown = if at == Path::new(path) {
+        path.to_owned()
+    } else {
+        format!(
+            "{path} does not exist yet; {}, where it will be made,",
+            at.display()
+        )
+    };
+    if free >= 1024 {
+        Finding::ok(format!("{shown} has {free} MiB free"))
+    } else {
+        Finding::warn(
+            format!("{shown} has only {free} MiB free"),
+            "Databases and backups grow; make room before the next upgrade.",
+        )
     }
 }
 

@@ -1872,6 +1872,9 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` reads the port of the SELinux module SELinux has
   loaded**, no longer that of the file the installer writes before it loads
   it, and names the `semodule -i` that repeats a load that failed.
+- **`garrison doctor` judges the free space where `/var/backups` will be
+  made** on a host that has none yet, as the installer does, where it was
+  unknown until the first upgrade.
 
 ## [0.1.2] - 2026-11-13
 

@@ -292,7 +292,8 @@ pub(super) fn clock_unsynchronized() -> Broken {
 pub(super) fn space_unknown() -> Broken {
     Broken {
         host: "free space that cannot be asked",
-        found: vec![host::room("/garrison-test-folder-that-is-not-there")],
+        // A path through a file, whose disk statvfs cannot be asked.
+        found: vec![host::room("/proc/self/status/garrison")],
         said: "free space of".into(),
         fix: None,
     }
