@@ -53,8 +53,8 @@ export function answers(): Record<string, Route> {
   };
 }
 
-/** Every page: each module's and each section's, and each module's with a
- * detail, which the pages that show one take (`explore` finds which). */
+/** Every page: each module's and each section's. A page that shows a
+ * detail, such as a delivery's queue, is opened as `<page>/${DETAIL}`. */
 export const PAGES = [...Object.keys(VIEWS), ...Object.keys(SECTIONS)];
 
 /** Loads the code of every view first, so a page renders at once. */
@@ -97,7 +97,7 @@ function scopeOf(scope: Step["scope"]): Element[] {
   const main = document.querySelector("main");
   if (scope === "dialog") return [...document.querySelectorAll("dialog[open]")];
   if (scope === "main") return main ? [main] : [];
-  // The frame is the page without its content: header, menu and dialogs closed.
+  // The frame is the page without its content: the header and the menu.
   return [...document.querySelectorAll("header, aside")];
 }
 
@@ -183,7 +183,7 @@ export async function explore(page: string, frame: boolean): Promise<Found[]> {
   return [...found].map(([key, steps]) => ({ key, steps }));
 }
 
-/** A request as the explorer names it: "METHOD path", and the steps to it. */
+/** The steps to a request, as a test's message names them. */
 export function describeSteps(steps: Step[]): string {
   return steps.length === 0 ? "on opening" : `after ${steps.map((step) => step.name).join(" › ")}`;
 }
