@@ -1,7 +1,7 @@
 // Two tabs of one browser, in the flows (flows.mjs). They share the session
 // cookie, and each follows what the other does, without a reload: a theme
-// saved in one, a sign-out, and a sign-in made while the other says that the
-// session has ended. A change of rights reaches the menu with the next
+// saved in one, settings saved in one while both show Settings, a sign-out,
+// and a sign-in made while the other says that the session has ended. A change of rights reaches the menu with the next
 // refresh of the status, and the session read that brings it asks the broker
 // nothing: the preview's broker (examples/preview/fakes.rs) counts its
 // questions and lets the flows change the rights it grants. A session whose
@@ -39,6 +39,30 @@ export async function twoTabs(shared, page) {
       });
       expect(await within(taken), `a theme saved in one tab is taken by the other at once (${wanted ? "dark" : "light"})`);
     }
+
+    at("settings saved in another tab");
+    // Both on Settings: what one saves, the other's boxes follow, and a save
+    // there keeps it.
+    for (const tab of [first, second]) await tab.goto(`${origin}/admin/preferences`);
+    await Promise.all([first.waitForLoadState("networkidle"), second.waitForLoadState("networkidle")]);
+    const saveIn = async (tab) => {
+      await tab.getByRole("button", { name: "Save settings" }).click();
+      await tab.getByText("Settings saved.").waitFor();
+    };
+    await second.getByRole("checkbox", { name: "Backups" }).uncheck();
+    await saveIn(second);
+    const followed = first.waitForFunction(() => document.querySelector('input[name="backups"]')?.checked === false, null, {
+      timeout: 3000,
+    });
+    expect(await within(followed), "the other tab's Settings page follows what one saved");
+    await saveIn(first);
+    const { session } = await (await first.request.get(`${origin}/api/session`)).json();
+    expect(session?.preferences.hiddenModules.includes("backups"), "a save in one tab keeps what the other saved");
+    await second.getByRole("checkbox", { name: "Backups" }).check();
+    await saveIn(second);
+    await first.goto(`${origin}/admin/services`);
+    await second.goto(`${origin}/admin/account`);
+    await Promise.all([first.waitForLoadState("networkidle"), second.waitForLoadState("networkidle")]);
 
     at("a sign-out in another tab");
     // A tab's refresh that leaves just before it hears of the sign-out is

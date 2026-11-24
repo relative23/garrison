@@ -256,8 +256,9 @@ a viewer; it takes a module from the
 profile and gives it back while a page is open, through the preview's broker
 (`crates/web/examples/preview/fakes.rs`), whose questions it counts: the menu
 must follow with the next refresh, at one question each; and in two tabs it
-saves a theme, signs out and signs in again, each of which the other tab
-must follow at once, and a tab whose read of the session the policy refuses
+saves a theme, saves settings while both show Settings, signs out and signs
+in again, each of which the other tab must follow at once, and a tab whose
+read of the session the policy refuses
 must say that the session has ended. It fails on an error in the console, a
 failed request
 other than those, a finding of axe (WCAG 2.2 AA, in the light and the dark
