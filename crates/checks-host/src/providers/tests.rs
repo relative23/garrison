@@ -159,13 +159,23 @@ fn host_resources_come_from_proc_files() {
     assert_eq!(value_of(observation, "Uptime"), &json!(12345));
     assert_eq!(value_of(observation, "Memory total"), &json!(1_024_000));
     assert_eq!(report.gauges["load_1m"], 0.52);
+    // A file that cannot be read costs only its own values, and says so.
     std::fs::remove_file(proc.join("uptime")).unwrap();
-    let unknown = provider
+    let without = provider
         .collect(&context(&config, &runner))
         .unwrap()
         .observations
         .remove(0);
-    assert_eq!(unknown.state, State::Unknown);
+    assert_eq!(without.state, State::Warning);
+    assert_eq!(
+        without.findings[0],
+        "uptime could not be read: No such file or directory (os error 2)."
+    );
+    assert_eq!(value_of(&without, "Uptime"), &Value::Null);
+    assert_eq!(
+        value_of(&without, "Load (1 / 5 / 15 min)"),
+        &json!("0.52 / 0.58 / 0.59")
+    );
 }
 
 /// The webmail plugins card for the plugins `named` in a Bulwark folder at
