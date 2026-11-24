@@ -8,7 +8,7 @@ use garrison_stalwart::ids::decode_native_id;
 use garrison_testing::lab::Lab;
 use serde_json::{Value, json};
 
-use super::{run, text};
+use super::{run, states, text};
 
 /// bind-role of the role `init` bound in `directory`, which meets its
 /// profile; of an ID Stalwart has no role of, and of one that is none of its
@@ -25,10 +25,10 @@ pub(crate) fn bind_role(lab: &Lab, directory: &Path) {
     let said = text(&bound);
     assert_eq!(bound.status.code(), Some(0), "{said}");
     // A note that the broker cannot read the file is this host's, not the role's.
+    let noted = states(&bound);
     assert!(
-        said.contains("Saved ")
-            && !said.contains("Note: role")
-            && !said.contains("cannot be evaluated"),
+        noted.contains(&"access-saved".to_owned())
+            && !noted.iter().any(|state| state.starts_with("access-role-")),
         "{said}"
     );
     for unknown in ["zzzzzzzz", "no-such-role"] {
@@ -39,7 +39,7 @@ pub(crate) fn bind_role(lab: &Lab, directory: &Path) {
         let said = text(&refused);
         assert_eq!(refused.status.code(), Some(1), "{said}");
         assert!(
-            said.contains(&format!("Stalwart has no role {unknown}:")),
+            states(&refused) == ["access-no-role"] && said.contains(unknown),
             "{said}"
         );
     }
