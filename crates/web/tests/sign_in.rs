@@ -47,12 +47,13 @@ async fn sign_in_uses_pkce_a_browser_bound_state_and_the_issuer() {
     };
     let issuer = "https%3A%2F%2Fmail.example.test";
     let short = format!("{state}.{}", &verifier[..42]);
-    // Another state, a cookie without a verifier, a malformed verifier, another issuer.
-    for (cookie, state, issuer) in [
-        (value.as_str(), "other", issuer),
-        (state, state, issuer),
-        (short.as_str(), state, issuer),
-        (value.as_str(), state, "https%3A%2F%2Fevil.example"),
+    // Another state, which leaves the cookie to its own sign-in; a cookie
+    // without a verifier, a malformed verifier, another issuer.
+    for (cookie, state, issuer, removed) in [
+        (value.as_str(), "other", issuer, false),
+        (state, state, issuer, true),
+        (short.as_str(), state, issuer, true),
+        (value.as_str(), state, "https%3A%2F%2Fevil.example", true),
     ] {
         setup
             .client
@@ -63,7 +64,11 @@ async fn sign_in_uses_pkce_a_browser_bound_state_and_the_issuer() {
             refused.header("location").ends_with("login_error=1"),
             "{cookie}"
         );
-        assert!(refused.header("set-cookie").contains("Max-Age=0"));
+        assert_eq!(
+            refused.header("set-cookie").contains("Max-Age=0"),
+            removed,
+            "{cookie}"
+        );
     }
     assert!(setup.provider.verifiers.lock().unwrap().is_empty());
     setup
@@ -291,6 +296,42 @@ async fn the_callback_needs_the_state_in_both_url_and_cookie() {
     assert!(setup.provider.verifiers.lock().unwrap().is_empty());
 }
 
+/// Two sign-ins begun in one browser, as from two tabs on the sign-in page:
+/// the login cookie is the one begun last. The other one's callback, or one
+/// that a page made up, is not this cookie's sign-in, so it leaves the cookie
+/// for the callback it belongs to.
+#[tokio::test]
+async fn a_callback_of_another_sign_in_leaves_the_one_begun_last() {
+    let mut setup = setup();
+    let issuer = "iss=https%3A%2F%2Fmail.example.test";
+    let first = login(&mut setup.client).await["state"].clone();
+    let last = login(&mut setup.client).await["state"].clone();
+    for state in [first.as_str(), "made-up"] {
+        let answer = setup
+            .client
+            .get(&format!(
+                "/auth/callback?state={state}&code=code-admin&{issuer}"
+            ))
+            .await;
+        assert_eq!(
+            answer.header("location"),
+            "/admin/?login_error=1",
+            "{state}"
+        );
+        assert_eq!(answer.header("set-cookie"), "", "{state}");
+    }
+    assert!(setup.provider.verifiers.lock().unwrap().is_empty());
+    let answer = setup
+        .client
+        .get(&format!(
+            "/auth/callback?state={last}&code=code-admin&{issuer}"
+        ))
+        .await;
+    assert_eq!(answer.header("location"), "/admin/");
+    assert!(setup.client.get(&api("session")).await.json()["session"].is_object());
+    assert!(!setup.client.cookies.contains_key(STATE_COOKIE));
+}
+
 #[tokio::test]
 async fn a_session_lasts_the_configured_minutes_at_most() {
     let mut setup = setup();
@@ -371,8 +412,9 @@ async fn a_token_whose_session_could_not_be_stored_is_revoked() {
 
 /// A browser comes to the sign-in routes, not the interface: whatever keeps
 /// a sign-in from its session ends on the sign-in page with a reason it
-/// explains, the login cookie removed, never on an answer of the API. Each
-/// way the two routes can refuse or fail is asked here.
+/// explains, never on an answer of the API, and the login cookie removed,
+/// but by another sign-in's callback, which leaves it to its own. Each way
+/// the two routes can refuse or fail is asked here.
 #[tokio::test]
 async fn every_sign_in_without_a_session_ends_on_the_sign_in_page() {
     let mut setup = setup();
@@ -429,7 +471,12 @@ async fn every_sign_in_without_a_session_ends_on_the_sign_in_page() {
             ),
             "{case}"
         );
-        assert!(answer.header("set-cookie").contains("Max-Age=0"), "{case}");
+        let kept = case == "another state";
+        assert_eq!(
+            answer.header("set-cookie").contains("Max-Age=0"),
+            !kept,
+            "{case}"
+        );
     }
     // A sign-in that does not start from the page gets no login cookie.
     let answer = setup

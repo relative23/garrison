@@ -1862,6 +1862,9 @@ Notable changes for operators and users. The format follows
   the installer runs again. A policy that names one garrison.toml does not
   have is refused by `check-config` and the installer with its name and
   `garrison access update`.
+- **Of two sign-ins begun in one browser, as from two tabs, the one begun
+  last completes**; the other's return, or one a page made up, no longer
+  ends it.
 
 ## [0.1.2] - 2026-11-13
 

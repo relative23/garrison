@@ -223,7 +223,15 @@ async fn callback(
     let Some((expected, verifier)) = cookie.split_once('.') else {
         return failure();
     };
-    if state.is_empty() || !constant_time::eq(state, expected) || !is_verifier(verifier) {
+    // Another sign-in's callback, as of one begun before in this browser or
+    // one a page made up, leaves the login cookie to its own.
+    if state.is_empty() || !constant_time::eq(state, expected) {
+        return redirect(&format!(
+            "{INTERFACE}/?login_error={}",
+            Ended::Failed.reason()
+        ));
+    }
+    if !is_verifier(verifier) {
         return failure();
     }
     // Only a matching state reaches Stalwart, so only it uses the budget.
