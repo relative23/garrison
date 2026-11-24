@@ -441,6 +441,11 @@ fn networks_are_written_in_canonical_form() {
     assert_eq!(network("172.17.0.0/16").unwrap(), "172.17.0.0/16");
     assert_eq!(network("10.1.2.3").unwrap(), "10.1.2.3/32");
     assert_eq!(network("fd00::/8").unwrap(), "fd00::/8");
-    assert!(network("172.17.0.1/16").is_err());
-    assert!(network("nonsense").is_err());
+    assert_eq!(
+        network("172.17.0.1/16"),
+        Err(states::network_host_bits("172.17.0.1/16"))
+    );
+    for invalid in ["nonsense", "10.1.2.3/x"] {
+        assert_eq!(network(invalid), Err(states::network_invalid(invalid)));
+    }
 }

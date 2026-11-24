@@ -16,7 +16,8 @@ use garrison_stalwart::http::Request;
 use super::objects::{
     Created, Enabled, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, Stored,
 };
-use super::{Admin, MAX_ANSWER, limited, restart, say, unreadable, write_secret};
+use super::{Admin, MAX_ANSWER, limited, restart, say, states, unreadable, write_secret};
+use crate::state::State;
 
 /// One of the keys: its file, as the broker or the collector reads it, its
 /// description in Stalwart, what it may do, and whether a running service
@@ -405,25 +406,21 @@ fn tried(config: &Config, key: &Key) -> Result<(), String> {
 }
 
 /// A network as `address/prefix`; the host part must be zero.
-pub(super) fn network(text: &str) -> Result<String, String> {
+pub(super) fn network(text: &str) -> Result<String, State> {
     let (address, prefix) = text.split_once('/').unwrap_or((text, ""));
-    let address: IpAddr = address
-        .parse()
-        .map_err(|_| format!("invalid network {text}"))?;
+    let address: IpAddr = address.parse().map_err(|_| states::network_invalid(text))?;
     let bits = if address.is_ipv4() { 32 } else { 128 };
     let prefix: u32 = if prefix.is_empty() {
         bits
     } else {
-        prefix
-            .parse()
-            .map_err(|_| format!("invalid network {text}"))?
+        prefix.parse().map_err(|_| states::network_invalid(text))?
     };
     let host_bits_zero = match address {
         IpAddr::V4(v4) => prefix <= 32 && (prefix == 32 || u32::from(v4) << prefix == 0),
         IpAddr::V6(v6) => prefix <= 128 && (prefix == 128 || u128::from(v6) << prefix == 0),
     };
     if !host_bits_zero {
-        return Err(format!("{text} has host bits set"));
+        return Err(states::network_host_bits(text));
     }
     Ok(format!("{address}/{prefix}"))
 }

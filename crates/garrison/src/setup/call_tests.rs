@@ -2,6 +2,7 @@
 //! release does not read: the method, what was wrong, and where the
 //! supported Stalwart releases are named.
 
+use garrison_core::files::ProtectedFileError;
 use garrison_testing::http::{answer, serve};
 use serde::de::IgnoredAny;
 use serde_json::json;
@@ -104,13 +105,14 @@ fn a_failure_names_the_run_that_mends_it() {
         &Source::File(missing.clone()),
         &asked("garrison stalwart setup --rotate"),
     );
+    let unavailable = ProtectedFileError::Unavailable(missing);
     assert_eq!(
         unread,
-        Err(format!(
-            "Protected file is unavailable: {}. Run `garrison stalwart setup --rotate` again \
-             once this is mended.",
-            missing.display()
-        ))
+        Err(states::again(
+            states::file_unread(unavailable),
+            "garrison stalwart setup --rotate"
+        )
+        .to_string())
     );
 }
 

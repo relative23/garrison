@@ -48,6 +48,7 @@ mod keys;
 mod milter;
 mod objects;
 mod restart;
+mod states;
 mod webhook;
 
 const BROKER_PERMISSIONS: [&str; 4] = [
@@ -116,6 +117,7 @@ struct Asked<'a> {
 }
 
 fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), String> {
+    let again = |state| states::again(state, asked.again).to_string();
     let mended = |error: String| {
         let again = asked.again;
         format!(
@@ -123,12 +125,12 @@ fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), Stri
             error.trim_end_matches('.')
         )
     };
-    let admin = Admin::new(config, source.authorization().map_err(mended)?);
+    let admin = Admin::new(config, source.authorization().map_err(again)?);
     // Keys work only from these networks: loopback, and for test setups such as
     // the contract lab's Docker bridge whatever --allow-network adds.
     let mut networks = Enabled::of(LOOPBACK);
     for text in asked.allowed {
-        networks.insert(keys::network(text).map_err(mended)?);
+        networks.insert(keys::network(text).map_err(again)?);
     }
     configure(&admin, config, asked, &networks).map_err(mended)?;
     source.finish();
@@ -275,13 +277,13 @@ fn run_as(config: &Config, command: &Command, again: Option<&str>) -> u8 {
     });
     let source = match Source::of(admin_credential.as_deref()) {
         Ok(source) => source,
-        Err(message) => {
-            crate::complain(&message);
+        Err(state) => {
+            crate::complain(&state.to_string());
             return 2;
         }
     };
-    if let Err((code, message)) = writable(&config.credentials_directory, again) {
-        crate::complain(&message);
+    if let Err((code, state)) = writable(&config.credentials_directory, again) {
+        crate::complain(&state.to_string());
         return code;
     }
     folder::sweep(&config.credentials_directory);

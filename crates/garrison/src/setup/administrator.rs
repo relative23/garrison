@@ -14,6 +14,8 @@ use garrison_core::files::{Privacy, read_private};
 use garrison_core::json;
 use serde::Deserialize;
 
+use super::states;
+use crate::state::State;
 use crate::{complain, say};
 
 const LIMIT: usize = 16384;
@@ -31,34 +33,29 @@ pub(super) enum Source {
 }
 
 impl Source {
-    pub(super) fn of(argument: Option<&Path>) -> Result<Self, String> {
+    pub(super) fn of(argument: Option<&Path>) -> Result<Self, State> {
         match argument {
             Some(path) if path == Path::new("-") => Ok(Self::Input),
             Some(path) => Ok(Self::File(path.to_owned())),
             None if crate::at_terminal() => Ok(Self::Terminal),
-            None => Err(
-                "Name the Stalwart administrator: run this at a terminal to be asked, \
-                         or pass --admin-credential - with the JSON on standard input, \
-                         or --admin-credential FILE."
-                    .into(),
-            ),
+            None => Err(states::no_administrator()),
         }
     }
 
     /// The value of the `Authorization` header for the management API.
-    pub(super) fn authorization(&self) -> Result<String, String> {
+    pub(super) fn authorization(&self) -> Result<String, State> {
         match self {
-            Self::File(path) => document(
-                &read_private(path, LIMIT, Privacy::Owned).map_err(|error| error.to_string())?,
-            ),
+            Self::File(path) => {
+                document(&read_private(path, LIMIT, Privacy::Owned).map_err(states::file_unread)?)
+            }
             Self::Input => {
                 let mut data = Vec::new();
                 io::stdin()
                     .take(LIMIT as u64 + 1)
                     .read_to_end(&mut data)
-                    .map_err(|error| format!("standard input: {error}"))?;
+                    .map_err(states::input_unread)?;
                 if data.len() > LIMIT {
-                    return Err("The administrator on standard input is too long.".into());
+                    return Err(states::administrator_too_long());
                 }
                 document(&data)
             }
@@ -105,12 +102,12 @@ enum Credential {
 }
 
 /// `{"username","secret"}` or `{"apiKey"}`.
-fn document(data: &[u8]) -> Result<String, String> {
-    let value = json::parse(data, LIMIT).map_err(|error| error.to_string())?;
+fn document(data: &[u8]) -> Result<String, State> {
+    let value = json::parse(data, LIMIT).map_err(states::administrator_not_json)?;
     match json::object(value) {
         Ok(Credential::Password { username, secret }) => Ok(basic(&username, &secret)),
         Ok(Credential::ApiKey { api_key }) => Ok(format!("Bearer {api_key}")),
-        Err(_) => Err(r#"The administrator needs {"username","secret"} or {"apiKey"}"#.into()),
+        Err(_) => Err(states::administrator_unusable()),
     }
 }
 
@@ -118,7 +115,7 @@ fn basic(user: &str, secret: &str) -> String {
     format!("Basic {}", STANDARD.encode(format!("{user}:{secret}")))
 }
 
-fn asked() -> Result<String, String> {
+fn asked() -> Result<String, State> {
     say("The Stalwart administrator for this setup; it is used once and stored nowhere.");
     let mut terminal = io::stdout().lock();
     let _ = write!(terminal, "User name (empty for an API key): ");
@@ -128,7 +125,7 @@ fn asked() -> Result<String, String> {
     io::stdin()
         .lock()
         .read_line(&mut user)
-        .map_err(|error| format!("standard input: {error}"))?;
+        .map_err(states::input_unread)?;
     let user = user.trim();
     if user.is_empty() {
         Ok(format!("Bearer {}", secret("API key:")?))
@@ -137,17 +134,17 @@ fn asked() -> Result<String, String> {
     }
 }
 
-fn secret(prompt: &str) -> Result<String, String> {
+fn secret(prompt: &str) -> Result<String, State> {
     let output = Command::new(ASK)
         .args(["--timeout=0", prompt])
         .stdin(Stdio::inherit())
         .stderr(Stdio::inherit())
         .output()
-        .map_err(|error| format!("{ASK}: {error}"))?;
+        .map_err(|error| states::ask_failed(ASK, error))?;
     let text = String::from_utf8(output.stdout).unwrap_or_default();
     let secret = text.trim_end_matches(['\r', '\n']);
     if !output.status.success() || secret.is_empty() {
-        return Err("No secret was entered; nothing was changed.".into());
+        return Err(states::no_secret());
     }
     Ok(secret.to_owned())
 }
@@ -189,10 +186,14 @@ mod tests {
         ] {
             assert_eq!(
                 document(unusable).unwrap_err(),
-                r#"The administrator needs {"username","secret"} or {"apiKey"}"#
+                states::administrator_unusable()
             );
         }
-        assert!(document(b"not json").is_err());
+        let not_json = json::parse(b"not json", LIMIT).unwrap_err();
+        assert_eq!(
+            document(b"not json").unwrap_err(),
+            states::administrator_not_json(not_json)
+        );
     }
 
     #[test]
