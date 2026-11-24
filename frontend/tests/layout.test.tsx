@@ -129,6 +129,12 @@ describe("header", () => {
     expect(link.hasAttribute("target")).toBe(false);
   });
 
+  it("offers no switch until the user turns the rows on, as at a first sign-in", () => {
+    // The web service's settings for a user who saved none (models.rs: show_switch defaults to false).
+    show("dashboard", session({ preferences: { theme: "system", hiddenModules: [], showSwitch: false } }));
+    expect(screen.queryByRole("link", { name: "Switch to Stalwart WebUI" })).toBeNull();
+  });
+
   it("offers no switch when no Stalwart WebUI address is configured", () => {
     show("dashboard", session({ links: { admin: "", other: {} } }));
     expect(screen.queryByRole("link", { name: "Switch to Stalwart WebUI" })).toBeNull();
