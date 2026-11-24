@@ -183,7 +183,10 @@ impl Gate {
 
     /// The gate with what revokes the token of a session that ends here.
     #[must_use]
-    pub(crate) fn revoking_with(mut self, revoke: impl Fn(&str) -> bool + Send + Sync + 'static) -> Self {
+    pub(crate) fn revoking_with(
+        mut self,
+        revoke: impl Fn(&str) -> bool + Send + Sync + 'static,
+    ) -> Self {
         self.revoke = Some(Box::new(revoke));
         self
     }
