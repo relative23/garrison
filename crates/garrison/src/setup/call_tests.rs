@@ -43,8 +43,8 @@ fn an_answer_this_release_does_not_read_is_said_as_one() {
 }
 
 /// Stalwart answers a wrong password, an unknown user and an API key it
-/// does not know 401 (measured on Stalwart 1.1.0): setup says that the
-/// administrator was refused and what to check, where it said
+/// does not know 401 (measured on Stalwart 1.1.0 and 1.2.0): setup says
+/// that the administrator was refused and what to check, where it said
 /// "x:ApiKey/get: HTTP 401". A credential it knows from an address it does
 /// not take it from is answered 403.
 #[test]

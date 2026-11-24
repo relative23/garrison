@@ -200,7 +200,8 @@ fn configure(
         say(&format!("- {step}"));
     }
     // Stalwart uses what it holds of these from its next reload of its
-    // settings on, and shows no read of what it uses: after a run stopped
+    // settings on (measured on Stalwart 1.2.0: a signature key and a scrape
+    // credential), and shows no read of what it uses: after a run stopped
     // between a change and the reload, only a reload makes it take what it
     // holds, so every run asks for one.
     let reload = admin.set("x:Action/set", &Set::create(Action::ReloadSettings));

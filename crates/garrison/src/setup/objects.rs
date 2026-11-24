@@ -71,7 +71,7 @@ impl<'a, T> Set<'a, T> {
 /// The arguments of a method on the objects of another account than the
 /// administrator's own, `account`, or on its own where that is `None`. An
 /// administrator lists and changes only its own account's API keys unless
-/// it names another (measured on Stalwart 1.1.0).
+/// it names another (measured on Stalwart 1.1.0 and 1.2.0).
 #[derive(Debug, Serialize)]
 pub(super) struct In<'a, T> {
     #[serde(rename = "accountId", skip_serializing_if = "Option::is_none")]

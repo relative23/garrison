@@ -131,7 +131,7 @@ pub(super) struct Found {
 /// of an account and could not remove there is found while any file names
 /// that account. The keys setup makes are the administrator's that made
 /// them, and an administrator lists only its own account's keys unless it
-/// names another (Stalwart 1.1.0).
+/// names another (measured on Stalwart 1.1.0 and 1.2.0).
 pub(super) fn find(
     admin: &Admin,
     directory: &Path,
@@ -223,7 +223,7 @@ pub(super) fn find(
 /// Whether Stalwart refused a new object for its account's quota, as
 /// `Admin::call` words a refusal: JMAP's error type `overQuota` (RFC 8620),
 /// which Stalwart gives where an account holds as many API keys as it may,
-/// five (measured on Stalwart 1.1.0).
+/// five (measured on Stalwart 1.1.0 and 1.2.0).
 fn over_quota(error: &str) -> bool {
     error.contains(r#""type":"overQuota""#)
 }
@@ -291,8 +291,9 @@ pub(super) fn settle(
     Ok(true)
 }
 
-/// `networks` as Stalwart 1.1.0 shows a key's: a single address without
-/// its prefix. A key that Stalwart shows as setup wrote it is held as well.
+/// `networks` as Stalwart shows a key's: a single address without its
+/// prefix (measured on Stalwart 1.1.0 and 1.2.0). A key that Stalwart shows
+/// as setup wrote it is held as well.
 fn as_shown(networks: &Enabled) -> Enabled {
     Enabled::of(networks.names().map(|network| {
         let single = if network.contains(':') { "/128" } else { "/32" };
@@ -370,10 +371,10 @@ fn refused(error: &str, description: &str) -> String {
 
 /// The key in its file opens a JMAP session from this host, as its service
 /// will use it. Stalwart answers a key it knows from an address the key
-/// does not allow 403 (measured on Stalwart 1.1.0). In a container's bridge
-/// network Stalwart sees this host as the bridge's gateway, not as
-/// 127.0.0.1, and then every key is refused. That is said here, at setup,
-/// rather than found later in the collector's results.
+/// does not allow 403 (measured on Stalwart 1.1.0 and 1.2.0). In a
+/// container's bridge network Stalwart sees this host as the bridge's
+/// gateway, not as 127.0.0.1, and then every key is refused. That is said
+/// here, at setup, rather than found later in the collector's results.
 fn tried(config: &Config, key: &Key) -> Result<(), String> {
     let url = format!("{}/jmap/session", config.deployment.stalwart_url);
     let name = key.file;

@@ -162,10 +162,10 @@ fn a_key_file_that_holds_no_key_gets_a_new_one() {
     );
 }
 
-/// A kept key whose rights Stalwart shows as setup gives them is left as
-/// it is, and only tried: its networks as setup wrote them or as Stalwart
-/// 1.1.0 shows them, a single address without its prefix. One with other
-/// rights is updated.
+/// A kept key whose rights Stalwart shows as setup gives them is left as it
+/// is, and only tried: its networks as setup wrote them or as Stalwart
+/// 1.1.0 and 1.2.0 show them, a single address without its prefix. One with
+/// other rights is updated.
 #[test]
 fn a_kept_key_with_its_rights_is_left_as_it_is() {
     let directory = tempfile::tempdir().unwrap();
@@ -304,9 +304,9 @@ fn a_new_key_is_taken_up_before_the_old_one_goes() {
     assert_eq!(requests.len(), 4);
 }
 
-/// Stalwart holds at most five keys for an account. Where a new key finds
-/// no room, nothing of that key changes, none goes first, and setup names
-/// the keys of the account, of which one is to be removed.
+/// Stalwart 1.1.0 and 1.2.0 hold at most five keys for an account. Where a
+/// new key finds no room, nothing of that key changes, none goes first, and
+/// setup names the keys of the account, of which one is to be removed.
 #[test]
 fn a_full_quota_changes_nothing_and_names_the_keys() {
     let directory = tempfile::tempdir().unwrap();

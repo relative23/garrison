@@ -56,7 +56,7 @@ impl Admin {
         match answer.status {
             200 => {}
             // A wrong password, an unknown user and an API key Stalwart does
-            // not know (measured on Stalwart 1.1.0).
+            // not know (measured on Stalwart 1.1.0 and 1.2.0).
             401 => {
                 return Err(
                     "Stalwart refused the administrator (HTTP 401): check the user name \

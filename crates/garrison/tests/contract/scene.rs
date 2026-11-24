@@ -221,8 +221,8 @@ impl Scene {
     }
 
     /// Before the stops of `kind`. The operators' own keys fill the account
-    /// the runs of a full kind make their keys in: Stalwart takes five API
-    /// keys an account and refuses the sixth for its quota.
+    /// the runs of a full kind make their keys in: Stalwart 1.1.0 and 1.2.0
+    /// take five API keys an account and refuse the sixth for its quota.
     pub(super) fn enter(&mut self, kind: Kind, setup: &Setup, lab: &mut Lab) {
         let credentials = setup.directory.join("credentials");
         self.forget(lab, &credentials);

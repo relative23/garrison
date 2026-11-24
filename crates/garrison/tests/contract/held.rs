@@ -132,8 +132,8 @@ pub(super) fn apart(
         faults.push("the running broker holds a key Stalwart no longer takes".to_owned());
     }
     // The key Stalwart signs with can change once it was given one, which
-    // Stalwart 1.1.0 takes only at a reload, and the receiver's only when it
-    // starts again.
+    // Stalwart 1.1.0 and 1.2.0 take only at a reload, and the receiver's only
+    // when it starts again.
     let given = |asked: &String| asked == RELOAD || asked.starts_with("x:WebHook/set");
     let changed = run.asked.iter().any(given) || names_the_restart(run.said, UNITS[1]);
     let window = run.request == RELOAD
