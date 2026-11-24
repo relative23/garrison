@@ -4,6 +4,7 @@
 //! report of another repository, or of one that is not known, keeps
 //! neither, since the card would show them as this repository's.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
@@ -266,6 +267,12 @@ fn reports(tool: &str) -> Vec<Way> {
             case.checked(&HERE, &id(""));
             Some(case.run(&HERE, &id(OLD)))
         }),
+        way("a report another user could have changed", false, |case| {
+            case.checked(&HERE, &id(OLD));
+            let open = std::fs::Permissions::from_mode(0o666);
+            std::fs::set_permissions(&case.report, open).unwrap();
+            Some(case.run(&HERE, &id(OLD)))
+        }),
         way("a link to a report of the repository", false, |case| {
             case.checked(&HERE, &id(OLD));
             let elsewhere = case.report.with_file_name("elsewhere.json");
@@ -425,6 +432,13 @@ fn a_run_says_why_it_keeps_nothing_and_names_what_the_file_names() {
     assert_eq!(
         text(&earlier.stderr),
         format!("The last report, {to}, holds no repository ID: {lost}")
+    );
+    case.checked(&HERE, &id(OLD));
+    let open = std::fs::Permissions::from_mode(0o666);
+    std::fs::set_permissions(&case.report, open).unwrap();
+    assert_eq!(
+        text(&case.run(&HERE, &id(OLD)).stderr),
+        format!("The last report, {to}, can be changed by users other than root: {lost}")
     );
     // restic's repository file names it by what it holds, as restic reads
     // it, and by itself where it cannot be read.

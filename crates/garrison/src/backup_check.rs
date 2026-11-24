@@ -20,7 +20,7 @@ use garrison_collector::backups::{
     MAX_REPORT, Report, Run, Snapshots, Tool, borg_archives, borg_id, borg_size, named, restic_id,
     restic_size, restic_snapshots,
 };
-use garrison_core::files::{atomic_write, read_json};
+use garrison_core::files::{atomic_write, changed_only_by_trusted, read_json_with_metadata};
 use garrison_core::{json, time};
 
 use crate::{complain, say};
@@ -219,11 +219,24 @@ impl Repository {
 
 /// The report the last run wrote, read as the collector reads it: no link
 /// followed, nothing but a regular file opened, no more than a report's size
-/// read. `--report` may name a place others can write to.
+/// read, and none that a user other than root could have changed, since
+/// `--report` may name a place others can write to.
 fn last_report(path: &Path) -> Option<Report> {
     // Only to say nothing where there is none yet.
     fs::symlink_metadata(path).ok()?;
-    let report = read_json(path, MAX_REPORT).and_then(|value| json::object(value).ok());
+    let read = read_json_with_metadata(path, MAX_REPORT);
+    if read
+        .as_ref()
+        .is_some_and(|(_, metadata)| !changed_only_by_trusted(metadata))
+    {
+        complain(&format!(
+            "The last report, {}, can be changed by users other than root: its last integrity \
+             check and test restore are not kept.",
+            path.display()
+        ));
+        return None;
+    }
+    let report = read.and_then(|(value, _)| json::object(value).ok());
     if report.is_none() {
         complain(&format!(
             "The last report, {}, cannot be read: it must be a file, not a link, of at most {} \

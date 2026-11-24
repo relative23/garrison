@@ -2,7 +2,8 @@
 # Sourced by scripts/acceptance-failures.sh: root's commands beside the
 # installer where what they do depends on root and on the host. A test
 # restore takes away the copies interrupted ones left in /var/tmp, and
-# nothing of other users' there. `garrison access` follows no link that
+# nothing of other users' there, and backup-check keeps no check from a
+# report another user could write. `garrison access` follows no link that
 # another user put in the policy's folder and takes no lock that is not its
 # own, makes a missing folder the broker can read, names what a role lacks
 # where none of Stalwart's qualifies, and its profiles follow `[[actions]]`,
@@ -15,7 +16,7 @@ catalog='printf "%s\n" "{\"op\": \"catalog\", \"token\": \"acceptance-token-0123
     timeout 10 runuser -u garrison -- /usr/local/bin/acceptance-connect /run/garrison/broker.sock'
 
 scenario_restore_leftovers() {
-    step "A test restore takes away what interrupted ones left, and nothing of others"
+    step "A test restore takes away what interrupted ones left, and nothing of others; no report of theirs counts"
     upgraded
     # restic as far as the test restore asks it.
     inside_input 'cat > /usr/local/bin/restic && chmod 755 /usr/local/bin/restic' <<'RESTIC'
@@ -54,6 +55,20 @@ RESTIC
     check "and removes its own copy, which it made in /var/tmp" \
         'own=$(cat /root/restic-target) && case $own in /var/tmp/garrison-restore-*) ;; *) exit 1 ;; esac &&
             test ! -e "$own"'
+    # The first report in a folder every user can write, put there by
+    # nobody: a passed check of the repository the next run asks.
+    inside 'mkdir -p /srv && mkdir -m 1777 /srv/reports'
+    inside_input 'runuser -u nobody -- sh -c "cat > /srv/reports/restic.json"' <<'REPORT'
+{"tool": "restic", "repository": "/srv/repo", "repositoryId": "5e1f0c3a9b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f",
+ "problem": null, "snapshots": null, "restore": null,
+ "verify": {"at": "2026-11-16T03:00:00+00:00", "ok": true, "detail": "no errors were found"}}
+REPORT
+    says "backup-check keeps no check from a report another user could write" \
+        '/opt/garrison/current/bin/garrison backup-check restic --repo /srv/repo --report /srv/reports/restic.json' \
+        "/srv/reports/restic.json, can be changed by users other than root: its last integrity check"
+    check "and writes its own report in its place, without that check" \
+        'test "$(stat -c %U /srv/reports/restic.json)" = root && grep -q "\"verify\": null" /srv/reports/restic.json'
+    inside 'rm -r /srv/reports'
     inside 'cd /var/tmp && rm -r garrison-restore-00000000000000c2 garrison-restore-00000000000000c3 &&
         rm garrison-restore-00000000000000c4 /usr/local/bin/restic /root/restic.json /root/restic-target'
     running "after the test restore" "$new"
