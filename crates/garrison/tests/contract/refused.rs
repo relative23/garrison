@@ -32,8 +32,8 @@ fn garrisons_keys(lab: &Lab) -> usize {
 /// are all answered 401, an API key of the administrator's that does not
 /// allow this host's address 403: setup says that the administrator was
 /// refused and what to check, where it said "x:ApiKey/get: HTTP 401", and
-/// changes nothing. A user without administrator rights gets as far as the
-/// first key, which Stalwart does not let it make.
+/// changes nothing. A user without administrator rights is stopped at its
+/// first read, of the milter entries, which Stalwart does not let it make.
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn a_refused_administrator_is_said_as_such() {
@@ -99,8 +99,8 @@ fn a_refused_administrator_is_said_as_such() {
             }
             403 => "Stalwart refused the administrator from this host's address (HTTP 403)",
             _ => {
-                "Stalwart refused the administrator the API key 'garrison broker', since it may \
-                 not grant the key's permissions: run setup as an administrator who holds them"
+                "Stalwart does not let the administrator read its milter entries: run setup as an \
+                 administrator who holds the keys' permissions"
             }
         };
         assert!(

@@ -1,11 +1,8 @@
-//! The macro milter's entry in Stalwart. Where the configuration has a
-//! `[milter]` section, setup leaves one entry for the filter; where the
-//! section is gone, it takes the filter's out, since an entry for a filter
-//! that no longer runs makes Stalwart defer all mail. It tells the filter's
-//! entries in each run from what is there (`doctor::milter::entries`), and
-//! changes nothing while Stalwart asks another entry in vain.
-//!
-//! The order keeps mail flowing and leaves what the next run finishes: the
+//! The macro milter's entry in Stalwart: one for the filter where the
+//! configuration has `[milter]`, none where it has not, as an entry for a
+//! filter that no longer runs makes Stalwart defer all mail. Each run tells
+//! the filter's entries from what is there (`doctor::milter::entries`). The
+//! order keeps mail flowing and leaves what the next run finishes: the
 //! filter answers before Stalwart is first told of it, moves to another
 //! port only after Stalwart has read the entry there, and stops only after
 //! Stalwart has forgotten it.
@@ -149,18 +146,26 @@ fn refused(stranded: &[&Entry]) -> String {
     let asked: Vec<String> = stranded
         .iter()
         .map(|entry| {
-            format!(
-                "{} (entry {}), where nothing answers, so it {}",
-                entry.address(),
-                entry.id,
-                entry.meanwhile("all incoming mail")
-            )
+            let (address, id) = (entry.address(), &entry.id);
+            let meanwhile = entry.meanwhile("all incoming mail");
+            format!("{address} (entry {id}), where nothing answers, so it {meanwhile}")
         })
         .collect();
+    let (asked, remove) = (asked.join(", and at "), entries::REMOVE);
+    format!("Stalwart asks a milter at {asked}. {remove} Setup changed nothing")
+}
+
+/// Why setup stops where Stalwart does not let the administrator read its
+/// milter entries, as a user without its administrator role: it could not
+/// tell whether Stalwart asks one in vain.
+fn unread(error: String) -> String {
+    if !error.contains(": forbidden") {
+        return error;
+    }
     format!(
-        "Stalwart asks a milter at {}. {} Setup changed nothing",
-        asked.join(", and at "),
-        entries::REMOVE
+        "Stalwart does not let the administrator read its milter entries: run setup as an \
+         administrator who holds the keys' permissions, as one with Stalwart's administrator \
+         role ({error})"
     )
 }
 
@@ -168,7 +173,7 @@ fn refused(stranded: &[&Entry]) -> String {
 /// not the filter's, and where the configuration has the filter, it
 /// answers, or can move to its port.
 pub(super) fn prepare(admin: &Admin, config: &Config) -> Result<(), String> {
-    let stored = admin.list::<Entry>("MtaMilter")?;
+    let stored = admin.list::<Entry>("MtaMilter").map_err(unread)?;
     let port = config.milter.as_ref().map(|milter| milter.port);
     let listening = listening()?;
     let ours = entries::ours(&stored, port, &listening);
@@ -203,13 +208,12 @@ pub(super) fn ensure(admin: &Admin, config: &Config) -> Result<Option<String>, S
         admin.set("x:MtaMilter/set", &Set::<()>::Destroy([entry.id.as_str()]))?;
     }
     let Some(milter) = &config.milter else {
-        return Ok(match gone.len() {
-            0 => None,
-            1 => Some("took the macro milter's entry out of Stalwart".to_owned()),
-            many => Some(format!(
-                "took the macro milter's {many} entries out of Stalwart"
-            )),
-        });
+        let took = match gone.len() {
+            0 => return Ok(None),
+            1 => "took the macro milter's entry out of Stalwart".to_owned(),
+            many => format!("took the macro milter's {many} entries out of Stalwart"),
+        };
+        return Ok(Some(took));
     };
     let wanted = entry(milter.port, milter.defer_when_unreachable);
     let Some(kept) = kept else {
@@ -225,10 +229,9 @@ pub(super) fn ensure(admin: &Admin, config: &Config) -> Result<Option<String>, S
         1 => "; took another entry for it out of Stalwart".to_owned(),
         many => format!("; took {many} other entries for it out of Stalwart"),
     };
-    Ok(Some(format!(
-        "updated the macro milter's entry (127.0.0.1:{}){more}",
-        milter.port
-    )))
+    let port = milter.port;
+    let updated = format!("updated the macro milter's entry (127.0.0.1:{port}){more}");
+    Ok(Some(updated))
 }
 
 /// After Stalwart has read its settings again, the filter follows them: one
