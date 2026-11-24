@@ -41,15 +41,21 @@ fn a_key_stalwart_refuses_gets_the_setups_advice() {
     for (secret, which) in [(narrow, "a narrow key"), (random_hex(24), "an unknown key")] {
         // The client takes each for a refusal, for every kind of object the
         // checks read with the collector's key; the mail flow's accounts
-        // among them, whose card needs an event history to show it.
+        // among them, in its pages, whose card needs an event history to
+        // show it.
         let client = JmapClient::new(&lab.url, &secret).with_timeout(Duration::from_secs(15));
-        for kind in ["Domain", "NetworkListener", "Account"] {
+        for kind in ["Domain", "NetworkListener"] {
             let read = client.get::<Value>(kind, None, &["id"]);
             assert!(
                 matches!(read, Err(garrison_stalwart::Error::Denied(_))),
                 "{which}, {kind}: {read:?}"
             );
         }
+        let accounts = client.listed::<Value>("Account", &["id", "emailAddress"], 1, || true);
+        assert!(
+            matches!(accounts, Err(garrison_stalwart::Error::Denied(_))),
+            "{which}, the mail flow's accounts: {accounts:?}"
+        );
         let dns = Dns::new(
             &"type = \"dns\"\nresolver = \"127.0.0.1:9\""
                 .parse()

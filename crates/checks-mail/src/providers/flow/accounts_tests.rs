@@ -60,11 +60,13 @@ fn by_domain(answer: Option<String>, memory: &Remembered) -> Observation {
     card
 }
 
-/// Stalwart's answer that names account 1's address.
+/// Stalwart's answer to a page of the accounts that names account 1's
+/// address, its only one.
 fn accounts() -> String {
-    answer_json(&json!({"methodResponses": [["x:Account/get", {"list": [
-        {"id": "b", "emailAddress": "anna@example.test"}
-    ]}, "0"]]}))
+    answer_json(&json!({"methodResponses": [
+        ["x:Account/query", {"ids": ["b"], "position": 0, "total": 1}, "0"],
+        ["x:Account/get", {"list": [{"id": "b", "emailAddress": "anna@example.test"}]}, "1"]
+    ]}))
 }
 
 #[test]
@@ -120,7 +122,7 @@ fn the_card_by_domain_says_why_the_domains_of_the_mailboxes_are_not_known() {
         (
             "unknownMethod",
             method("unknownMethod"),
-            unread("x:Account/get answered the error unknownMethod"),
+            unread("x:Account/query answered the error unknownMethod"),
         ),
     ];
     let found: Vec<(&str, State, Vec<String>, Vec<String>)> = cases
@@ -193,10 +195,7 @@ fn a_stalwart_slow_to_give_its_accounts_costs_no_count() {
         .collect();
     let directory = tempfile::tempdir().unwrap();
     let mut config = history(directory.path(), &Receiver::default(), &events, 0);
-    let accounts = answer_json(&json!({"methodResponses": [["x:Account/get", {"list": [
-        {"id": "b", "emailAddress": "anna@example.test"}
-    ]}, "0"]]}));
-    let (url, stalwart) = slow(accounts, Duration::from_millis(2_500));
+    let (url, stalwart) = slow(accounts(), Duration::from_millis(2_500));
     config.deployment.stalwart_url = url;
     let runner = Canned(String::new());
     let context = Context {

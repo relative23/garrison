@@ -50,7 +50,8 @@ Notable changes for operators and users. The format follows
   needs `sysDomainQuery` and `sysAccountQuery` now, to find the domains and
   accounts the checks read. Until then the DNS records, Blocklists, Reverse
   names and TLS certificates cards say that Stalwart did not give its
-  domains, and the Management API card that it refused `x:Account/query`.
+  domains, the Management API card that it refused `x:Account/query`, and
+  the Spam and ham by domain card that it did not give its accounts.
 
 ### Added
 
@@ -1044,6 +1045,8 @@ Notable changes for operators and users. The format follows
   domains however many Stalwart has, and count the rest.**
 - **The mailbox storage card reads Stalwart's accounts up to `max_accounts`
   and says how many it leaves.** Raise `max_accounts` where it names some.
+- **Spam and ham by domain names the domains of Stalwart's first 20 000
+  accounts, not of the first 500 alone, and says how many it leaves.**
 - **The TLS check probes a listener Stalwart binds to one address on that
   address.**
 - **The TLS certificates card says where an SMTP listener stopped before

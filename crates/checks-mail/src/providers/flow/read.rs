@@ -15,18 +15,23 @@ pub(super) const DAY: i64 = 86_400;
 pub(super) const DAYS: i64 = 7;
 
 /// How much of the week the lists take: the newest events of each type
-/// whose fields are read, and the rows each list shows. The counts by day and
-/// the numbers of mail with and without TLS count every event of the week.
+/// whose fields are read, the rows each list shows, and the first of
+/// Stalwart's accounts whose domains name the mail by domain. The counts by
+/// day and the numbers of mail with and without TLS count every event of
+/// the week.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Limits {
     pub(super) events: usize,
     pub(super) rows: usize,
+    pub(super) accounts: usize,
 }
 
 impl Limits {
+    /// The accounts as many as the `stalwart` check reads at the most.
     pub(super) const WEEK: Limits = Limits {
         events: 50_000,
         rows: 20,
+        accounts: 20_000,
     };
 }
 

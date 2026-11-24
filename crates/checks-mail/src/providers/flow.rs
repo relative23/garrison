@@ -56,6 +56,11 @@ struct Read {
     /// the reading is made again in the first run that has one.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     no_native_key: bool,
+    /// What the card by domain says of Stalwart's accounts after those whose
+    /// domains were read, where it has more: their mail is counted under
+    /// "unknown".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    domains_left: Option<String>,
 }
 
 impl Read {
@@ -132,27 +137,52 @@ impl Flow {
         Ok(Flow { checks })
     }
 
-    /// The domain of each account's address, by the account's number. Without
-    /// an answer from Stalwart the domains stay unknown, and the error says
-    /// why; the counts do not need them. Without a key none is asked for,
-    /// and the error says what makes one.
-    fn accounts(context: &Context<'_>) -> Result<HashMap<i64, String>, String> {
+    /// The domain of each address of the first `most` of Stalwart's
+    /// accounts, by the account's number, read in pages while the run has
+    /// time; and what to say of the accounts after them, where Stalwart has
+    /// more. Without an answer from Stalwart the domains stay unknown, and
+    /// the error says why; the counts do not need them. Without a key none
+    /// is asked for, and the error says what makes one.
+    fn accounts(
+        context: &Context<'_>,
+        most: usize,
+    ) -> Result<(HashMap<i64, String>, Option<String>), String> {
         let Some(key) = context.native_key.as_deref() else {
             return Err(NO_KEY.to_owned());
         };
         let client = JmapClient::new(&context.deployment.stalwart_url, key)
             .with_timeout(Duration::from_secs(8));
-        let accounts = client
-            .get::<Account>("Account", None, &["id", "emailAddress"])
+        let listed = client
+            .listed::<Account>("Account", &["id", "emailAddress"], most, || {
+                !context.deadline.expired()
+            })
             .map_err(|error| unread(&error))?;
-        Ok(accounts
+        let (read, total) = (listed.objects.len(), listed.total);
+        let left = (total > read).then(|| {
+            let which = if read >= most {
+                format!("only the first {most} are read")
+            } else if context.deadline.expired() {
+                format!(
+                    "only {read} of them were read before the collection run's time was used up"
+                )
+            } else {
+                format!("only {read} of them could be read")
+            };
+            format!(
+                "Stalwart has {total} accounts; {which}, and mail to the others is counted under \
+                 \"unknown\"."
+            )
+        });
+        let domains = listed
+            .objects
             .iter()
             .filter_map(|account| {
                 let number = i64::try_from(decode_native_id(&account.id)?).ok()?;
                 let (_, domain) = account.email_address.as_deref()?.rsplit_once('@')?;
                 Some((number, domain.to_lowercase()))
             })
-            .collect())
+            .collect();
+        Ok((domains, left))
     }
 
     /// The last reading, or a new one where that is due: every ten minutes,
@@ -164,9 +194,10 @@ impl Flow {
     /// Stalwart alone.
     fn known(context: &Context<'_>) -> Kept<Read> {
         let keyed = context.native_key.is_some();
+        // One account tells Stalwart's answer.
         let asked = recalled::<Read>(context, MEMORY)
             .filter(|(_, read)| keyed && read.of_stalwart())
-            .map(|_| Self::accounts(context).err());
+            .map(|_| Self::accounts(context, 1).err());
         let wait = |_, read: &Read| {
             let answered = asked
                 .as_ref()
@@ -195,10 +226,11 @@ impl Flow {
         // Stalwart first: the reader's time runs from its opening, and an
         // answer that is slow to come must not use up the time of counts
         // that need no account.
-        let (accounts, domains_unread) = match Self::accounts(context) {
-            Ok(accounts) => (accounts, None),
-            Err(why) => (HashMap::new(), Some(why)),
-        };
+        let (accounts, domains_left, domains_unread) =
+            match Self::accounts(context, limits.accounts) {
+                Ok((accounts, left)) => (accounts, left, None),
+                Err(why) => (HashMap::new(), None, Some(why)),
+            };
         match reading(&context.events_database, Duration::from_secs(2)) {
             Ok(Some(db)) => match read::week(&db, now, &accounts, limits) {
                 Ok(week) => Read {
@@ -211,6 +243,7 @@ impl Flow {
                     problem: None,
                     domains_unread,
                     no_native_key: context.native_key.is_none(),
+                    domains_left,
                 },
                 Err(error) => problem(format!("the event history could not be read: {error}")),
             },
@@ -323,6 +356,8 @@ mod accounts_tests;
 mod cut_tests;
 #[cfg(test)]
 mod history_tests;
+#[cfg(test)]
+mod many_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

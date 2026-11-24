@@ -188,6 +188,9 @@ fn the_collector_calls_need_only_the_required_permissions() {
         .map(|((method, _), _)| *method)
         .collect();
     assert!(refused.is_empty(), "{refused:?}");
+    // The mail flow's pages of the accounts' addresses.
+    let flow = client.listed::<Value>("Account", &["id", "emailAddress"], 1, || true);
+    assert!(flow.is_ok(), "{flow:?}");
 
     let provider = Stalwart::new(&"type = \"stalwart\"".parse().unwrap()).unwrap();
     let report = collect(&provider, &deployment(&lab), Some(secret), None);

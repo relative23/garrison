@@ -4,12 +4,12 @@
 //! day and the numbers of mail with and without TLS count every event of the
 //! week, whatever the lists take.
 
-use garrison_testing::http::{json as answer_json, serve};
 use serde_json::{Value, json};
 
 use super::read::Limits;
 use super::tests::{Event, event, history};
 use super::*;
+use crate::testing::objects::{Objects, objects};
 use crate::testing::{Canned, Receiver, table};
 
 /// Two of everything a list reads, each with a domain or host of its own,
@@ -71,11 +71,14 @@ fn week() -> Vec<Event> {
     events
 }
 
-fn accounts() -> String {
-    answer_json(&json!({"methodResponses": [["x:Account/get", {"list": [
-        {"id": "b", "emailAddress": "anna@a.example"},
-        {"id": "c", "emailAddress": "ben@b.example"},
-    ]}, "0"]]}))
+fn accounts() -> Objects {
+    objects(
+        "Account",
+        vec![
+            json!({"id": "b", "emailAddress": "anna@a.example"}),
+            json!({"id": "c", "emailAddress": "ben@b.example"}),
+        ],
+    )
 }
 
 /// A card as the test compares it: what it shows, its state and findings.
@@ -105,7 +108,7 @@ fn card(observation: &Observation) -> Card {
 fn a_list_that_left_events_or_rows_out_says_so_and_no_count_is_cut() {
     let directory = tempfile::tempdir().unwrap();
     let mut config = history(directory.path(), &Receiver::default(), &week(), 0);
-    let stalwart = serve(vec![accounts(), accounts(), accounts()]);
+    let stalwart = accounts();
     config.deployment.stalwart_url.clone_from(&stalwart.url);
     let runner = Canned(String::new());
     let context = Context {
