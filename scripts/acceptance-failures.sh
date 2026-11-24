@@ -388,7 +388,8 @@ scenario_collect_beside() {
     check "a run beside it ends as a success and says why" \
         'systemctl start garrison-collect.service &&
             test "$(systemctl show -p Result --value garrison-collect.service)" = success &&
-            journalctl -u garrison-collect.service -n 20 --no-pager | grep -q "Another collection run is under way"'
+            journalctl -u garrison-collect.service -n 20 --no-pager > /root/collect.log &&
+            acceptance-state /root/collect.log collect-busy'
     check "and stores no snapshot" "test \"\$($newest)\" = '$before'"
     inside 'systemctl stop acceptance-collecting'
     check "once that run is over, the next one stores its snapshot" \

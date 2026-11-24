@@ -45,7 +45,9 @@ fn a_service_that_stops_says_why_in_the_journal_format() {
     assert_eq!(plain.status.code(), Some(1));
     let logged = text(&plain.stderr);
     assert!(
-        logged.starts_with("ERROR garrison: The ingest service stopped: "),
+        logged.starts_with("ERROR garrison: ")
+            && logged.contains("ingest")
+            && states(&plain.stderr) == ["service-stopped"],
         "{logged}"
     );
     // Under systemd, stderr is the stream that $JOURNAL_STREAM names.
@@ -67,7 +69,9 @@ fn a_service_that_stops_says_why_in_the_journal_format() {
     let mut journal = String::new();
     reader.read_to_string(&mut journal).unwrap();
     assert!(
-        journal.starts_with("<3>ERROR garrison: The ingest service stopped: "),
+        journal.starts_with("<3>ERROR garrison: ")
+            && journal.contains("ingest")
+            && states(journal.as_bytes()) == ["service-stopped"],
         "{journal}"
     );
 }

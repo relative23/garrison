@@ -268,7 +268,7 @@ fn service<E: std::fmt::Display>(name: &str, result: Result<(), E>) -> u8 {
     match result {
         Ok(()) => 0,
         Err(error) => {
-            log::error!("The {name} service stopped: {error}");
+            log::error!("{}", states::services::stopped(name, error));
             1
         }
     }
@@ -283,9 +283,7 @@ fn dispatch(task: Task, config: &Config, path: &Path) -> u8 {
             match garrison_collector::collect(config, &credentials(config), &runner) {
                 // No failure: the run under way stores what this one would.
                 Err(garrison_collector::run::Error::Busy) => {
-                    log::warn!(
-                        "Another collection run is under way; this one ends without collecting"
-                    );
+                    log::warn!("{}", states::services::collect_busy());
                     0
                 }
                 collected => service("collector", collected.map(drop)),

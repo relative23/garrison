@@ -406,7 +406,7 @@ fn restart() {
     arguments.extend(RESTART);
     match garrison_core::command::run(&arguments, Duration::from_secs(60)) {
         Ok(output) if output.code == Some(0) => {
-            say("The broker and the web service were restarted where they ran.");
+            say(&states::modules_restarted().to_string());
         }
         _ => complain(&apply),
     }

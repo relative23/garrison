@@ -437,7 +437,8 @@ services() {
         if [ -x /usr/bin/apt-get ] || { [ -x /usr/bin/dnf ] && [ ! -x /usr/bin/dnf5 ]; }; then
             printf %s "$document" | grep -o "\"id\":\"host.updates\"[^}]*\"state\":\"[a-z]*\"" | grep -q -E "\"state\":\"(ok|warning)\"" || exit 1
         fi'
-    # In its own sandbox the watch reads the collector's database.
+    # In its own sandbox the watch reads the collector's database. The check
+    # runs on the previous releases too, which print no name: hence the words.
     check "$1: the watch over the collector finds it running" \
         'systemctl start garrison-watch.service &&
             journalctl -u garrison-watch.service -n 5 --no-pager | grep -q "The collector runs"'

@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 /// The areas whose states the scripts look for, as a name begins.
-const AREAS: [&str; 14] = [
+const AREAS: [&str; 17] = [
     "install",
     "upgrade",
     "setup",
@@ -25,6 +25,9 @@ const AREAS: [&str; 14] = [
     "modules",
     "wizard",
     "switch",
+    "service",
+    "collect",
+    "watch",
 ];
 
 /// Names of commands the scripts run, which are no states.

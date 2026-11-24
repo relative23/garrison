@@ -396,7 +396,8 @@ fn every_command_is_held_to_the_four_questions() {
         let right = match (takes, command[0]) {
             (Follows, "watch") => {
                 named.status.code() == Some(0)
-                    && stderr.contains(&format!("{} does not load", missing.display()))
+                    && states(&named.stderr).contains(&"watch-unloaded".to_owned())
+                    && stderr.contains(&missing.display().to_string())
             }
             (Follows, _) => {
                 named.status.code() == Some(2)

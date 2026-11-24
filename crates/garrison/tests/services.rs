@@ -5,6 +5,8 @@
 // Helpers fail the test by panicking, like the tests themselves.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod support;
+
 use std::io::Read;
 use std::net::TcpListener;
 use std::os::unix::net::UnixDatagram;
@@ -295,10 +297,7 @@ fn a_collection_run_beside_one_under_way_ends_without_collecting() {
     let status = ended(child, "the collection run did not end");
     Read::read_to_string(&mut { stderr }, &mut said).unwrap();
     assert!(status.success(), "{said}");
-    assert!(
-        said.contains("Another collection run is under way; this one ends without collecting"),
-        "{said}"
-    );
+    assert_eq!(support::states(said.as_bytes()), ["collect-busy"], "{said}");
     assert!(!state.join("status.sqlite").exists());
     // Once that run has ended, the next one collects.
     drop(under_way);

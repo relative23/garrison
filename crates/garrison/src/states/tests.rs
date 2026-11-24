@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::{commands, config};
+use super::{commands, config, services};
 use crate::state::State;
 
 mod access;
@@ -170,6 +170,63 @@ fn smaller() -> Rows {
             "Restart garrison-broker.service and garrison-web.service to apply it. \
              [modules-unapplied]",
         ),
+        (
+            commands::modules_restarted(),
+            "The broker and the web service were restarted where they ran. [modules-restarted]",
+        ),
+    ]
+}
+
+fn services() -> Rows {
+    let database = Path::new("/var/lib/garrison/collector/status.sqlite");
+    vec![
+        (
+            services::stopped("ingest", "Address already in use (os error 98)"),
+            "The ingest service stopped: Address already in use (os error 98) [service-stopped]",
+        ),
+        (
+            services::collect_busy(),
+            "Another collection run is under way; this one ends without collecting \
+             [collect-busy]",
+        ),
+        (
+            services::watch_unloaded(
+                Path::new("/etc/garrison/garrison.toml"),
+                "unknown field `nonsense`",
+            ),
+            "/etc/garrison/garrison.toml does not load (unknown field `nonsense`); watching with \
+             what the last collection run left [watch-unloaded]",
+        ),
+        (
+            services::watch_not_known(database),
+            "Whether the collector runs is not known: the newest snapshot in \
+             /var/lib/garrison/collector/status.sqlite is dated at a time that is none \
+             [watch-not-known]",
+        ),
+        (
+            services::watch_never_ran(),
+            "No collection run has finished yet [watch-never-ran]",
+        ),
+        (
+            services::watch_running(),
+            "The collector runs [watch-running]",
+        ),
+        (
+            services::watch_stopped(),
+            "The collector has stopped [watch-stopped]",
+        ),
+        (
+            services::watch_told_stopped(),
+            "The collector has stopped; the channels were told [watch-told-stopped]",
+        ),
+        (
+            services::watch_told_running(),
+            "The collector runs again; the channels were told [watch-told-running]",
+        ),
+        (
+            services::watch_unfinished("database is locked"),
+            "The watch over the collector did not finish: database is locked [watch-unfinished]",
+        ),
     ]
 }
 
@@ -234,6 +291,7 @@ fn every_state_of_the_commands_says_its_line() {
     let rows = [
         configuration(),
         smaller(),
+        services(),
         wizard(),
         access::rows(),
         access::answers(),
@@ -247,6 +305,7 @@ fn every_state_of_the_commands_says_its_line() {
     let sources = [
         include_str!("config.rs"),
         include_str!("commands.rs"),
+        include_str!("services.rs"),
         include_str!("access.rs"),
         include_str!("roles.rs"),
         include_str!("backup_check.rs"),

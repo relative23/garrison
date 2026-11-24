@@ -113,6 +113,13 @@ pub(crate) fn modules_unapplied(units: &[&str]) -> State {
     )
 }
 
+pub(crate) fn modules_restarted() -> State {
+    State::new(
+        "modules-restarted",
+        "The broker and the web service were restarted where they ran.",
+    )
+}
+
 pub(crate) fn wizard_io(what: impl Display, error: impl Display) -> State {
     State::new("wizard-io", format!("{what}: {error}"))
 }
