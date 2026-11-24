@@ -14,8 +14,8 @@
 //! being received may hold so much and no more, and one message is scanned
 //! at a time. A message that finds no room is answered with a temporary
 //! failure, so the sending server brings it again; the filter itself stays up.
-//! [`most_memory`] adds up what that comes to, and the unit's limit lies
-//! above it.
+//! `most_memory` adds up what that comes to, and a test holds the unit's
+//! limit above it.
 //!
 //! Time is bounded too: from a message's end the filter answers within
 //! [`SCAN_TIME`], the wait for its turn included. A message whose scan is
@@ -47,10 +47,10 @@ pub const REFUSAL: &str = "550 5.7.1 Message refused: an attached Office documen
 /// The header a message gets that was taken although the scan could not
 /// look at all of it, and the header's value.
 pub const UNSCANNED_HEADER: &str = "X-Garrison-Scan";
-pub const UNSCANNED: &str = "unscanned";
+pub(crate) const UNSCANNED: &str = "unscanned";
 /// What the sender's server is told of a message that is refused because it
 /// could not be scanned completely.
-pub const UNSCANNED_REFUSAL: &str =
+pub(crate) const UNSCANNED_REFUSAL: &str =
     "550 5.7.1 Message refused: its attachments could not be scanned completely.";
 /// A mail server that is silent for this long has gone.
 const PATIENCE: Duration = Duration::from_secs(60);
@@ -102,7 +102,7 @@ pub fn session(stream: &mut (impl Read + Write), settings: Settings) -> io::Resu
 
 /// Speak with the mail server over `stream` until it ends the connection;
 /// `shared` is what this connection has in common with the others.
-pub fn session_among(
+pub(crate) fn session_among(
     stream: &mut (impl Read + Write),
     settings: Settings,
     shared: &Shared,
@@ -234,8 +234,9 @@ fn unscanned(gap: Gap, action: IncompleteAction) -> Vec<Reply> {
 /// The most memory a filter takes that scans messages of up to `max_bytes`.
 /// The unit's `MemoryMax` must lie above what this says of the largest
 /// `max_message_mib` the configuration takes; a test holds the two together.
+#[cfg(test)]
 #[must_use]
-pub const fn most_memory(max_bytes: usize) -> usize {
+pub(crate) const fn most_memory(max_bytes: usize) -> usize {
     // The messages that arrive, the one that is being scanned among them.
     let room = if room::HELD > max_bytes {
         room::HELD

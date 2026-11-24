@@ -66,7 +66,7 @@ impl Shared {
     /// Room for the messages of a filter that scans messages of up to
     /// `max_bytes`: always enough for one message of that size.
     #[must_use]
-    pub fn of(max_bytes: usize) -> Shared {
+    pub(crate) fn of(max_bytes: usize) -> Shared {
         Shared::with_room(HELD.max(max_bytes))
     }
 
