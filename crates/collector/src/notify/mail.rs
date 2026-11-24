@@ -5,12 +5,13 @@
 //! server, and its spam filter files it accordingly. A message the server's
 //! own account submits is delivered like any other of that account.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::sync::Arc;
 use std::time::Instant;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use garrison_checks::smtp::{greeting, host, reply};
 use garrison_core::time;
 use rustls::RootCertStore;
 use serde::{Deserialize, Serialize};
@@ -47,40 +48,6 @@ impl std::fmt::Debug for Mail {
     }
 }
 
-/// The longest line of a reply that is read.
-const LONGEST: usize = 2048;
-
-/// One reply of the server: its code and its last line. A line is read up to
-/// `LONGEST`, so that a server that sends no end of line cannot fill memory.
-fn reply(reader: &mut impl BufRead) -> Result<(u16, String), String> {
-    loop {
-        let mut data = Vec::new();
-        let read = reader
-            .take(LONGEST as u64 + 1)
-            .read_until(b'\n', &mut data)
-            .map_err(|error| match error.kind() {
-                std::io::ErrorKind::InvalidData | std::io::ErrorKind::Other => tls_error(&error),
-                _ => error.to_string(),
-            })?;
-        if read == 0 {
-            return Err("the server closed the session".to_owned());
-        }
-        if read > LONGEST {
-            return Err("the server's reply is too long".to_owned());
-        }
-        let text = String::from_utf8_lossy(&data);
-        let line = text.trim_end();
-        let code: u16 = line
-            .get(..3)
-            .and_then(|code| code.parse().ok())
-            .ok_or("the server's reply is no SMTP reply")?;
-        // `250-` goes on, `250 ` ends the reply.
-        if line.as_bytes().get(3) != Some(&b'-') {
-            return Ok((code, line.chars().take(200).collect()));
-        }
-    }
-}
-
 /// A header's value on one line; text beyond ASCII as an encoded word.
 fn header(value: &str) -> String {
     let line: String = value
@@ -110,31 +77,6 @@ fn display_name(value: &str) -> String {
     }
 }
 
-/// This installation's host from `name`, as `public_origin` names it,
-/// without its port: a greeting and a Message-ID name a host, never a port
-/// (RFC 5321, 4.1.1.1; RFC 5322, 3.6.4).
-fn host_name(name: &str) -> &str {
-    match name.strip_prefix('[') {
-        // An IPv6 address keeps the colons inside its brackets.
-        Some(rest) => rest.find(']').map_or(name, |end| &name[..end + 2]),
-        None => name.rsplit_once(':').map_or(name, |(host, _)| host),
-    }
-}
-
-/// What this installation greets with: its host, or an address as an
-/// address literal, `[192.0.2.1]` or `[IPv6:2001:db8::1]` (RFC 5321, 4.1.3).
-fn greeting(name: &str) -> String {
-    let host = host_name(name);
-    match host
-        .strip_prefix('[')
-        .and_then(|rest| rest.strip_suffix(']'))
-    {
-        Some(address) => format!("[IPv6:{address}]"),
-        None if host.parse::<std::net::Ipv4Addr>().is_ok() => format!("[{host}]"),
-        None => host.to_owned(),
-    }
-}
-
 /// The message: its text in base64, so that any character and any length of
 /// line arrives as it was written.
 pub fn message(mail: &Mail, name: &str, subject: &str, text: &str, now: time::Timestamp) -> String {
@@ -149,7 +91,7 @@ pub fn message(mail: &Mail, name: &str, subject: &str, text: &str, now: time::Ti
          Message-ID: <{stamp}.{unique:08x}@{host}>\r\nAuto-Submitted: auto-generated\r\n\
          MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\
          Content-Transfer-Encoding: base64\r\n\r\n{body}\r\n",
-        host = host_name(name),
+        host = host(name),
         sender = display_name(&format!("Garrison on {name}")),
         from = mail.from,
         to = mail.to,
@@ -206,7 +148,11 @@ pub fn submit_over(
     let login = STANDARD.encode(format!("\0{}\0{}", mail.user, mail.password.text()?));
     let steps = [
         (None, 220, "greet"),
-        (Some(format!("EHLO {}\r\n", greeting(name))), 250, "greet"),
+        (
+            Some(format!("EHLO {}\r\n", greeting(host(name)))),
+            250,
+            "greet",
+        ),
         (Some(format!("AUTH PLAIN {login}\r\n")), 235, "sign in"),
         (
             Some(format!("MAIL FROM:<{}>\r\n", mail.from)),
