@@ -34,10 +34,6 @@ mkdir "$work/archives"
 cp "$out"/garrison-*-"$arch".tar.gz "$out"/garrison-*-"$arch".tar.gz.minisig "$work/archives/"
 printf 'vm ansible_host=127.0.0.1 ansible_port=%s ansible_user=root ansible_ssh_private_key_file=%s ansible_ssh_common_args="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"\n' \
     "$vm_port" "$vm_dir/key" > "$work/inventory"
-# Setup reads the account that each /get answer names, as Stalwart 1.1.0's
-# answers do; where the stand-in leaves it out, it is added.
-inside 'grep -q accountId /root/stalwart-stub.sh ||
-    sed -i '\''s/{\\"list\\": \[/{\\"accountId\\": \\"b\\", \\"list\\": [/'\'' /root/stalwart-stub.sh'
 # The stand-in names no administrator role for `access init` to bind, so the
 # play writes the policy that init writes where Stalwart names one, unless a
 # scenario sets acceptance_policy to false. acceptance_config is added to the
