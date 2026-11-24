@@ -243,18 +243,18 @@ report before it only where that report is of the same tool, the same name
 and the same ID: another repository under the same name, as another disk
 mounted at its place, starts without them, and so do a copy of it under
 another name, a report without an ID and a run for which the tool gives no
-ID, as where it cannot open the repository; the command says so. A copy
-made byte for byte, as by rsync, keeps the repository's ID, so one under
-the same name counts as the same repository. The card shows no check or
-restore of a report an earlier release wrote, which holds no ID: where
-`verify_days` or `restore_days` is set, it warns until the next run with
-`--verify` or `--restore`. A report that is a link or no plain file, is larger than 256 KiB, is not one
-JSON object as the command writes it, or can be changed by a user other
-than root makes the check Unknown. The command reads the report it wrote
-last the same way, to keep its last check and restore: from anything else
-it keeps neither, says so and writes its report in that place. Call the
-command from the backup job's own unit, and less often with the two longer
-runs:
+ID, as where it cannot open the repository; the command says so. A copy made
+byte for byte, as by rsync, keeps the repository's ID, so one under the same
+name counts as the same repository. The card shows no check or restore of a
+report an earlier release wrote, which holds no ID: where `verify_days` or
+`restore_days` is set, it warns until the next run with `--verify` or
+`--restore`. A report that is a link or no plain file, is larger than 256
+KiB, is not one JSON object as the command writes it, or can be changed by a
+user other than root makes the check Unknown. The command reads the report
+it wrote last the same way, to keep its last check and restore: from
+anything else it keeps neither, says so and writes its report in that place.
+Call the command from the backup job's own unit, and less often with the two
+longer runs:
 
 ```ini
 # In the backup job's unit: report after every backup.
