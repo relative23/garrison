@@ -6,7 +6,7 @@ use std::time::Duration;
 use garrison_core::config::Config;
 use garrison_core::json;
 use garrison_stalwart::http::Request;
-use garrison_stalwart::jmap::{Answers, Calls, Get, Got, Problem};
+use garrison_stalwart::jmap::{Answers, Calls, Get, Problem};
 use garrison_stalwart::{Error, SUPPORTED};
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
@@ -47,8 +47,8 @@ impl Admin {
             .send()
             .map_err(|error| match error {
                 Error::Unreadable(why) => unreadable(method, &why),
+                Error::Limited(_) => format!("{method}: {}", limited()),
                 Error::Unavailable(why)
-                | Error::Limited(why)
                 | Error::InvalidToken(why)
                 | Error::Denied(why)
                 | Error::Misconfigured(why) => format!("{method}: {why}"),
@@ -56,7 +56,7 @@ impl Admin {
         match answer.status {
             200 => {}
             // A wrong password, an unknown user and an API key Stalwart does
-            // not know (measured on Stalwart 1.1.0).
+            // not know (measured on Stalwart 1.1.0 and 1.2.0).
             401 => {
                 return Err(
                     "Stalwart refused the administrator (HTTP 401): check the user name \
@@ -145,13 +145,17 @@ impl Admin {
 
     /// Every object of a kind, read as far as `T` names its fields.
     pub(super) fn list<T: DeserializeOwned>(&self, kind: &str) -> Result<Vec<T>, String> {
-        let all = Get {
-            ids: None,
-            properties: None,
-        };
-        let got: Got<T> = self.call(&format!("x:{kind}/get"), &all)?;
-        Ok(got.list)
+        self.list_in(kind, None).map(|listed| listed.list)
     }
+}
+
+/// What setup says where Stalwart refuses a request for its rate limit
+/// (HTTP 429), as where it sees setup at another address than 127.0.0.1: a
+/// run after the limit's window goes through.
+pub(super) fn limited() -> String {
+    "Stalwart refused the request for its limit of requests (HTTP 429), whose window is a \
+     minute unless it was set otherwise"
+        .to_owned()
 }
 
 /// What setup says of an answer of Stalwart's that this release does not

@@ -5,23 +5,26 @@
 //!   * a read-only API key for the broker (account and role metadata),
 //!   * a read-only API key for the collector (status observations),
 //!   * the Prometheus exporter with a dedicated scrape credential (if not in use).
-//!   * Garrison's OAuth client, for sign-in only.
+//!   * Garrison's OAuth client, for sign-in only,
+//!   * the macro filter's entry, where the configuration has `[milter]`.
 //!
 //! API keys use Replace permissions, may be used only from loopback and are
-//! tried once from this host at the end (see `keys`). Secrets
-//! are written to the credentials directory (mode 0600) and printed nowhere. The
-//! administrator is asked at the terminal or read from standard input or a
-//! root-only file (see `administrator`), never from the command line.
-//! Existing objects are matched by their description (the OAuth client by its
-//! client ID); foreign objects are not touched.
+//! tried from this host as soon as they are made or updated (see `keys`).
+//! Secrets are written to the credentials directory (mode 0600) and printed
+//! nowhere. The administrator is asked at the terminal or read from standard
+//! input or a root-only file (see `administrator`), never from the command
+//! line. Existing objects are matched by their description (the OAuth client
+//! by its client ID); foreign objects are not touched.
 //!
-//! A secret's file holds what Stalwart uses: a new API key's at once, the
-//! webhook's new key and a new scrape credential after Stalwart has
-//! reloaded its settings, which is when it takes them. So the next run
-//! brings both places together wherever a run stopped.
+//! Wherever a run stops, each service holds a secret that Stalwart takes, and
+//! Stalwart holds no secret of Garrison's that no file holds: a new API key
+//! is written and taken up by its service before the key it replaces goes,
+//! and a new signature key or scrape credential is written to its file
+//! before Stalwart is given it, which it takes when it reloads its settings.
+//! So the next run finishes, from what Stalwart and the files hold, whatever
+//! a run left.
 
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -31,13 +34,10 @@ use garrison_core::config::Config;
 
 use crate::say;
 use administrator::Source;
-use api::{Admin, unreadable};
-use client::ensure_oauth_client;
-use exporter::ensure_metrics;
+use api::{Admin, limited, unreadable};
 use folder::{writable, write_secret};
 use keys::Key;
 use objects::{Action, Enabled, Set};
-use webhook::ensure_webhook;
 
 mod administrator;
 mod api;
@@ -61,21 +61,20 @@ const BROKER: Key = Key {
     description: "garrison broker",
     permissions: &BROKER_PERMISSIONS,
     held: true,
-    without: "the broker checks no user's rights",
 };
 const COLLECTOR: Key = Key {
     file: "collector-native-key",
     description: "garrison collector",
     permissions: &COLLECTOR_PERMISSIONS,
     held: false,
-    without: "the cards that need the collector's key cannot read Stalwart",
 };
 const LOOPBACK: [&str; 2] = ["127.0.0.1/32", "::1/128"];
 const MAX_ANSWER: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-    /// Create webhook, API keys and metrics access.
+    /// Connect Stalwart: the webhook, the API keys, the sign-in client, the
+    /// metrics access and the macro filter's entry.
     Setup {
         /// The Stalwart administrator: a 0600 JSON file with {"username","secret"}
         /// or {"apiKey"}, or `-` for that JSON on standard input. Without it, the
@@ -116,18 +115,14 @@ struct Asked<'a> {
     again: &'a str,
 }
 
-/// What a run has done so far, kept also where it fails on the way: the
-/// keys that new ones replace, and the files it wrote anew whose secret a
-/// running service holds, which Stalwart uses by then.
-#[derive(Default)]
-struct Done {
-    replaced: Vec<keys::Replaced>,
-    renewed: BTreeSet<&'static str>,
-}
-
 fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), String> {
-    let again = format!("Run `{}` again once this is mended", asked.again);
-    let mended = |error: String| format!("{}. {again}.", error.trim_end_matches('.'));
+    let mended = |error: String| {
+        let again = asked.again;
+        format!(
+            "{}. Run `{again}` again once this is mended.",
+            error.trim_end_matches('.')
+        )
+    };
     let admin = Admin::new(config, source.authorization().map_err(mended)?);
     // Keys work only from these networks: loopback, and for test setups such as
     // the contract lab's Docker bridge whatever --allow-network adds.
@@ -135,179 +130,124 @@ fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), Stri
     for text in asked.allowed {
         networks.insert(keys::network(text).map_err(mended)?);
     }
-    let mut done = Done::default();
-    let configured = configure(&admin, config, asked, &networks, &mut done);
-    // Before the replaced keys go, also after a failure: the broker would
-    // otherwise be left with a key that is gone. Each service whose secret
-    // the run wrote anew, and once it is done each that holds another one
-    // than its file.
-    let directory = &config.credentials_directory;
-    if configured.is_ok() {
-        done.renewed.extend(restart::stale(directory));
-    }
-    match (&configured, restart::restart(directory, &done.renewed)) {
-        (Ok(()), None) => say("Settings reloaded."),
-        (Ok(()), Some(line)) => say(&format!("Settings reloaded. {line}")),
-        (Err(_), Some(line)) => say(&line),
-        (Err(_), None) => {}
-    }
-    // After a failure they go all the same, since keys are replaced
-    // because someone may have seen them.
-    let removed = keys::remove(&admin, &done.replaced);
-    match (configured, removed) {
-        (Ok(()), Ok(())) => {
-            source.finish();
-            Ok(())
-        }
-        (Ok(()), Err(also)) => Err(format!(
-            "The API keys that new ones replaced could not be removed: {also}. {again}, which \
-             removes them."
-        )),
-        (Err(error), Err(_)) if !done.replaced.is_empty() => Err(format!(
-            "{}. {again}, which also removes the API keys that new ones replaced.",
-            error.trim_end_matches('.')
-        )),
-        (Err(error), _) => Err(mended(error)),
-    }
+    configure(&admin, config, asked, &networks).map_err(mended)?;
+    source.finish();
+    Ok(())
 }
 
-/// Everything setup makes in Stalwart and here but the removal of the keys
-/// that new ones replace, which go to `done` with what it wrote anew: the
-/// keys, the webhook, the sign-in client, the exporter and the macro
-/// filter's entry; then Stalwart reloads its settings, the files of the
-/// secrets it takes then are written, and the keys are tried from this host.
+/// What setup says, and nothing else on standard output, where it finds
+/// everything as asked.
+const UNCHANGED: &str = "Stalwart is set up as asked; nothing was changed.";
+
+/// Everything setup makes in Stalwart and here, each step said once it is
+/// done. What Stalwart holds is read first, so that what refuses refuses
+/// before anything changes, and only what differs from what was asked is
+/// written. Then the keys, each taken up by its service before the keys it
+/// replaces go; the sign-in client and the macro filter's entry; the webhook
+/// and the exporter, each new secret in its file before Stalwart is given
+/// it. Stalwart then reloads its settings, which is when it takes them, and
+/// the receiver starts again with its new key, as each service does that
+/// holds another secret than its file.
 fn configure(
     admin: &Admin,
     config: &Config,
     asked: &Asked<'_>,
     networks: &Enabled,
-    done: &mut Done,
 ) -> Result<(), String> {
     let (directory, rotate) = (&config.credentials_directory, asked.rotate);
-    // What setup refuses for, it refuses before it changes anything.
-    milter::prepare(admin, config)?;
-    let broker = keys::ensure(admin, directory, &BROKER, networks, rotate)?;
-    done.replaced.extend(broker.replaced);
-    if broker.made {
-        done.renewed.insert(BROKER.file);
+    let started = milter::prepare(admin, config)?;
+    if let Some(step) = &started {
+        say(&format!("- {step}"));
     }
-    // Where its old key had to go first, the broker checks no rights until
-    // it starts again with the new one, so it does at once.
-    if broker.gone_first {
-        restart_broker(directory, done);
-    }
-    let collector = match keys::ensure(admin, directory, &COLLECTOR, networks, rotate) {
-        // No room beside the keys the broker's new one replaced: they go
-        // first, once the broker holds the new one.
-        Err(error) if keys::over_quota(&error) && !done.replaced.is_empty() => {
-            restart_broker(directory, done);
-            keys::remove(admin, &done.replaced)?;
-            done.replaced.clear();
-            keys::ensure(admin, directory, &COLLECTOR, networks, rotate)?
-        }
-        collector => collector?,
+    let found = keys::find(admin, directory, &[&BROKER, &COLLECTOR], rotate)?;
+    let hook = webhook::find(admin)?;
+    let client = client::find(admin, config)?;
+    let metrics = if asked.skip_metrics {
+        None
+    } else {
+        Some(exporter::find(admin)?)
     };
-    done.replaced.extend(collector.replaced);
-    let webhook = ensure_webhook(admin, config, directory, asked.webhook_url, rotate)?;
-    let mut steps = vec![
-        broker.step,
-        collector.step,
-        webhook.step,
-        ensure_oauth_client(admin, config)?,
-    ];
-    let mut credential = None;
-    if !asked.skip_metrics {
-        let exported = ensure_metrics(admin, directory, rotate)?;
-        steps.push(exported.step);
-        credential = exported.new_credential;
+    let mut keys_changed = false;
+    for (key, found) in [&BROKER, &COLLECTOR].into_iter().zip(found) {
+        keys_changed |= keys::settle(admin, config, key, found, networks, &keys::take_up)?;
     }
-    steps.extend(milter::ensure(admin, config)?);
-    reload(admin, webhook.new_key.is_some(), credential.is_some())?;
-    // Stalwart signs with the webhook's new key and takes the new scrape
-    // credential from now on, so their files follow.
-    if let Some(key) = &webhook.new_key {
-        write_secret(&directory.join(webhook::KEY_FILE), key)?;
-        done.renewed.insert(webhook::KEY_FILE);
+    if keys_changed {
+        say("- Stalwart accepts both API keys from this host");
     }
-    if let Some(document) = &credential {
-        exporter::keep(directory, document)?;
+    // What Stalwart takes only when it reads its settings again.
+    let mut steps = vec![client::ensure(admin, config, client)?];
+    steps.push(milter::ensure(admin, config)?);
+    let signing = webhook::key(directory, rotate)?;
+    let url = asked.webhook_url;
+    let hooked = webhook::ensure(admin, config, url, hook.as_ref(), &signing);
+    steps.push(hooked.map_err(|error| until(error, signing.new, false))?);
+    let scraping = match &metrics {
+        Some(found) => exporter::credential(directory, found, rotate)
+            .map_err(|error| until(error, signing.new, false))?,
+        None => None,
+    };
+    let new_scrape = scraping.as_ref().is_some_and(|scrape| scrape.new);
+    match (&metrics, &scraping) {
+        (Some(found), Some(scrape)) => steps.push(
+            exporter::ensure(admin, config, found, scrape)
+                .map_err(|error| until(error, signing.new, new_scrape))?,
+        ),
+        (Some(_), None) => say(&format!("- {}", exporter::theirs(directory))),
+        (None, _) => {}
     }
+    let steps: Vec<String> = steps.into_iter().flatten().collect();
     for step in &steps {
         say(&format!("- {step}"));
     }
-    for step in milter::retire(config)? {
+    // Stalwart uses what it holds of these from its next reload of its
+    // settings on (measured on Stalwart 1.2.0: a signature key and a scrape
+    // credential), and shows no read of what it uses: after a run stopped
+    // between a change and the reload, only a reload makes it take what it
+    // holds, so every run asks for one.
+    let reload = admin.set("x:Action/set", &Set::create(Action::ReloadSettings));
+    reload.map_err(|error| until(error, signing.new, new_scrape))?;
+    // Stalwart signs with the receiver's new key from now on, so the
+    // receiver starts again to read it.
+    let mut stale = restart::stale(directory);
+    if signing.new {
+        stale.insert(webhook::KEY_FILE);
+    }
+    let restarted = match restart::restart(&stale) {
+        Ok(said) => said,
+        Err(asked) => Some(asked),
+    };
+    let retired = milter::retire(config)?;
+    let changed = started.is_some() || keys_changed || !steps.is_empty();
+    if !changed && stale.is_empty() && retired.is_empty() {
+        say(UNCHANGED);
+        return Ok(());
+    }
+    match restarted {
+        None => say("Settings reloaded."),
+        Some(line) => say(&format!("Settings reloaded. {line}")),
+    }
+    for step in &retired {
         say(&format!("- {step}"));
     }
-    tried(admin, config, networks, done)
+    Ok(())
 }
 
-/// Stalwart reads its settings again, which is when it takes a new
-/// signature key or scrape credential. An answer lost on the way may come
-/// of a reload all the same, after which the services that hold the old
-/// ones go without, until a run writes the new ones to their files.
-fn reload(admin: &Admin, signature: bool, scrape: bool) -> Result<(), String> {
-    let reloaded = admin.set("x:Action/set", &Set::create(Action::ReloadSettings));
-    let mut without = Vec::new();
+/// What goes without a new signature key or scrape credential, in its file
+/// by now, where a run fails before Stalwart has surely reloaded its
+/// settings: Stalwart takes them at a reload, and may have taken them
+/// already or take them later, as at its own restart.
+fn until(error: String, signature: bool, scrape: bool) -> String {
+    let mut said = error;
     if signature {
-        without.push(
-            "the receiver refuses Stalwart's batches until setup runs again, and Stalwart \
+        said.push_str(
+            "; the receiver may refuse Stalwart's batches until setup runs again, and Stalwart \
              sends them again for an hour",
         );
     }
     if scrape {
-        without.push("the exporter refuses the collector's scrape until setup runs again");
+        said.push_str("; the exporter may refuse the collector's scrape until setup runs again");
     }
-    reloaded.map_err(|error| {
-        if without.is_empty() {
-            return error;
-        }
-        format!(
-            "{error}; where Stalwart reloaded its settings all the same, {}",
-            without.join("; ")
-        )
-    })
-}
-
-/// The broker started again at once with the new key this run made, so that
-/// the keys it replaces may go before the run ends.
-fn restart_broker(directory: &Path, done: &mut Done) {
-    if done.renewed.remove(BROKER.file)
-        && let Some(line) = restart::restart(directory, &BTreeSet::from([BROKER.file]))
-    {
-        say(&line);
-    }
-}
-
-/// Both keys tried from this host, as the services will use them. A key
-/// that Stalwart does not know, as after the credentials directory was put
-/// back from a copy older than the last rotation, is made anew, once.
-fn tried(
-    admin: &Admin,
-    config: &Config,
-    networks: &Enabled,
-    done: &mut Done,
-) -> Result<(), String> {
-    let directory = &config.credentials_directory;
-    let unknown = keys::verify(config, directory, &[&BROKER, &COLLECTOR])?;
-    for key in &unknown {
-        let made = keys::ensure(admin, directory, key, networks, true)?;
-        done.replaced.extend(made.replaced);
-        if key.held {
-            done.renewed.insert(key.file);
-        }
-        say(&format!(
-            "- Stalwart did not know the API key in {}; made a new one",
-            directory.join(key.file).display()
-        ));
-    }
-    if let Some(key) = keys::verify(config, directory, &unknown)?.first() {
-        return Err(format!(
-            "Stalwart does not take the API key it just made in {} (HTTP 401)",
-            key.file
-        ));
-    }
-    say("- Stalwart accepts both API keys from this host");
-    Ok(())
+    said
 }
 
 pub(crate) fn run(config: &Config, command: &Command) -> u8 {

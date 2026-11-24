@@ -1,8 +1,9 @@
 //! The kinds of run the stop test stops, and the lab and the folder each
-//! starts from: the administrators, the operator's own keys, the macro
+//! starts from: the administrators, the operators' own keys, the macro
 //! filter and the configuration.
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use garrison_testing::lab::{Lab, random_hex, unique};
@@ -18,6 +19,9 @@ pub(super) enum Kind {
     First,
     /// `--rotate` while the services run with the secrets of the files.
     Rotation,
+    /// A rotation as `Rotation`, after which Stalwart reloads its settings
+    /// on its own, as after its restart, before the next run.
+    Reloaded,
     /// A plain run after the broker's key file and the signature key's file
     /// were emptied while the services run with systemd's copies of the
     /// keys they held.
@@ -26,26 +30,36 @@ pub(super) enum Kind {
     /// as Stalwart takes, five: the operator's own beside setup's two.
     Full,
     /// A plain run as a second administrator after the first one's setup,
-    /// while the services run with the keys the first one made; the runs
-    /// after it are the second one's too.
+    /// while the services run with the keys the first one made and the
+    /// broker's key file may be read by other users; the runs after it are
+    /// the second one's too.
     Second,
+    /// `--rotate` as a second administrator after the first one's setup,
+    /// where the second one's own account holds as many API keys as
+    /// Stalwart takes.
+    SecondFull,
     /// The first setup with `[milter]`, while the filter answers at its port.
     Milter,
 }
 
-pub(super) const KINDS: [Kind; 6] = [
+pub(super) const KINDS: [Kind; 8] = [
     Kind::First,
     Kind::Rotation,
+    Kind::Reloaded,
     Kind::Emptied,
     Kind::Full,
     Kind::Second,
+    Kind::SecondFull,
     Kind::Milter,
 ];
 
 impl Kind {
     /// The arguments of the stopped run besides setup's own.
     pub(super) fn arguments(self) -> &'static [&'static str] {
-        if matches!(self, Kind::Rotation | Kind::Full) {
+        if matches!(
+            self,
+            Kind::Rotation | Kind::Reloaded | Kind::Full | Kind::SecondFull
+        ) {
             &["--rotate"]
         } else {
             &[]
@@ -56,6 +70,17 @@ impl Kind {
     /// has `[milter]`.
     pub(super) fn milter(self) -> bool {
         self == Kind::Milter
+    }
+
+    /// Whether the account the runs make their keys in has no room for
+    /// another one, so that no rotation can go through.
+    pub(super) fn full(self) -> bool {
+        matches!(self, Kind::Full | Kind::SecondFull)
+    }
+
+    /// Whether the runs are the second administrator's.
+    fn second(self) -> bool {
+        matches!(self, Kind::Second | Kind::SecondFull)
     }
 }
 
@@ -68,15 +93,19 @@ pub(super) fn holding(credentials: &Path) -> [String; 2] {
 }
 
 /// What the kinds need beside the lab: the two administrators, the
-/// filter's port, where a filter answers, and the operator's own keys while
-/// the kind `Full` runs.
+/// filter's port, where a filter answers, and the operators' own keys
+/// while a kind whose account is full runs.
 pub(super) struct Scene {
     first: String,
     second: String,
+    /// The second administrator's user name and password.
+    second_user: String,
     /// The second administrator's account.
     pub(super) account: String,
     pub(super) port: u16,
-    own: Vec<String>,
+    /// The operators' own keys, each with its account: the first
+    /// administrator's where that is `None`.
+    own: Vec<(Option<String>, String)>,
 }
 
 impl Scene {
@@ -110,6 +139,7 @@ impl Scene {
         Scene {
             first: json!({"username": user, "secret": secret}).to_string(),
             second: json!({"username": name, "secret": password}).to_string(),
+            second_user: format!("{name}:{password}"),
             account,
             port,
             own: Vec::new(),
@@ -128,7 +158,7 @@ impl Scene {
 
     /// The accounts that may hold setup's keys in `kind`.
     pub(super) fn accounts(&self, kind: Kind) -> Vec<Option<&str>> {
-        if kind == Kind::Second {
+        if kind.second() {
             vec![None, Some(&self.account)]
         } else {
             vec![None]
@@ -163,7 +193,7 @@ impl Scene {
         // The others start where both places agree; a second
         // administrator's run where the first one set Garrison up, so that
         // the files hold that one's keys.
-        if kind == Kind::Second {
+        if kind.second() {
             self.forget(lab, &credentials);
         }
         self.configure(setup, &lab.url, false);
@@ -178,27 +208,48 @@ impl Scene {
                     fs::write(credentials.join(name), "").unwrap();
                 }
             }
-            Kind::Second => self.act_as(setup, true),
+            Kind::Second => {
+                // As after a copy that did not keep the modes.
+                let broker = credentials.join(HELD[0]);
+                fs::set_permissions(broker, fs::Permissions::from_mode(0o644)).unwrap();
+                self.act_as(setup, true);
+            }
+            Kind::SecondFull => self.act_as(setup, true),
             _ => {}
         }
         Ok(Some(held))
     }
 
-    /// Before the stops of `kind`. The operator's own keys fill the
-    /// administrator's account for `Full`: Stalwart takes five API keys an
-    /// account and refuses the sixth for its quota, as setup counts on.
+    /// Before the stops of `kind`. The operators' own keys fill the account
+    /// the runs of a full kind make their keys in: Stalwart 1.1.0 and 1.2.0
+    /// take five API keys an account and refuse the sixth for its quota.
     pub(super) fn enter(&mut self, kind: Kind, setup: &Setup, lab: &mut Lab) {
         let credentials = setup.directory.join("credentials");
         self.forget(lab, &credentials);
-        if kind != Kind::Full {
-            return;
+        match kind {
+            Kind::Full => {
+                self.configure(setup, &lab.url, false);
+                let ready = setup.run(&[]);
+                assert_eq!(ready.status.code(), Some(0), "{}", text(&ready));
+                let listed = lab.call("x:ApiKey/get", &json!({"ids": null}));
+                let before = listed["list"].as_array().unwrap().len();
+                let admin = std::env::var("GARRISON_LAB_ADMIN").unwrap();
+                let made = self.fill(lab, &admin, None);
+                assert_eq!(before + made, 5, "the keys the account took");
+            }
+            Kind::SecondFull => {
+                let (user, account) = (self.second_user.clone(), self.account.clone());
+                let made = self.fill(lab, &user, Some(&account));
+                assert_eq!(made, 5, "the keys the second administrator's account took");
+            }
+            _ => {}
         }
-        self.configure(setup, &lab.url, false);
-        let ready = setup.run(&[]);
-        assert_eq!(ready.status.code(), Some(0), "{}", text(&ready));
-        let admin = std::env::var("GARRISON_LAB_ADMIN").unwrap();
-        let listed = lab.call("x:ApiKey/get", &json!({"ids": null}));
-        let before = listed["list"].as_array().unwrap().len();
+    }
+
+    /// Keys of an operator's own in the account of `user`, `account`, until
+    /// Stalwart refuses one for its quota; how many it took.
+    fn fill(&mut self, lab: &mut Lab, user: &str, account: Option<&str>) -> usize {
+        let mut made = 0;
         let refusal = loop {
             let key = json!({
                 "description": format!("an operator's own key {}", unique()),
@@ -208,24 +259,36 @@ impl Scene {
             });
             let request = json!({"using": ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"],
                 "methodCalls": [["x:ApiKey/set", {"create": {"k": key}}, "0"]]});
-            let answer = lab.http("/jmap/", &admin, Some(&request));
+            let answer = lab.http("/jmap/", user, Some(&request));
             let payload = &answer["methodResponses"][0][1];
             let Some(id) = payload["created"]["k"]["id"].as_str() else {
                 break payload["notCreated"]["k"].clone();
             };
-            lab.created.push(("ApiKey".to_owned(), id.to_owned()));
-            self.own.push(id.to_owned());
-            assert!(self.own.len() <= 5, "Stalwart took more than five API keys");
+            if account.is_none() {
+                lab.created.push(("ApiKey".to_owned(), id.to_owned()));
+            }
+            self.own.push((account.map(str::to_owned), id.to_owned()));
+            made += 1;
+            assert!(made <= 5, "Stalwart took more than five API keys");
         };
         assert_eq!(refusal["type"], "overQuota", "{refusal}");
-        assert_eq!(before + self.own.len(), 5, "the keys the account took");
+        made
     }
 
-    /// After the stops of `kind`: the operator's own keys go again.
+    /// Operators' own keys go, so that the full account of `kind` has room
+    /// for the keys a rotation makes there at once: one where the keys it
+    /// replaces are in the same account, both where they are in another.
+    pub(super) fn make_room(&mut self, lab: &mut Lab, kind: Kind) {
+        for _ in 0..if kind.second() { 2 } else { 1 } {
+            let (account, id) = self.own.pop().unwrap();
+            remove_own(lab, account.as_deref(), &id);
+        }
+    }
+
+    /// After the stops of `kind`: the operators' own keys go again.
     pub(super) fn leave(&mut self, lab: &mut Lab) {
-        for id in self.own.drain(..) {
-            lab.call("x:ApiKey/set", &json!({"destroy": [id]}));
-            lab.created.retain(|(_, known)| *known != id);
+        for (account, id) in self.own.drain(..) {
+            remove_own(lab, account.as_deref(), &id);
         }
     }
 
@@ -262,6 +325,17 @@ impl Scene {
         }
         forget(lab, credentials);
     }
+}
+
+/// An operator's own key out of `account`, the first administrator's where
+/// that is `None`.
+fn remove_own(lab: &mut Lab, account: Option<&str>, id: &str) {
+    let mut arguments = json!({"destroy": [id]});
+    if let Some(account) = account {
+        arguments["accountId"] = json!(account);
+    }
+    lab.call("x:ApiKey/set", &arguments);
+    lab.created.retain(|(_, known)| *known != id);
 }
 
 /// The IDs of the keys in a list of keys that are described as Garrison's.

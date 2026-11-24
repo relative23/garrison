@@ -15,8 +15,8 @@ use super::{Setup, forget, lab, remove_afterwards, run, text};
 /// Without the gateway the keys are allowed from loopback only, which this
 /// host is not for the lab's Stalwart, just as for a Stalwart in a bridge
 /// network: setup says so instead of leaving keys that never work. A
-/// rotation that stops there asks for the services' restart, removes the
-/// old keys all the same and names the run that finishes it.
+/// rotation that stops there leaves the broker its key, which stays beside
+/// the new one, and names the run that finishes it.
 pub(super) fn refused_without_the_gateway(
     lab: &mut Lab,
     directory: &std::path::Path,
@@ -42,28 +42,29 @@ pub(super) fn refused_without_the_gateway(
     assert_eq!(code, Some(1), "{output}");
     assert!(output.contains(refused), "{output}");
     assert!(
-        output
-            .contains("Restart garrison-ingest and garrison-broker so they read the new secrets.")
+        !output.contains("Restart garrison-broker")
             && output.contains(
                 "with Compose). Run `garrison stalwart setup --rotate` again once this is mended."
             ),
         "{output}"
     );
     let keys = lab.call("x:ApiKey/get", &json!({"ids": null}));
-    for description in ["garrison broker", "garrison collector"] {
+    for (description, count) in [("garrison broker", 2), ("garrison collector", 1)] {
         let named = keys["list"].as_array().unwrap().iter();
         assert_eq!(
             named
                 .filter(|key| key["description"] == description)
                 .count(),
-            1
+            count,
+            "{description}"
         );
     }
 }
 
-/// `--rotate` writes new secrets everywhere. The old keys still work while
-/// setup tries the new ones, the last thing it does before it restarts the
-/// services that hold the old ones, and stop working once it is done.
+/// `--rotate` writes new secrets everywhere. The broker's old key works
+/// until the broker takes up the new one: while setup asks whose the files'
+/// keys are and while it tries the broker's new key; it goes before the
+/// collector's new key is tried.
 pub(super) fn rotate(lab: &mut Lab, directory: &std::path::Path, credential: &str, gateway: &str) {
     let credentials = directory.join("credentials");
     let before = secrets(&credentials);
@@ -113,12 +114,9 @@ pub(super) fn rotate(lab: &mut Lab, directory: &std::path::Path, credential: &st
     for (name, old) in &before {
         assert_ne!(&after[name], old, "{name} kept its secret");
     }
-    // A broker that still held the old key could check rights all along:
-    // while setup asks whose the files' keys are, and while it tries the
-    // new ones.
     assert_eq!(
         *tried.lock().unwrap(),
-        [200, 200, 200, 200],
+        [200, 200, 200, 401],
         "{}",
         text(&rotated)
     );
@@ -330,10 +328,9 @@ fn a_second_administrator_finds_the_keys_the_first_made() {
     let plain = setup.run(&[]);
     let said = text(&plain);
     assert_eq!(plain.status.code(), Some(0), "{said}");
-    for description in ["garrison broker", "garrison collector"] {
-        let kept = format!("- updated API key '{description}' (secret unchanged)");
-        assert!(said.contains(&kept), "{said}");
-    }
+    // The first one's keys, which the files hold, are as asked: nothing changes.
+    let stdout = String::from_utf8_lossy(&plain.stdout);
+    assert_eq!(stdout.lines().last(), Some(super::UNCHANGED), "{said}");
     let context = "a plain run as the second administrator";
     assert_keys_held_in(&lab, &[None], &credentials, &setup.gateway, context);
     let rotated = setup.run(&["--rotate"]);

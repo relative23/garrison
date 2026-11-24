@@ -1,49 +1,37 @@
 //! Where a file's key is another administrator's: its keys of the
 //! description are found in its account, kept or replaced there, and
-//! removed from it.
+//! removed from it, also where others may read the file.
 
 use garrison_testing::http::{answer, json, serve};
 use serde_json::json;
 
-use super::tests::{COLLECTOR, NEW, OLD, listed, session};
+use super::tests::{NEW, OLD, TAKEN, done, listed, made, session, settled};
 use super::*;
-
-/// What `ensure` does for the collector's key, which its file holds, where
-/// the administrator's own account `b` has no key of its description and
-/// Stalwart answers the session of the file's key with `session`, and the
-/// requests after it with `after`: the step or the error, and the requests.
-fn whose(session: String, after: Vec<String>) -> (Result<String, String>, Vec<String>) {
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join(COLLECTOR.file);
-    garrison_testing::write_private(&file, format!("{OLD}\n").as_bytes());
-    let mut answers = vec![listed("b", &[]), session];
-    answers.extend(after);
-    let server = serve(answers);
-    let admin = Admin {
-        url: format!("{}/jmap/", server.url),
-        authorization: "Bearer admin".to_owned(),
-    };
-    let networks = Enabled::of(["127.0.0.1/32"]);
-    let shown = |text: String| text.replace(&directory.path().display().to_string(), "DIR");
-    let outcome = ensure(&admin, directory.path(), &COLLECTOR, &networks, false)
-        .map(|done| shown(done.step))
-        .map_err(shown);
-    (outcome, server.requests())
-}
 
 /// Where Stalwart's answer to the session of the file's key names no
 /// account, as for its rate limit or an outage, the key may be another
-/// administrator's: the run stops before it makes a key, which would leave
-/// that one valid for good.
+/// administrator's: the run stops before it changes anything, which would
+/// leave that one valid for good.
 #[test]
-fn a_key_whose_account_is_not_known_stops_the_run_before_a_key_is_made() {
-    for status in [429, 503, 404] {
-        let (outcome, requests) = whose(answer(status, "{}"), Vec::new());
+fn a_key_whose_account_is_not_known_stops_the_run_before_anything_changes() {
+    let limited = "Stalwart refused the request for its limit of requests (HTTP 429), whose window \
+                   is a minute unless it was set otherwise";
+    for (status, said) in [
+        (429, limited.to_owned()),
+        (503, "Stalwart answered HTTP 503".to_owned()),
+        (404, "Stalwart answered HTTP 404".to_owned()),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let answers = vec![listed("b", &[]), answer(status, "{}")];
+        let written = format!("{OLD}\n");
+        let (outcome, requests) =
+            settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
+        let path = directory.path().join("credentials/collector-native-key");
         assert_eq!(
             outcome,
             Err(format!(
-                "Asking Stalwart whose API key DIR/collector-native-key holds: Stalwart \
-                 answered HTTP {status}"
+                "Asking Stalwart whose API key {} holds: {said}",
+                path.display()
             ))
         );
         assert_eq!(requests.len(), 2, "{status}");
@@ -52,19 +40,22 @@ fn a_key_whose_account_is_not_known_stops_the_run_before_a_key_is_made() {
 
 /// A key Stalwart does not know (401) belongs to no account, and one it
 /// refuses from this host's address (403) names none: the run goes on with
-/// the administrator's own keys, and the key try at its end says what is
-/// wrong where Stalwart refuses the new key too.
+/// the administrator's own keys, and the new key's try says what is wrong
+/// where Stalwart refuses it too.
 #[test]
 fn a_key_stalwart_does_not_know_or_refuses_here_names_no_account() {
-    let made = json(&json!({"methodResponses": [["x:ApiKey/set",
-        {"created": {"new": {"id": "fresh", "secret": NEW}}}, "0"]]}));
     for status in [401, 403] {
-        let (outcome, requests) = whose(answer(status, "{}"), vec![made.clone()]);
-        assert_eq!(
-            outcome.as_deref(),
-            Ok("created API key 'garrison collector' -> DIR/collector-native-key"),
-            "{status}"
-        );
+        let directory = tempfile::tempdir().unwrap();
+        let answers = vec![
+            listed("b", &[]),
+            answer(status, "{}"),
+            made(),
+            answer(200, "{}"),
+        ];
+        let written = format!("{OLD}\n");
+        let (outcome, requests) =
+            settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
+        assert_eq!(outcome, Ok(true), "{status}");
         assert!(requests[2].contains(r#""create""#), "{}", requests[2]);
     }
 }
@@ -79,16 +70,20 @@ fn an_account_the_administrator_may_not_see_is_said_as_such() {
         &json!({"methodResponses": [["error", {"type": "accountNotFound",
         "description": "The accountId does not correspond to a valid account"}, "0"]]}),
     );
-    let (outcome, requests) = whose(session("c"), vec![missing]);
+    let directory = tempfile::tempdir().unwrap();
+    let answers = vec![listed("b", &[]), session("c"), missing];
+    let written = format!("{OLD}\n");
+    let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, false, &TAKEN);
+    let path = directory.path().join("credentials/collector-native-key");
     assert_eq!(
         outcome,
-        Err(
-            "Stalwart does not show the administrator the account that the API key in \
-             DIR/collector-native-key belongs to: run setup as an administrator who holds the \
-             keys' permissions, as one with Stalwart's administrator role (x:ApiKey/get: \
-             accountNotFound The accountId does not correspond to a valid account)"
-                .to_owned()
-        )
+        Err(format!(
+            "Stalwart does not show the administrator the account that the API key in {} \
+             belongs to: run setup as an administrator who holds the keys' permissions, as one \
+             with Stalwart's administrator role (x:ApiKey/get: accountNotFound The accountId \
+             does not correspond to a valid account)",
+            path.display()
+        ))
     );
     assert!(
         requests[2].contains(r#""accountId":"c""#),
@@ -97,42 +92,24 @@ fn an_account_the_administrator_may_not_see_is_said_as_such() {
     );
 }
 
-/// What `ensure` does where the file's key belongs to another
-/// administrator's account, `c`, which holds the key `k` of the
-/// description: the step, the keys it replaces, and the requests.
-fn ensured_elsewhere(rotate: bool) -> (String, Vec<Replaced>, Vec<String>) {
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join(COLLECTOR.file);
-    garrison_testing::write_private(&file, format!("{OLD}\n").as_bytes());
-    let done = json(&json!({"methodResponses": [["x:ApiKey/set",
-        {"created": {"new": {"id": "fresh", "secret": NEW}}, "updated": {"k": null}}, "0"]]}));
-    let answers = vec![listed("b", &[]), session("c"), listed("c", &["k"]), done];
-    let server = serve(answers);
-    let admin = Admin {
-        url: format!("{}/jmap/", server.url),
-        authorization: "Bearer admin".to_owned(),
-    };
-    let networks = Enabled::of(["127.0.0.1/32"]);
-    let done = ensure(&admin, directory.path(), &COLLECTOR, &networks, rotate).unwrap();
-    let step = done
-        .step
-        .replace(&directory.path().display().to_string(), "DIR");
-    (step, done.replaced, server.requests())
-}
-
 /// The keys setup makes are the administrator's, and another administrator
-/// lists only its own account's: a run as a second administrator found none
-/// of the first one's, made new keys and left those valid for good, after a
-/// rotation too. The account the file's key belongs to is now asked as
-/// well: its key is kept and updated there, and a rotation replaces it.
+/// lists only its own account's. The account the file's key belongs to is
+/// asked as well: its key is kept and updated there, and a rotation, or a
+/// file that others may read, replaces it with one in the administrator's
+/// own account and removes it from the other one.
 #[test]
 fn the_keys_another_administrator_made_are_kept_or_replaced_in_its_account() {
-    let (step, replaced, requests) = ensured_elsewhere(false);
-    assert_eq!(
-        step,
-        "updated API key 'garrison collector' (secret unchanged)"
-    );
-    assert_eq!(replaced, Vec::new());
+    let directory = tempfile::tempdir().unwrap();
+    let kept = vec![
+        listed("b", &[]),
+        session("c"),
+        listed("c", &["k"]),
+        done("x:ApiKey/set"),
+        answer(200, "{}"),
+    ];
+    let written = format!("{OLD}\n");
+    let (outcome, requests) = settled(directory.path(), (&written, 0o600), kept, false, &TAKEN);
+    assert_eq!(outcome, Ok(true));
     assert!(
         requests[1].starts_with("GET /jmap/session "),
         "{}",
@@ -140,59 +117,104 @@ fn the_keys_another_administrator_made_are_kept_or_replaced_in_its_account() {
     );
     assert!(requests[1].contains(&format!("Bearer {OLD}")));
     assert!(
-        requests[2].contains(r#""accountId":"c""#),
-        "{}",
-        requests[2]
-    );
-    assert!(
         requests[3].contains(r#""accountId":"c""#) && requests[3].contains(r#""update":{"k""#),
         "{}",
         requests[3]
     );
-    let (step, replaced, requests) = ensured_elsewhere(true);
-    assert_eq!(
-        step,
-        "replaced API key 'garrison collector' -> DIR/collector-native-key"
-    );
-    let theirs = Replaced {
-        account: Some("c".to_owned()),
-        id: "k".to_owned(),
-    };
-    assert_eq!(replaced, vec![theirs]);
-    // The new key is the administrator's own.
-    assert!(!requests[3].contains("accountId"), "{}", requests[3]);
+    for (mode, rotate) in [(0o600, true), (0o644, false), (0o640, false)] {
+        let directory = tempfile::tempdir().unwrap();
+        let replaced = vec![
+            listed("b", &[]),
+            session("c"),
+            listed("c", &["k"]),
+            made(),
+            answer(200, "{}"),
+            done("x:ApiKey/set"),
+        ];
+        let (outcome, requests) =
+            settled(directory.path(), (&written, mode), replaced, rotate, &TAKEN);
+        assert_eq!(outcome, Ok(true), "{mode:o}");
+        // The new key is the administrator's own; the old one goes from
+        // the account that holds it.
+        assert!(!requests[3].contains("accountId"), "{}", requests[3]);
+        assert!(requests[4].contains(&format!("Bearer {NEW}")));
+        assert!(
+            requests[5].contains(r#""accountId":"c","destroy":["k"]"#),
+            "{mode:o}: {}",
+            requests[5]
+        );
+    }
 }
 
-/// Each replaced key goes from the account that holds it.
+/// A file's key is asked whose it is only where the file holds one.
 #[test]
-fn a_replaced_key_goes_from_its_account() {
-    let gone =
-        |id: &str| json(&json!({"methodResponses": [["x:ApiKey/set", {"destroyed": [id]}, "0"]]}));
-    let server = serve(vec![gone("k"), gone("x")]);
+fn a_file_that_holds_no_key_is_not_asked_whose_it_is() {
+    let directory = tempfile::tempdir().unwrap();
+    let server = serve(vec![listed("b", &[])]);
     let admin = Admin {
         url: format!("{}/jmap/", server.url),
         authorization: "Bearer admin".to_owned(),
     };
-    let replaced = [
-        Replaced {
-            account: Some("c".to_owned()),
-            id: "k".to_owned(),
-        },
-        Replaced {
-            account: None,
-            id: "x".to_owned(),
-        },
+    let found = find(&admin, directory.path(), &[&tests::COLLECTOR], false).unwrap();
+    server.requests();
+    assert_eq!(found.len(), 1);
+    assert_eq!((&found[0].existing, &found[0].keep), (&Vec::new(), &None));
+}
+
+/// A key that a run moved out of another administrator's account and could
+/// not remove there is found while another file's key names that account:
+/// each account the files' keys name is listed once, for every description.
+#[test]
+fn a_key_left_in_an_account_another_file_names_is_found() {
+    const BROKER: Key = Key {
+        file: "broker-native-key",
+        description: "garrison broker",
+        permissions: &["authenticate"],
+        held: false,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    for name in [BROKER.file, tests::COLLECTOR.file] {
+        garrison_testing::write_private(
+            &directory.path().join(name),
+            format!("{OLD}\n").as_bytes(),
+        );
+    }
+    let keys = |account: &str, keys: &[(&str, &str)]| {
+        let list: Vec<_> = keys
+            .iter()
+            .map(|(id, description)| json!({"id": id, "description": description}))
+            .collect();
+        json(&json!({"methodResponses": [["x:ApiKey/get",
+            {"accountId": account, "list": list}, "0"]]}))
+    };
+    let answers = vec![
+        keys("b", &[("new", "garrison broker")]),
+        session("b"),
+        session("c"),
+        keys(
+            "c",
+            &[("k", "garrison collector"), ("left", "garrison broker")],
+        ),
     ];
-    remove(&admin, &replaced).unwrap();
-    let requests = server.requests();
-    assert!(
-        requests[0].contains(r#""accountId":"c","destroy":["k"]"#),
-        "{}",
-        requests[0]
-    );
-    assert!(
-        requests[1].contains(r#""destroy":["x"]"#) && !requests[1].contains("accountId"),
-        "{}",
-        requests[1]
-    );
+    let server = serve(answers);
+    let admin = Admin {
+        url: format!("{}/jmap/", server.url),
+        authorization: "Bearer admin".to_owned(),
+    };
+    let found = find(
+        &admin,
+        directory.path(),
+        &[&BROKER, &tests::COLLECTOR],
+        false,
+    )
+    .unwrap();
+    server.requests();
+    let at = |account: Option<&str>, id: &str| AccountKey {
+        account: account.map(str::to_owned),
+        id: id.to_owned(),
+    };
+    assert_eq!(found[0].existing, [at(None, "new"), at(Some("c"), "left")]);
+    assert_eq!(found[0].keep, None);
+    assert_eq!(found[1].existing, [at(Some("c"), "k")]);
+    assert!(found[1].keep.is_some());
 }

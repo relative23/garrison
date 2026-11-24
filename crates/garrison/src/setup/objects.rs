@@ -37,12 +37,12 @@ impl Enabled {
         Enabled(names.into_iter().map(|name| (name.into(), true)).collect())
     }
 
-    pub(super) fn none() -> Self {
-        Enabled::default()
-    }
-
     pub(super) fn insert(&mut self, name: String) {
         self.0.insert(name, true);
+    }
+
+    pub(super) fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
     }
 }
 
@@ -71,7 +71,7 @@ impl<'a, T> Set<'a, T> {
 /// The arguments of a method on the objects of another account than the
 /// administrator's own, `account`, or on its own where that is `None`. An
 /// administrator lists and changes only its own account's API keys unless
-/// it names another (measured on Stalwart 1.1.0).
+/// it names another (measured on Stalwart 1.1.0 and 1.2.0).
 #[derive(Debug, Serialize)]
 pub(super) struct In<'a, T> {
     #[serde(rename = "accountId", skip_serializing_if = "Option::is_none")]
@@ -120,6 +120,50 @@ impl Refused {
     }
 }
 
+/// An object as Stalwart shows it: its ID and its other fields, of which it
+/// masks the secrets.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub(super) struct Stored {
+    #[serde(default)]
+    pub(super) id: String,
+    #[serde(flatten)]
+    pub(super) fields: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The fields of secrets, which Stalwart does not show.
+const SECRETS: [&str; 3] = ["signatureKey", "authSecret", "secret"];
+
+impl Stored {
+    /// A field that is text.
+    pub(super) fn text(&self, field: &str) -> Option<&str> {
+        self.fields.get(field).and_then(serde_json::Value::as_str)
+    }
+
+    /// Whether it holds every field of `wanted` as setup writes it, the
+    /// secrets aside: writing `wanted` would change nothing Stalwart shows.
+    pub(super) fn holds(&self, wanted: &impl Serialize) -> bool {
+        let Ok(serde_json::Value::Object(wanted)) = serde_json::to_value(wanted) else {
+            return false;
+        };
+        wanted.iter().all(|(field, value)| {
+            SECRETS.contains(&field.as_str())
+                || self.fields.get(field).map(open) == Some(open(value))
+        })
+    }
+}
+
+/// `value` without the fields of secrets, at any depth.
+fn open(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(fields) => fields
+            .iter()
+            .filter(|(field, _)| !SECRETS.contains(&field.as_str()))
+            .map(|(field, value)| (field.clone(), open(value)))
+            .collect(),
+        other => other.clone(),
+    }
+}
+
 /// A secret given by value.
 #[derive(Debug, Serialize)]
 #[serde(tag = "@type")]
@@ -141,14 +185,6 @@ pub(super) struct OAuthClient<'a> {
     pub(super) grant_types: Enabled,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct StoredClient {
-    pub(super) id: String,
-    #[serde(default)]
-    pub(super) client_id: Option<String>,
-}
-
 /// The webhook that delivers the recorded event types to the ingest.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -166,7 +202,7 @@ pub(super) struct WebHook<'a> {
     pub(super) lossy: bool,
     pub(super) signature_key: Secret<'a>,
     pub(super) http_auth: HttpAuth,
-    pub(super) http_headers: BTreeMap<&'static str, &'static str>,
+    pub(super) http_headers: BTreeMap<&'static str, &'a str>,
     pub(super) allow_invalid_certs: bool,
     pub(super) enable: bool,
 }
@@ -187,14 +223,6 @@ pub(super) enum Level {
 #[serde(tag = "@type")]
 pub(super) enum HttpAuth {
     Unauthenticated,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct StoredWebHook {
-    pub(super) id: String,
-    #[serde(default)]
-    pub(super) http_headers: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 /// What an API key may do and from where; the part an update replaces.
@@ -222,13 +250,6 @@ pub(super) struct NewKey<'a> {
     pub(super) expires_at: Option<&'a str>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct StoredKey {
-    pub(super) id: String,
-    #[serde(default)]
-    pub(super) description: Option<String>,
-}
-
 /// The secret of a key Stalwart just created; it is sent this once.
 #[derive(Deserialize)]
 pub(super) struct NewSecret {
@@ -249,21 +270,6 @@ pub(super) enum Exporter<'a> {
         auth_username: &'a str,
         auth_secret: Secret<'a>,
     },
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub(super) struct StoredMetrics {
-    #[serde(default)]
-    pub(super) prometheus: Option<StoredExporter>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct StoredExporter {
-    #[serde(default, rename = "@type")]
-    pub(super) kind: Option<String>,
-    #[serde(default)]
-    pub(super) auth_username: Option<String>,
 }
 
 /// A server action.
@@ -306,8 +312,8 @@ mod tests {
             client_id: None,
             description: "Garrison",
             redirect_uris: Enabled::of(["https://admin.example.test/auth/callback"]),
-            post_logout_redirect_uris: Enabled::none(),
-            scopes: Enabled::none(),
+            post_logout_redirect_uris: Enabled::default(),
+            scopes: Enabled::default(),
             grant_types: Enabled::of(["authorizationCode"]),
         };
         assert_eq!(
@@ -390,30 +396,54 @@ mod tests {
 
     #[test]
     fn stored_objects_are_read_whatever_else_they_hold() {
-        let client: StoredClient = serde_json::from_value(json!({
+        let client: Stored = serde_json::from_value(json!({
             "id": "c", "clientId": "https://a.example/oauth-client.json", "logo": null,
-            "grantTypes": {"authorizationCode": true},
         }))
         .unwrap();
         assert_eq!(
-            (client.id.as_str(), client.client_id.as_deref()),
+            (client.id.as_str(), client.text("clientId")),
             ("c", Some("https://a.example/oauth-client.json"))
         );
-        let foreign: StoredWebHook =
+        let foreign: Stored =
             serde_json::from_value(json!({"id": "w", "httpHeaders": null, "url": 7})).unwrap();
-        assert_eq!(foreign.http_headers, None);
-        let key: StoredKey =
-            serde_json::from_value(json!({"id": "k", "description": null})).unwrap();
-        assert_eq!(key.description, None);
-        let off: StoredMetrics =
-            serde_json::from_value(json!({"prometheus": {"@type": "Disabled"}})).unwrap();
-        assert_eq!(off.prometheus.unwrap().kind.as_deref(), Some("Disabled"));
-        assert!(
-            serde_json::from_value::<StoredMetrics>(json!({}))
-                .unwrap()
-                .prometheus
-                .is_none()
-        );
+        assert_eq!(foreign.text("url"), None);
+    }
+
+    /// Stalwart holds what setup would write where it holds every field
+    /// setup writes as setup writes it, whatever else it holds. A map is held
+    /// whole, so an entry more is a change; the secrets are not compared, at
+    /// any depth, since Stalwart shows none.
+    #[test]
+    fn a_stored_object_holds_what_setup_would_write_but_its_secrets() {
+        let stored =
+            |value: serde_json::Value| -> Stored { serde_json::from_value(value).unwrap() };
+        let metrics = Metrics {
+            prometheus: Exporter::Enabled {
+                auth_username: "garrison",
+                auth_secret: Secret::Value { secret: "s" },
+            },
+        };
+        let shown = json!({"id": "singleton", "other": 1, "prometheus": {"@type": "Enabled",
+            "authUsername": "garrison", "authSecret": {"@type": "Value", "secret": "****"}}});
+        assert!(stored(shown).holds(&metrics));
+        let theirs = json!({"id": "singleton", "prometheus": {"@type": "Enabled",
+            "authUsername": "someone"}});
+        assert!(!stored(theirs).holds(&metrics));
+        let client = OAuthClient {
+            client_id: None,
+            description: "Garrison",
+            redirect_uris: Enabled::of(["https://a.example/cb"]),
+            post_logout_redirect_uris: Enabled::default(),
+            scopes: Enabled::default(),
+            grant_types: Enabled::of(["authorizationCode"]),
+        };
+        let held = json!({"id": "c", "clientId": "x", "description": "Garrison",
+            "redirectUris": {"https://a.example/cb": true}, "postLogoutRedirectUris": {},
+            "scopes": {}, "grantTypes": {"authorizationCode": true}});
+        assert!(stored(held.clone()).holds(&client));
+        let mut more = held;
+        more["grantTypes"]["refreshToken"] = json!(true);
+        assert!(!stored(more).holds(&client));
     }
 
     #[test]

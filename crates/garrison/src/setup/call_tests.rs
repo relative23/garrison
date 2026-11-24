@@ -43,8 +43,8 @@ fn an_answer_this_release_does_not_read_is_said_as_one() {
 }
 
 /// Stalwart answers a wrong password, an unknown user and an API key it
-/// does not know 401 (measured on Stalwart 1.1.0): setup says that the
-/// administrator was refused and what to check, where it said
+/// does not know 401 (measured on Stalwart 1.1.0 and 1.2.0): setup says
+/// that the administrator was refused and what to check, where it said
 /// "x:ApiKey/get: HTTP 401". A credential it knows from an address it does
 /// not take it from is answered 403.
 #[test]
@@ -114,29 +114,36 @@ fn a_failure_names_the_run_that_mends_it() {
     );
 }
 
-/// Where the answer to the reload is lost, Stalwart may have reloaded all
-/// the same and taken the new secrets: setup says what goes without them
-/// until it runs again.
+/// Where a run fails once a new signature key or scrape credential is in
+/// its file and before Stalwart has surely reloaded its settings, setup says
+/// what may go without it until it runs again.
 #[test]
-fn a_reload_without_an_answer_says_what_goes_without_the_new_secrets() {
-    let server = serve(vec![answer(503, "{}"), answer(503, "{}")]);
+fn a_failure_after_a_new_secret_says_what_may_go_without_it() {
+    let error = || "x:Action/set: Stalwart answered HTTP 503".to_owned();
+    assert_eq!(until(error(), false, false), error());
+    assert_eq!(
+        until(error(), true, true),
+        "x:Action/set: Stalwart answered HTTP 503; the receiver may refuse Stalwart's batches \
+         until setup runs again, and Stalwart sends them again for an hour; the exporter may \
+         refuse the collector's scrape until setup runs again"
+    );
+}
+
+/// Stalwart refuses a request for its rate limit with 429, as where it sees
+/// setup at another address than 127.0.0.1: setup says so and that a run
+/// after its window goes through.
+#[test]
+fn a_rate_limit_is_said_as_one() {
+    let server = serve(vec![answer(429, "{}")]);
     let admin = Admin {
         url: format!("{}/jmap/", server.url),
         authorization: "Bearer key".to_owned(),
     };
-    assert_eq!(
-        reload(&admin, false, false),
-        Err("x:Action/set: Stalwart answered HTTP 503".to_owned())
-    );
-    assert_eq!(
-        reload(&admin, true, true),
-        Err(
-            "x:Action/set: Stalwart answered HTTP 503; where Stalwart reloaded its settings all \
-             the same, the receiver refuses Stalwart's batches until setup runs again, and \
-             Stalwart sends them again for an hour; the exporter refuses the collector's scrape \
-             until setup runs again"
-                .to_owned()
-        )
-    );
+    let said = admin.call::<_, IgnoredAny>("x:ApiKey/get", &json!({}));
     server.requests();
+    assert_eq!(
+        said.unwrap_err(),
+        "x:ApiKey/get: Stalwart refused the request for its limit of requests (HTTP 429), whose \
+         window is a minute unless it was set otherwise"
+    );
 }

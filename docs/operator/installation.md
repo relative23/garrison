@@ -134,9 +134,12 @@ administrator as JSON, `{"username": "...", "secret": "..."}` or
 root-only file with `--admin-credential FILE`, which it offers to delete
 afterwards when it runs at a terminal.
 
-This creates, and on repeated runs updates:
+This creates, and on repeated runs updates where it differs from what was
+asked:
 
-- a signed webhook that sends selected events to Garrison,
+- a signed webhook that sends selected events to Garrison, with a header
+  (`X-Garrison-Key`) that names its signature key by a hash, since Stalwart
+  shows no key,
 - two read-only API keys (broker, collector) usable only from loopback,
 - the Prometheus exporter with its own scrape credential,
 - Garrison as a registered OAuth client: sign-in only, no access to mail,
@@ -145,16 +148,20 @@ This creates, and on repeated runs updates:
 - where the configuration has a `[milter]` section, the macro filter's entry
   among Stalwart's milters (step 10).
 
+A run that finds all of it as asked changes nothing and says "Stalwart is set
+up as asked; nothing was changed."
+
 All secrets go to `/etc/garrison/credentials/` (mode 0600), which is root's:
 run setup as root. A file there that other users may read gets a new
 secret, since its old one may have been seen. Where it cannot write there,
 it stops before it asks for the administrator, and nothing is changed.
 
-At the end it tries both keys from this host. Stalwart in Docker or Podman
-must use the host network (`--network host`, or `network_mode: host` with
-Compose): in a bridge network Stalwart sees this host under the bridge's
-gateway, refuses keys meant for loopback, and cannot reach Garrison's event
-receiver, which accepts loopback only. `stalwart setup` then stops and says so.
+It tries each key from this host as soon as it has made or updated it.
+Stalwart in Docker or Podman must use the host network (`--network host`, or
+`network_mode: host` with Compose): in a bridge network Stalwart sees this
+host under the bridge's gateway, refuses keys meant for loopback, and cannot
+reach Garrison's event receiver, which accepts loopback only. `stalwart setup`
+then stops and says so.
 
 ## 4. Grant access
 

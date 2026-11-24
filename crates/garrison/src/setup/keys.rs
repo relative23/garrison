@@ -1,31 +1,31 @@
 //! Garrison's two read-only API keys in Stalwart: created or updated with
-//! their permissions and networks, written to the credentials directory, and
-//! tried from this host.
+//! their permissions and networks, written to the credentials directory,
+//! tried from this host and taken up by the service that holds them before
+//! the keys they replace go.
 
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::path::Path;
 use std::time::Duration;
 
 use garrison_core::config::Config;
-use garrison_core::files::{self, Privacy};
+use garrison_core::files::{self, Form, Holds, Privacy};
 use garrison_core::json;
 use garrison_stalwart::http::Request;
 
 use super::objects::{
-    Created, Enabled, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, StoredKey,
+    Created, Enabled, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, Stored,
 };
-use super::{Admin, MAX_ANSWER, unreadable, write_secret};
+use super::{Admin, MAX_ANSWER, limited, restart, say, unreadable, write_secret};
 
 /// One of the keys: its file, as the broker or the collector reads it, its
-/// description in Stalwart, what it may do, whether a running service
-/// holds it, which must start again to read a new one, and what goes
-/// without it while Stalwart takes none of its file's.
+/// description in Stalwart, what it may do, and whether a running service
+/// holds it, which must start again to read a new one.
 pub(super) struct Key {
     pub(super) file: &'static str,
     pub(super) description: &'static str,
     pub(super) permissions: &'static [&'static str],
     pub(super) held: bool,
-    pub(super) without: &'static str,
 }
 
 /// Whether the file at `path` holds a key as the service that reads it
@@ -38,39 +38,55 @@ pub(super) fn holds_key(path: &Path) -> bool {
     files::read_secret(path, Privacy::Owned).is_ok()
 }
 
-/// A key that a new one replaces, in the account that holds it: the
-/// administrator's own where `account` is `None`.
+/// A key of one of Garrison's descriptions, in the account that holds it:
+/// the administrator's own where `account` is `None`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct Replaced {
+pub(super) struct AccountKey {
     pub(super) account: Option<String>,
     pub(super) id: String,
 }
 
-/// The account the key in `target` belongs to, as the session it opens
-/// names it: an administrator lists only its own account's keys (Stalwart
-/// 1.1.0), and setup's keys are the administrator's that made them. A key
-/// Stalwart does not know (401) belongs to none, and one it refuses from
-/// this host's address (403) names none, which the key try at the end of
-/// the run says. Without an answer, or with another one, the account is not
-/// known, and the run stops before it makes a key: taken for the
-/// administrator's own, it would leave another administrator's key valid.
-fn owner(admin: &Admin, target: &Path) -> Result<Option<String>, String> {
+/// What a file's key opens: a session in an account, none for a key
+/// Stalwart does not know (401), or none for one it refuses from this
+/// host's address (403), whose account is then not known.
+#[derive(Debug, PartialEq, Eq)]
+enum Session {
+    Of(String),
+    Unknown,
+    Refused,
+}
+
+/// The session the key in `target` opens, as the account it belongs to,
+/// asked also where others may read the file, which then holds a key to
+/// replace in that account. Without an answer, or with another one, the
+/// account is not known, and the run stops before it changes anything:
+/// taken for the administrator's own, it would leave another
+/// administrator's key valid.
+fn owner(admin: &Admin, target: &Path) -> Result<Option<Session>, String> {
+    if !files::holds(target, Form::Token).is_ok_and(|held| held == Holds::Secret) {
+        return Ok(None);
+    }
     let asked = |why: &dyn std::fmt::Display| {
         format!(
             "Asking Stalwart whose API key {} holds: {why}",
             target.display()
         )
     };
-    let secret = files::read_secret(target, Privacy::Owned).map_err(|error| asked(&error))?;
+    let data = files::read_bounded(target, 16384).map_err(|error| asked(&error))?;
+    let secret = String::from_utf8_lossy(&data);
     let answer = Request::get(&admin.session_url())
-        .header("Authorization", &format!("Bearer {secret}"))
+        .header("Authorization", &format!("Bearer {}", secret.trim()))
         .timeout(Duration::from_secs(30))
         .limit(MAX_ANSWER)
         .send()
-        .map_err(|error| asked(&error))?;
+        .map_err(|error| match error {
+            garrison_stalwart::Error::Limited(_) => asked(&limited()),
+            error => asked(&error),
+        })?;
     match answer.status {
         200 => {}
-        401 | 403 => return Ok(None),
+        401 => return Ok(Some(Session::Unknown)),
+        403 => return Ok(Some(Session::Refused)),
         status => return Err(asked(&format!("Stalwart answered HTTP {status}"))),
     }
     let method = "GET /jmap/session";
@@ -78,7 +94,7 @@ fn owner(admin: &Admin, target: &Path) -> Result<Option<String>, String> {
         .map_err(|error| unreadable(method, &error.to_string()))?;
     let account = session["primaryAccounts"]["urn:stalwart:jmap"].as_str();
     let account = account.ok_or_else(|| unreadable(method, "no account named"))?;
-    Ok(Some(account.to_owned()))
+    Ok(Some(Session::Of(account.to_owned())))
 }
 
 /// What setup says where Stalwart does not show the administrator the
@@ -97,129 +113,192 @@ fn unseen(error: String, target: &Path) -> String {
     )
 }
 
-/// What `ensure` did: the step, the keys a new one replaces, whether the
-/// file holds a key this run made, and whether the old keys went before
-/// it, so that a service that holds one has a key Stalwart no longer takes
-/// until it starts again. `setup` removes the replaced keys once the
-/// services that hold them have restarted with the new one, also when it
-/// fails on the way (`remove`).
-pub(super) struct Ensured {
-    pub(super) step: String,
-    pub(super) replaced: Vec<Replaced>,
-    pub(super) made: bool,
-    pub(super) gone_first: bool,
+/// What Stalwart and its file hold of one key, read before anything
+/// changes: its keys of the description in the accounts concerned, the one
+/// to keep where its file holds it, as Stalwart shows it, what a new key is
+/// said as, and what setup says where Stalwart's quota leaves a new one no
+/// room.
+pub(super) struct Found {
+    existing: Vec<AccountKey>,
+    keep: Option<(AccountKey, Stored)>,
+    made: String,
+    full: String,
+}
+
+/// The keys of `keys` as Stalwart and the files hold them: the
+/// administrator's own keys and those of every account a file's key opens a
+/// session in, each account listed once, so that a key that a run moved out
+/// of an account and could not remove there is found while any file names
+/// that account. The keys setup makes are the administrator's that made
+/// them, and an administrator lists only its own account's keys unless it
+/// names another (measured on Stalwart 1.1.0 and 1.2.0).
+pub(super) fn find(
+    admin: &Admin,
+    directory: &Path,
+    keys: &[&Key],
+    rotate: bool,
+) -> Result<Vec<Found>, String> {
+    let Listed { account_id, list } = admin.list_in::<Stored>("ApiKey", None)?;
+    let named: Vec<String> = list
+        .iter()
+        .map(|item| match item.text("description") {
+            Some(text) => format!("'{text}'"),
+            None => format!("one without a description ({})", item.id),
+        })
+        .collect();
+    let mut held: Vec<(Option<String>, Stored)> =
+        list.into_iter().map(|item| (None, item)).collect();
+    let (mut sessions, mut listed) = (Vec::new(), vec![account_id]);
+    for key in keys {
+        let target = directory.join(key.file);
+        let session = owner(admin, &target)?;
+        if let Some(Session::Of(account)) = &session
+            && !listed.contains(account)
+        {
+            let theirs = admin.list_in::<Stored>("ApiKey", Some(account));
+            let theirs = theirs.map_err(|error| unseen(error, &target))?;
+            held.extend(
+                theirs
+                    .list
+                    .into_iter()
+                    .map(|item| (Some(account.clone()), item)),
+            );
+            listed.push(account.clone());
+        }
+        sessions.push(session);
+    }
+    let mut found = Vec::new();
+    for (key, session) in keys.iter().zip(sessions) {
+        let target = directory.join(key.file);
+        let ours: Vec<&(Option<String>, Stored)> = held
+            .iter()
+            .filter(|(_, item)| item.text("description") == Some(key.description))
+            .collect();
+        let existing: Vec<AccountKey> = ours
+            .iter()
+            .map(|(account, item)| AccountKey {
+                account: account.clone(),
+                id: item.id.clone(),
+            })
+            .collect();
+        // The one key of its description is kept where its file holds it.
+        // Where Stalwart has several, as after a run that stopped before
+        // the old one went, no run can tell which one the file holds, since
+        // Stalwart shows no key's secret: a new key replaces them all.
+        let known = matches!(session, Some(Session::Of(_) | Session::Refused));
+        let keep = match (existing.as_slice(), ours.as_slice()) {
+            ([only], [(_, stored)]) if known && !rotate && holds_key(&target) => {
+                Some((only.clone(), stored.clone()))
+            }
+            _ => None,
+        };
+        let (path, description) = (target.display(), key.description);
+        let made = match (existing.len(), rotate) {
+            _ if session == Some(Session::Unknown) => {
+                format!("Stalwart did not know the API key in {path}; made a new one")
+            }
+            (0, _) | (1, false) => format!("created API key '{description}' -> {path}"),
+            (count, false) => {
+                format!("replaced the {count} API keys '{description}' with one -> {path}")
+            }
+            (_, true) => format!("replaced API key '{description}' -> {path}"),
+        };
+        let full = format!(
+            "Stalwart takes no more API keys in the administrator's account, which holds {}: \
+             setup makes a new key before it removes the one it replaces. Remove a key the \
+             account no longer needs in the Stalwart WebUI; setup made no new key \
+             '{description}' and removed none",
+            named.join(", ")
+        );
+        found.push(Found {
+            existing,
+            keep,
+            made,
+            full,
+        });
+    }
+    Ok(found)
 }
 
 /// Whether Stalwart refused a new object for its account's quota, as
 /// `Admin::call` words a refusal: JMAP's error type `overQuota` (RFC 8620),
 /// which Stalwart gives where an account holds as many API keys as it may,
-/// five (measured on Stalwart 1.1.0).
-pub(super) fn over_quota(error: &str) -> bool {
+/// five (measured on Stalwart 1.1.0 and 1.2.0).
+fn over_quota(error: &str) -> bool {
     error.contains(r#""type":"overQuota""#)
 }
 
-pub(super) fn ensure(
+/// One key as it was asked for: the file's kept with the rights setup
+/// gives it, or a new one made, written to its file, tried from this host
+/// and taken up by its service, and only then the keys it replaces
+/// removed, so that a service always holds a key Stalwart takes. Where
+/// Stalwart's quota leaves the new key no room, nothing of this key
+/// changes. `take_up` has the service that holds the key read a new one.
+/// Whether anything changed: a kept key whose rights are as setup gives
+/// them is left as it is.
+pub(super) fn settle(
     admin: &Admin,
-    directory: &Path,
+    config: &Config,
     key: &Key,
+    found: Found,
     networks: &Enabled,
-    rotate: bool,
-) -> Result<Ensured, String> {
+    take_up: &dyn Fn(&Key) -> Result<(), String>,
+) -> Result<bool, String> {
+    let directory = &config.credentials_directory;
     let (target, description) = (directory.join(key.file), key.description);
-    let ours = |item: &StoredKey| item.description.as_deref() == Some(description);
-    let own: Listed<StoredKey> = admin.list_in("ApiKey", None)?;
-    let mut existing: Vec<(Option<String>, StoredKey)> = own
-        .list
-        .into_iter()
-        .filter(|item| ours(item))
-        .map(|item| (None, item))
-        .collect();
-    // The file's key may be another administrator's: that account's keys of
-    // this description count as well.
-    let held = holds_key(&target);
-    let other = if held { owner(admin, &target)? } else { None };
-    if let Some(account) = other.filter(|account| *account != own.account_id) {
-        let theirs = admin.list_in::<StoredKey>("ApiKey", Some(&account));
-        let theirs = theirs.map_err(|error| unseen(error, &target))?;
-        let theirs = theirs.list.into_iter().filter(|item| ours(item));
-        existing.extend(theirs.map(|item| (Some(account.clone()), item)));
-    }
     let rights = || KeyRights {
         permissions: KeyPermissions::Replace {
             permissions: Enabled::of(key.permissions.iter().copied()),
         },
         allowed_ips: networks,
     };
-    // The one key of its description is kept where its file holds a key.
-    // Where Stalwart has several, as after a rotation that was stopped or
-    // whose clean-up failed, no run can tell which one the file holds, since
-    // Stalwart shows no key's secret: a new key replaces them all, as where
-    // the file holds none.
-    if let ([(account, only)], true, false) = (existing.as_slice(), held, rotate) {
-        let update = Set::update(&only.id, rights());
-        admin.set_in("x:ApiKey/set", account.as_deref(), &update)?;
-        return Ok(Ensured {
-            step: format!("updated API key '{description}' (secret unchanged)"),
-            replaced: Vec::new(),
-            made: false,
-            gone_first: false,
-        });
-    }
-    let mut replaced: Vec<Replaced> = existing
-        .iter()
-        .map(|(account, item)| Replaced {
-            account: account.clone(),
-            id: item.id.clone(),
-        })
-        .collect();
-    let path = target.display();
-    let mut step = match (existing.len(), rotate) {
-        (0, _) | (1, false) => format!("created API key '{description}' -> {path}"),
-        (count, false) => {
-            format!("replaced the {count} API keys '{description}' with one -> {path}")
+    if let Some((kept, stored)) = &found.keep {
+        let shown = KeyRights {
+            allowed_ips: &as_shown(networks),
+            ..rights()
+        };
+        let changed = !stored.holds(&rights()) && !stored.holds(&shown);
+        if changed {
+            let update = Set::update(&kept.id, rights());
+            admin.set_in("x:ApiKey/set", kept.account.as_deref(), &update)?;
         }
-        (_, true) => format!("replaced API key '{description}' -> {path}"),
-    };
-    // A new key first and its file next. A running service keeps the old
-    // key until it restarts, so the old keys go after that (`remove`). Where
-    // Stalwart's quota leaves the new key no room beside them, they go
-    // first, and what holds one goes without a key Stalwart takes until it
-    // starts again with the new one.
-    let mut gone_first = false;
-    match make(admin, &target, description, rights()) {
-        Err(error) if over_quota(&error) && !replaced.is_empty() => {
-            let quota = "Stalwart's quota of API keys left the new key no room";
-            let without = key.without;
-            if let Err(error) = remove(admin, &replaced) {
-                return Err(format!(
-                    "{error}; {quota}, so setup was removing the old ones first: where they \
-                     are gone, {without} until setup makes its key"
-                ));
-            }
-            if let Err(error) = make(admin, &target, description, rights()) {
-                return Err(format!(
-                    "{error}; {quota}, so the old ones went first: {without} until setup \
-                     makes its key"
-                ));
-            }
-            replaced.clear();
-            gone_first = true;
-            step.push_str(" (the old ones went first: Stalwart's quota of API keys left no room)");
-        }
-        Err(error) if over_quota(&error) => {
-            return Err(format!(
-                "{error}. Stalwart holds no more API keys for the administrator's account: \
-                 remove those of its keys that are no longer needed in the Stalwart WebUI"
+        tried(config, key)?;
+        if changed {
+            say(&format!(
+                "- updated API key '{description}' (secret unchanged)"
             ));
         }
-        done => done?,
+        return Ok(changed);
     }
-    Ok(Ensured {
-        step,
-        replaced,
-        made: true,
-        gone_first,
-    })
+    if let Err(error) = make(admin, &target, description, rights()) {
+        return Err(if over_quota(&error) {
+            found.full
+        } else {
+            error
+        });
+    }
+    tried(config, key)?;
+    say(&format!("- {}", found.made));
+    take_up(key)?;
+    for old in &found.existing {
+        let destroy = Set::<()>::Destroy([old.id.as_str()]);
+        admin
+            .set_in("x:ApiKey/set", old.account.as_deref(), &destroy)
+            .map_err(|error| {
+                format!("{error}; the API key '{description}' that the new one replaced stays")
+            })?;
+    }
+    Ok(true)
+}
+
+/// `networks` as Stalwart shows a key's: a single address without its
+/// prefix (measured on Stalwart 1.1.0 and 1.2.0). A key that Stalwart shows
+/// as setup wrote it is held as well.
+fn as_shown(networks: &Enabled) -> Enabled {
+    Enabled::of(networks.names().map(|network| {
+        let single = if network.contains(':') { "/128" } else { "/32" };
+        network.strip_suffix(single).unwrap_or(network).to_owned()
+    }))
 }
 
 /// A new key, its secret written to `target`. A key whose secret is lost is
@@ -254,6 +333,27 @@ fn make(
     })
 }
 
+/// The service that holds `key` reads its new one: the broker starts again,
+/// the collector reads it at its next run. Where root's restart fails, the
+/// broker may still hold the key the new one replaces, which then stays.
+pub(super) fn take_up(key: &Key) -> Result<(), String> {
+    if !key.held {
+        return Ok(());
+    }
+    match restart::restart(&BTreeSet::from([key.file])) {
+        Ok(said) => {
+            if let Some(line) = said {
+                say(&line);
+            }
+            Ok(())
+        }
+        Err(asked) => Err(format!(
+            "{asked} Until then it holds the API key the new one replaces, which stays in \
+             Stalwart"
+        )),
+    }
+}
+
 /// What setup says where Stalwart made no new key. A user without
 /// administrator rights reads the list of keys, its own, but may not grant
 /// a key the permissions it lacks: JMAP's `forbidden`, as Stalwart answers
@@ -269,61 +369,39 @@ fn refused(error: &str, description: &str) -> String {
     format!("{error} (Stalwart did not return the new API key secret)")
 }
 
-/// Remove the keys that new ones replaced, each from its account.
-pub(super) fn remove(admin: &Admin, replaced: &[Replaced]) -> Result<(), String> {
-    for key in replaced {
-        let destroy = Set::<()>::Destroy([key.id.as_str()]);
-        admin.set_in("x:ApiKey/set", key.account.as_deref(), &destroy)?;
-    }
-    Ok(())
-}
-
-/// Each key opens a JMAP session from this host, as the services will use
-/// it; what is returned are the keys that Stalwart does not know. It answers
-/// such a key 401, as after the credentials directory was put back from a
-/// copy older than the last rotation, and a key it knows from an address the
-/// key does not allow 403 (measured on Stalwart 1.1.0). In a container's
-/// bridge network Stalwart sees this host as the bridge's gateway, not as
-/// 127.0.0.1, and then every key is refused. That is said here, at setup,
-/// rather than found later in the collector's results.
-pub(super) fn verify<'k>(
-    config: &Config,
-    directory: &Path,
-    keys: &[&'k Key],
-) -> Result<Vec<&'k Key>, String> {
+/// The key in its file opens a JMAP session from this host, as its service
+/// will use it. Stalwart answers a key it knows from an address the key
+/// does not allow 403 (measured on Stalwart 1.1.0 and 1.2.0). In a
+/// container's bridge network Stalwart sees this host as the bridge's
+/// gateway, not as 127.0.0.1, and then every key is refused. That is said
+/// here, at setup, rather than found later in the collector's results.
+fn tried(config: &Config, key: &Key) -> Result<(), String> {
     let url = format!("{}/jmap/session", config.deployment.stalwart_url);
-    let mut unknown = Vec::new();
-    for key in keys {
-        let name = key.file;
-        // As the services read it, so that what is tried is what they use.
-        let secret = files::read_secret(&directory.join(name), Privacy::Owned)
-            .map_err(|error| format!("{name}: {error}"))?;
-        let authorization = format!("Bearer {secret}");
-        let status = Request::get(&url)
-            .header("Authorization", &authorization)
-            .timeout(Duration::from_secs(30))
-            .status()
-            .map_err(|error| format!("Trying {name}: {error}"))?;
-        match status {
-            200 => {}
-            401 => unknown.push(*key),
-            403 => {
-                return Err(format!(
-                    "Stalwart refuses the API key in {name} from this host (HTTP 403): it sees \
-                     this host at an address the key does not allow. That happens when \
-                     Stalwart runs in a Docker or Podman bridge network; run it in the host \
-                     network instead (docker run --network host, or network_mode: host with \
-                     Compose)"
-                ));
-            }
-            other => {
-                return Err(format!(
-                    "Trying {name}: Stalwart answered HTTP {other} for its JMAP session"
-                ));
-            }
-        }
+    let name = key.file;
+    // As the services read it, so that what is tried is what they use.
+    let path = config.credentials_directory.join(name);
+    let secret =
+        files::read_secret(&path, Privacy::Owned).map_err(|error| format!("{name}: {error}"))?;
+    let status = Request::get(&url)
+        .header("Authorization", &format!("Bearer {secret}"))
+        .timeout(Duration::from_secs(30))
+        .status()
+        .map_err(|error| format!("Trying {name}: {error}"))?;
+    match status {
+        200 => Ok(()),
+        401 => Err(format!(
+            "Stalwart does not take the API key in {name} (HTTP 401)"
+        )),
+        403 => Err(format!(
+            "Stalwart refuses the API key in {name} from this host (HTTP 403): it sees this host \
+             at an address the key does not allow. That happens when Stalwart runs in a Docker \
+             or Podman bridge network; run it in the host network instead (docker run --network \
+             host, or network_mode: host with Compose)"
+        )),
+        other => Err(format!(
+            "Trying {name}: Stalwart answered HTTP {other} for its JMAP session"
+        )),
     }
-    Ok(unknown)
 }
 
 /// A network as `address/prefix`; the host part must be zero.

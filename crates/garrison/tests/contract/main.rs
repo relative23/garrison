@@ -31,6 +31,7 @@ mod entry_refusals;
 mod entry_stalwart;
 mod entry_stops;
 mod exporter;
+mod held;
 mod keys;
 mod milter;
 mod refused;
@@ -220,25 +221,8 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
         assert!(credentials.join(name).is_file(), "{name}");
     }
     write_private(&credentials.join(PENDING), b"part of a key");
-    let again = run(
-        directory.path(),
-        &[
-            "stalwart",
-            "setup",
-            "--admin-credential",
-            &credential,
-            "--webhook-url",
-            "http://127.0.0.1:9/webhook",
-            "--allow-network",
-            &gateway,
-            "--skip-metrics",
-        ],
-    );
-    assert_eq!(again.status.code(), Some(0), "{}", text(&again));
+    unchanged(&lab, directory.path(), &credential, &gateway);
     assert!(!credentials.join(PENDING).exists(), "{PENDING} was left");
-    assert!(text(&again).contains("- updated API key 'garrison broker' (secret unchanged)"));
-    assert!(text(&again).contains("- updated webhook"));
-    assert!(text(&again).contains(&format!("- updated OAuth client {client}")));
     assert_eq!(oauth_client(&lab, client)["id"], registered["id"]);
 
     rotate(&mut lab, directory.path(), &credential, &gateway);
@@ -246,6 +230,48 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
     access_after_the_rotation(&lab, directory.path());
     milter::macro_filter(&mut lab, directory.path(), &credential, &gateway);
     refused_without_the_gateway(&mut lab, directory.path(), &credential);
+}
+
+/// What setup says, and nothing else on standard output, where it finds
+/// everything as asked.
+const UNCHANGED: &str = "Stalwart is set up as asked; nothing was changed.";
+
+/// The run after a first setup, with the same arguments, through a relay
+/// that keeps every request: it finds everything as asked, so it writes no
+/// object in Stalwart, restarts no service and says so. It asks Stalwart to
+/// reload its settings, as every run does, since no read shows whether
+/// Stalwart uses what it holds.
+fn unchanged(lab: &Lab, directory: &std::path::Path, credential: &str, gateway: &str) {
+    let relay = stopper::Stopper::new(&lab.url, usize::MAX, stopper::Stop::Lost);
+    let settings = directory.join("garrison.toml");
+    std::fs::write(&settings, config_text(directory, &relay.url)).unwrap();
+    let again = run(
+        directory,
+        &[
+            "stalwart",
+            "setup",
+            "--admin-credential",
+            credential,
+            "--webhook-url",
+            "http://127.0.0.1:9/webhook",
+            "--allow-network",
+            gateway,
+        ],
+    );
+    std::fs::write(&settings, config_text(directory, &lab.url)).unwrap();
+    let (said, asked) = (text(&again), relay.asked());
+    assert_eq!(again.status.code(), Some(0), "{said}");
+    let written: Vec<&String> = asked
+        .iter()
+        .filter(|asked| asked.contains("/set") && *asked != "x:Action/set create")
+        .collect();
+    assert_eq!(written, Vec::<&String>::new(), "{said}");
+    assert!(
+        !said.contains("Restart ") && !said.contains(" restarted"),
+        "{said}"
+    );
+    let stdout = String::from_utf8_lossy(&again.stdout);
+    assert_eq!(stdout.lines().last(), Some(UNCHANGED), "{said}");
 }
 
 /// `access init` signs in with the new broker key and finds the
@@ -281,8 +307,11 @@ fn remove_afterwards(lab: &mut Lab) {
                     .is_some_and(|text| text.ends_with("/oauth-client.json")),
                 _ => item["httpHeaders"]["X-Garrison"] == "events",
             };
+            // Stalwart numbers each kind of object on its own: an API key and
+            // an OAuth client can have the same ID.
             let id = item["id"].as_str().unwrap().to_owned();
-            if ours && !lab.created.iter().any(|(_, known)| *known == id) {
+            let known = |(other, known): &(String, String)| other == kind && *known == id;
+            if ours && !lab.created.iter().any(known) {
                 lab.created.push((kind.into(), id));
             }
         }
