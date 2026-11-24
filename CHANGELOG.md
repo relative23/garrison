@@ -1854,6 +1854,8 @@ Notable changes for operators and users. The format follows
 - **`garrison doctor` says that nginx does not reach the web service where it
   answers 502 for Garrison**, and names the service, the include's port and the
   SELinux module instead of the include itself.
+- **The Ansible role shows what `garrison stalwart setup` said**, also where
+  it failed; the Stalwart administrator's credential stays out of the output.
 
 ## [0.1.2] - 2026-11-13
 

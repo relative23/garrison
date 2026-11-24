@@ -121,10 +121,20 @@
       - --admin-credential
       - "-"
     stdin: "{{ garrison_stalwart_admin | to_json }}"
+  register: garrison_setup
+  # Hides the administrator on standard input; what setup says holds no
+  # secret and is shown next.
   no_log: true
+  failed_when: false
   when: >-
     garrison_stalwart_admin | length > 0
     and garrison_keys.results | rejectattr('rc', 'equalto', 0) | list | length > 0
+
+- name: What setup said
+  ansible.builtin.debug:
+    msg: "{{ garrison_setup.stdout_lines + garrison_setup.stderr_lines }}"
+  failed_when: garrison_setup.rc != 0
+  when: garrison_setup is not skipped
 
 - name: Stalwart's administrators have access
   ansible.builtin.command:

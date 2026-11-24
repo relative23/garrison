@@ -1,6 +1,7 @@
 #!/bin/sh
 # The Ansible role (deploy/ansible) against a virtual machine: a first
-# installation, a second run that changes nothing, and an upgrade by version.
+# installation, a second run that changes nothing, an upgrade by version, and
+# plays that stop on the way, each finished by the next play.
 #
 #   HOST=vm [DISTRO=debian-13] [ANSIBLE=ansible-playbook] [SCENARIOS="..."] \
 #       scripts/acceptance-ansible.sh OUT-DIR
@@ -157,6 +158,42 @@ stops() {
     echo "ok    the play for $version stops and says: $words"
 }
 
+# No secret is in what the play printed: not the administrator that went in
+# on standard input, not a key the stand-in handed out, not the webhook's key
+# or the scrape credential as their files hold them.
+nothing_secret() {
+    for file in webhook-signature-key collector-native-key broker-native-key; do
+        secret=$(inside "cat /etc/garrison/credentials/$file 2>/dev/null || true")
+        if [ -n "$secret" ] && grep -F -q -- "$secret" "$log"; then
+            echo "FAIL  the play shows no secret, but $file is in what it printed"
+            exit 1
+        fi
+    done
+    secret=$(inside 'sed -n '\''s/.*"secret":"\([^"]*\)".*/\1/p'\'' /etc/garrison/credentials/metrics-credential')
+    if [ -n "$secret" ] && grep -F -q -- "$secret" "$log"; then
+        echo "FAIL  the play shows no secret, but the scrape credential is in what it printed"
+        exit 1
+    fi
+    if grep -E -q 'stand-in-administrator|stand-in-k[0-9]+-secret' "$log"; then
+        echo "FAIL  the play shows no secret, but the administrator or a key's secret is in what it printed"
+        exit 1
+    fi
+    echo "ok    the play shows no secret"
+}
+
+# Setup fails at its last step, after it wrote every key file: the stand-in
+# refuses the keys' sessions, as Stalwart refuses a key it does not take.
+scenario_setup_refused() {
+    step "A setup that fails says why and shows no secret"
+    inside 'cd /etc/garrison/credentials && rm webhook-signature-key collector-native-key broker-native-key &&
+        touch /root/stand-in-refuses'
+    stops "$newer" "Stalwart does not take the API key it just made"
+    nothing_secret
+    inside 'rm /root/stand-in-refuses'
+    play "$newer"
+    services "after a setup that failed"
+}
+
 step "The play and the role are valid"
 if ! ANSIBLE_ROLES_PATH=$roles "$ansible" --syntax-check -i "$work/inventory" "$work/site.yml" > "$work/syntax.log" 2>&1; then
     cat "$work/syntax.log"
@@ -178,8 +215,8 @@ play "$newer"
 check "the role upgraded to $newer" "test \"\$(cat /opt/garrison/current/VERSION)\" = '$newer'"
 services "upgraded by the role"
 
-for scenario in ${SCENARIOS:-}; do
+for scenario in ${SCENARIOS:-setup_refused}; do
     "scenario_$scenario"
 done
 
-step "Accepted: the role installs, keeps and upgrades Garrison"
+step "Accepted: the role installs, keeps and upgrades Garrison, and finishes plays that stopped"
