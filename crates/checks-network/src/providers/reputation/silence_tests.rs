@@ -203,3 +203,48 @@ fn what_the_resolver_answered_before_it_went_silent_for_a_mail_host_counts() {
     assert_dated(&blocklists, 0, AGAIN);
     assert_dated(&reverse, 0, AGAIN);
 }
+
+/// A mail host whose answer over UDP is cut off and whose question over TCP
+/// fails is that host's alone: the resolver answered, so the next mail host
+/// is asked, and the cards name the host whose addresses could not be read.
+#[test]
+fn a_mail_host_whose_question_over_tcp_fails_is_that_hosts_alone() {
+    use crate::providers::dns::stand_in::{Fault, resolver_faulty};
+
+    let mut zone = Zone::new();
+    address(&mut zone, "mx2.example.test", "203.0.113.9");
+    pointer(&mut zone, "203.0.113.9", "mx2.example.test");
+    let closed =
+        std::collections::BTreeMap::from([(question("mail.example.test", Kind::A), Fault::Closed)]);
+    let (resolver, stopping) = resolver_faulty(zone, closed);
+    let hosts = "hosts = [\"mail.example.test\", \"mx2.example.test\"]";
+    let check = Reputation::new(&table(&format!(
+        "type = \"reputation\"\nresolver = \"{resolver}\"\n{hosts}\n{LIST}"
+    )))
+    .unwrap();
+    let (blocklists, reverse) = observed(&check, &Remembered::default(), 0);
+    stopping.questions();
+    let unread = "The IPv4 addresses of mail.example.test could not be read: the resolver's answer \
+                  is cut off, and the question over TCP failed: the resolver closed the \
+                  connection before it answered.";
+    assert_eq!(
+        (
+            blocklists.state,
+            blocklists.findings.clone(),
+            rows(&blocklists)
+        ),
+        (
+            State::Partial,
+            vec![unread.to_owned()],
+            vec!["203.0.113.9 | up.example.org | not listed".to_owned()]
+        )
+    );
+    assert_eq!(
+        (reverse.state, reverse.findings.clone(), rows(&reverse)),
+        (
+            State::Partial,
+            vec![unread.to_owned()],
+            vec!["203.0.113.9 | mx2.example.test | mx2.example.test | fits".to_owned()]
+        )
+    );
+}

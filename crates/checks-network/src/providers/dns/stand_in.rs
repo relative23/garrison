@@ -60,6 +60,9 @@ pub(crate) enum Fault {
     Code(u8),
     /// An answer cut off, over UDP and again over TCP.
     CutOff,
+    /// An answer cut off over UDP, and over TCP a connection closed once
+    /// the question was read, without an answer.
+    Closed,
     /// No answer at all.
     Silent,
 }
@@ -153,6 +156,9 @@ fn over_tcp_once(mut stream: TcpStream, zone: &Zone, faults: &BTreeMap<(String, 
     }
     let (name, kind) = asked(&question);
     let fault = faults.get(&(name.clone(), kind)).copied();
+    if fault == Some(Fault::Closed) {
+        return;
+    }
     let message = faulty(&question, &name, kind, zone, fault);
     let _ = stream.write_all(&u16::try_from(message.len()).unwrap().to_be_bytes());
     let _ = stream.write_all(&message);
@@ -165,7 +171,7 @@ fn faulty(question: &[u8], name: &str, kind: u16, zone: &Zone, fault: Option<Fau
             let errors = BTreeMap::from([((name.to_owned(), kind), code)]);
             answered(question, name, kind, zone, &errors)
         }
-        Some(Fault::CutOff) => {
+        Some(Fault::CutOff | Fault::Closed) => {
             let mut message = question.to_vec();
             // An answer, recursion wanted, cut off (TC), no error.
             message[2] = 0x83;

@@ -62,11 +62,15 @@ fn an_answer_cut_off_over_udp_is_asked_for_again_over_tcp() {
     assert_eq!(error.to_string(), format!("the resolver {waited}"));
 }
 
+/// The words of a question over TCP that failed after an answer cut off
+/// over UDP.
+const OVER_TCP: &str = "the resolver's answer is cut off, and the question over TCP failed";
+
 /// An answer cut off over UDP is asked for over TCP: where nothing listens
-/// for TCP, the resolver did not answer; where TCP cuts it off as well, it
-/// is cut off.
+/// for TCP, the question failed, which concerns this question alone, since
+/// the resolver answered; where TCP cuts it off as well, it is cut off.
 #[test]
-fn the_question_over_tcp_has_no_answer_or_one_cut_off_again() {
+fn the_question_over_tcp_fails_or_is_cut_off_again() {
     let cut = |question: &[u8]| answer(question, [0x83, 0x80], &[]);
     // No listener for TCP on the UDP port: the connection is refused.
     let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -77,7 +81,11 @@ fn the_question_over_tcp_has_no_answer_or_one_cut_off_again() {
         udp.send_to(&cut(&buffer[..length]), client).unwrap();
     });
     let error = ask(server, "example.test", Kind::Txt).unwrap_err();
-    assert!(matches!(error, Error::NoAnswer { .. }), "{error:?}");
+    assert!(!matches!(error, Error::NoAnswer { .. }), "{error:?}");
+    assert_eq!(
+        error.to_string(),
+        format!("{OVER_TCP}: Connection refused (os error 111)")
+    );
     handle.join().unwrap();
     // TCP answers, cut off again.
     let (udp, tcp) = (0..50)
@@ -105,4 +113,50 @@ fn the_question_over_tcp_has_no_answer_or_one_cut_off_again() {
     });
     assert_eq!(ask(server, "example.test", Kind::Txt), Err(Error::CutOff));
     handle.join().unwrap();
+}
+
+/// A resolver whose answer over UDP is cut off and that answers over TCP
+/// as `tcp` does with its listener.
+fn cut_off_then(tcp: fn(TcpListener)) -> SocketAddr {
+    let (udp, listener) = (0..50)
+        .find_map(|_| {
+            let udp = UdpSocket::bind("127.0.0.1:0").ok()?;
+            let listener = TcpListener::bind(udp.local_addr().ok()?).ok()?;
+            Some((udp, listener))
+        })
+        .expect("a port that is free for UDP and TCP");
+    let server = udp.local_addr().unwrap();
+    thread::spawn(move || {
+        let mut buffer = [0; 512];
+        let (length, client) = udp.recv_from(&mut buffer).unwrap();
+        let cut = answer(&buffer[..length], [0x83, 0x80], &[]);
+        udp.send_to(&cut, client).unwrap();
+    });
+    thread::spawn(move || tcp(listener));
+    server
+}
+
+/// A resolver that takes the connection over TCP and closes it without an
+/// answer, at once or once it read the question, closed it: the system's
+/// words for that ("failed to fill whole buffer", "Connection reset by
+/// peer") say nothing of the kind.
+#[test]
+fn a_connection_over_tcp_closed_before_the_answer_says_so() {
+    let closed = format!("{OVER_TCP}: the resolver closed the connection before it answered");
+    let at_once = cut_off_then(|listener| {
+        let (stream, _) = listener.accept().unwrap();
+        drop(stream);
+    });
+    let read = cut_off_then(|listener| {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut size = [0; 2];
+        stream.read_exact(&mut size).unwrap();
+        let mut question = vec![0; usize::from(u16::from_be_bytes(size))];
+        stream.read_exact(&mut question).unwrap();
+    });
+    for server in [at_once, read] {
+        let error = ask(server, "example.test", Kind::Txt).unwrap_err();
+        assert!(!matches!(error, Error::NoAnswer { .. }), "{error:?}");
+        assert_eq!(error.to_string(), closed);
+    }
 }

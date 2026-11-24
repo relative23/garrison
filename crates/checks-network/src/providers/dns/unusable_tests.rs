@@ -271,3 +271,51 @@ fn a_policy_that_stops_senders_is_a_warning_beside_what_could_not_be_read() {
         );
     }
 }
+
+/// An answer cut off over UDP whose question over TCP fails is that
+/// record's: the resolver answered, so it is asked the records after it and
+/// those of the next domain.
+#[test]
+fn a_record_whose_question_over_tcp_fails_is_that_records_alone() {
+    let zone_file =
+        |name: &str| format!("{name}. IN MX 10 mail.{name}.\n{name}. IN TXT \"v=spf1 mx -all\"\n");
+    let mut answers = BTreeMap::new();
+    for name in ["a.test", "b.test"] {
+        answers.insert(
+            (name.to_owned(), Kind::Mx.code()),
+            vec![host(&[0, 10], &format!("mail.{name}"))],
+        );
+        answers.insert(
+            (name.to_owned(), Kind::Txt.code()),
+            vec![text("v=spf1 mx -all")],
+        );
+    }
+    let closed = BTreeMap::from([(("a.test".to_owned(), Kind::Txt.code()), Fault::Closed)]);
+    let (address, stopping) = resolver_faulty(answers, closed);
+    let cards = collected_with(
+        &json!([
+            {"id": "a", "name": "a.test", "dnsZoneFile": zone_file("a.test")},
+            {"id": "b", "name": "b.test", "dnsZoneFile": zone_file("b.test")},
+        ]),
+        address,
+        None,
+    );
+    assert_eq!(stopping.questions().len(), 4);
+    let words = "the resolver's answer is cut off, and the question over TCP failed: the resolver \
+                 closed the connection before it answered";
+    assert_eq!(
+        results(&cards[0]),
+        ["published".to_owned(), format!("not read: {words}")]
+    );
+    assert_eq!(
+        (cards[0].state, cards[0].findings.clone()),
+        (
+            State::Unknown,
+            vec![format!("TXT a.test could not be read: {words}.")]
+        )
+    );
+    assert_eq!(
+        (cards[1].state, results(&cards[1])),
+        (State::Ok, vec!["published".to_owned(); 2])
+    );
+}

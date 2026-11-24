@@ -162,6 +162,13 @@ fn each_failure_keeps_its_words() {
             },
             "the resolver 192.0.2.53:53 did not answer: no answer within 3 s",
         ),
+        (
+            Error::NoTcpAnswer {
+                why: "no answer within 3 s".to_owned(),
+            },
+            "the resolver's answer is cut off, and the question over TCP failed: no answer \
+             within 3 s",
+        ),
         (Error::Code(2), "the resolver could not answer (SERVFAIL)"),
         (Error::Code(5), "the resolver refused the question"),
         (Error::Code(4), "the resolver answered with error 4"),

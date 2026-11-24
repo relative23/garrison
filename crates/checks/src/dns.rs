@@ -91,10 +91,14 @@ pub enum Answer {
 /// are.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
-    /// No answer came in the question's time, over UDP, or over TCP for one
-    /// that was cut off: the resolver did not answer or could not be
-    /// reached, and would likely keep the next question waiting as long.
+    /// No answer came over UDP in the question's time: the resolver did not
+    /// answer or could not be reached, and would likely keep the next
+    /// question waiting as long.
     NoAnswer { server: SocketAddr, why: String },
+    /// The answer was cut off over UDP, and the question asked again over
+    /// TCP got none: the resolver answered, so this concerns this question
+    /// alone.
+    NoTcpAnswer { why: String },
     /// The resolver answered with an error code (RFC 1035, 4.1.1), such as
     /// 2, SERVFAIL, or 5, REFUSED: about this question, not every one.
     Code(u8),
@@ -114,6 +118,10 @@ impl fmt::Display for Error {
             Error::NoAnswer { server, why } => {
                 write!(formatter, "the resolver {server} did not answer: {why}")
             }
+            Error::NoTcpAnswer { why } => write!(
+                formatter,
+                "the resolver's answer is cut off, and the question over TCP failed: {why}"
+            ),
             Error::Code(2) => formatter.write_str("the resolver could not answer (SERVFAIL)"),
             Error::Code(5) => formatter.write_str("the resolver refused the question"),
             Error::Code(code) => write!(formatter, "the resolver answered with error {code}"),
@@ -417,11 +425,20 @@ fn over_tcp(server: SocketAddr, question: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 /// Why no answer came, in words: a wait that ran out says so, where the
-/// system's own words for it read "Resource temporarily unavailable".
-fn waited(error: &io::Error) -> String {
+/// system's own words for it read "Resource temporarily unavailable", and
+/// so does a connection the resolver closed before it answered, which the
+/// system words as "failed to fill whole buffer" or "Connection reset by
+/// peer".
+fn why_none(error: &io::Error) -> String {
     match error.kind() {
         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => {
             format!("no answer within {} s", TIMEOUT.as_secs())
+        }
+        io::ErrorKind::UnexpectedEof
+        | io::ErrorKind::ConnectionReset
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::BrokenPipe => {
+            "the resolver closed the connection before it answered".to_owned()
         }
         _ => error.to_string(),
     }
@@ -433,15 +450,16 @@ pub fn ask(server: SocketAddr, name: &str, kind: Kind) -> Result<Answer, Error> 
     getrandom::fill(&mut number).map_err(|_| Error::NoRandom)?;
     let id = u16::from_be_bytes(number);
     let question = question(id, name, kind).ok_or_else(|| Error::NoName(name.to_owned()))?;
-    let unanswered = |error: io::Error| Error::NoAnswer {
+    let answer = over_udp(server, &question).map_err(|error| Error::NoAnswer {
         server,
-        why: waited(&error),
-    };
-    let answer = over_udp(server, &question).map_err(unanswered)?;
+        why: why_none(&error),
+    })?;
     if let Some(answer) = read(&answer, id, kind)? {
         return Ok(answer);
     }
-    let answer = over_tcp(server, &question).map_err(unanswered)?;
+    let answer = over_tcp(server, &question).map_err(|error| Error::NoTcpAnswer {
+        why: why_none(&error),
+    })?;
     read(&answer, id, kind)?.ok_or(Error::CutOff)
 }
 

@@ -1015,6 +1015,9 @@ Notable changes for operators and users. The format follows
   warning in either case now.
 - **A notification of the TLS certificates or a domain's DNS records card
   names what made it a warning or a failure.**
+- **A long DNS answer no longer stops the DNS and reputation checks where
+  the resolver refuses TCP.** That record or host is named with why; let the
+  resolver answer over TCP on port 53.
 - **A blocklist that gives no verdict keeps the Blocklists card from being
   OK.** A list that refused this resolver, as Spamhaus refuses public ones,
   answered with an error or did not answer at all, showed only in its row:

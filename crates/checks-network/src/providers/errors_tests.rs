@@ -1,8 +1,9 @@
 //! The rule of an error's words, held over every card that words one of the
 //! DNS client's errors: each kind reads as the client says it, after the
 //! card's own frame, on its row and in its finding. An error code, an answer
-//! that is malformed or cut off are answers that cannot be used; none reads
-//! as no answer, and no answer reads as none of them.
+//! that is malformed or cut off, and one cut off over UDP whose question
+//! over TCP failed are answers that cannot be used; none reads as no
+//! answer, and no answer reads as none of them.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -27,12 +28,13 @@ enum Failure {
     Malformed,
 }
 
-const FAILURES: [Failure; 6] = [
+const FAILURES: [Failure; 7] = [
     Failure::Fault(Fault::Silent),
     Failure::Fault(Fault::Code(2)),
     Failure::Fault(Fault::Code(4)),
     Failure::Fault(Fault::Code(5)),
     Failure::Fault(Fault::CutOff),
+    Failure::Fault(Fault::Closed),
     Failure::Malformed,
 ];
 
@@ -45,6 +47,9 @@ fn words(failure: Failure, resolver: SocketAddr) -> String {
         },
         Failure::Fault(Fault::Code(code)) => dns::Error::Code(code),
         Failure::Fault(Fault::CutOff) => dns::Error::CutOff,
+        Failure::Fault(Fault::Closed) => dns::Error::NoTcpAnswer {
+            why: "the resolver closed the connection before it answered".to_owned(),
+        },
         Failure::Malformed => dns::Error::Malformed,
     }
     .to_string()

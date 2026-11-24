@@ -325,7 +325,9 @@ check asks the resolver for them and compares:
 The answers are those of this resolver at this moment; another resolver may
 still hold older ones. A record that the resolver answers with an error, such
 as SERVFAIL for a zone whose DNSSEC signatures expired, or with an answer
-that is malformed or cut off, says "not read" and why. A record that could
+that is malformed or cut off, says "not read" and why; so does one whose
+answer is too long for UDP where the resolver then takes no question over
+TCP, which it must on port 53. A record that could
 not be read keeps the domain from being in order, optional as it may be: a
 needed one leaves it Unknown, an optional one, such as a TLSA record, Partial
 where it would be OK, and the card names the records and why; where the
