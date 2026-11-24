@@ -83,6 +83,13 @@ pub(crate) fn run(path: &Path, config: &Config, set: Option<&str>, yes: bool, ad
         return 0;
     }
     say(&format!("{}\ngoes into {}.", line(&chosen), path.display()));
+    if !yes && !crate::at_terminal() {
+        complain(
+            "garrison modules asks before it writes, and no terminal is here to answer: add \
+             --yes to write it.",
+        );
+        return 2;
+    }
     let question = "Write it? [y/N]";
     if !yes && !ask(question, false, &mut io::stdin().lock(), &mut io::stdout()) {
         say("Nothing was changed.");
