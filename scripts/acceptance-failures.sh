@@ -290,8 +290,9 @@ scenario_stopped_collector() {
     running "after the stopped collector" "$new"
 }
 
-# Stalwart takes the new keys of a rotation that stops at their check, the
-# old ones go all the same, and the services still hold the old secrets.
+# Stalwart takes the new keys of a rotation that stops at their check: the
+# run restarts the services that hold the secrets all the same, the old
+# keys go, and it names the run that finishes it.
 scenario_rotation() {
     step "Setting up again after a rotation that failed"
     upgraded
@@ -299,12 +300,21 @@ scenario_rotation() {
     inside 'umask 077 && printf "{\"apiKey\": \"stand-in-administrator\"}" > /root/stalwart-admin.json'
     says "a rotation restarts the services that hold the secrets" "$setup --rotate" \
         "restarted with the new secrets"
-    inside 'touch /root/stand-in-refuses'
-    refused "a rotation whose keys Stalwart refuses stops" "$setup --rotate" \
-        "The API keys that new ones replaced were removed"
-    inside 'rm /root/stand-in-refuses'
-    says "setup again restarts the services that still hold the replaced secrets" "$setup" \
-        "restarted with the new secrets"
+    inside 'cp /root/stand-in-keys /root/keys-before-rotation && touch /root/stand-in-refuses'
+    if inside "umask 077 && $setup --rotate > /root/rotation.log 2>&1"; then
+        inside 'cat /root/rotation.log' || true
+        echo "FAIL  a rotation whose keys Stalwart refuses stops"
+        exit 1
+    fi
+    echo "ok    a rotation whose keys Stalwart refuses stops"
+    check "the failed rotation restarted the services that hold the secrets" \
+        'grep -q -F "garrison-ingest and garrison-broker restarted with the new secrets." /root/rotation.log'
+    check "the failed rotation removed the keys that new ones replaced" \
+        'for id in $(cut -d " " -f 1 /root/keys-before-rotation); do ! grep -q "^$id " /root/stand-in-keys || exit 1; done'
+    check "the failed rotation names the run that finishes it" \
+        'grep -q -F "Run \`garrison stalwart setup --rotate\` again once this is mended." /root/rotation.log'
+    inside 'rm /root/stand-in-refuses /root/keys-before-rotation /root/rotation.log'
+    says "setup again once Stalwart takes the keys" "$setup" "Settings reloaded."
     check "the receiver holds the signature key of its file" \
         'test "$(cat /run/credentials/garrison-ingest.service/webhook-signature-key)" = \
             "$(cat /etc/garrison/credentials/webhook-signature-key)"'
