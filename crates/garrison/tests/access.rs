@@ -17,6 +17,8 @@ mod graph;
 mod links;
 #[path = "access/roles.rs"]
 mod roles;
+#[path = "access/size.rs"]
+mod size;
 
 use std::collections::BTreeSet;
 

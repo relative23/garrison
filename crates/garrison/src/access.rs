@@ -13,7 +13,7 @@ use clap::Subcommand;
 use garrison_authz::policy::{Policy, is_profile_name, parse_policy};
 use garrison_authz::{Authority, Error, SUPPORTED};
 use garrison_core::config::Config;
-use garrison_core::files::read_protected;
+use garrison_core::files::{ProtectedFileError, read_protected};
 use garrison_stalwart::jmap::JmapClient;
 use garrison_stalwart::oidc::is_subject;
 use garrison_stalwart::permissions::native_rights;
@@ -97,12 +97,21 @@ fn save(config: &Config, folder: &Folder, policy: &Policy) -> Result<(), String>
     // Never write an invalid policy.
     parse_policy(&document, &action_ids(config)).map_err(|error| error.to_string())?;
     let path = &config.broker.policy;
+    let text = format!("{}\n", pretty(&document));
+    // Nor one larger than the broker reads, which would be none.
+    if text.len() > MAX_POLICY {
+        return Err(format!(
+            "The policy would be larger than the broker reads ({} KiB): the change is not saved, \
+             and {} stays as it is.",
+            MAX_POLICY / 1024,
+            path.display()
+        ));
+    }
     let kept = match folder.current()? {
         Current::File => Some(folder.back_up(&folder.content()?)?),
         Current::Missing => None,
         Current::Other => return Err(not_a_file(path)),
     };
-    let text = format!("{}\n", pretty(&document));
     let group = group_id(POLICY_GROUP).map(rustix::fs::Gid::from_raw);
     if let Some(note) = folder.replace(text.as_bytes(), group)? {
         say(&note);
@@ -237,8 +246,16 @@ fn action_ids(config: &Config) -> BTreeSet<&str> {
 fn written(config: &Config) -> Result<Policy, String> {
     let path = &config.broker.policy;
     there(path)?;
-    let raw = read_protected(path, MAX_POLICY)
-        .map_err(|error| format!("Garrison access policy: {error}"))?;
+    let raw = read_protected(path, MAX_POLICY).map_err(|error| match error {
+        ProtectedFileError::TooLarge(_) => format!(
+            "The access policy {} is larger than the broker reads ({} KiB), so it is no policy: \
+             copy back the last backup beside it ({}.<time>.bak) with sudo cp.",
+            path.display(),
+            MAX_POLICY / 1024,
+            path.display()
+        ),
+        error => format!("Garrison access policy: {error}"),
+    })?;
     let named = named(config);
     let mut known = action_ids(config);
     known.extend(named.iter().map(String::as_str));

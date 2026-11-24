@@ -609,6 +609,8 @@ Notable changes for operators and users. The format follows
   that another process holds.** Where no command runs, remove
   `access-policy.json.lock`, which an earlier release made readable for
   others.
+- **No `garrison access` command writes a policy larger than the broker
+  reads (64 KiB), which the broker and every command then refused.**
 - **An action added after `garrison access init` reaches its users.**
   `init` gives the `administrator` profile every action of `[[actions]]`
   and the `operator` profile those marked `operator = true`, as
