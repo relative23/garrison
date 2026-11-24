@@ -147,7 +147,7 @@ impl Read for Chunks {
     }
 }
 
-fn read_reply(chunks: Vec<Vec<u8>>) -> io::Result<String> {
+fn read_reply(chunks: Vec<Vec<u8>>) -> Result<String, Failure> {
     reply(&mut Chunks(chunks.into()))
 }
 
@@ -159,8 +159,8 @@ fn a_reply_ends_with_its_last_line_up_to_64_kib() {
         "250 last"
     );
     assert_eq!(
-        read_reply(lines("220 rea")).unwrap_err().to_string(),
-        "SMTP connection closed"
+        read_reply(lines("220 rea")),
+        Err(Failure("SMTP connection closed"))
     );
     // A continued reply of exactly the limit may still end.
     let mut long = b"250-".to_vec();
@@ -172,10 +172,8 @@ fn a_reply_ends_with_its_last_line_up_to_64_kib() {
     );
     long.insert(4, b'x');
     assert_eq!(
-        read_reply(vec![long, b"250 end\r\n".to_vec()])
-            .unwrap_err()
-            .to_string(),
-        "SMTP reply too long"
+        read_reply(vec![long, b"250 end\r\n".to_vec()]),
+        Err(Failure("SMTP reply too long"))
     );
 }
 

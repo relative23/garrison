@@ -94,18 +94,14 @@ fn certificate(reason: &CertificateError) -> &'static str {
     }
 }
 
-fn protocol_error(message: &str) -> io::Error {
-    io::Error::other(message.to_owned())
-}
-
 /// The last line of one SMTP reply.
-fn reply(stream: &mut impl Read) -> io::Result<String> {
+fn reply(stream: &mut impl Read) -> Result<String, Failure> {
     let mut data = Vec::new();
     let mut chunk = [0; 4096];
     loop {
-        let read = stream.read(&mut chunk)?;
+        let read = stream.read(&mut chunk).map_err(|error| failure(&error))?;
         if read == 0 {
-            return Err(protocol_error("SMTP connection closed"));
+            return Err(Failure("SMTP connection closed"));
         }
         data.extend_from_slice(&chunk[..read]);
         let text = String::from_utf8_lossy(&data);
@@ -114,22 +110,27 @@ fn reply(stream: &mut impl Read) -> io::Result<String> {
             return Ok(last.to_owned());
         }
         if data.len() > MAX_REPLY {
-            return Err(protocol_error("SMTP reply too long"));
+            return Err(Failure("SMTP reply too long"));
         }
     }
 }
 
-fn starttls(stream: &mut (impl Read + Write), host: &str) -> io::Result<()> {
+/// The greeting, EHLO and STARTTLS: where the listener stops before TLS,
+/// the step it stopped at.
+fn starttls(stream: &mut (impl Read + Write)) -> Result<(), Failure> {
+    let written = |error: io::Error| failure(&error);
     if !reply(stream)?.starts_with("220") {
-        return Err(protocol_error("Unexpected SMTP greeting"));
+        return Err(Failure("refused at the SMTP greeting"));
     }
-    stream.write_all(b"EHLO garrison.invalid\r\n")?;
+    stream
+        .write_all(b"EHLO garrison.invalid\r\n")
+        .map_err(written)?;
     if !reply(stream)?.starts_with("250") {
-        return Err(protocol_error("EHLO rejected"));
+        return Err(Failure("EHLO refused"));
     }
-    stream.write_all(b"STARTTLS\r\n")?;
+    stream.write_all(b"STARTTLS\r\n").map_err(written)?;
     if !reply(stream)?.starts_with("220") {
-        return Err(protocol_error(&format!("STARTTLS not offered by {host}")));
+        return Err(Failure("STARTTLS refused"));
     }
     Ok(())
 }
@@ -172,11 +173,7 @@ pub fn probe(
     let mut stream = connect(address, port, Instant::now() + PROBE)?;
     let io = |error| failure(&error);
     if use_starttls {
-        // A server that answers but refuses STARTTLS is not a network failure.
-        starttls(&mut stream, host).map_err(|error| match error.kind() {
-            io::ErrorKind::Other => Failure("STARTTLS refused"),
-            _ => failure(&error),
-        })?;
+        starttls(&mut stream)?;
     }
     while connection.is_handshaking() {
         connection.complete_io(&mut stream).map_err(io)?;
@@ -482,6 +479,8 @@ impl Provider for Tls {
 
 #[cfg(test)]
 mod rule_tests;
+#[cfg(test)]
+mod smtp_tests;
 #[cfg(test)]
 pub(crate) mod tests;
 #[cfg(test)]

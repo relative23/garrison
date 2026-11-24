@@ -1029,6 +1029,8 @@ Notable changes for operators and users. The format follows
   and says how many it leaves.** Raise `max_accounts` where it names some.
 - **The TLS check probes a listener Stalwart binds to one address on that
   address.**
+- **The TLS certificates card says where an SMTP listener stopped before
+  TLS**: a closed connection, its greeting, EHLO or STARTTLS.
 - **A blocklist that gives no verdict keeps the Blocklists card from being
   OK.** A list that refused this resolver, as Spamhaus refuses public ones,
   answered with an error or did not answer at all, showed only in its row:
