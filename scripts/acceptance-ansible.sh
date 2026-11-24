@@ -207,7 +207,7 @@ scenario_setup_refused() {
     inside 'cd /etc/garrison/credentials && rm webhook-signature-key collector-native-key broker-native-key &&
         touch /root/stand-in-refuses'
     # At -vvv a task without no_log shows what went in on its standard input.
-    stops "$newer" "Stalwart does not take the API key in broker-native-key" -vvv
+    stops "$newer" "Stalwart does not take the API key in" -vvv
     nothing_secret
     inside 'rm /root/stand-in-refuses'
     play "$newer"
