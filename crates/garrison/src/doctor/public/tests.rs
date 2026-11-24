@@ -225,7 +225,7 @@ fn a_502_names_the_restart_where_nothing_listens_on_web_port() {
         ),
     ] {
         let server = garrison_testing::tls::serve_until(vec![answer.clone()], 2036, 1, 1);
-        let roots = std::sync::Arc::new(server.roots.clone());
+        let roots = Arc::new(server.roots.clone());
         let directory = tempfile::tempdir().unwrap();
         let mut config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
         config.deployment.public_origin.clone_from(&server.url);
