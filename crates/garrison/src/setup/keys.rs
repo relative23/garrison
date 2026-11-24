@@ -314,4 +314,6 @@ pub(super) fn network(text: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
+mod account_tests;
+#[cfg(test)]
 mod tests;
