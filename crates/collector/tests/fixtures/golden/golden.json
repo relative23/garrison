@@ -181,7 +181,7 @@
      "fields": [
       {
        "label": "User accounts",
-       "value": 4,
+       "value": 3,
        "format": "number"
       },
       {
@@ -232,7 +232,7 @@
      },
      "findings": [
       "full@example.test uses 90 % or more of its quota.",
-      "Only the first 3 accounts are listed."
+      "Stalwart has 5 accounts; only the first 3 are read (`max_accounts`)."
      ],
      "value": {},
      "maxAge": 900

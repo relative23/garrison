@@ -7,11 +7,12 @@ use garrison_testing::http::{answer, serve};
 use super::*;
 use crate::testing::{Canned, config, context, table};
 
-/// Every card of a run against a Stalwart that answers the check's one
-/// request with `response`.
-pub(super) fn cards(response: String) -> Vec<Observation> {
+/// Every card of a run against a Stalwart that answers the check's
+/// requests with `responses`, one after another: the first request, then
+/// the accounts' pages.
+pub(super) fn cards(responses: Vec<String>) -> Vec<Observation> {
     let directory = tempfile::tempdir().unwrap();
-    let server = serve(vec![response]);
+    let server = serve(responses);
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&server.url);
     let runner = Canned(String::new());
@@ -25,9 +26,10 @@ pub(super) fn cards(response: String) -> Vec<Observation> {
     report.observations
 }
 
-/// The Management API card of such a run.
+/// The Management API card of a run whose first request is answered with
+/// `response`, which ends the run.
 pub(super) fn api(response: String) -> Observation {
-    cards(response)
+    cards(vec![response])
         .into_iter()
         .find(|observation| observation.id == "stalwart.api")
         .unwrap()

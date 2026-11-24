@@ -1,4 +1,5 @@
 use garrison_core::observations::State;
+use garrison_stalwart::jmap::Listed;
 use garrison_testing::http::{answer, serve};
 use serde_json::{Value, json};
 
@@ -6,9 +7,14 @@ use super::*;
 use crate::context::{Provider, Scrape};
 use crate::testing::{Canned, config, context, table};
 
-/// The accounts of an answer of Stalwart, as the provider reads them.
-fn listed(answer: &Value) -> Vec<stalwart::answers::MailboxAccount> {
-    stalwart::answers::rows(answer.as_object().cloned()).unwrap()
+/// The accounts of an answer of Stalwart, as the provider reads them: all
+/// of those Stalwart has.
+fn listed(answer: &Value) -> Listed<stalwart::answers::MailboxAccount> {
+    let objects = stalwart::answers::rows(answer.as_object().cloned()).unwrap();
+    Listed {
+        total: objects.len(),
+        objects,
+    }
 }
 
 fn account(address: &str, used: Option<u64>, quota: Option<u64>) -> Value {
@@ -54,10 +60,17 @@ fn mailboxes_put_the_fullest_first_and_warn_at_ninety_percent() {
     );
 
     let three = json!({"list": (0..3).map(|n| account(&format!("user{n}@example.test"), Some(n), Some(100))).collect::<Vec<_>>()});
-    let partial = mailboxes::mailboxes(&context, Some(&listed(&three)), 2).unwrap();
+    // Stalwart has three, of which the first two are read.
+    let mut first_two = listed(&three);
+    first_two.objects.truncate(2);
+    let partial = mailboxes::mailboxes(&context, Some(&first_two), 2).unwrap();
     assert_eq!(partial.state, State::Partial);
+    assert_eq!(
+        partial.findings,
+        ["Stalwart has 3 accounts; only the first 2 are read (`max_accounts`)."]
+    );
     assert_eq!(partial.table.unwrap().rows.len(), 2);
-    // Exactly as many accounts as listed are not cut.
+    // Exactly as many accounts as Stalwart has are not cut.
     assert_eq!(
         mailboxes::mailboxes(&context, Some(&listed(&three)), 3)
             .unwrap()

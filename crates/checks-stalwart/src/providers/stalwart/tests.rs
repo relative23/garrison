@@ -127,8 +127,6 @@ fn the_calls_are_written_as_stalwart_reads_them() {
             ["x:QueuedMessage/query", {"calculateTotal": true, "limit": 1}],
             ["x:MtaMilter/get", {"ids": null,
                 "properties": ["host", "port", "enable", "stages", "tempFailOnError"]}],
-            ["x:Account/get", {"ids": null,
-                "properties": ["id", "@type", "emailAddress", "quotas", "usedDiskQuota"]}],
         ])
     );
 }

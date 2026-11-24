@@ -6,6 +6,7 @@ use garrison_core::modules::ModuleId;
 use garrison_core::observations::{
     Column, Evidence, Field, Format, Observation, Required, State, Table,
 };
+use garrison_stalwart::jmap::Listed;
 use serde_json::{Value, json};
 
 use super::stalwart::answers::MailboxAccount;
@@ -50,9 +51,11 @@ impl Row {
     }
 }
 
+/// The card of the `accounts` read, the first `max_accounts` of Stalwart's
+/// at the most; none where they could not be read.
 pub fn mailboxes(
     context: &Context<'_>,
-    accounts: Option<&[MailboxAccount]>,
+    accounts: Option<&Listed<MailboxAccount>>,
     max_accounts: usize,
 ) -> Result<Observation, ProviderError> {
     let base = |state| {
@@ -73,15 +76,17 @@ pub fn mailboxes(
             )
         })
     };
-    let Some(list) = accounts else {
+    let Some(listed) = accounts else {
         return Ok(base(State::Unknown)?);
     };
     let user = Some(json!("User"));
-    let users: Vec<&MailboxAccount> = list.iter().filter(|row| row.kind.0 == user).collect();
+    let users: Vec<&MailboxAccount> = listed
+        .objects
+        .iter()
+        .filter(|row| row.kind.0 == user)
+        .collect();
     let mut rows: Vec<Row> = users.iter().map(|account| Row::of(account)).collect();
     rows.sort_by(Row::order);
-    let truncated = rows.len() > max_accounts;
-    rows.truncate(max_accounts);
     let full: Vec<&str> = rows
         .iter()
         .filter(|row| row.share.is_some_and(|share| share >= FULL_PERCENT))
@@ -92,12 +97,24 @@ pub fn mailboxes(
         .take(5)
         .map(|name| format!("{name} uses 90 % or more of its quota."))
         .collect();
-    if truncated {
-        findings.push(format!(
-            "Only the first {max_accounts} accounts are listed."
-        ));
+    // The accounts after those read: beyond `max_accounts`, or where the
+    // run's time ended the pages.
+    let read = listed.objects.len();
+    let left = listed.total > read;
+    if left {
+        let total = listed.total;
+        findings.push(if read >= max_accounts {
+            format!("Stalwart has {total} accounts; only the first {max_accounts} are read (`max_accounts`).")
+        } else if context.deadline.expired() {
+            format!(
+                "Stalwart has {total} accounts; only {read} of them were read: the collection run's \
+                 time was used up."
+            )
+        } else {
+            format!("Stalwart has {total} accounts; {read} of them could be read.")
+        });
     }
-    let state = match (full.is_empty(), truncated) {
+    let state = match (full.is_empty(), left) {
         (false, _) => State::Warning,
         (true, true) => State::Partial,
         (true, false) => State::Ok,

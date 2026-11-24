@@ -56,11 +56,12 @@ fn a_refused_key_gets_the_setups_advice_on_the_management_api_card() {
     }
 }
 
-/// Each call of the one request answers for itself. Where Stalwart refused
-/// the key some of them, as it refuses every call of a key that may only
-/// authenticate (measured on Stalwart 1.1.0), or answered one in a form this
-/// release does not read, the Management API card says which, beside the
-/// cards the other calls fill.
+/// Each call of the first request answers for itself, and so do the
+/// accounts' pages. Where Stalwart refused the key some of them, as it
+/// refuses every call of a key that may only authenticate (measured on
+/// Stalwart 1.1.0), or answered one in a form this release does not read,
+/// the Management API card says which, beside the cards the other calls
+/// fill.
 #[test]
 fn calls_that_gave_nothing_are_named_on_the_management_api_card() {
     let error = |kind: &str, tag: usize| json!(["error", {"type": kind}, tag.to_string()]);
@@ -68,28 +69,45 @@ fn calls_that_gave_nothing_are_named_on_the_management_api_card() {
     let all: Vec<Value> = (0..methods.len())
         .map(|tag| error("forbidden", tag))
         .collect();
-    let refused = api(answer_json(&json!({ "methodResponses": all })));
+    let accounts_refused = answer_json(&json!({"methodResponses": [
+        error("forbidden", 0),
+        error("forbidden", 1),
+    ]}));
+    let refused = cards(vec![
+        answer_json(&json!({ "methodResponses": all })),
+        accounts_refused,
+    ]);
     assert_eq!(
-        (refused.state, refused.findings),
+        (
+            cards_of(&refused, "stalwart.api").state,
+            cards_of(&refused, "stalwart.api").findings.clone()
+        ),
         (
             State::Unknown,
             vec![format!(
-                "Not readable: access denied to {}; run `garrison stalwart setup` again, which \
-                 gives the collector's API key the permissions it needs.",
+                "Not readable: access denied to {}, x:Account/query; run `garrison stalwart \
+                 setup` again, which gives the collector's API key the permissions it needs.",
                 methods.join(", ")
             )]
         )
     );
-    // One refused, one Stalwart does not know, one not answered, the
-    // others answered: the queue is read.
-    let some = cards(answer_json(&json!({"methodResponses": [
-        error("forbidden", 0),
-        ["x:SpamClassifier/get", {"list": []}, "1"],
-        error("unknownMethod", 2),
-        ["x:SpamTrainingSample/query", {"total": 0}, "3"],
-        ["x:QueuedMessage/query", {"total": 4}, "4"],
-        ["x:MtaMilter/get", {"list": []}, "5"],
-    ]})));
+    assert_eq!(
+        cards_of(&refused, "stalwart.mailboxes").state,
+        State::Unknown
+    );
+    // One refused, one Stalwart does not know, the accounts not answered,
+    // the others answered: the queue is read.
+    let some = cards(vec![
+        answer_json(&json!({"methodResponses": [
+            error("forbidden", 0),
+            ["x:SpamClassifier/get", {"list": []}, "1"],
+            error("unknownMethod", 2),
+            ["x:SpamTrainingSample/query", {"total": 0}, "3"],
+            ["x:QueuedMessage/query", {"total": 4}, "4"],
+            ["x:MtaMilter/get", {"list": []}, "5"],
+        ]})),
+        answer_json(&json!({"methodResponses": []})),
+    ]);
     let card = |id: &str| cards_of(&some, id);
     assert_eq!(
         card("stalwart.api").findings,
@@ -97,7 +115,7 @@ fn calls_that_gave_nothing_are_named_on_the_management_api_card() {
             "Not readable: access denied to x:SpamSettings/get; run `garrison stalwart setup` \
              again, which gives the collector's API key the permissions it needs.",
             "Not readable: Stalwart answered in a form this release of Garrison does not read \
-             (x:SpamRule/query answered the error unknownMethod, x:Account/get was not \
+             (x:SpamRule/query answered the error unknownMethod, x:Account/query was not \
              answered); see the supported Stalwart releases in the README.",
         ]
     );

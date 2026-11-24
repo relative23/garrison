@@ -33,9 +33,9 @@ fn the(cards: &[Observation], id: &str) -> Observation {
         .unwrap_or_else(|| panic!("no card {id}"))
 }
 
-/// A user account with `used` of its `quota`.
-fn account(address: &str, used: u64, quota: u64) -> serde_json::Value {
-    json!({"@type": "User", "emailAddress": address, "usedDiskQuota": used,
+/// The user account `id` with `used` of its `quota`.
+fn account(id: &str, address: &str, used: u64, quota: u64) -> serde_json::Value {
+    json!({"id": id, "@type": "User", "emailAddress": address, "usedDiskQuota": used,
            "quotas": {"maxDiskQuota": quota}})
 }
 
@@ -51,13 +51,16 @@ fn stalwart() -> Vec<Told> {
         ["x:SpamTrainingSample/query", {"total": 0}, "3"],
         ["x:QueuedMessage/query", {"total": 1}, "4"],
         ["x:MtaMilter/get", {"list": [milter, milter]}, "5"],
-        ["x:Account/get", {"list": [
-            account("a@example.test", 1, 100),
-            account("b@example.test", 2, 100),
-            account("full@example.test", 95, 100),
-        ]}, "6"],
     ]});
-    let server = serve(vec![answer_json(&answers)]);
+    // The first two of Stalwart's three accounts, in a page of their own.
+    let accounts = json!({"methodResponses": [
+        ["x:Account/query", {"ids": ["a", "full"], "position": 0, "total": 3}, "0"],
+        ["x:Account/get", {"list": [
+            account("a", "a@example.test", 1, 100),
+            account("full", "full@example.test", 95, 100),
+        ]}, "1"],
+    ]});
+    let server = serve(vec![answer_json(&answers), answer_json(&accounts)]);
     let directory = tempfile::tempdir().unwrap();
     let mut config = config(directory.path());
     config.deployment.stalwart_url.clone_from(&server.url);

@@ -9,7 +9,7 @@ use garrison_core::json;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_stalwart::http::MAX_RESPONSE;
-use garrison_stalwart::jmap::{JmapClient, Object};
+use garrison_stalwart::jmap::{JmapClient, Listed, Object};
 use garrison_stalwart::{Error, SUPPORTED};
 
 use self::answers::{Arguments, MailboxAccount, Milter, SpamClassifier, SpamSettings};
@@ -24,9 +24,11 @@ mod version;
 
 pub(super) use version::running_version;
 
-/// The calls of one collection, in the order in which `Answers::read` takes
-/// their answers.
-pub fn calls() -> [(&'static str, Arguments); 7] {
+/// The calls of one collection's first request, in the order in which
+/// `Answers::read` takes their answers. The accounts come in pages of their
+/// own ([`ACCOUNT_PROPERTIES`]), as many as `max_accounts`: Stalwart gives a
+/// `/get` of all of them the first 500 alone.
+pub fn calls() -> [(&'static str, Arguments); 6] {
     const SINGLETON: Arguments = Arguments::get(Some(&["singleton"]), None);
     [
         ("x:SpamSettings/get", SINGLETON),
@@ -41,15 +43,15 @@ pub fn calls() -> [(&'static str, Arguments); 7] {
                 Some(&["host", "port", "enable", "stages", "tempFailOnError"]),
             ),
         ),
-        (
-            "x:Account/get",
-            Arguments::get(
-                None,
-                Some(&["id", "@type", "emailAddress", "quotas", "usedDiskQuota"]),
-            ),
-        ),
     ]
 }
+
+/// What the mailbox storage reads of each account.
+pub const ACCOUNT_PROPERTIES: [&str; 5] =
+    ["id", "@type", "emailAddress", "quotas", "usedDiskQuota"];
+/// The method the pages of the accounts begin with, as the Management API
+/// card names it where they gave nothing.
+const ACCOUNTS: &str = "x:Account/query";
 
 /// What the calls answered, each as far as an observation shows it. A method
 /// that did not answer leaves its part unknown.
@@ -61,7 +63,6 @@ struct Answers {
     training: Option<u64>,
     queue: Option<u64>,
     milters: Option<Vec<Milter>>,
-    accounts: Option<Vec<MailboxAccount>>,
 }
 
 impl Answers {
@@ -76,13 +77,12 @@ impl Answers {
             training: answers::total(next()),
             queue: answers::total(next()),
             milters: answers::rows(next()),
-            accounts: answers::rows(next()),
         }
     }
 }
 
 /// Permissions the collector's API key needs (see `garrison stalwart setup`).
-pub const REQUIRED_PERMISSIONS: [&str; 11] = [
+pub const REQUIRED_PERMISSIONS: [&str; 12] = [
     "authenticate",
     "sysSpamSettingsGet",
     "sysSpamClassifierGet",
@@ -90,7 +90,9 @@ pub const REQUIRED_PERMISSIONS: [&str; 11] = [
     "sysSpamTrainingSampleQuery",
     "sysQueuedMessageQuery",
     "sysMtaMilterGet",
+    // The mailbox storage reads the accounts in pages a query finds.
     "sysAccountGet",
+    "sysAccountQuery",
     // The `dns` provider reads each domain's expected records, those of
     // the first `max_domains` found by a query.
     "sysDomainGet",
@@ -120,22 +122,22 @@ fn unread(error: &Error) -> String {
     }
 }
 
-/// What the Management API card says of the calls of the one request that
-/// gave nothing, in the order of [`calls`]: those Stalwart refused the
+/// What the Management API card says of the calls that gave nothing, each
+/// with its method, in the order they were made: those Stalwart refused the
 /// collector's key, as it refuses every call of a key made before they were
-/// needed, with the setup's advice, and those it answered in a form this
-/// release does not read; nothing where every call answered.
-fn parts_unread(answers: &[Result<Object, Error>]) -> Vec<String> {
+/// needed, with the setup's advice, those it answered in a form this release
+/// does not read, and the accounts' pages where Stalwart did not complete
+/// one; nothing where every call answered.
+fn parts_unread(failed: &[(&str, &Error)]) -> Vec<String> {
     let (mut refused, mut unreadable, mut others) = (Vec::new(), Vec::new(), Vec::new());
-    for ((method, _), answer) in calls().iter().zip(answers) {
-        match answer {
-            Ok(_) => {}
-            Err(Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_)) => {
+    for (method, error) in failed {
+        match error {
+            Error::Denied(_) | Error::InvalidToken(_) | Error::Misconfigured(_) => {
                 refused.push(*method);
             }
-            Err(Error::Unreadable(why)) => unreadable.push(why.as_str()),
-            // These end the whole request, never one call of it.
-            Err(error @ (Error::Unavailable(_) | Error::Limited(_))) => {
+            Error::Unreadable(why) => unreadable.push(why.as_str()),
+            // These end a whole request: the first one's never reach here.
+            Error::Unavailable(_) | Error::Limited(_) => {
                 others.push(format!("Not readable ({method}): {}.", unread(error)));
             }
         }
@@ -324,8 +326,27 @@ impl Provider for Stalwart {
                 return Ok(report);
             }
         };
+        // The accounts, as many as `max_accounts`, in requests of their own,
+        // each made while the run has time.
+        let accounts = (!context.deadline.expired()).then(|| {
+            client.listed::<MailboxAccount>(
+                "Account",
+                &ACCOUNT_PROPERTIES,
+                self.max_accounts,
+                || !context.deadline.expired(),
+            )
+        });
         // The calls that answered fill their cards; the others are named.
-        let unanswered = parts_unread(&answers);
+        let requests = calls();
+        let mut failed: Vec<(&str, &Error)> = requests
+            .iter()
+            .zip(&answers)
+            .filter_map(|((method, _), answer)| answer.as_ref().err().map(|error| (*method, error)))
+            .collect();
+        if let Some(Err(error)) = &accounts {
+            failed.push((ACCOUNTS, error));
+        }
+        let unanswered = parts_unread(&failed);
         if !unanswered.is_empty() {
             report
                 .observations
@@ -336,10 +357,15 @@ impl Provider for Stalwart {
         report
             .observations
             .push(self.milter(context, answers.milters.as_deref())?);
-        let accounts = answers.accounts.as_deref();
-        report
-            .observations
-            .push(mailboxes(context, accounts, self.max_accounts)?);
+        let listed: Option<&Listed<MailboxAccount>> =
+            accounts.as_ref().and_then(|read| read.as_ref().ok());
+        let mut storage = mailboxes(context, listed, self.max_accounts)?;
+        if accounts.is_none() {
+            storage
+                .findings
+                .push("Not asked: the collection run's time was used up.".to_owned());
+        }
+        report.observations.push(storage);
         let queue = answers.queue;
         let observation = Self::observation(
             context,
@@ -371,6 +397,8 @@ impl Provider for Stalwart {
 
 #[cfg(test)]
 mod limit_tests;
+#[cfg(test)]
+mod many_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
