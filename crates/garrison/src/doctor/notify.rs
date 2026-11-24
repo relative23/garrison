@@ -80,17 +80,31 @@ mod tests {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
     }
 
-    fn levels(findings: &[Finding]) -> Vec<(Level, &str)> {
+    /// The channels as the collector meets them, in whose words doctor
+    /// names them.
+    fn met(config: &Config, credentials: &Credentials) -> Channels {
+        Channels::of(config, Secrets::read(credentials, &config.notifications)).located(credentials)
+    }
+
+    /// The levels and names of `findings`.
+    fn named(findings: &[Finding]) -> Vec<(Level, &str)> {
         findings
             .iter()
-            .map(|finding| (finding.level, finding.state.text.as_str()))
+            .map(|finding| (finding.level, finding.state.name))
             .collect()
+    }
+
+    /// What doctor says where every channel can send.
+    fn sending(config: &Config, credentials: &Credentials) -> Vec<Finding> {
+        vec![Finding::ok(states::channels(
+            &met(config, credentials).names(),
+        ))]
     }
 
     #[test]
     fn no_channel_needs_no_check() {
         let (_directory, config, credentials) = host();
-        assert_eq!(levels(&checks(&config, &credentials)), []);
+        assert_eq!(checks(&config, &credentials), []);
     }
 
     #[test]
@@ -98,19 +112,14 @@ mod tests {
         let (_directory, mut config, credentials) = host();
         config.notifications.ntfy_url = Some(Endpoint::Written(TOPIC.to_owned()));
         let found = checks(&config, &credentials);
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].level, Level::Warn);
-        assert!(
-            found[0]
-                .state
-                .text
-                .starts_with("the ntfy topic takes no token, and garrison.toml"),
-            "{}",
-            found[0].state.text
+        assert_eq!(
+            found,
+            [Finding::warn(states::open(
+                Open::Ntfy,
+                credentials.directory()
+            ))]
         );
-        let fix = found[0].state.fix.as_deref().unwrap();
-        assert!(fix.contains("ntfy-url (root, mode 0600)"), "{fix}");
-        assert!(fix.contains("ntfy_url = \"credential:ntfy-url\""), "{fix}");
+        // The topic, which only its address protects, is in no line.
         assert!(!found[0].line().contains("nobody-guesses"));
         // With a token, the address alone opens nothing.
         write(
@@ -118,10 +127,9 @@ mod tests {
             "ntfy-token",
             "tk_abcdefghijklmnopqrstuvwxyz123",
         );
-        assert_eq!(
-            levels(&checks(&config, &credentials)),
-            [(Level::Ok, "notifications: ntfy at ntfy.example.org")]
-        );
+        let sent = checks(&config, &credentials);
+        assert_eq!(sent, sending(&config, &credentials));
+        assert_eq!(named(&sent), [(Level::Ok, "doctor-notify-channels")]);
     }
 
     #[test]
@@ -130,12 +138,12 @@ mod tests {
         config.notifications.webhook_url = Some(Endpoint::Written(
             "https://hooks.example.org/T/B/key".to_owned(),
         ));
-        let found = checks(&config, &credentials);
-        assert_eq!(found[0].level, Level::Warn);
-        assert!(
-            found[0].state.text.contains("post to it where its key"),
-            "{}",
-            found[0].state.text
+        assert_eq!(
+            checks(&config, &credentials),
+            [Finding::warn(states::open(
+                Open::Webhook,
+                credentials.directory()
+            ))]
         );
         config.notifications.webhook_url = Some(Endpoint::File(SecretSource::Credential(
             "notify-webhook-url".into(),
@@ -146,8 +154,8 @@ mod tests {
             "https://hooks.example.org/T/B/key\n",
         );
         assert_eq!(
-            levels(&checks(&config, &credentials)),
-            [(Level::Ok, "notifications: webhook at hooks.example.org")]
+            checks(&config, &credentials),
+            sending(&config, &credentials)
         );
     }
 
@@ -156,27 +164,16 @@ mod tests {
         let (_directory, mut config, credentials) = host();
         config.notifications.ntfy_url =
             Some(Endpoint::File(SecretSource::Credential("ntfy-url".into())));
-        let found = checks(&config, &credentials);
-        assert_eq!(found.len(), 1, "{:?}", levels(&found));
-        assert_eq!(found[0].level, Level::Fail);
-        assert!(
-            found[0]
-                .state
-                .text
-                .starts_with("notifications: ntfy: notifications.ntfy_url cannot be used: "),
-            "{}",
-            found[0].state.text
-        );
-        assert!(
-            found[0]
-                .state
-                .text
-                .ends_with("ntfy-url is empty; write the address into it")
+        let unusable = met(&config, &credentials).unusable();
+        assert_eq!(unusable.len(), 1);
+        assert_eq!(
+            checks(&config, &credentials),
+            [Finding::fail(states::unusable(&unusable[0]))]
         );
         write(&credentials, "ntfy-url", TOPIC);
         assert_eq!(
-            levels(&checks(&config, &credentials)),
-            [(Level::Ok, "notifications: ntfy at ntfy.example.org")]
+            checks(&config, &credentials),
+            sending(&config, &credentials)
         );
     }
 }
