@@ -236,8 +236,20 @@ impl Lab {
 
 impl Drop for Lab {
     fn drop(&mut self) {
+        let mut milters = false;
         while let Some((kind, identifier)) = self.created.pop() {
+            milters |= kind == "MtaMilter";
             self.call(&format!("x:{kind}/set"), &json!({"destroy": [identifier]}));
+        }
+        // Stalwart asks the milters it read last until it reads its settings
+        // again. An entry that is only removed, with `tempFailOnError` and
+        // its milter gone, has it defer every later message of the lab.
+        if milters {
+            self.call(
+                "x:Action/set",
+                &json!({"create": {"r": {"@type": "ReloadSettings"}}}),
+            );
+            sleep(Duration::from_secs(2));
         }
     }
 }
