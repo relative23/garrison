@@ -8,7 +8,7 @@ mod host;
 mod keys;
 pub(crate) mod milter;
 mod notify;
-mod policy;
+pub(crate) mod policy;
 mod public;
 
 use garrison_core::config::Config;

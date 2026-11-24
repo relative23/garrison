@@ -1935,6 +1935,11 @@ Notable changes for operators and users. The format follows
   reading takes it**: one the broker owns is a warning, no longer a failure,
   one it does not take is named with why, and a closed `/etc/garrison` with
   the `chmod` that opens it.
+- **`garrison check-config` judges the access policy as the broker meets
+  it**: one the broker may not read or reach is refused with the command
+  that mends it, and one the broker owns is taken, with a warning. An
+  upgrade stops there, before anything changes, where a folder on the way
+  keeps the broker from the policy; nobody could sign in there before either.
 - **`garrison doctor` tries the broker's and the collector's API keys with
   Stalwart**, as their services use them, and fails one Stalwart no longer
   knows, with which nobody can sign in, with the setup that makes a new one.
