@@ -145,6 +145,16 @@ scenario_upgrade_killed() {
     running "after the killed upgrade" "$new"
     check "previous is what it was before the upgrade" "test \"\$(readlink -f /opt/garrison/previous 2>/dev/null || true)\" = '$earlier'"
     check "nothing is left unfinished" 'test ! -e /opt/garrison/unfinished.json'
+    # Killed once that release was started: it may have recorded what no
+    # copy holds, so the next run copies the state before it switches back.
+    killed_at '/root/hanging/bin/garrison install' \
+        "$(current_is "$hanging") && systemctl is-active --quiet garrison-ingest.service" 0 'did not start'
+    refused "after a kill once it was started, the next run copies the state and switches back" \
+        '/root/hanging/bin/garrison install' "the state as it is was copied to /var/backups/garrison/pre-switch-back-"
+    running "after the upgrade killed once it was started" "$new"
+    check "previous is still what it was before the upgrade" \
+        "test \"\$(readlink -f /opt/garrison/previous 2>/dev/null || true)\" = '$earlier'"
+    check "nothing is left unfinished after it either" 'test ! -e /opt/garrison/unfinished.json'
 }
 
 scenario_upgrade_resumed() {
