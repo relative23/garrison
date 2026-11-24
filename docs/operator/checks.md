@@ -37,8 +37,8 @@ observation the checks report is in [observation ids](observations.md).
 
 | `type` | Options | Shows |
 |---|---|---|
-| `host` | `disk_path`, `modules` | Memory, load, disk, uptime |
-| `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path` (with `disk`), `firewall_units`, `modules` | What the host needs from its operator; see below |
+| `host` | `disk_path` (`/`), `proc` (`/proc`, for tests), `modules` | Memory, load, disk, uptime |
+| `host-care` | `checks` (default: all of `updates`, `restart`, `clock`, `disk`, `firewall`), `disk_path` (with `disk`), `firewall_units`, `root` (`/`, for tests), `modules` | What the host needs from its operator; see below |
 | `systemd` | `units = [{unit, label, modules, expect = "active" \| "idle", max_age_hours}]` | Unit states; an alias, such as `sshd.service`, shows the state of the unit it names and names that unit ("Alias of"). Timers show their schedule and next run. For one-shot jobs see below |
 | `tls` | `endpoints = [{host, port, address = "127.0.0.1", starttls = false}]` (default: Stalwart's own listeners), `max_domains` (20, at most 100), `modules` | Certificate validity per endpoint; see below |
 | `mail-flow` | `checks` (default: all of `spam`, `milter`, `authentication`, `tls`) | A week of the recorded events in numbers; see below |
@@ -591,8 +591,8 @@ some places of the host from it: `/home`, `/root` and `/run/user`
 where the `restart` check reads the installed kernels; the broker's unit
 hides that too. `check-config`, and with it the installer before an upgrade,
 refuses a path of a check that lies there, also through a link, and
-`garrison doctor` names it: `disk_path`, `proc` and `root` of `host` and
-`host-care`, the `path` of `receipt` and `backup-check`, the files and the
+`garrison doctor` names it: `disk_path` and `proc` of `host`, `disk_path`
+and `root` of `host-care`, the `path` of `receipt` and `backup-check`, the files and the
 database folder of `clamav`, `admin_directory` of `bulwark` and the program
 a `version-command` runs. Root sees them there, the collector does not, so
 the check would read nothing there, or the free space of the collector's

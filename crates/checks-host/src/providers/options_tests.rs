@@ -308,3 +308,65 @@ fn every_option_is_used_where_it_is_taken() {
     let named: BTreeSet<String> = SOURCES.iter().map(|(name, _)| (*name).to_owned()).collect();
     assert_eq!(takers(), named, "every source that takes options is read");
 }
+
+/// What `reference` says of the checks of `types`: their rows of its table
+/// and their sections.
+fn said_of(reference: &str, types: &[&str]) -> String {
+    let mut said = String::new();
+    for kind in types {
+        let row = format!("| `{kind}` |");
+        for line in reference.lines().filter(|line| line.starts_with(&row)) {
+            said.push_str(line);
+            said.push('\n');
+        }
+        let heading = format!("\n## `{kind}`");
+        if let Some(at) = reference.find(&heading) {
+            let rest = &reference[at + heading.len()..];
+            said.push_str(&rest[..rest.find("\n## ").unwrap_or(rest.len())]);
+        }
+    }
+    said
+}
+
+/// Whether the code of `text`, what it writes between backticks, an
+/// example's fence among it, holds `word` as a word of its own.
+fn names(text: &str, word: &str) -> bool {
+    let part = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    text.split('`').skip(1).step_by(2).any(|code| {
+        code.match_indices(word).any(|(at, _)| {
+            let before = code.as_bytes().get(at.wrapping_sub(1)).copied();
+            let after = code.as_bytes().get(at + word.len()).copied();
+            !before.is_some_and(part) && !after.is_some_and(part)
+        })
+    })
+}
+
+/// Every option of every check of the crate is named where an operator
+/// looks it up, the reference of the checks: in the row of its check's
+/// type in the table, or in that type's section.
+#[test]
+fn every_option_is_named_in_the_reference_of_the_checks() {
+    let reference = include_str!("../../../../docs/operator/checks.md");
+    let types: BTreeMap<&str, &[&str]> = BTreeMap::from([
+        ("backupcheck.rs", &["backup-check"][..]),
+        ("host.rs", &["host"][..]),
+        ("hostcare.rs", &["host-care"][..]),
+        ("receipt.rs", &["receipt"][..]),
+        ("receipt/keys.rs", &["receipt"][..]),
+        ("systemd.rs", &["systemd"][..]),
+        ("version.rs", &["version-command"][..]),
+        ("web.rs", &["http", "bulwark"][..]),
+    ]);
+    let unnamed: Vec<String> = SOURCES
+        .iter()
+        .flat_map(|(source, text)| {
+            let kinds = types[source];
+            let said = said_of(reference, kinds);
+            taken(text)
+                .into_iter()
+                .filter(move |option| !names(&said, option))
+                .map(move |option| format!("{option} of {}", kinds.join(" or ")))
+        })
+        .collect();
+    assert_eq!(unnamed, Vec::<String>::new());
+}
