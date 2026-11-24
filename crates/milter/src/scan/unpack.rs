@@ -8,6 +8,8 @@
 //! by the directory at the archive's end takes both from there, and the two
 //! headers may disagree.
 
+use std::collections::HashMap;
+use std::hash::{BuildHasher, RandomState};
 use std::time::Instant;
 
 use flate2::{Decompress, FlushDecompress, Status};
@@ -49,8 +51,8 @@ pub(super) const ENCODINGS: usize = 2;
 /// A sender can put the mark of a nested encoding into every phase's output
 /// at every level and force the recursion to branch; the bytes decoded over
 /// all levels are bounded by this multiple of the message's size. Honest
-/// nesting three levels deep decodes up to about 22 times (measured), since
-/// the base64 is read in two ways and again with quoted-printable undone.
+/// nesting three levels deep decodes up to about 23 times (measured), since
+/// the base64 is read in four ways and again with quoted-printable undone.
 const DECODE_BUDGET: usize = 48;
 
 /// What may still be unpacked: bytes of all files together, and files.
@@ -84,6 +86,11 @@ pub(super) struct Work {
     /// The first thing the scan could not look at.
     pub(super) gap: Option<Gap>,
     inflater: Decompress,
+    /// The messages read again so far, by a hash with a key of this process
+    /// (so that a sender cannot make two of them meet), with how many levels
+    /// were left below each.
+    read_again: HashMap<u64, usize>,
+    keys: RandomState,
 }
 
 impl Work {
@@ -96,7 +103,24 @@ impl Work {
             until,
             gap: None,
             inflater: Decompress::new(false),
+            read_again: HashMap::new(),
+            keys: RandomState::new(),
         }
+    }
+
+    /// Whether `message` is to be read as a message: not when it was read so
+    /// already with as many levels left below it.
+    pub(super) fn unread_message(&mut self, message: &[u8]) -> bool {
+        let key = self.keys.hash_one(message);
+        if self
+            .read_again
+            .get(&key)
+            .is_some_and(|levels| *levels >= self.encodings)
+        {
+            return false;
+        }
+        self.read_again.insert(key, self.encodings);
+        true
     }
 
     /// Whether `bytes` more may be decoded. Once the budget is spent, the

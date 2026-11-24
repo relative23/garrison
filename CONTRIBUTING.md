@@ -308,14 +308,17 @@ broker's socket (`broker_request`), the text of Stalwart's metrics endpoint
 (`prometheus`), a resolver's answer (`dns_answer`), a batch of events together
 with every view of the stored history (`events`), any request to the web
 service's routes, signed in or not, with real databases behind them
-(`web_request`), a message as the macro milter scans it (`milter_scan`) and
-what a mail server sends that milter on a connection (`milter_session`). A
-target fails on a panic, on an answer "Internal error", and where what was
-stored cannot be read again. Running the targets needs a nightly compiler
-and cargo-fuzz, so that is no part of the checks before a commit (their
+(`web_request`), a message as the macro milter scans it (`milter_scan`),
+what a mail server sends that milter on a connection (`milter_session`) and a
+part's base64 as mail programs' decoders read it (`milter_base64`). A
+target fails on a panic, on an answer "Internal error", where what was
+stored cannot be read again, and where the macro scan calls clean a message
+from which a decoder it follows rebuilds a document with macros. Running the
+targets needs a nightly compiler and cargo-fuzz, so that is no part of the
+checks before a commit (their
 format and their lockfile are, see [Checks](#checks));
 `.github/workflows/fuzz.yml` runs each for five minutes every week and
-whenever `fuzz/` changes. The two milter targets get inputs of up to a
+whenever `fuzz/` changes. The three milter targets get inputs of up to a
 megabyte there (`-max_len=1048576`), and an input that takes longer than 20
 seconds fails the run: the time a scan takes must not grow faster than its
 message.

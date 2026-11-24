@@ -47,11 +47,7 @@ impl Work {
         let declared = content_transfer_encodings(message)
             .iter()
             .any(|value| !decodable(value));
-        let begun = UNREAD.iter().any(|opening| {
-            memchr::memmem::find_iter(message, opening)
-                .any(|at| at == 0 || matches!(message[at - 1], b'\n' | b'\r'))
-        });
-        if declared || begun {
+        if declared || unread_opening(message).is_some() {
             self.gap.get_or_insert(Gap::Encoding);
         }
     }
@@ -61,6 +57,17 @@ impl Work {
 /// start: `yEnc` and `BinHex` 4.0. A mail program may take either from a body
 /// that no header describes.
 const UNREAD: [&[u8]; 2] = [b"=ybegin ", b"(This file must be converted with BinHex"];
+
+/// Where the first block in an encoding the scan does not decode opens.
+pub(super) fn unread_opening(message: &[u8]) -> Option<usize> {
+    UNREAD
+        .iter()
+        .filter_map(|opening| {
+            memchr::memmem::find_iter(message, opening)
+                .find(|at| *at == 0 || matches!(message[at - 1], b'\n' | b'\r'))
+        })
+        .min()
+}
 
 /// The token of a transfer-encoding value, in lower case.
 fn token(value: &[u8]) -> Vec<u8> {

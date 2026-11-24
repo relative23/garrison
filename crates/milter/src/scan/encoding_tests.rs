@@ -1,6 +1,6 @@
 //! Every transfer encoding a conforming mail client would decode is a way
 //! the scan reads the attachment. A document with macros answers `Macros`
-//! (or `Incomplete`) however it is wrapped, never `Clean`; a document
+//! (or `Incomplete`) in each wrapping below, never `Clean`; a document
 //! without macros stays `Clean` in the same wrappings, so a fix against
 //! evasion does not turn ordinary mail into "unscanned".
 //!

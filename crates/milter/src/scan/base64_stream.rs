@@ -14,10 +14,10 @@
 //! of the message stays three quarters of it at the most, as before.
 //!
 //! What a decoder does with `=` is not one thing. One drops it with every
-//! other byte outside the alphabet: [`decode_phase`]. Another reads four
-//! characters at a time, `=` among them, gives two bytes or one for a group
-//! that ends in `=`, and goes on with the next group: [`decode_tokens`], which
-//! is how a body written in padded pieces comes out whole. Both are read.
+//! other byte outside the alphabet: [`decode_phase`]. The others read four
+//! characters at a time, `=` among them as the value 0, and go on with the
+//! next group; they differ in which of a group's three bytes they give where
+//! `=` stands in it ([`Group`]): [`decode_tokens`]. Each way is read.
 
 use base64::Engine;
 use base64::engine::general_purpose::GeneralPurpose;
@@ -52,6 +52,21 @@ const fn table(padding: bool) -> [bool; 256] {
 }
 static SYMBOL: [bool; 256] = table(false);
 static TOKEN: [bool; 256] = table(true);
+
+/// For every byte, its value as a symbol; `=` and the rest count as 0.
+const fn values() -> [u8; 256] {
+    let mut values = [0; 256];
+    let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut value = 0;
+    while value < 64 {
+        #[allow(clippy::cast_possible_truncation)]
+        let symbol = value as u8;
+        values[alphabet[value] as usize] = symbol;
+        value += 1;
+    }
+    values
+}
+static VALUE: [u8; 256] = values();
 
 /// How many base64 symbols the message holds.
 pub(super) fn count(message: &[u8]) -> usize {
@@ -124,59 +139,84 @@ fn append(symbols: &[u8], data: &mut Vec<u8>) {
     }
 }
 
+/// Which of its three bytes a group of four gives that holds `=`, which
+/// counts as the value 0 in each.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Group {
+    /// Thunderbird's: one byte fewer for each `=` in the group, one at least.
+    Counted,
+    /// `GLib`'s (Evolution) and `GMime`'s (Geary, Balsa): the first byte always,
+    /// the second unless the third place is `=`, the third unless the fourth
+    /// is.
+    Placed,
+    /// `MimeKit`'s: nothing if the second place is `=`, else the first byte,
+    /// then the second unless the third place is, then the third unless the
+    /// fourth is.
+    Nested,
+}
+
+impl Group {
+    pub(super) const ALL: [Group; 3] = [Group::Counted, Group::Placed, Group::Nested];
+}
+
 /// The bytes a decoder gives that reads the message's symbols and `=` four at
-/// a time from the `phase`-th of them: three bytes for a group, two where it
-/// holds one `=` and one where it holds more, with `=` counted as zero, and
-/// the next group read as any other. `tokens` is [`count`] and [`padding`] of
-/// the same message together. A group the message's end cuts short gives
-/// nothing.
-pub(super) fn decode_tokens(message: &[u8], phase: usize, tokens: usize) -> Vec<u8> {
+/// a time from the `phase`-th of them, a group as `group` says, and the next
+/// group as any other. `tokens` is [`count`] and [`padding`] of the same
+/// message together. A group the message's end cuts short gives nothing.
+pub(super) fn decode_tokens(message: &[u8], phase: usize, tokens: usize, group: Group) -> Vec<u8> {
     let mut out = Vec::with_capacity(tokens.saturating_sub(phase) / 4 * 3);
     pieces(message, &TOKEN, phase, |piece| {
-        append_groups(piece, &mut out);
+        append_groups(piece, group, &mut out);
     });
     out
 }
 
 /// Decode whole groups of four. Most pieces hold no `=`, and those are plain
 /// base64.
-fn append_groups(tokens: &[u8], out: &mut Vec<u8>) {
+fn append_groups(tokens: &[u8], kind: Group, out: &mut Vec<u8>) {
     if !tokens.contains(&b'=') {
         append(tokens, out);
         return;
     }
     let (groups, _) = tokens.as_chunks::<4>();
+    out.reserve(groups.len() * 3);
     for group in groups {
-        if group.contains(&b'=') {
-            push_group(*group, out);
-        } else {
-            append(group, out);
-        }
+        push_group(*group, kind, out);
     }
 }
 
 /// One group of four as such a decoder reads it.
-fn push_group(group: [u8; 4], out: &mut Vec<u8>) {
-    let mut number: u32 = 0;
-    let mut padding = 0;
-    for token in group {
-        let value = match token {
-            b'A'..=b'Z' => token - b'A',
-            b'a'..=b'z' => token - b'a' + 26,
-            b'0'..=b'9' => token - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            _ => {
-                padding += 1;
-                0
-            }
-        };
-        number = (number << 6) | u32::from(value);
-    }
+fn push_group(group: [u8; 4], kind: Group, out: &mut Vec<u8>) {
+    let number = group.iter().fold(0_u32, |number, token| {
+        (number << 6) | u32::from(VALUE[usize::from(*token)])
+    });
     let [_, first, second, third] = number.to_be_bytes();
-    match padding {
-        0 => out.extend_from_slice(&[first, second, third]),
-        1 => out.extend_from_slice(&[first, second]),
-        _ => out.push(first),
+    let pad = group.map(|token| token == b'=');
+    match kind {
+        Group::Counted => {
+            let given = 3 - pad.iter().filter(|pad| **pad).count().min(2);
+            out.extend_from_slice(&[first, second, third][..given]);
+        }
+        Group::Placed => {
+            out.push(first);
+            if !pad[2] {
+                out.push(second);
+            }
+            if !pad[3] {
+                out.push(third);
+            }
+        }
+        Group::Nested => {
+            let given = if pad[1] {
+                0
+            } else if pad[2] {
+                1
+            } else if pad[3] {
+                2
+            } else {
+                3
+            };
+            out.extend_from_slice(&[first, second, third][..given]);
+        }
     }
 }

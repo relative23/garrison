@@ -78,39 +78,51 @@ brokers never repeat a job; pending jobs become "uncertain".
 
 ## Known limits
 
-- The macro filter reads documents by their structure, not by running them:
-  it misses what an archive with a password hides, a document in zip
-  archives nested more than three deep, Excel 4.0 macro sheets in an old
-  `.xls` file, the macros of an old `.ppt` file and archive formats other
-  than zip. It finds the document however the message wraps it, without
-  reading the message's structure: it reads the message as it stands, decodes
-  the base64 of the whole message (ignoring every byte outside the alphabet,
-  RFC 2045 section 6.8, so junk, boundaries and headers around a base64 body
-  fall away, and also with `=` taken for the end of a group of four, as a
-  mail program takes padding in the middle), undoes quoted-printable and
-  reads what comes of it in the same ways, and reads a uuencode block
-  wherever it stands, by the characters, line lengths and `begin` lines a
-  mail program takes. A body wrapped again in a transfer encoding (a base64-encoded
-  forwarded message with its own base64 attachment) is read as a message in
-  turn, three encodings deep as archives are opened three deep. Where a part
-  begins or ends, how deeply it is nested and how its headers are written are
-  never read to decide this, so no boundary trick, depth or header hides a
-  document the scan would otherwise find. It does not decode yEnc or BinHex,
-  which a mail program may take from a body: a message that holds a block of
-  either, a part that declares a transfer encoding the filter does not decode,
-  and nesting deeper than three are incomplete, below, not a clean message.
-  Anyone who can reach its loopback port can ask it about a message, as with
-  any milter.
+- The macro filter reads documents by their structure, not by running them: it
+  misses what an archive with a password hides, a document in zip archives
+  nested more than three deep, Excel 4.0 macro sheets in an old `.xls` file,
+  the macros of an old `.ppt` file and archive formats other than zip. It
+  looks for the document without reading the message's structure: it reads the
+  message as it stands, decodes the base64 of the whole message (ignoring
+  every byte outside the alphabet, RFC 2045 section 6.8, so junk, boundaries
+  and headers around a base64 body fall away) in each way the decoders of PHP,
+  Python, Perl, Thunderbird, GLib (Evolution), GMime 3 (Geary, Balsa), MimeKit
+  and Jakarta Mail read a `=` in it, undoes quoted-printable (also taking `=`
+  before a lone CR for a soft break, as Thunderbird and PHP do) and reads what
+  comes of it in the same ways where that undid an `=XX`, and reads a uuencode
+  block wherever it stands, by the characters, line lengths and `begin` lines
+  a mail program takes. A body wrapped again in a transfer encoding (a
+  base64-encoded forwarded message with its own base64 attachment) is read as
+  a message in turn, three encodings deep as archives are opened three deep.
+  Where a part begins or ends, how deeply it is nested and how its headers are
+  written are never read to decide this, so no boundary trick, depth or header
+  hides a document the scan would otherwise find. It does not read base64 as
+  Node's mail parsers do (libbase64, postal-mime), which begin anew after
+  every `=`, nor as Node's `Buffer` does with `-` and `_` for `+` and `/`, nor
+  as GMime 2.6 does, nor base64 with `=` in it under quoted-printable that
+  only soft line breaks wrap as the programs do that count `=`;
+  quoted-printable that is not well formed it undoes as its standard has it,
+  which some programs do not. How Outlook and Apple Mail decode is not known.
+  It reads one message at a time, so a document split over the fragments of a
+  message/partial is not seen. It does not decode yEnc or BinHex, which a mail
+  program may take from a body: a message that holds a block of either, a part
+  that declares a transfer encoding the filter does not decode, and nesting
+  deeper than three are incomplete, below, not a clean message. Anyone who can
+  reach its loopback port can ask it about a message, as with any milter.
 - A message the macro filter could not scan completely is taken all the same
-  unless the operator chose otherwise: one larger than `max_message_mib`,
-  one whose archives unpack to more than 16 MiB a file or 64 MiB together or
-  are compressed by another method than deflate (bzip2, LZMA and the like),
-  one with a part that declares a transfer encoding the filter does not
-  decode, a uuencode block begun and not ended, or a body nested in more than
-  three transfer encodings, and one whose scan was not
-  done within 20 seconds. By default (`on_incomplete = "tag"`) it arrives with the
-  header `X-Garrison-Scan: unscanned`, and it is up to a Sieve rule or the
-  mail program to act on that; `"defer"` and `"refuse"` keep it out.
+  unless the operator chose otherwise: one larger than `max_message_mib`, one
+  whose archives unpack to more than 16 MiB a file or 64 MiB together or are
+  compressed by another method than deflate (bzip2, LZMA and the like), one
+  with a part that declares a transfer encoding the filter does not decode (or
+  a body that quotes such a header line, as a forwarded raw message does: the
+  filter cannot tell it from a real one), a uuencode block begun and not
+  ended, or a body nested in more than three transfer encodings, one that
+  needs more decoding than 48 times its size (a message attached as base64
+  inside another, with a quoted-printable part and an attachment of its own,
+  does), and one whose scan was not done within 20 seconds. By default
+  (`on_incomplete = "tag"`) it arrives with the header
+  `X-Garrison-Scan: unscanned`, and it is up to a Sieve rule or the mail
+  program to act on that; `"defer"` and `"refuse"` keep it out.
 - A flood of sign-in callbacks from more than 4096 networks within a minute
   (a single IPv6 /48 holds 65 536 of them) leaves everyone signing in from a
   network that has not tried within that minute 10 exchanges a minute,

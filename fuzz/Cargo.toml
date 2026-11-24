@@ -19,7 +19,7 @@ garrison-broker = { path = "../crates/broker" }
 garrison-collector = { path = "../crates/collector" }
 garrison-core = { path = "../crates/core" }
 garrison-ingest = { path = "../crates/ingest" }
-garrison-milter = { path = "../crates/milter" }
+garrison-milter = { path = "../crates/milter", features = ["testing"] }
 garrison-stalwart = { path = "../crates/stalwart" }
 garrison-testing = { path = "../crates/testing" }
 garrison-web = { path = "../crates/web" }
@@ -81,6 +81,13 @@ bench = false
 [[bin]]
 name = "milter_session"
 path = "fuzz_targets/milter_session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "milter_base64"
+path = "fuzz_targets/milter_base64.rs"
 test = false
 doc = false
 bench = false
