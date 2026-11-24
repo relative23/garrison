@@ -94,7 +94,7 @@ fn listening() -> Result<Vec<u16>, String> {
     match entries::listening().filter(|_| managed()) {
         Some(ports) if ports.is_empty() => Err(format!(
             "{} runs, but setup cannot see where it listens, so it cannot tell which of \
-             Stalwart's entries ask it. Nothing was changed",
+             Stalwart's entries ask it",
             units::MILTER
         )),
         ports => Ok(ports.unwrap_or_default()),
@@ -175,7 +175,7 @@ fn unread(error: String) -> String {
 pub(super) fn prepare(admin: &Admin, config: &Config) -> Result<(), String> {
     let stored = admin.list::<Entry>("MtaMilter").map_err(unread)?;
     let port = config.milter.as_ref().map(|milter| milter.port);
-    let listening = listening()?;
+    let listening = listening().map_err(|error| format!("{error}. Nothing was changed"))?;
     let ours = entries::ours(&stored, port, &listening);
     let theirs = stored
         .iter()
