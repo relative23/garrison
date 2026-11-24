@@ -671,6 +671,9 @@ Notable changes for operators and users. The format follows
 - **`garrison setup` says the configuration holds its addresses only where it
   does.** A `[deployment]` table it cannot edit, as with dotted keys, ends the
   setup with the lines to write there by hand.
+- **`garrison setup` asks for the modules unless a top-level `modules`
+  chooses them**, as `garrison modules` writes it; a check's own `modules`
+  line no longer skips the choice.
 - **A clock that jumps ahead no longer takes the metric history with it.**
   The history keeps `collector.history_days` and every minute of the last
   eight, counted from the time of each collection run: a clock set a year

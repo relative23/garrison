@@ -141,6 +141,13 @@ fn written(text: &str, answers: &[String]) -> Written {
     }
 }
 
+/// Whether `text` chooses the modules, with the top-level `modules` that
+/// `garrison modules` writes; a provider's `modules` chooses none.
+fn chosen(text: &str) -> bool {
+    text.parse::<toml::Table>()
+        .is_ok_and(|table| table.contains_key("modules"))
+}
+
 /// The current value of a `[deployment]` key, unless it is still a placeholder.
 fn current(config: &Config, key: &str) -> Option<String> {
     let value = match key {
@@ -228,10 +235,7 @@ fn guided(path: &Path) -> Result<(), String> {
     step(2, "Modules");
     let config = load(path)?;
     let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    if text
-        .lines()
-        .any(|line| line.trim_start().starts_with("modules"))
-    {
+    if chosen(&text) {
         say("The modules are chosen already; `garrison modules` changes them.");
     } else {
         finish(
@@ -427,6 +431,22 @@ mod tests {
             written(&example_as("plain"), &shared),
             Written::Invalid(_)
         ));
+    }
+
+    /// The modules are chosen where the file has the top-level `modules` of
+    /// `garrison modules`, also over several lines, and not by a provider's.
+    #[test]
+    fn the_modules_are_chosen_by_a_top_level_key_alone() {
+        let example = example_as("plain");
+        assert!(!chosen(&example));
+        assert!(chosen(&format!("modules = [\"backups\"]\n{example}")));
+        assert!(chosen(&format!(
+            "modules = [\n    \"backups\",\n]\n{example}"
+        )));
+        let provider = "\n[[providers]]\ntype = \"receipt\"\nid = \"nightly\"\ntitle = \"Nightly\"\n\
+                        path = \"/var/lib/garrison/receipts/nightly.json\"\nmodules = [\"services\"]\n";
+        assert!(config::from_text(&(example.clone() + provider)).is_ok());
+        assert!(!chosen(&(example + provider)));
     }
 
     #[test]
