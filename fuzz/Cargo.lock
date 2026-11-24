@@ -426,6 +426,7 @@ version = "0.1.2"
 dependencies = [
  "garrison-core",
  "garrison-stalwart",
+ "log",
  "serde",
  "serde_json",
  "thiserror",
