@@ -131,10 +131,11 @@ pub(super) fn apart(
     if key_status(&lab.url, &held[0]) != 200 {
         faults.push("the running broker holds a key Stalwart no longer takes".to_owned());
     }
-    // Stalwart takes another signature key only when it reloads its
-    // settings, and the receiver another one only when it starts again.
-    let changed =
-        run.asked.iter().any(|asked| asked == RELOAD) || names_the_restart(run.said, UNITS[1]);
+    // The key Stalwart signs with can change once it was given one, which
+    // Stalwart 1.1.0 takes only at a reload, and the receiver's only when it
+    // starts again.
+    let given = |asked: &String| asked == RELOAD || asked.starts_with("x:WebHook/set");
+    let changed = run.asked.iter().any(given) || names_the_restart(run.said, UNITS[1]);
     let window = run.request == RELOAD
         && (run.stop == Stop::Interrupted || run.said.contains(RECEIVER_TOLD));
     if changed && !window && signed_with(capture, &[&held[1]]) != Some(0) {
