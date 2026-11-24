@@ -252,7 +252,8 @@ fn a_bundle_whose_integrity_is_not_known_is_named_and_not_in_order() {
         (
             json!([recorded("spam", code)]),
             vec![],
-            "plugins/spam.js is missing",
+            "plugins/spam.js is not there, though plugins/registry.json lists it; Bulwark writes \
+             it when it installs the plugin",
         ),
         (
             json!([recorded("spam", &large)]),
@@ -315,16 +316,22 @@ fn a_bundle_whose_integrity_is_not_known_is_named_and_not_in_order() {
     );
 }
 
-/// A registry that cannot be read leaves every bundle unknown, and says why.
+/// A registry that cannot be read leaves every bundle unknown, and says why:
+/// one that is not there names the option that names the folder, which
+/// `admin_directory` may name wrongly, and the folder it names.
 #[test]
 fn a_plugin_registry_that_cannot_be_read_says_why() {
     let missing = tempfile::tempdir().unwrap();
     let card = plugins_card(missing.path(), "\"spam\"");
     assert_eq!(
-        (card.state, card.findings.as_slice()),
+        (card.state, card.findings),
         (
             State::Unknown,
-            &["No bundle's integrity is known: plugins/registry.json is missing.".to_owned()][..]
+            vec![format!(
+                "No bundle's integrity is known: there is no plugins/registry.json in {}; set \
+                 `admin_directory` to Bulwark's administration folder, which holds it.",
+                missing.path().display()
+            )]
         )
     );
     for (text, why) in [
@@ -363,7 +370,7 @@ impl crate::command::Runner for Gives {
 }
 
 /// A version command that gives no version says why: it could not be run,
-/// did not finish in the collector's time for a command, ended with a
+/// gave no answer in the collector's time for a command, ended with a
 /// status or by a signal, wrote nothing to the output that is read, or
 /// nothing that `pattern` finds there, within the part that is read.
 #[test]
@@ -382,7 +389,7 @@ fn a_version_command_without_a_version_says_why() {
             Gives(Err(|| {
                 std::io::Error::new(std::io::ErrorKind::TimedOut, "command timed out")
             })),
-            "/usr/bin/c did not finish within 8 seconds and was ended.",
+            "/usr/bin/c did not answer within 8 seconds.",
         ),
         (
             output(Some(2), "c 1.2.3\n"),
@@ -416,4 +423,43 @@ fn a_version_command_without_a_version_says_why() {
             (State::Unknown, vec![said.to_owned()])
         );
     }
+}
+
+/// The webmail card and a version command whose file system gives no
+/// answer by the check's time, as a folder or a program on a hard NFS mount
+/// whose server is gone, say so: here the time is past before they begin.
+#[test]
+fn a_file_system_that_does_not_answer_is_named_by_the_card_that_reads_it() {
+    let code = b"bundle".as_slice();
+    let folder = webmail(&json!([recorded("spam", code)]), &[("spam.js", code)]);
+    let raw = format!(
+        "admin_directory = \"{}\"\nplugins = [\"spam\"]",
+        folder.path().display()
+    );
+    let (config, runner) = (config(folder.path()), Canned(String::new()));
+    let card = Bulwark::new(&table(&raw))
+        .unwrap()
+        .card(&context(&config, &runner), std::time::Instant::now())
+        .unwrap()
+        .observations
+        .remove(0);
+    assert_eq!(
+        (card.state, card.findings),
+        (
+            State::Unknown,
+            vec![
+                "No bundle's integrity is known: the file system of plugins/registry.json did \
+                 not answer within 8 seconds."
+                    .to_owned()
+            ]
+        )
+    );
+    let version = VersionCommand::new(&table(
+        "component = \"C\"\ncommand = [\"/usr/bin/c\", \"--version\"]",
+    ))
+    .unwrap();
+    assert_eq!(
+        version.version(&context(&config, &runner), std::time::Instant::now()),
+        Err("/usr/bin/c was not run: its file system did not answer within 8 seconds.".to_owned())
+    );
 }

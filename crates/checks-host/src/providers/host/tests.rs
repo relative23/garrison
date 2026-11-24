@@ -66,15 +66,23 @@ fn readings_come_from_proc_and_the_configured_disk() {
     assert_eq!(field("CPU cores"), serde_json::json!(cores));
     assert_eq!(field("Load (1 / 5 / 15 min)"), "0.50 / 0.40 / 0.30");
     assert_eq!(field("Uptime"), 3600);
+    // Other tests write to the same file system meanwhile, hence the margins.
     let disk = rustix::fs::statvfs(proc).unwrap();
-    let inodes: f64 = field("Free inodes")
-        .as_str()
-        .unwrap()
-        .trim_end_matches('%')
-        .parse()
-        .unwrap();
-    let expected = 100.0 * ratio(disk.f_favail, disk.f_files.max(1));
-    assert!((inodes - expected).abs() < 0.2, "{inodes} {expected}");
+    // btrfs, which makes inodes as it needs them, counts none: the card
+    // shows no share there (`a_count_the_file_system_does_not_keep_is_unknown`).
+    let inodes = field("Free inodes");
+    if disk.f_files > 0 {
+        let shown: f64 = inodes
+            .as_str()
+            .unwrap()
+            .trim_end_matches('%')
+            .parse()
+            .unwrap();
+        let expected = 100.0 * ratio(disk.f_favail, disk.f_files);
+        assert!((shown - expected).abs() < 0.2, "{shown} {expected}");
+    } else {
+        assert_eq!(inodes, serde_json::Value::Null);
+    }
     #[allow(clippy::cast_precision_loss)]
     let free = (disk.f_bavail * disk.f_frsize) as f64 / GIB;
     assert!((report.gauges["disk_free_gib"] - free).abs() < 0.01);
@@ -216,4 +224,46 @@ fn a_meminfo_without_its_totals_leaves_the_memory_unknown() {
         assert_ne!(card.state, State::Ok);
         assert!(!report.gauges.contains_key("ram_used_gib"), "{missing}");
     }
+}
+
+/// A file system that gives no answer by the check's time, as a hard NFS
+/// mount whose server is gone, costs the card its disk alone. Here the time
+/// is past before the card begins, as it is once such a mount has held the
+/// look at `disk_path` for eight seconds.
+#[test]
+fn a_disk_that_does_not_answer_costs_the_card_its_disk_alone() {
+    let directory = tempfile::tempdir().unwrap();
+    let proc = directory.path();
+    fs::write(
+        proc.join("meminfo"),
+        "MemTotal: 1048576 kB\nMemAvailable: 524288 kB\n",
+    )
+    .unwrap();
+    fs::write(proc.join("loadavg"), "0.50 0.40 0.30 1/100 1234\n").unwrap();
+    fs::write(proc.join("uptime"), "3600.9 100.0\n").unwrap();
+    let raw = format!("proc = \"{0}\"\ndisk_path = \"{0}\"", proc.display());
+    let host = Host::new(&table(&raw)).unwrap();
+    let (config, runner) = (config(proc), Canned(String::new()));
+    let report = host
+        .card(&context(&config, &runner), Instant::now())
+        .unwrap();
+    let card = &report.observations[0];
+    assert_eq!(
+        (card.state, card.findings.as_slice()),
+        (
+            State::Partial,
+            &[format!(
+                "The file system at {} did not answer within 8 seconds.",
+                proc.display()
+            )][..]
+        )
+    );
+    let field = |label: &str| {
+        let field = card.fields.iter().find(|field| field.label == label);
+        field.unwrap().value.clone()
+    };
+    assert_eq!(field("Memory total"), serde_json::json!(1_073_741_824));
+    assert_eq!(field("Disk total"), serde_json::Value::Null);
+    let gauges: Vec<&str> = report.gauges.keys().map(String::as_str).collect();
+    assert_eq!(gauges, ["load_1m", "ram_used_gib"]);
 }

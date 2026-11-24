@@ -4,6 +4,7 @@ mod backupcheck;
 mod hidden;
 mod host;
 mod hostcare;
+mod http;
 mod ran;
 mod receipt;
 mod systemd;
@@ -13,10 +14,11 @@ mod web;
 pub use backupcheck::BackupCheck;
 pub use host::Host;
 pub use hostcare::HostCare;
+pub use http::Http;
 pub use receipt::Receipt;
 pub use systemd::Systemd;
 pub use version::VersionCommand;
-pub use web::{Bulwark, Http};
+pub use web::Bulwark;
 
 #[cfg(test)]
 mod cuts_tests;

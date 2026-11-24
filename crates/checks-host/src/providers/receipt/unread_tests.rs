@@ -1,13 +1,14 @@
 //! Why a receipt that the card cannot read is not read, and what mends it.
 
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use rustix::fs::{CWD, Mode, OFlags, RenameFlags};
 
 use super::*;
+use crate::providers::hidden::Seen;
 use crate::testing::{Canned, config, context, table};
 
 /// A receipt only this user can change, whatever the umask.
@@ -83,7 +84,8 @@ fn an_unreadable_receipt_says_why_and_what_mends_it() {
             card(),
             [format!(
                 "The receipt at {shown} cannot be looked for: the collector's user may not \
-                 search the folder {there}; let every user search it (chmod o+x {there})."
+                 search the folder {there}; let the job write it where that user may search, and \
+                 set `path` to it."
             )]
         );
     }
@@ -187,14 +189,160 @@ fn a_receipt_in_a_place_the_sandbox_hides_says_so() {
         .unwrap();
         let hides = format!(
             "The receipt at {path} lies under {place}, which the collector's unit hides from \
-             it: let the job write it where the collector sees it, as under /var/lib \
-             (docs/operator/checks.md, \"Paths the collector cannot see\")."
+             it: let the job write it where the collector sees it, as under /var/lib, and set \
+             `path` to it (docs/operator/checks.md, \"Paths the collector cannot see\")."
         );
-        assert_eq!(receipt.unread(Some(Path::new(place))), hides);
+        let hidden = Seen::Hidden(PathBuf::from(place));
+        assert_eq!(receipt.unread(&hidden, patience()), hides);
         let kept_out = std::fs::symlink_metadata(path)
             .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied);
-        let seen = receipt.unread(None);
+        let seen = receipt.unread(&Seen::Host, patience());
         assert_eq!(seen == hides, kept_out, "{path}: {seen}");
         assert!(!seen.contains("chmod"), "{path}: {seen}");
+    }
+}
+
+/// A receipt whose file system gives no answer by the check's time, as one
+/// on a hard NFS mount whose server is gone, is Unknown and says so, and
+/// the looks at why it could not be read say the same: here the time is
+/// past before the card begins.
+#[test]
+fn a_receipt_whose_file_system_does_not_answer_says_so() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("last.json");
+    write(&path, r#"{"date": "2026-10-29T11:00:00Z"}"#);
+    let receipt = Receipt::new(&table(&format!(
+        "type = \"receipt\"\nid = \"r\"\ntitle = \"R\"\npath = \"{}\"\nmodules = [\"backups\"]",
+        path.display()
+    )))
+    .unwrap();
+    let (config, runner) = (config(directory.path()), Canned(String::new()));
+    let silent = format!(
+        "The receipt at {} could not be read: its file system did not answer within 8 seconds.",
+        path.display()
+    );
+    let card = receipt
+        .card(&context(&config, &runner), Instant::now())
+        .unwrap()
+        .observations
+        .remove(0);
+    assert_eq!(
+        (card.state, card.findings),
+        (State::Unknown, vec![silent.clone()])
+    );
+    assert_eq!(receipt.unread(&Seen::Host, Instant::now()), silent);
+}
+
+/// Where a mount shows the collector a folder of the host at another place,
+/// as docs/operator/checks.md has an operator do it, a folder there that
+/// its user may not search, or a receipt it may not open, is named by its
+/// place on the host, where its mode is: no mode at the mount's place mends
+/// it, and the folder is opened to nobody. Both are shown without root, by
+/// mode 000, and without a mount, by how the place is seen.
+#[test]
+fn what_a_mount_shows_is_named_by_its_place_on_the_host() {
+    let directory = tempfile::tempdir().unwrap();
+    let shown = directory.path().join("shown");
+    std::fs::create_dir(&shown).unwrap();
+    let path = shown.join("receipt.json");
+    write(&path, r#"{"date": "2026-10-29T11:00:00Z"}"#);
+    let receipt = Receipt::new(&table(&format!(
+        "type = \"receipt\"\nid = \"r\"\ntitle = \"R\"\npath = \"{}\"\nmodules = [\"backups\"]",
+        path.display()
+    )))
+    .unwrap();
+    let mounted = Seen::Bound {
+        point: shown.clone(),
+        source: PathBuf::from("/home/backup/receipts"),
+    };
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&path).is_err() {
+        assert_eq!(
+            receipt.unread(&mounted, patience()),
+            format!(
+                "The receipt at {} is there, but the collector's user may not open it: let the \
+                 job write it with mode 0644 (chmod 0644 /home/backup/receipts/receipt.json on the \
+                 host, which a mount shows there).",
+                path.display()
+            )
+        );
+    }
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::set_permissions(&shown, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let kept_out = std::fs::symlink_metadata(&path).is_err();
+    let said = receipt.unread(&mounted, patience());
+    std::fs::set_permissions(&shown, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if kept_out {
+        assert_eq!(
+            said,
+            format!(
+                "The receipt at {} cannot be looked for: the collector's user may not search the \
+                 folder {}, a mount of the host's /home/backup/receipts; let the job write it \
+                 where that user may search, and set `path` to it.",
+                path.display(),
+                shown.display()
+            )
+        );
+    }
+}
+
+/// A link on the way to the receipt is followed and named. Where it leads
+/// into a home, which the collector's unit hides, the card says so; where it
+/// leads to a folder that the collector's user may not search, the card
+/// names the link, where it leads and that folder. Neither opens a folder to
+/// every user. Shown without root, by `/root` and by mode 000.
+#[test]
+fn a_link_on_the_way_is_named_with_where_it_leads() {
+    let directory = tempfile::tempdir().unwrap();
+    let card = |path: &Path| {
+        let receipt = Receipt::new(&table(&format!(
+            "type = \"receipt\"\nid = \"r\"\ntitle = \"R\"\npath = \"{}\"\nmodules = [\"backups\"]",
+            path.display()
+        )))
+        .unwrap();
+        receipt.unread(&Seen::Host, patience())
+    };
+    let home = directory.path().join("home");
+    std::os::unix::fs::symlink("/root", &home).unwrap();
+    let path = home.join("last.json");
+    let kept_out = |path: &Path| {
+        std::fs::symlink_metadata(path)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied)
+    };
+    if kept_out(Path::new("/root/garrison-test-link")) {
+        assert_eq!(
+            card(&path),
+            format!(
+                "The receipt at {} lies, through the link {}, under /root, which the \
+                 collector's unit hides from it: let the job write it where the collector sees \
+                 it, as under /var/lib, and set `path` to it (docs/operator/checks.md, \"Paths \
+                 the collector cannot see\").",
+                path.display(),
+                home.display()
+            )
+        );
+    }
+    // A link that names no root leads from the folder that holds it.
+    let closed = directory.path().join("closed");
+    std::fs::create_dir(&closed).unwrap();
+    let link = directory.path().join("link");
+    std::os::unix::fs::symlink("closed", &link).unwrap();
+    let path = link.join("last.json");
+    std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let (denied, said) = (kept_out(&path), card(&path));
+    std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if denied {
+        assert_eq!(
+            said,
+            format!(
+                "The receipt at {} cannot be looked for: the link {} leads to {}, and the \
+                 collector's user may not search the folder {}; let the job write it where that \
+                 user may search, and set `path` to it.",
+                path.display(),
+                link.display(),
+                closed.display(),
+                closed.display()
+            )
+        );
     }
 }

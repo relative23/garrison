@@ -1,5 +1,6 @@
 //! Asking the host's package manager for the updates it would install.
 
+use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -146,6 +147,82 @@ pub(super) fn last_change(root: &Path) -> Option<i64> {
         .max()
 }
 
+/// Where apt notes each time it fetches its package lists, or tries to: the
+/// folder it fetches them into, which `apt-get update` and apt-daily's
+/// update write in also where the servers cannot be reached; the lists keep
+/// the servers' times (measured on Debian 13).
+const APT_TRIED: &str = "var/lib/apt/lists/partial";
+/// Where dnf notes each refresh of its metadata, also one that cannot reach
+/// the mirrors; `repomd.xml` keeps the time it last changed (measured on
+/// `AlmaLinux` 10).
+const DNF_TRIED: &str = "var/cache/dnf/expired_repos.json";
+/// Metadata that its package manager has not fetched for this long is out
+/// of date: the distributions' own jobs fetch at least daily, and Debian
+/// signs its security suite for a week.
+const WEEK: i64 = 7 * 86_400;
+
+/// Why the metadata that the pending updates are counted from is out of
+/// date at `now`, the seconds since the epoch, where it is: a list of
+/// apt's has expired, or the package manager has not fetched its metadata,
+/// nor tried to, for a week.
+pub(super) fn stale(root: &Path, now: i64) -> Option<String> {
+    let (manager, tried, mends) = if root.join("usr/bin/apt-get").exists() {
+        if let Some(expired) = expired(root, now) {
+            return Some(expired);
+        }
+        (
+            "apt has not fetched its package lists",
+            APT_TRIED,
+            "`apt-get update` fetches them, as the host's update job does",
+        )
+    } else {
+        (
+            "dnf has not refreshed its metadata",
+            DNF_TRIED,
+            "`dnf makecache` refreshes it, as the dnf-makecache timer does",
+        )
+    };
+    let tried = fs::metadata(root.join(tried))
+        .and_then(|metadata| metadata.modified())
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|since| i64::try_from(since.as_secs()).ok())?;
+    let age = now.saturating_sub(tried);
+    (age >= WEEK).then(|| {
+        let days = age / 86_400;
+        format!("{manager} for {days} days, so updates published since are not counted: {mends}.")
+    })
+}
+
+/// What apt says of a list it fetched whose `Valid-Until` is before `now`:
+/// one it could not fetch again, however often it tried.
+fn expired(root: &Path, now: i64) -> Option<String> {
+    let entries = fs::read_dir(root.join(APT_LISTS)).ok()?;
+    let mut lists: Vec<(String, String)> = entries
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with("_InRelease") || name.ends_with("_Release"))
+        .filter_map(|name| {
+            let mut head = String::new();
+            // The fields come before the list of files; a head is enough.
+            fs::File::open(root.join(APT_LISTS).join(&name))
+                .and_then(|file| file.take(4096).read_to_string(&mut head))
+                .ok()?;
+            let valid = head
+                .lines()
+                .find_map(|line| line.strip_prefix("Valid-Until: "))?;
+            (reading::release_date(valid)? < now).then(|| (name, valid.trim().to_owned()))
+        })
+        .collect();
+    lists.sort();
+    let (name, valid) = lists.into_iter().next()?;
+    Some(format!(
+        "apt's list {name} expired on {valid}, so updates published since are not counted: \
+         `apt-get update` says why apt could not fetch it again."
+    ))
+}
+
 /// The repositories whose folder in dnf's cache only root may read. Made
 /// under umask 077, one such folder keeps an unprivileged reader like this
 /// check out, and dnf then answers nothing at all.
@@ -176,16 +253,19 @@ fn repository(folder: &str) -> String {
         .to_owned()
 }
 
-/// What to tell when unreadable cache folders are why dnf failed.
+/// What to tell when unreadable cache folders are why dnf failed. Under
+/// umask 077 dnf makes the files in them as closed as the folders, so only
+/// the cache made again under the default umask mends it (measured,
+/// 2026-11-24).
 fn locked_out(repositories: &[String]) -> Option<String> {
     let (last, rest) = repositories.split_last()?;
-    let (names, folder, them) = if rest.is_empty() {
-        (last.clone(), "folder", "it")
+    let (names, folder) = if rest.is_empty() {
+        (last.clone(), "folder")
     } else {
-        (format!("{} and {last}", rest.join(", ")), "folders", "them")
+        (format!("{} and {last}", rest.join(", ")), "folders")
     };
     Some(format!(
-        "only root may read the dnf cache {folder} of {names} in /var/cache/dnf; \
-         chmod 755 on {them} lets this check read {them}"
+        "only root may read the dnf cache {folder} of {names} in /var/cache/dnf: make the cache \
+         again under umask 022 (dnf clean all; umask 022; dnf makecache)"
     ))
 }

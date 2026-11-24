@@ -20,14 +20,15 @@
 use std::collections::BTreeSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
+use std::time::Instant;
 
-use garrison_core::files::{changed_only_by_trusted, read_json_with_metadata};
+use garrison_core::files::changed_only_by_trusted;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Observation, Required, State};
 use garrison_core::time::Written;
 use serde_json::Value;
 
-use super::hidden;
+use super::ran::patience;
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
@@ -335,8 +336,13 @@ impl Provider for Receipt {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let read = read_json_with_metadata(&self.path, MAX_DOCUMENT)
-            .filter(|(value, _)| value.is_object() || value.is_array());
+        self.card(context, patience())
+    }
+}
+
+impl Receipt {
+    /// The card, with the receipt read by `until`.
+    fn card(&self, context: &Context<'_>, until: Instant) -> Collected {
         let base = |state| {
             Observation::new(Required {
                 id: &format!("receipt.{}", self.id),
@@ -350,10 +356,9 @@ impl Provider for Receipt {
             })
             .map(|observation| observation.with_scope(self.scope.clone()))
         };
-        let Some((document, metadata)) = read else {
-            let unknown = base(State::Unknown)?
-                .with_findings(vec![self.unread(hidden::place(&self.path).as_deref())]);
-            return Ok(Report::of(unknown));
+        let (document, metadata) = match self.read(until) {
+            Ok(read) => read,
+            Err(why) => return Ok(Report::of(base(State::Unknown)?.with_findings(vec![why]))),
         };
         if let Some(finding) = self.misshapen(&document) {
             return Ok(Report::of(

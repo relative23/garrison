@@ -1,0 +1,12 @@
+1236 955 0:29 /@ / rw,relatime shared:552 master:1 - btrfs /dev/mapper/root rw,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=256,subvol=/@
+1328 1236 0:29 /@log /var/log rw,relatime shared:769 master:157 - btrfs /dev/mapper/root rw,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=260,subvol=/@log
+1329 1236 0:29 /@home /home rw,relatime shared:770 master:162 - btrfs /dev/mapper/root rw,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=259,subvol=/@home
+1332 1236 0:58 / /tmp rw,nosuid,nodev shared:791 master:177 - tmpfs tmpfs rw,size=32726144k,nr_inodes=1048576,inode64,huge=advise,usrquota
+1336 1333 0:32 / /dev/shm rw,nosuid,nodev shared:561 master:4 - tmpfs tmpfs rw,inode64,huge=advise,usrquota
+1345 1336 0:29 /@/etc /dev/shm/hostchk-3/etc-shown ro,relatime shared:562 master:1 - btrfs /dev/mapper/root rw,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=256,subvol=/@
+1346 1336 0:29 /@/root /dev/shm/hostchk-3/shown ro,relatime shared:563 master:1 - btrfs /dev/mapper/root rw,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=256,subvol=/@
+1347 1329 0:82 /systemd/inaccessible/dir /home ro,nosuid,nodev,noexec,relatime shared:771 master:670 - tmpfs tmpfs rw,size=6545228k,nr_inodes=1636307,mode=700,uid=1000,gid=1000,inode64,huge=advise
+1349 1236 0:82 /systemd/inaccessible/dir /root ro,nosuid,nodev,noexec,relatime shared:793 master:670 - tmpfs tmpfs rw,size=6545228k,nr_inodes=1636307,mode=700,uid=1000,gid=1000,inode64,huge=advise
+1351 1318 0:82 /systemd/inaccessible/dir /run/user ro,nosuid,nodev,noexec,relatime shared:767 master:670 - tmpfs tmpfs rw,size=6545228k,nr_inodes=1636307,mode=700,uid=1000,gid=1000,inode64,huge=advise
+1352 1332 0:58 /systemd-private-994b3b7d2c11478585842ed861f759d9-hostchk-3-mounts-3604086.service-FaD3I5/tmp /tmp rw,nosuid,nodev shared:792 master:177 - tmpfs tmpfs rw,size=32726144k,nr_inodes=1048576,inode64,huge=advise,usrquota
+1353 1236 0:29 /@/var/tmp/systemd-private-994b3b7d2c11478585842ed861f759d9-hostchk-3-mounts-3604086.service-3zpvOf/tmp /var/tmp rw,relatime shared:794 master:1 - btrfs /dev/mapper/root rw,compress=zstd:3,ssd,discard=async,space_cache=v2,subvolid=256,subvol=/@

@@ -406,7 +406,8 @@ fn a_dnf_cache_that_only_root_may_read_is_named_with_its_remedy() {
         both.findings,
         [
             "The pending updates are not known: only root may read the dnf cache folders of \
-             docker-ce-stable and epel in /var/cache/dnf; chmod 755 on them lets this check read them."
+             docker-ce-stable and epel in /var/cache/dnf: make the cache again under umask 022 \
+             (dnf clean all; umask 022; dnf makecache)."
         ]
     );
     open("epel-74fe7744c98fc60d", 0o755);
@@ -415,7 +416,8 @@ fn a_dnf_cache_that_only_root_may_read_is_named_with_its_remedy() {
         one.findings,
         [
             "The pending updates are not known: only root may read the dnf cache folder of \
-             docker-ce-stable in /var/cache/dnf; chmod 755 on it lets this check read it."
+             docker-ce-stable in /var/cache/dnf: make the cache again under umask 022 (dnf clean \
+             all; umask 022; dnf makecache)."
         ]
     );
 }
@@ -430,9 +432,8 @@ impl Runner for Late {
     }
 }
 
-/// A package manager that the collector ended at its time for a command
-/// ran: the card says that it did not finish in that time, and how long it
-/// is.
+/// A package manager that gave no answer in the collector's time for a
+/// command: the card says so, and how long that time is.
 #[test]
 fn a_package_manager_ended_at_its_time_limit_is_named_so() {
     let root = tempfile::tempdir().unwrap();
@@ -448,8 +449,7 @@ fn a_package_manager_ended_at_its_time_limit_is_named_so() {
         (
             State::Unknown,
             vec![
-                "The pending updates are not known: dnf did not finish within 8 seconds and was \
-                 ended."
+                "The pending updates are not known: dnf did not answer within 8 seconds."
                     .to_owned()
             ]
         )

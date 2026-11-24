@@ -1,18 +1,18 @@
-//! HTTP health probes and Bulwark webmail plugin observations.
+//! Bulwark webmail plugin observations.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::Instant;
 use std::{fs, io};
 
-use garrison_core::files::read_bounded;
+use garrison_core::files::{answered_by, read_bounded};
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_core::{hex, json};
-use garrison_stalwart::http::status_of;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use super::hidden::{self, Seen};
+use super::ran::{SECONDS, patience, silent};
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
@@ -20,80 +20,6 @@ use crate::options::{Checked, Options, fail};
 const REGISTRY: &str = "plugins/registry.json";
 const MAX_REGISTRY: usize = 1024 * 1024;
 const MAX_BUNDLE: usize = 2 * 1024 * 1024;
-
-/// A loopback endpoint answers with an expected status (process evidence).
-#[derive(Debug)]
-pub struct Http {
-    id: String,
-    title: String,
-    url: String,
-    expect: u16,
-    modules: BTreeSet<ModuleId>,
-}
-
-impl Http {
-    pub fn new(raw: &toml::Table) -> Checked<Self> {
-        let options = Options::new(raw, &["id", "title", "url", "expect_status", "modules"])?;
-        let id = options.text("id", None)?;
-        let title = options.text("title", None)?;
-        let url = options.text("url", None)?;
-        let loopback = url::Url::parse(&url).is_ok_and(|parsed| {
-            parsed.scheme() == "http"
-                && matches!(parsed.host_str(), Some("127.0.0.1" | "[::1]" | "localhost"))
-        });
-        if !loopback {
-            return fail("providers[http].url must be a loopback http:// URL");
-        }
-        let expect = options.integer("expect_status", 200, 100, 599)?;
-        Ok(Http {
-            id,
-            title,
-            url,
-            expect: u16::try_from(expect).unwrap_or(200),
-            modules: options.modules(&["services"])?,
-        })
-    }
-}
-
-impl Provider for Http {
-    fn name(&self) -> &'static str {
-        "http"
-    }
-
-    fn ids(&self) -> Vec<String> {
-        vec![format!("http.{}", self.id)]
-    }
-
-    fn collect(&self, context: &Context<'_>) -> Collected {
-        let status = status_of(&self.url, Duration::from_secs(5)).ok();
-        let findings = match status {
-            None => vec!["The endpoint did not answer.".to_owned()],
-            Some(status) if status != self.expect => {
-                vec![format!("Answered HTTP {status}, expected {}.", self.expect)]
-            }
-            Some(_) => Vec::new(),
-        };
-        let observation = Observation::new(Required {
-            id: &format!("http.{}", self.id),
-            provider: self.name(),
-            title: &self.title,
-            modules: self.modules.iter().copied(),
-            evidence: Evidence::Process,
-            state: if status == Some(self.expect) {
-                State::Ok
-            } else {
-                State::Failed
-            },
-            checked_at: &context.checked_at(),
-            source: &self.url,
-        })?
-        .with_scope("The endpoint answered; this does not test user functionality.")
-        .with_fields(vec![Field::new("HTTP status", status, Format::Number)])
-        .with_findings(findings)
-        .with_max_age(180);
-        Ok(Report::of(observation))
-    }
-}
 
 /// `1.2.3`, optionally with a pre-release or build suffix.
 fn is_version(text: &str) -> bool {
@@ -149,11 +75,16 @@ impl Bulwark {
         Ok(Bulwark { base, plugins })
     }
 
-    /// The plugins the registry lists, or why it cannot be read.
-    fn registry(&self) -> Result<Vec<Value>, String> {
+    /// The plugins the registry lists, or why it cannot be read by `until`.
+    fn registry(&self, until: Instant) -> Result<Vec<Value>, String> {
         let path = self.base.join(REGISTRY);
-        let data = read_bounded(&path, MAX_REGISTRY)
-            .map_err(|error| unread(REGISTRY, &path, &error, MAX_REGISTRY))?;
+        let missing = format!(
+            "there is no {REGISTRY} in {}; set `admin_directory` to Bulwark's administration \
+             folder, which holds it",
+            self.base.display()
+        );
+        let data = read(&path, MAX_REGISTRY, until)
+            .map_err(|error| unread(REGISTRY, &path, &error, MAX_REGISTRY, until, &missing))?;
         let registry =
             json::parse(&data, MAX_REGISTRY).map_err(|_| format!("{REGISTRY} is no valid JSON"))?;
         registry
@@ -163,8 +94,9 @@ impl Bulwark {
             .ok_or_else(|| format!("{REGISTRY} holds no list of plugins"))
     }
 
-    /// The bundle of `name` against the hash that its row records.
-    fn integrity(&self, name: &str, row: &Value) -> Integrity {
+    /// The bundle of `name`, read by `until`, against the hash that its row
+    /// records.
+    fn integrity(&self, name: &str, row: &Value, until: Instant) -> Integrity {
         let Some(expected) = row
             .get("bundleHash")
             .and_then(Value::as_str)
@@ -179,12 +111,25 @@ impl Bulwark {
         };
         let shown = format!("plugins/{name}.js");
         let path = self.base.join(&shown);
-        match read_bounded(&path, MAX_BUNDLE) {
+        let missing = format!(
+            "{shown} is not there, though {REGISTRY} lists it; Bulwark writes it when it installs \
+             the plugin"
+        );
+        match read(&path, MAX_BUNDLE, until) {
             Ok(code) if hex::encode(&Sha256::digest(&code)) == expected => Integrity::Verified,
             Ok(_) => Integrity::Mismatch,
-            Err(error) => Integrity::Unknown(unread(&shown, &path, &error, MAX_BUNDLE)),
+            Err(error) => {
+                Integrity::Unknown(unread(&shown, &path, &error, MAX_BUNDLE, until, &missing))
+            }
         }
     }
+}
+
+/// The file at `path`, of at most `limit` bytes, as its file system answers
+/// by `until`.
+fn read(path: &Path, limit: usize, until: Instant) -> io::Result<Vec<u8>> {
+    let path = path.to_path_buf();
+    answered_by(until, move || read_bounded(&path, limit)).and_then(|read| read)
 }
 
 /// What the check of one plugin's bundle found.
@@ -207,12 +152,26 @@ impl Integrity {
     }
 }
 
-/// Why a file below the administration folder could not be read: it is
-/// missing, a link, larger than it may be, kept from the collector, or the
-/// error says.
-fn unread(shown: &str, path: &Path, error: &io::Error, limit: usize) -> String {
-    match fs::symlink_metadata(path) {
-        Err(_) if error.kind() == io::ErrorKind::NotFound => format!("{shown} is missing"),
+/// Why a file below the administration folder could not be read: its file
+/// system gave no answer by `until`, or it is not there, as `missing` says
+/// with what mends it, a link, larger than it may be, kept from the
+/// collector, or the error says.
+fn unread(
+    shown: &str,
+    path: &Path,
+    error: &io::Error,
+    limit: usize,
+    until: Instant,
+    missing: &str,
+) -> String {
+    let silence = || format!("the file system of {shown} did not answer within {SECONDS} seconds");
+    if silent(error) {
+        return silence();
+    }
+    let looked = path.to_path_buf();
+    match answered_by(until, move || fs::symlink_metadata(&looked)).and_then(|looked| looked) {
+        Err(looked) if silent(&looked) => silence(),
+        Err(_) if error.kind() == io::ErrorKind::NotFound => missing.to_owned(),
         Ok(metadata) if metadata.is_symlink() => {
             format!("{shown} is a link, which is not followed")
         }
@@ -244,8 +203,25 @@ impl Provider for Bulwark {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
+        self.card(context, patience())
+    }
+}
+
+impl Bulwark {
+    /// The card, with what it reads below the folder read by `until`.
+    pub(super) fn card(&self, context: &Context<'_>, until: Instant) -> Collected {
         let registry_path = self.base.join(REGISTRY);
-        let registry = self.registry();
+        // What the collector's unit hides is not mended by another folder.
+        let registry = match hidden::seen(&self.base) {
+            Seen::Hidden(place) => Err(format!(
+                "{} lies under {}, which the collector's unit hides from it: show the collector \
+                 that folder at another place and set `admin_directory` to it \
+                 (docs/operator/checks.md, \"Paths the collector cannot see\")",
+                self.base.display(),
+                place.display()
+            )),
+            Seen::Host | Seen::Bound { .. } => self.registry(until),
+        };
         let mut fields = Vec::new();
         let (mut mismatched, mut unknown, mut verified) = (Vec::new(), Vec::new(), 0_usize);
         for name in &self.plugins {
@@ -256,7 +232,7 @@ impl Provider for Bulwark {
                         .filter(|row| row.get("id").and_then(Value::as_str) == Some(name))
                         .collect();
                     match matches[..] {
-                        [row] => (row, self.integrity(name, row)),
+                        [row] => (row, self.integrity(name, row, until)),
                         [] => (
                             &Value::Null,
                             Integrity::Unknown(format!("{REGISTRY} does not list it")),
@@ -338,38 +314,10 @@ impl Provider for Bulwark {
 
 #[cfg(test)]
 mod tests {
-    use garrison_testing::http::{answer, serve};
     use serde_json::json;
 
     use super::*;
     use crate::testing::{Canned, config, context, table};
-
-    fn probe(url: &str, expect: u16) -> Observation {
-        let directory = tempfile::tempdir().unwrap();
-        let (config, runner) = (config(directory.path()), Canned(String::new()));
-        let raw =
-            format!("id = \"api\"\ntitle = \"API\"\nurl = \"{url}\"\nexpect_status = {expect}");
-        let provider = Http::new(&table(&raw)).unwrap();
-        provider
-            .collect(&context(&config, &runner))
-            .unwrap()
-            .observations
-            .remove(0)
-    }
-
-    #[test]
-    fn an_endpoint_is_ok_only_with_the_expected_status() {
-        let ok = serve(vec![answer(204, "")]);
-        let observation = probe(&ok.url, 204);
-        assert_eq!(
-            (observation.state, observation.findings.len()),
-            (State::Ok, 0)
-        );
-        let other = serve(vec![answer(503, "")]);
-        let observation = probe(&other.url, 204);
-        assert_eq!(observation.state, State::Failed);
-        assert_eq!(observation.findings, ["Answered HTTP 503, expected 204."]);
-    }
 
     /// A plugin directory with `bundle` as `spam.js` and `hash` recorded for it.
     fn plugins(bundle: &[u8], hash: &str) -> (tempfile::TempDir, Observation) {
@@ -422,6 +370,22 @@ mod tests {
             let (_directory, observation) = plugins(b"x", recorded);
             assert_eq!(integrity(&observation), json!("unknown"), "{recorded}");
         }
+    }
+
+    /// A bundle whose file system gives no answer by the card's time is not
+    /// known, and says so.
+    #[test]
+    fn a_bundle_whose_file_system_does_not_answer_is_not_known() {
+        let directory = tempfile::tempdir().unwrap();
+        let raw = format!("admin_directory = \"{}\"", directory.path().display());
+        let provider = Bulwark::new(&table(&raw)).unwrap();
+        let row = json!({"id": "spam", "bundleHash": hex::encode(&Sha256::digest(b"x"))});
+        assert_eq!(
+            provider.integrity("spam", &row, Instant::now()),
+            Integrity::Unknown(
+                "the file system of plugins/spam.js did not answer within 8 seconds".to_owned()
+            )
+        );
     }
 
     #[test]

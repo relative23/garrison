@@ -1370,11 +1370,29 @@ Notable changes for operators and users. The format follows
   and names what mends each.
 - **A receipt that another user swaps for a named pipe no longer holds up
   the collection run.**
+- **A file system that does not answer no longer holds up the collection
+  run.** A `disk_path`, receipt, webmail folder or version command on a
+  mount that hangs, such as a hard NFS mount whose server is gone, costs its
+  card 8 seconds, and the card says so.
 - **A receipt whose `ok_rows` finds no row to judge is no longer in
   order.** An empty list of rows is Unknown now, as a missing one is.
 - **A receipt in a place the collector's unit hides, such as `/root` or
   `/tmp`, says so instead of asking for a `chmod`.** Let the job write it
   where the collector sees it, as under `/var/lib`.
+- **The receipt card no longer asks to open a folder to every user, and
+  names what a mount shows the collector by its place on the host.** Where
+  the collector's user may not search a folder, let the job write the
+  receipt where it may, and set `path` to it.
+- **The updates card warns where the package lists are a week old or
+  have expired.** It counted from lists that the host had stopped fetching,
+  however old; `apt-get update` or `dnf makecache` fetches them, as the
+  host's update job should.
+- **The updates card's advice for a dnf cache that only root may read
+  mends it.** `chmod 755` on the cache folders left dnf's files in them
+  closed; make the cache again under umask 022, as the card says.
+- **A receipt reached through a link names the link and where it leads.**
+  Where it leads into a place the collector's unit hides, the card says
+  so, and names `path`, which is to follow the receipt to its new place.
 - **A list receipt read by an entry for an object is Unknown and says how
   to read it, instead of Failed.** A list is read with `rows = []` and
   `row_date`.
@@ -1405,6 +1423,9 @@ Notable changes for operators and users. The format follows
   file existed, and showed the age of the daily one without judging it. A
   daily database older than 48 hours is now a warning, and files without a
   daily database among them are Unknown.
+- **The webmail card names what mends a registry or a bundle that is not
+  there.** A folder without `plugins/registry.json` names `admin_directory`,
+  and a bundle the registry lists says that Bulwark writes it.
 - **A webmail plugin whose bundle cannot be checked is named.** The
   webmail plugins card stayed in order where a plugin's bundle integrity
   was "unknown", as long as no other bundle mismatched: a plugin that

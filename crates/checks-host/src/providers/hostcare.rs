@@ -9,8 +9,10 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use garrison_core::config::is_unit_name;
+use garrison_core::files::answered_by;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use serde::{Deserialize, Serialize};
@@ -21,6 +23,7 @@ mod restart;
 
 use reading::{Pending, Sample};
 
+use super::ran::{SECONDS, patience, silent};
 use crate::context::{Collected, Context, HostPath, Provider, ProviderError, Report, Use};
 use crate::kept::{Kept, cached};
 use crate::options::{Checked, Options, fail};
@@ -224,6 +227,15 @@ impl HostCare {
                 )),
             ),
         };
+        // Counts from metadata out of date leave out what was published since.
+        let outdated = asked
+            .pending
+            .and_then(|_| packages::stale(&self.root, context.now.as_second()));
+        let state = if outdated.is_some() {
+            State::Warning
+        } else {
+            state
+        };
         let observation = self
             .observation(context, "updates", "System updates", state, &asked.source)?
             .with_scope(
@@ -235,7 +247,7 @@ impl HostCare {
                 Field::new("Other updates", asked.pending.map(|pending| pending.other), Format::Number),
                 Field::new("Asked", kept.asked(), Format::Datetime),
             ])
-            .with_findings(finding.into_iter().collect());
+            .with_findings(finding.into_iter().chain(outdated).collect());
         // The card is as old as the package manager's answer.
         Ok(kept.dated(observation))
     }
@@ -275,14 +287,18 @@ impl HostCare {
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss
     )]
-    fn disk(&self, context: &Context<'_>) -> Made {
+    fn disk(&self, context: &Context<'_>, until: Instant) -> Made {
         let source = self.disk_path.display().to_string();
+        let path = self.disk_path.clone();
         // A file system of the kernel's, such as /proc, keeps no size, and
         // its free space of none is nothing to carry forward.
-        let measured = match rustix::fs::statvfs(&self.disk_path) {
-            Ok(filesystem) if filesystem.f_blocks > 0 => Ok(filesystem),
-            Ok(_) => Err("The file system gives no size."),
-            Err(_) => Err("The file system could not be read."),
+        let measured = match answered_by(until, move || rustix::fs::statvfs(&path)) {
+            Ok(Ok(filesystem)) if filesystem.f_blocks > 0 => Ok(filesystem),
+            Ok(Ok(_)) => Err("The file system gives no size.".to_owned()),
+            Err(error) if silent(&error) => Err(format!(
+                "The file system did not answer within {SECONDS} seconds."
+            )),
+            _ => Err("The file system could not be read.".to_owned()),
         };
         let filesystem = match measured {
             Ok(filesystem) => filesystem,
@@ -295,7 +311,7 @@ impl HostCare {
                         State::Unknown,
                         &source,
                     )?
-                    .with_findings(vec![why.to_owned()]));
+                    .with_findings(vec![why]));
             }
         };
         let free = filesystem.f_bavail.saturating_mul(filesystem.f_frsize);
@@ -462,7 +478,7 @@ impl Provider for HostCare {
                 "updates" => self.updates(context)?,
                 "restart" => self.restart(context)?,
                 "clock" => self.clock(context)?,
-                "disk" => self.disk(context)?,
+                "disk" => self.disk(context, patience())?,
                 _ => self.firewall(context)?,
             });
         }

@@ -1,14 +1,17 @@
 //! Installed versions from local commands, e.g. `clamdscan --version`.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
+use garrison_core::files::answered_by;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Kind, Observation, Required, State};
 use regex_lite::Regex;
 use serde_json::{Map, json};
 
-use super::ran::not_run;
+use super::ran::{SECONDS, not_run, patience, silent};
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
 
@@ -54,9 +57,17 @@ impl VersionCommand {
         })
     }
 
-    /// The version the command gives, or why it gives none.
-    fn version(&self, context: &Context<'_>) -> Result<String, String> {
+    /// The version the command gives, or why it gives none. The program's
+    /// file system is asked first, by `until`: starting a program waits for
+    /// the file system it lies on, and the runner's time begins only after.
+    pub(super) fn version(&self, context: &Context<'_>, until: Instant) -> Result<String, String> {
         let program = &self.command[0];
+        let looked = PathBuf::from(program);
+        if answered_by(until, move || fs::metadata(&looked)).is_err_and(|error| silent(&error)) {
+            return Err(format!(
+                "{program} was not run: its file system did not answer within {SECONDS} seconds."
+            ));
+        }
         let arguments: Vec<&str> = self.command.iter().map(String::as_str).collect();
         let output = context
             .runner
@@ -122,7 +133,7 @@ impl Provider for VersionCommand {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let version = self.version(context);
+        let version = self.version(context, patience());
         let mut value = Map::new();
         value.insert("component".into(), json!(self.component));
         value.insert("version".into(), json!(version.as_ref().ok()));

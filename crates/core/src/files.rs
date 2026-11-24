@@ -1,4 +1,5 @@
-//! Bounded file reads, protected files and atomic writes.
+//! Bounded file reads, protected files, atomic writes, and calls on a file
+//! system that may not answer.
 //!
 //! Files are opened without following symbolic links and without blocking on a
 //! FIFO; only regular files are read, and never more than a fixed size.
@@ -7,6 +8,9 @@ use std::fs::{File, Metadata};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
+use std::time::Instant;
 
 use rustix::fs::{Mode, OFlags};
 use serde_json::Value;
@@ -65,6 +69,32 @@ fn read_limited(file: File, limit: usize) -> io::Result<Option<Vec<u8>>> {
 /// since the first.
 pub fn open_regular_file(path: &Path) -> io::Result<File> {
     open_regular(path)
+}
+
+/// What `call`, which asks a file system, answers by `until`. A file system
+/// that does not answer, as a hard NFS mount whose server is gone or a FUSE
+/// file system whose daemon hangs, holds a call for good, and nothing stops
+/// it: so the call runs on a thread of its own, which is left to end with
+/// the call or with the process, and the caller gets an error of kind
+/// [`io::ErrorKind::TimedOut`] by then. Nothing is asked once `until` is past.
+pub fn answered_by<T: Send + 'static>(
+    until: Instant,
+    call: impl FnOnce() -> T + Send + 'static,
+) -> io::Result<T> {
+    let silent = || io::Error::new(io::ErrorKind::TimedOut, "the file system did not answer");
+    let wait = until.saturating_duration_since(Instant::now());
+    if wait.is_zero() {
+        return Err(silent());
+    }
+    let (sender, answer) = mpsc::channel();
+    thread::Builder::new().spawn(move || {
+        // Once the caller has stopped waiting, the answer goes nowhere.
+        let _ = sender.send(call());
+    })?;
+    answer.recv_timeout(wait).map_err(|error| match error {
+        RecvTimeoutError::Timeout => silent(),
+        RecvTimeoutError::Disconnected => io::Error::other("the call ended without an answer"),
+    })
 }
 
 /// Read a regular file of at most `limit` bytes, never following symbolic links.

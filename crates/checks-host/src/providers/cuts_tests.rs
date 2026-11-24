@@ -176,6 +176,11 @@ fn every_cut_says_what_it_left_out() {
             "a larger report is not read: Unknown, named",
         ),
         (
+            "providers/hostcare/packages.rs",
+            ".take(4096)",
+            "the head of a Release file, where its fields stand: nothing of it is shown",
+        ),
+        (
             "providers/hostcare/restart.rs",
             ".take(5)",
             "the packages past five: said, below",

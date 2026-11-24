@@ -60,3 +60,31 @@ fn a_file_system_without_a_size_has_no_forecast() {
         )
     );
 }
+
+/// A file system that gives no answer by the check's time, as a hard NFS
+/// mount whose server is gone, has no forecast, and what the readings were
+/// stays as it was: here the time is past before the check begins.
+#[test]
+fn a_file_system_that_does_not_answer_has_no_forecast() {
+    let disk = tempfile::tempdir().unwrap();
+    let memory = Remembered::default();
+    memory.keep(DISK, "kept");
+    let directory = tempfile::tempdir().unwrap();
+    let config = config(directory.path());
+    let nothing = Programs::new(Vec::new());
+    let context = Context {
+        memory: &memory,
+        ..crate::testing::context(&config, &nothing)
+    };
+    let card = forecast(disk.path())
+        .disk(&context, Instant::now())
+        .unwrap();
+    assert_eq!(
+        (card.state, card.findings),
+        (
+            State::Unknown,
+            vec!["The file system did not answer within 8 seconds.".to_owned()]
+        )
+    );
+    assert_eq!(memory.recall(DISK).as_deref(), Some("kept"));
+}

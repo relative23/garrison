@@ -4,7 +4,10 @@ What Garrison shows on its pages comes from checks. The configuration calls
 them providers: each `[[providers]]` entry in `/etc/garrison/garrison.toml`
 is one check, and `type` names it. The collector runs them every minute. A
 source that is missing or unreadable shows as Unknown; it never stops the
-other checks. The checks that read Stalwart's domains, listeners or
+other checks. A file system that does not answer, as a hard NFS mount whose
+server is gone, costs `host`, `host-care`, `receipt`, `bulwark` and
+`version-command` eight seconds each, and their cards say so. The checks
+that read Stalwart's domains, listeners or
 accounts with the collector's API key (`dns`, `tls`, `reputation`,
 `mail-flow`) say why where they could not: Stalwart could not be reached or
 failed on its side, which the card names, such as "Stalwart answered HTTP
@@ -47,7 +50,7 @@ observation the checks report is in [observation ids](observations.md).
 | `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
 | `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning, and so is one dated more than five minutes ahead of the host's clock, whose age is not known; where both are there the newer one counts, also for the dashboard's signature age |
 | `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30), `verify_days` (0: not expected), `restore_days` (0), `path`, `modules` | What the backup tool reported of its repository; see below |
-| `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity: a bundle (`plugins/<id>.js`) that does not match the SHA-256 in `plugins/registry.json` is a failure. A plugin whose bundle cannot be checked, as one the registry does not list or lists twice, gives no hash for, or whose bundle is missing, a link, unreadable or larger than 2 MiB, is named with why; the card is then Partial, or Unknown where no bundle could be checked, as without `plugins`, which name the plugins to check |
+| `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity: a bundle (`plugins/<id>.js`) that does not match the SHA-256 in `plugins/registry.json` is a failure. A plugin whose bundle cannot be checked, as one the registry does not list or lists twice, gives no hash for, or whose bundle is missing, a link, unreadable or larger than 2 MiB, is named with why; the card is then Partial, or Unknown where no bundle could be checked, as without `plugins`, which name the plugins to check, or where `admin_directory` holds no `plugins/registry.json`, and the card then names that option |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
 | `version-command` | `component`, `command`, `pattern` (its first group, `( )`, is the version), `modules` | Installed version from a command; it runs in the collector's sandbox, so a program that compiles code at run time (a JIT) fails there. Only its standard output is read, so a version written to standard error, as `nginx -v` writes it, is not found; a card without a version says why |
 | `reputation` | `hosts` (default: the mail hosts Stalwart names), `max_domains` (20, at most 100), `lists`, `lists_ipv6`, `resolver`, `modules` | Blocklists and reverse names of the addresses this server sends from; see below |
@@ -70,13 +73,17 @@ changes nothing; one that cannot be made is Unknown.
   archive it comes from. It reads the metadata the host has fetched, so it is
   as fresh as the host's own update job keeps it; where apt has fetched no
   package lists at all (`/var/lib/apt/lists`), as a container image leaves
-  it, the card is Unknown and says so. It asks again within
+  it, the card is Unknown and says so. Where the package manager has not
+  fetched its metadata, nor tried to, for a week, as where that job stopped,
+  or a list of apt's has expired (its `Valid-Until`), the card warns: updates
+  published since are not counted. It asks again within
   five minutes once packages are installed or removed or new metadata is
   fetched, and otherwise every six hours. It reads `apt` (Debian, Ubuntu) and
   `dnf` 4 (the RHEL family, Amazon Linux); elsewhere it is Unknown. The
   collector's user reads dnf's cache in `/var/cache/dnf`: where only root may
   read a cache folder, as a dnf run under umask 077 leaves it, the finding
-  names the repository.
+  names the repository and says to make the cache again under umask 022,
+  since such a run leaves the files in it closed too.
 - `restart`: whether installed updates need a restart of the host. On every
   distribution a kernel installed in `/lib/modules` that is newer than the
   one that runs, and of its flavor, is a warning. The flavor is the
@@ -576,10 +583,14 @@ receipt, it says why and what mends it: the collector's unit hides the place,
 as it does `/home` and `/tmp` (see [below](#paths-the-collector-cannot-see));
 there is no file at `path`, which the
 job has not written; the collector's user may not search a folder on the way
-there (`chmod o+x` that folder) or may not open the file, as where a job
+there (let the job write it where that user may search, and set `path` to
+it: opening the folder to every user would open what else it holds) or may
+not open the file, as where a job
 under umask 027 or 077 writes it with mode 0640 or 0600 (mode `0644` mends
 it); it is a link, which is not followed, or no plain file; or it is larger
-than 1024 KiB or no JSON object or list.
+than 1024 KiB or no JSON object or list. A folder or a file that a mount
+shows the collector at another place, as below, is named by its place on
+the host, and a link on the way with where it leads.
 
 A receipt can list results, one row each: `rows = []` where the file itself
 is the list, or `rows = ["results"]` for a list under that key. `columns`
@@ -641,7 +652,9 @@ BindReadOnlyPaths=/home/webmail/bulwark:/srv/garrison/bulwark
 
 and `admin_directory = "/srv/garrison/bulwark"`. The collector then reads
 that folder there and nothing else of `/home`; root sees an empty folder at
-`/srv/garrison/bulwark`. For the free space of a file system mounted at
+`/srv/garrison/bulwark`. The folder keeps its own mode there, so the
+collector's user must be allowed to search it and read what the check reads.
+For the free space of a file system mounted at
 `/home`, show it an empty folder of that file system:
 `sudo mkdir -p /home/.garrison-disk /srv/garrison/home-disk`, the line
 `BindReadOnlyPaths=/home/.garrison-disk:/srv/garrison/home-disk` and
