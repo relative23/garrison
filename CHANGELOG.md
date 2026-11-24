@@ -1762,17 +1762,21 @@ Notable changes for operators and users. The format follows
 - **An installation whose services ran is upgraded only with a configuration
   the new release loads and its access policy in place**, also where
   `broker.policy` lies outside `/etc/garrison`; otherwise nothing changes.
-- **An upgrade that was interrupted, also once `current` named the new
-  release, is finished by running it again**, with the same installer or
-  `garrison upgrade` and the same archive; it switches back where the new
-  release did not start, and puts no copy back once Garrison ran since.
-- **A rollback that was interrupted is finished by running it again**, also
-  with the state from before the upgrade where it began with it; where it
-  returned to a release from before this one, run the command its first
-  line names.
-- **A restore that was interrupted is finished by running it again**, and
-  names the copy of the state its first run made; where Garrison ran since,
-  it copies the state as it is first.
+- **An upgrade that was interrupted is finished by running it again**, with
+  its installer or `garrison upgrade` and the same archive; a release that
+  does not start then is stopped, and the answer names `install --rollback`.
+- **A rollback that was interrupted is finished by the command its first
+  line names**: the installer of the release it left, with the same options.
+- **A restore that was interrupted is finished by running it again**, which
+  copies the state as it finds it first; the copy its first run made keeps
+  the state from before it.
+- **The installer changes nothing where its release runs as installed, and
+  says so** with exit status 0: it stops nothing and makes no backup. After a
+  change of `garrison.toml` alone, restart the services, as configuration.md
+  says.
+- **`garrison upgrade` with the archive of the release that runs hands it to
+  its installer**, which finishes an installation cut short or changes
+  nothing; an older archive is refused as before.
 - **The installer and an uninstallation no longer stop the macro filter
   while Stalwart may still ask it**, which left Stalwart deferring all
   incoming mail; they say why the filter keeps running and that `garrison

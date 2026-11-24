@@ -101,9 +101,9 @@ through a link or into a folder that `broker.policy` names, removes a
 database that did not exist when the backup was made, and starts the
 services. What was recorded since the backup is in the `pre-restore-*` copy
 and no longer in Garrison; restore that copy to take the restore back.
-Run again after it was interrupted, a restore finishes and names its first
-run's copy as the state from before; where Garrison was started since, it
-copies the state as it is first, as a new restore does.
+A restore that was interrupted is finished by running it again, which
+copies the state as it finds it first; the copy its first run made keeps
+the state from before it.
 
 A backup holds neither sessions nor credentials. After a restore everyone
 signs in again. On a new host, restore `/etc/garrison` from your host backup
@@ -149,11 +149,18 @@ switches `/opt/garrison/current` to the new release and starts it. The
 services report ready only once they serve, and they must then stay up
 without a restart for eight seconds, so a release that fails right after it
 starts, or keeps restarting, counts as not started; where the macro filter
-runs, it must stay up as well. Installing the running release again backs up
-to `pre-reinstall-*` and keeps the pre-upgrade copy that a rollback restores.
+runs, it must stay up as well. Run where its release runs as installed, the
+installer changes nothing, stops nothing and says so (`… is running as
+installed; nothing was changed.`, exit status 0); it starts the services
+where a file it writes changed, as after a change of `web.port` or
+`[[actions]]`, while a change of `garrison.toml` alone takes a restart of the
+services ([configuration](configuration.md)). Where it unpacks other files of
+the same version, it backs up to `pre-reinstall-*` first. Neither moves the
+pre-upgrade copy that a rollback restores.
 
 If the new release does not start, or anything fails after the old one
-stopped, the installer switches back by itself:
+stopped, the installer switches back by itself to the release that ran when
+it began:
 
 1. It stops everything of Garrison that writes: the services, the timers and
    a collection run that is under way.
@@ -178,9 +185,11 @@ where the upgrade had switched to it, and `previous` the old one, so that
 sudo /opt/garrison/current/bin/garrison install --rollback --restore-state
 ```
 
-returns to the old release with the whole state from before the upgrade. The
-installer exits with 1 in both cases; the journal says why the new release
-failed.
+returns to the old release with the whole state from before the upgrade.
+Where no release ran when the installer began, as after a run that was
+killed, it switches back to none: it stops the release that did not start
+and names `install --rollback`. The installer exits with 1 in each case; the
+journal says why the new release failed.
 
 Before it changes anything, the installer checks that systemd, polkit and the
 free space suffice: the release and a backup as large as the databases must
@@ -191,21 +200,17 @@ changes. After a successful installation it keeps the running,
 the previous and one older release, and the three newest of its own backups
 plus the one a rollback restores; it removes the older ones. Backups you write
 with `garrison backup --to` are left alone; the `pre-restore-*` copies of a
-restore and the `pre-switch-back-*` ones count among the installer's own.
+restore count among the installer's own.
 
-While one installer runs, a second one is refused. An upgrade that was
-interrupted, even killed, is finished by running its installer again, or
-`garrison upgrade` with the same archive; `/opt/garrison/unfinished.json`
-notes what the installer began until a release runs again. Once a service of
-Garrison's was started after that note, by the interrupted run itself, a
-reboot or by hand, the next run removes it and puts nothing back on its
-word, since the databases may hold what was recorded since; only where the
-new release is current and does not run does it still switch back, once it
-has copied the state as it is to `pre-switch-back-*`. A rollback is
-finished by running it again, with the state from before the upgrade where it
-began with `--restore-state`; one that went back to a release from before this
-one is finished by the release it left, as its first line says: `sudo
-/opt/garrison/releases/<release>/bin/garrison install --rollback`.
+While one installer runs, a second one is refused. A run that was
+interrupted, even killed, leaves no note for the next one: run it again, and
+it goes on from what it finds. An upgrade is finished by its installer, or
+`garrison upgrade` with the same archive. A rollback is finished by the
+command its first line names, the installer of the release it left: `sudo
+/opt/garrison/releases/<release>/bin/garrison install --rollback`, with
+`--restore-state` where it began with it, which puts the state from before
+the upgrade back again; until then some databases may be the copies and
+others not.
 
 To return to the previous release:
 
