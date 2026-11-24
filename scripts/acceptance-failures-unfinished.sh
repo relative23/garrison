@@ -102,6 +102,9 @@ scenario_killed_late() {
     check "no event was lost" "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -ge $before"
     check "no partly unpacked release is left" '! ls -A /opt/garrison/releases | grep -q "^\."'
     check "the state to restore is complete" 'test -d "$(readlink -f /var/backups/garrison/last-pre-upgrade)/etc"'
+    # The links as the other scenarios take them: the release before, then this one.
+    installer '/root/previous/bin/garrison install'
+    upgraded
 }
 
 # The command `1` run in the background, killed with its children as SIGKILL
