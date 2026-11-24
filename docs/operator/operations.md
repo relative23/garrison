@@ -231,7 +231,11 @@ This replaces the two API keys, the webhook signature key and the metrics
 credential with new secrets and restarts the services that hold them. A new
 key is created and written first, and the old one goes only after the
 services that hold it have restarted with the new one, so sign-in and the
-checks of users' rights go on throughout. Event batches that Stalwart sends
+checks of users' rights go on throughout. Stalwart takes five API keys an
+account, and setup makes its two in the administrator's: where that account
+holds three keys of its own, the broker's old key must go before the new one
+is made, and sign-in pauses until setup has restarted the broker with its
+new key, which it does at once. Event batches that Stalwart sends
 while the signature key changes are refused once and delivered again.
 Rotate after anyone who should not have them may have seen the files in
 `/etc/garrison/credentials`, and from time to time.
@@ -317,6 +321,7 @@ Stalwart WebUI if you no longer need them.
 | The browser says that Garrison's page redirects too many times | `public_origin` names a port other than 443, and nginx passes the host name without the port: an include of your own with `proxy_set_header Host $host;`. Garrison's include passes the host as the browser sent it (`$http_host`); write it anew: `sudo sh -c 'garrison nginx --snippet > /etc/nginx/snippets/garrison.conf' && sudo nginx -t && sudo systemctl reload nginx`. |
 | The installer says polkit or systemd is too old | Garrison needs systemd 247 and polkit 0.106 or newer, with JavaScript rules: Debian 12, Ubuntu 24.04, the RHEL 9 family or newer. Ubuntu 22.04 and Debian 11 ship polkit 0.105. |
 | `stalwart setup` says Stalwart refuses an API key | Stalwart answered HTTP 403: it knows the key but sees this host at another address than 127.0.0.1, as in a Docker or Podman bridge network. Run Stalwart in the host network (`--network host`, Compose `network_mode: host`) and run `stalwart setup` again. A key Stalwart does not know at all (HTTP 401), as where `/etc/garrison/credentials` was put back from a copy older than the last rotation, setup makes anew by itself and says so. |
+| `stalwart setup` says that Stalwart's quota of API keys left no room, or that Stalwart holds no more API keys for the administrator's account | Stalwart takes five API keys an account, and setup makes its two in the administrator's, beside that account's own. Where a new key found no room beside an old one, the old one went first, and where the new one could then not be made, setup says what goes without it until a run of setup makes it, as the broker checking no user's rights, so that nobody can sign in. Remove the administrator's own keys that are no longer needed in the Stalwart WebUI, then run setup again. |
 | `stalwart setup` says it cannot write the credentials folder | It writes the keys Stalwart makes to `/etc/garrison/credentials`, which is root's: run it as root, with `sudo`. It stopped before it asked for the administrator and changed nothing. Run as root, it names the reason, such as a file system mounted read-only. |
 | `stalwart setup` says Stalwart refused the administrator | HTTP 401: Stalwart does not know the user name and password, or the API key, that setup was given; check them and run it again. HTTP 403: Stalwart knows the credential but does not take it from this host's address, as for an API key whose networks leave this host out, or for an address it blocked after failed sign-ins (see "Sign-in fails"). Setup changed nothing. Where it says that Stalwart refused the administrator an API key, setup was given an account without Stalwart's administrator rights: run it as an administrator. |
 | The installer says how many MiB it needs | The release and a backup as large as the databases must fit; free space where it says, then run it again. Nothing was changed. |

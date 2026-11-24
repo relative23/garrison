@@ -64,12 +64,14 @@ const BROKER: Key = Key {
     description: "garrison broker",
     permissions: &BROKER_PERMISSIONS,
     held: true,
+    without: "the broker checks no user's rights",
 };
 const COLLECTOR: Key = Key {
     file: "collector-native-key",
     description: "garrison collector",
     permissions: &COLLECTOR_PERMISSIONS,
     held: false,
+    without: "the cards that need the collector's key cannot read Stalwart",
 };
 const LOOPBACK: [&str; 2] = ["127.0.0.1/32", "::1/128"];
 const MAX_ANSWER: usize = 4 * 1024 * 1024;
@@ -367,6 +369,14 @@ fn configure(
     done.replaced.extend(broker.replaced);
     if broker.made {
         done.renewed.insert(BROKER.file);
+    }
+    // Where its old key had to go first, the broker checks no rights until
+    // it starts again with the new one, so it does at once.
+    if broker.gone_first {
+        if let Some(line) = restart::restart(directory, &done.renewed) {
+            say(&line);
+        }
+        done.renewed.remove(BROKER.file);
     }
     let collector = keys::ensure(admin, directory, &COLLECTOR, networks, rotate)?;
     done.replaced.extend(collector.replaced);

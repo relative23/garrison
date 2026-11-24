@@ -12,6 +12,7 @@ const COLLECTOR: Key = Key {
     description: "garrison collector",
     permissions: &["authenticate"],
     held: false,
+    without: "the cards that need the collector's key cannot read Stalwart",
 };
 
 /// Stalwart's list of an account's keys of the collector's description.
@@ -145,9 +146,58 @@ fn a_full_quota_lets_the_old_keys_go_first() {
         "replaced API key 'garrison collector' -> DIR/collector-native-key (the old ones \
          went first: Stalwart's quota of API keys left no room)"
     );
-    assert_eq!((done.replaced, done.made), (Vec::<Replaced>::new(), true));
+    assert_eq!(
+        (done.replaced, done.made, done.gone_first),
+        (Vec::<Replaced>::new(), true, true)
+    );
     let held = std::fs::read_to_string(directory.path().join(COLLECTOR.file)).unwrap();
     assert_eq!(held, format!("{NEW}\n"));
+}
+
+/// Where the old keys went for the quota and the new one cannot be made,
+/// or where their removal failed, the error says what goes without a key
+/// Stalwart takes until a run of setup makes one.
+#[test]
+fn a_new_key_that_finds_no_room_says_what_goes_without_one() {
+    let full = json(
+        &json!({"methodResponses": [["x:ApiKey/set", {"notCreated": {"new": {
+        "type": "overQuota", "description": "You have exceeded your quota of 5 API keys."}}},
+        "0"]]}),
+    );
+    let gone = json(&json!({"methodResponses": [["x:ApiKey/set", {"destroyed": ["old"]}, "0"]]}));
+    let quota = "Stalwart's quota of API keys left the new key no room";
+    let without =
+        "the cards that need the collector's key cannot read Stalwart until setup makes its key";
+    let cases = [
+        (
+            vec![listed("b", &["old"]), full.clone(), gone, answer(503, "{}")],
+            format!(
+                "x:ApiKey/set: Stalwart answered HTTP 503 (Stalwart did not return the new API \
+                 key secret); {quota}, so the old ones went first: {without}"
+            ),
+        ),
+        (
+            vec![listed("b", &["old"]), full, answer(503, "{}")],
+            format!(
+                "x:ApiKey/set: Stalwart answered HTTP 503; {quota}, so setup was removing the \
+                 old ones first: where they are gone, {without}"
+            ),
+        ),
+    ];
+    for (answers, said) in cases {
+        let directory = tempfile::tempdir().unwrap();
+        let server = serve(answers);
+        let admin = Admin {
+            url: format!("{}/jmap/", server.url),
+            authorization: "Bearer admin".to_owned(),
+        };
+        let networks = Enabled::of(["127.0.0.1/32"]);
+        let error = ensure(&admin, directory.path(), &COLLECTOR, &networks, true)
+            .err()
+            .unwrap();
+        server.requests();
+        assert_eq!(error, said);
+    }
 }
 
 /// A key whose file cannot be written goes again, so that Stalwart keeps

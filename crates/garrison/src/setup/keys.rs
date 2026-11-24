@@ -17,13 +17,15 @@ use super::objects::{
 use super::{Admin, MAX_ANSWER, write_secret};
 
 /// One of the keys: its file, as the broker or the collector reads it, its
-/// description in Stalwart, what it may do, and whether a running service
-/// holds it, which must start again to read a new one.
+/// description in Stalwart, what it may do, whether a running service
+/// holds it, which must start again to read a new one, and what goes
+/// without it while Stalwart takes none of its file's.
 pub(super) struct Key {
     pub(super) file: &'static str,
     pub(super) description: &'static str,
     pub(super) permissions: &'static [&'static str],
     pub(super) held: bool,
+    pub(super) without: &'static str,
 }
 
 /// Whether the file at `path` holds a key as the service that reads it
@@ -59,14 +61,17 @@ fn owner(admin: &Admin, target: &Path) -> Option<String> {
     account.map(str::to_owned)
 }
 
-/// What `ensure` did: the step, the keys a new one replaces, and whether
-/// the file holds a key this run made. `setup` removes the replaced keys
-/// once the services that hold them have restarted with the new one, also
-/// when it fails on the way (`remove`).
+/// What `ensure` did: the step, the keys a new one replaces, whether the
+/// file holds a key this run made, and whether the old keys went before
+/// it, so that a service that holds one has a key Stalwart no longer takes
+/// until it starts again. `setup` removes the replaced keys once the
+/// services that hold them have restarted with the new one, also when it
+/// fails on the way (`remove`).
 pub(super) struct Ensured {
     pub(super) step: String,
     pub(super) replaced: Vec<Replaced>,
     pub(super) made: bool,
+    pub(super) gone_first: bool,
 }
 
 /// Whether Stalwart refused a new object for its account's quota, as
@@ -120,6 +125,7 @@ pub(super) fn ensure(
             step: format!("updated API key '{description}' (secret unchanged)"),
             replaced: Vec::new(),
             made: false,
+            gone_first: false,
         });
     }
     let mut replaced: Vec<Replaced> = existing
@@ -140,12 +146,27 @@ pub(super) fn ensure(
     // A new key first and its file next. A running service keeps the old
     // key until it restarts, so the old keys go after that (`remove`). Where
     // Stalwart's quota leaves the new key no room beside them, they go
-    // first, and the broker checks no rights until it restarts.
+    // first, and what holds one goes without a key Stalwart takes until it
+    // starts again with the new one.
+    let mut gone_first = false;
     match make(admin, &target, description, rights()) {
         Err(error) if over_quota(&error) && !replaced.is_empty() => {
-            remove(admin, &replaced)?;
+            let quota = "Stalwart's quota of API keys left the new key no room";
+            let without = key.without;
+            if let Err(error) = remove(admin, &replaced) {
+                return Err(format!(
+                    "{error}; {quota}, so setup was removing the old ones first: where they \
+                     are gone, {without} until setup makes its key"
+                ));
+            }
+            if let Err(error) = make(admin, &target, description, rights()) {
+                return Err(format!(
+                    "{error}; {quota}, so the old ones went first: {without} until setup \
+                     makes its key"
+                ));
+            }
             replaced.clear();
-            make(admin, &target, description, rights())?;
+            gone_first = true;
             step.push_str(" (the old ones went first: Stalwart's quota of API keys left no room)");
         }
         Err(error) if over_quota(&error) => {
@@ -160,6 +181,7 @@ pub(super) fn ensure(
         step,
         replaced,
         made: true,
+        gone_first,
     })
 }
 
