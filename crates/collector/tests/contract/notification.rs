@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use garrison_core::time;
-use garrison_testing::lab::{Lab, random_hex};
+use garrison_testing::lab::{Lab, random_hex, smtp_pace};
 
 use super::{delivered, one_at_a_time};
 
@@ -88,6 +88,7 @@ fn stalwart_takes_a_notification_its_own_account_submits_past_the_spam_filter() 
         .with_no_client_auth();
     let server = rustls::pki_types::ServerName::try_from("localhost").unwrap();
     let connection = rustls::ClientConnection::new(std::sync::Arc::new(config), server).unwrap();
+    smtp_pace();
     let stream = std::net::TcpStream::connect((smtp.as_str(), 465)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
@@ -114,6 +115,7 @@ fn stalwart_takes_a_notification_its_own_account_submits_past_the_spam_filter() 
         .with_no_client_auth();
     let server = rustls::pki_types::ServerName::try_from("localhost").unwrap();
     let connection = rustls::ClientConnection::new(std::sync::Arc::new(config), server).unwrap();
+    smtp_pace();
     let stream = std::net::TcpStream::connect((smtp.as_str(), 465)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
@@ -211,6 +213,7 @@ fn a_password_with_spaces_read_from_its_file_signs_the_account_in() {
         .with_no_client_auth();
     let server = rustls::pki_types::ServerName::try_from("localhost").unwrap();
     let connection = rustls::ClientConnection::new(std::sync::Arc::new(config), server).unwrap();
+    smtp_pace();
     let stream = std::net::TcpStream::connect((smtp.as_str(), 465)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
@@ -244,6 +247,7 @@ fn session(smtp: &str) -> rustls::StreamOwned<rustls::ClientConnection, std::net
         .with_no_client_auth();
     let server = rustls::pki_types::ServerName::try_from("localhost").unwrap();
     let connection = rustls::ClientConnection::new(std::sync::Arc::new(config), server).unwrap();
+    smtp_pace();
     let stream = std::net::TcpStream::connect((smtp, 465)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))

@@ -131,6 +131,7 @@ fn reload(lab: &Lab) {
 
 /// The mail test's card, its tests sent to the lab's administrator.
 fn tested(smtp: &str) -> Observation {
+    let _alone = garrison_testing::lab::smtp_alone();
     let directory = tempfile::tempdir().unwrap();
     let config = garrison_testing::config(directory.path(), "http://127.0.0.1:9");
     let runner = Canned(String::new());

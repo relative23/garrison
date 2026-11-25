@@ -10,8 +10,10 @@ pub struct Smtp {
 }
 
 impl Smtp {
-    /// Connect to port 25 and read the greeting, which must be 220.
+    /// Connect to port 25, in this binary's turn (`lab::smtp_pace`), and
+    /// read the greeting, which must be 220.
     pub fn connect(host: &str) -> Smtp {
+        crate::lab::smtp_pace();
         let stream = TcpStream::connect((host, 25)).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(20)))

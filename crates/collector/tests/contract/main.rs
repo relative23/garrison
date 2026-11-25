@@ -409,7 +409,9 @@ fn stalwart_takes_the_mail_tests_and_knows_the_spam_text_by_its_subject() {
             .unwrap(),
     )
     .unwrap();
+    let alone = garrison_testing::lab::smtp_alone();
     let report = collect(&provider, &deployment(&lab), None, None);
+    drop(alone);
     let results = &report.observations[0];
     let rows = &results.table.as_ref().unwrap().rows;
     // The lab has no scanner, so the test file is accepted, and that is what

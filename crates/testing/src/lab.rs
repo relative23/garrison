@@ -11,6 +11,7 @@ use std::hash::{BuildHasher, RandomState};
 use std::io::Read;
 use std::net::IpAddr;
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -28,6 +29,51 @@ pub struct Lab {
     agent: ureq::Agent,
     /// Objects to destroy afterwards, newest last.
     pub created: Vec<(String, String)>,
+}
+
+/// When this binary may open its next SMTP connection to the lab.
+///
+/// Stalwart lets one address open five SMTP connections a second and closes
+/// the next without an answer (`smtp.rate-limit-exceeded` of its inbound
+/// throttle, "limit = 5, period = 1000ms"; measured on 1.2.0 with its
+/// defaults). The tests of one binary reach the lab from one address, side
+/// by side or one right after the other, so each connection waits here.
+static SMTP: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn smtp_wait(beyond: Duration) -> MutexGuard<'static, Option<Instant>> {
+    let next = SMTP.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(at) = *next {
+        sleep((at + beyond).saturating_duration_since(Instant::now()));
+    }
+    next
+}
+
+/// Call before opening an SMTP connection to the lab: it returns a quarter
+/// of a second after the binary's last one, so that it opens four a second
+/// at the most.
+pub fn smtp_pace() {
+    // The wait first: an assignment reads its value before its place.
+    let mut next = smtp_wait(Duration::ZERO);
+    *next = Some(Instant::now() + Duration::from_millis(250));
+}
+
+/// For a run of the product that opens its connections itself, such as the
+/// mail tests: it begins a second after the binary's last connection, no
+/// other connection of the binary is opened while the guard lives, and the
+/// next comes a second after it is dropped. Such a run must stay within
+/// Stalwart's five a second by itself.
+pub fn smtp_alone() -> SmtpAlone {
+    SmtpAlone(smtp_wait(Duration::from_millis(750)))
+}
+
+/// The lab's SMTP listeners for one run of the product; see [`smtp_alone`].
+#[derive(Debug)]
+pub struct SmtpAlone(MutexGuard<'static, Option<Instant>>);
+
+impl Drop for SmtpAlone {
+    fn drop(&mut self) {
+        *self.0 = Some(Instant::now() + Duration::from_secs(1));
+    }
 }
 
 /// A random lowercase hex string; the standard library seeds it per process.
@@ -251,5 +297,27 @@ impl Drop for Lab {
             );
             sleep(Duration::from_secs(2));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Connections come a quarter of a second apart; a run of the product
+    /// begins a second after the last connection, and the next connection
+    /// comes a second after that run.
+    #[test]
+    fn the_binary_keeps_under_stalwarts_five_connections_a_second() {
+        let began = Instant::now();
+        smtp_pace();
+        smtp_pace();
+        smtp_pace();
+        assert!(began.elapsed() >= Duration::from_millis(500));
+        let alone = smtp_alone();
+        assert!(began.elapsed() >= Duration::from_millis(1500));
+        drop(alone);
+        smtp_pace();
+        assert!(began.elapsed() >= Duration::from_millis(2500));
     }
 }
