@@ -28,8 +28,9 @@
 //! which lands in that mailbox where the server takes it.
 //!
 //! Where the operator switches it on (`macro_document = true`), a third
-//! message carries a document that a macro filter such as Garrison's milter
-//! takes for one with macros; it must be refused like the test file.
+//! message carries a document that a virus scanner told to report macros
+//! takes for one with macros (`ClamAV` with `AlertOLE2Macros yes`); it must
+//! be refused like the test file.
 
 use std::time::Duration;
 
@@ -46,6 +47,7 @@ use crate::options::{Checked, Options, fail};
 use message::Test;
 use session::SESSION;
 
+mod document;
 mod message;
 mod schedule;
 mod session;

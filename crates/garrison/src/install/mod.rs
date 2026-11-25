@@ -18,7 +18,6 @@ mod command;
 mod fallback;
 mod files;
 mod housekeeping;
-mod milter;
 mod precheck;
 mod release;
 mod requirements;
@@ -64,7 +63,8 @@ pub(super) const UNITS: [&str; 9] = [
     units::COLLECT_TIMER,
     units::WATCH,
     units::WATCH_TIMER,
-    units::MILTER,
+    // Not shipped any more: found on a host, it is stopped and removed.
+    units::EARLIER_MILTER,
 ];
 pub(super) use garrison_core::systemd::SYSTEMCTL;
 

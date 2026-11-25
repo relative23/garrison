@@ -9,7 +9,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-const PRIVILEGED: [&str; 11] = [
+const PRIVILEGED: [&str; 10] = [
     "garrison-core",
     "garrison-stalwart",
     "garrison-authz",
@@ -20,7 +20,6 @@ const PRIVILEGED: [&str; 11] = [
     "garrison-checks-mail",
     "garrison-checks-network",
     "garrison-checks-stalwart",
-    "garrison-milter",
 ];
 
 const FORBIDDEN: [&str; 10] = [

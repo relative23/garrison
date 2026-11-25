@@ -105,6 +105,16 @@ fn unseen(failed: Failed, target: &Path) -> State {
     failed.state
 }
 
+/// What setup says where Stalwart does not let the administrator list its
+/// own API keys, setup's first read: JMAP's `forbidden`, as Stalwart answers
+/// a user without its administrator rights.
+fn unlisted(failed: Failed) -> State {
+    if failed.is("forbidden") {
+        return states::keys_unreadable(&failed.state);
+    }
+    failed.state
+}
+
 /// What Stalwart and its file hold of one key, read before anything
 /// changes: its keys of the description in the accounts concerned, the one
 /// to keep where its file holds it, as Stalwart shows it, what a new key is
@@ -130,7 +140,8 @@ pub(super) fn find(
     keys: &[&Key],
     rotate: bool,
 ) -> Result<Vec<Found>, State> {
-    let Listed { account_id, list } = admin.list_in::<Stored>("ApiKey", None)?;
+    let listed = admin.list_in::<Stored>("ApiKey", None).map_err(unlisted)?;
+    let Listed { account_id, list } = listed;
     let named: Vec<String> = list
         .iter()
         .map(|item| match item.text("description") {

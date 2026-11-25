@@ -151,9 +151,7 @@ asked:
 - the Prometheus exporter with its own scrape credential,
 - Garrison as a registered OAuth client: sign-in only, no access to mail,
   and only back to its own callback. Stalwart's "client metadata documents"
-  setting can stay disabled,
-- where the configuration has a `[milter]` section, the macro filter's entry
-  among Stalwart's milters (step 10).
+  setting can stay disabled.
 
 A run that finds all of it as asked changes nothing and says `Stalwart is set
 up as asked; nothing was changed. [setup-as-asked]`.
@@ -432,23 +430,27 @@ sudo garrison notify-test
 A topic that needs an access token, the webhook, mail and what is sent when:
 [configuration](configuration.md#notifications).
 
-## 10. Macro filter (optional, experimental)
+## 10. Mail with Office macros (optional)
 
-Garrison watches and reports; it changes nothing in the mail flow. The one
-exception is a filter that has Stalwart refuse or mark mail with Office
-documents that carry macros. It is off until you add a `[milter]` section to
-`/etc/garrison/garrison.toml` and run:
+Garrison watches and reports; it changes nothing in the mail flow and reads
+no mail. Whether documents with macros are refused is the virus scanner's
+to decide. With ClamAV, one line in clamd's configuration
+(`/etc/clamav/clamd.conf` on Debian and Ubuntu, `/etc/clamd.d/scan.conf` on
+the RHEL family) has it report every Office document that carries a macro
+project, and clamav-milter then does with such a message what its
+`OnInfected` says:
 
-```sh
-sudo garrison stalwart setup
+```text
+AlertOLE2Macros yes
 ```
 
-Setup starts the filter, makes sure it answers and only then tells Stalwart
-of it. Then send the server a mail from outside and see that it arrives. To
-switch it off again, remove the section and run the same command; keep to
-that order. The filter is experimental: what it finds, what it does not, what
-of it may change in a later release, and its settings:
-[configuration](configuration.md#milter).
+Restart clamd, then let Garrison show that it works: with
+`macro_document = true` the [mail test](checks.md#mail-test) sends a harmless
+document with an empty macro project, which the scanner must refuse.
+
+Releases up to 0.2 had a macro filter of their own (`[milter]`). It is gone:
+see [`[milter]`](configuration.md#milter) before you upgrade an installation
+that runs it.
 
 ## Unattended installation
 

@@ -1,41 +1,17 @@
-//! The milter protocol as far as this filter speaks it.
+//! The milter protocol as far as a stand-in milter of the contract tests
+//! speaks it.
 //!
 //! Every message between the mail server and a milter is a frame: four bytes
 //! of length, one byte that says what it is, then its data. The server
 //! begins by saying which steps of an SMTP session it can send and which
-//! answers it can do without; the filter answers with what it wants of
-//! that. This filter wants the headers and the body of a message and gives
-//! one answer, at the body's end.
+//! answers it can do without; a milter answers with what it wants of that.
 
 use std::io::{self, Read, Write};
 
 /// The largest frame that is read. A mail server sends the body in pieces of
 /// 64 KiB; this leaves room for one that sends larger ones.
-pub(crate) const MAX_FRAME: usize = 2 * 1024 * 1024;
+const MAX_FRAME: usize = 2 * 1024 * 1024;
 
-// What the mail server need not send (`SMFIP_NO...`), and the answers it need
-// not wait for (`SMFIP_NR_...`).
-const NO_CONNECT: u32 = 0x0000_0001;
-const NO_HELO: u32 = 0x0000_0002;
-const NO_MAIL: u32 = 0x0000_0004;
-const NO_RCPT: u32 = 0x0000_0008;
-const NO_UNKNOWN: u32 = 0x0000_0100;
-const NO_DATA: u32 = 0x0000_0200;
-pub(crate) const NO_REPLY_HEADER: u32 = 0x0000_0080;
-pub(crate) const NO_REPLY_END_OF_HEADERS: u32 = 0x0004_0000;
-pub(crate) const NO_REPLY_BODY: u32 = 0x0008_0000;
-/// The steps this filter does without, and the answers it does not give.
-const WANTED: u32 = NO_CONNECT
-    | NO_HELO
-    | NO_MAIL
-    | NO_RCPT
-    | NO_UNKNOWN
-    | NO_DATA
-    | NO_REPLY_HEADER
-    | NO_REPLY_END_OF_HEADERS
-    | NO_REPLY_BODY;
-/// The filter may add a header (`SMFIF_ADDHDRS`).
-pub(crate) const ADD_HEADERS: u32 = 0x0000_0001;
 const VERSION: u32 = 6;
 
 /// What the mail server sends.
@@ -130,15 +106,6 @@ pub fn read(stream: &mut impl Read) -> io::Result<Option<Command>> {
     }))
 }
 
-/// What the filter takes of what the server offers.
-#[must_use]
-pub(crate) fn negotiated(actions: u32, protocol: u32, tagging: bool) -> Reply {
-    Reply::Negotiate {
-        actions: if tagging { actions & ADD_HEADERS } else { 0 },
-        protocol: protocol & WANTED,
-    }
-}
-
 pub fn write(stream: &mut impl Write, reply: &Reply) -> io::Result<()> {
     let mut frame = Vec::new();
     match reply {
@@ -182,7 +149,7 @@ pub(crate) mod tests {
     use super::*;
 
     /// A frame as the mail server writes it.
-    pub(crate) fn frame(kind: u8, data: &[u8]) -> Vec<u8> {
+    fn frame(kind: u8, data: &[u8]) -> Vec<u8> {
         let mut frame = u32::try_from(data.len() + 1)
             .unwrap()
             .to_be_bytes()
@@ -192,7 +159,7 @@ pub(crate) mod tests {
         frame
     }
 
-    pub(crate) fn opening(protocol: u32) -> Vec<u8> {
+    fn opening(protocol: u32) -> Vec<u8> {
         let fields: Vec<u8> = [6u32, 0x1ff, protocol]
             .iter()
             .flat_map(|value| value.to_be_bytes())
@@ -245,31 +212,6 @@ pub(crate) mod tests {
         let huge = u32::try_from(MAX_FRAME + 1).unwrap().to_be_bytes();
         assert!(one(&huge).is_err());
         assert!(one(&frame(b'O', &[0, 0, 0, 6])).is_err());
-    }
-
-    #[test]
-    fn the_filter_takes_only_what_the_server_offers() {
-        // A server of protocol 2 offers none of the answers to do without.
-        assert_eq!(
-            negotiated(0x1ff, 0x0000_007f, false),
-            Reply::Negotiate {
-                actions: 0,
-                protocol: 0x0f
-            }
-        );
-        let all = negotiated(0x1ff, 0x001f_ffff, true);
-        assert_eq!(
-            all,
-            Reply::Negotiate {
-                actions: ADD_HEADERS,
-                protocol: WANTED
-            }
-        );
-        let mut written = Vec::new();
-        write(&mut written, &all).unwrap();
-        assert_eq!(written.len(), 4 + 13);
-        assert_eq!(&written[..5], [0, 0, 0, 13, b'O']);
-        assert_eq!(&written[5..9], 6u32.to_be_bytes());
     }
 
     #[test]

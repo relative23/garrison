@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use toml::{Table, Value};
 
-use super::notify::{milter, notifications};
+use super::notify::notifications;
 use super::values::{
     Section, absolute_path, boolean, https_origin, https_url, integer, loopback_url, origin_of,
     secret_source, short_text,
@@ -19,6 +19,16 @@ fn fail<T>(message: impl Into<String>) -> Result<T, ConfigError> {
     Err(ConfigError(message.into()))
 }
 
+/// What a file is told that still has the section of the macro filter, which
+/// Garrison had until 0.2: an upgrade must not take the filter away while
+/// Stalwart asks it, so the release that runs it switches it off first.
+const MILTER_GONE: &str = "[milter] is no longer a section: Garrison has no macro filter of its own any \
+                           more. Where a release of Garrison runs the filter, remove the section and run \
+                           that release's `garrison stalwart setup`, which takes the filter out of \
+                           Stalwart and stops it; then upgrade. Elsewhere remove the section. A virus \
+                           scanner refuses documents with macros instead (docs/operator/checks.md, \
+                           mail-test)";
+
 pub fn parse(raw: &Table) -> Result<Config, ConfigError> {
     let allowed = [
         "schema",
@@ -29,11 +39,13 @@ pub fn parse(raw: &Table) -> Result<Config, ConfigError> {
         "collector",
         "broker",
         "notifications",
-        "milter",
         "actions",
         "providers",
         "modules",
     ];
+    if raw.contains_key("milter") {
+        return fail(MILTER_GONE);
+    }
     let top = Section::of(raw, "top level", &allowed)?;
     if top.get("schema").and_then(Value::as_integer) != Some(1) {
         return fail("schema must be 1");
@@ -50,7 +62,6 @@ pub fn parse(raw: &Table) -> Result<Config, ConfigError> {
         collector: collector(top.get("collector"), top.get("providers"))?,
         broker: broker(top.get("broker"), top.get("actions"))?,
         notifications: notifications(top.get("notifications"))?,
-        milter: milter(top.get("milter"))?,
         modules: modules(top.get("modules"))?,
     })
 }

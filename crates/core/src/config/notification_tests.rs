@@ -248,66 +248,17 @@ fn mail_needs_the_server_the_sender_and_the_recipient() {
 }
 
 #[test]
-fn the_milter_runs_where_its_section_is_there() {
-    assert_eq!(parse(&table()).unwrap().milter, None);
-    let with = |pairs: &[(&str, toml::Value)]| {
-        let mut raw = table();
-        let section = pairs
-            .iter()
-            .map(|(key, value)| ((*key).to_owned(), value.clone()));
-        raw.insert("milter".into(), toml::Value::Table(section.collect()));
-        parse(&raw)
-    };
+fn the_macro_filters_section_is_refused_with_the_way_out() {
+    let mut raw = table();
+    raw.insert("milter".into(), toml::Value::Table(toml::Table::new()));
     assert_eq!(
-        with(&[]).unwrap().milter,
-        Some(MilterConfig {
-            port: 8096,
-            action: MacroAction::Reject,
-            on_incomplete: IncompleteAction::Tag,
-            max_message_bytes: 64 * 1024 * 1024,
-            defer_when_unreachable: true,
-        })
+        parse(&raw).unwrap_err().0,
+        "[milter] is no longer a section: Garrison has no macro filter of its own any more. Where a \
+         release of Garrison runs the filter, remove the section and run that release's `garrison \
+         stalwart setup`, which takes the filter out of Stalwart and stops it; then upgrade. Elsewhere \
+         remove the section. A virus scanner refuses documents with macros instead \
+         (docs/operator/checks.md, mail-test)"
     );
-    let set = with(&[
-        ("port", toml::Value::Integer(9001)),
-        ("on_macro", text("tag")),
-        ("on_incomplete", text("defer")),
-        ("max_message_mib", toml::Value::Integer(10)),
-        ("when_unreachable", text("accept")),
-    ]);
-    assert_eq!(
-        set.unwrap().milter,
-        Some(MilterConfig {
-            port: 9001,
-            action: MacroAction::Tag,
-            on_incomplete: IncompleteAction::Defer,
-            max_message_bytes: 10 * 1024 * 1024,
-            defer_when_unreachable: false,
-        })
-    );
-    assert_eq!(
-        with(&[("on_macro", text("quarantine"))]).unwrap_err().0,
-        "milter.on_macro is \"reject\" or \"tag\""
-    );
-    for (word, action) in [
-        ("tag", IncompleteAction::Tag),
-        ("defer", IncompleteAction::Defer),
-        ("refuse", IncompleteAction::Refuse),
-    ] {
-        let set = with(&[("on_incomplete", text(word))]).unwrap().milter;
-        assert_eq!(set.unwrap().on_incomplete, action);
-    }
-    assert_eq!(
-        with(&[("on_incomplete", text("accept"))]).unwrap_err().0,
-        "milter.on_incomplete is \"tag\", \"defer\" or \"refuse\""
-    );
-    assert!(with(&[("on_incomplete", toml::Value::Boolean(true))]).is_err());
-    assert!(with(&[("when_unreachable", text("drop"))]).is_err());
-    assert!(with(&[("port", toml::Value::Integer(25))]).is_err());
-    assert!(with(&[("max_message_mib", toml::Value::Integer(0))]).is_err());
-    assert!(with(&[("max_message_mib", toml::Value::Integer(256))]).is_ok());
-    assert!(with(&[("max_message_mib", toml::Value::Integer(257))]).is_err());
-    assert!(with(&[("action", text("reject"))]).is_err());
 }
 
 /// An address no request could send as written is refused, and the

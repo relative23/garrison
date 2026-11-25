@@ -34,10 +34,6 @@ boundaries and in scope:
   or acting for a user who is not signed in.
 - The webhook receiver: accepting an unsigned or altered batch, storing data the
   field allowlist excludes, or exceeding the configured limits.
-- The macro filter, where it is switched on: a message that stops it, makes
-  it use memory without bound or leaves it with anything of the message kept
-  or sent elsewhere. That a document with macros in a form it does not read
-  gets past it is a limit the documentation names, not a vulnerability.
 - The interface: script execution, server data rendered as HTML, a bypass of
   the Content-Security-Policy, or the "Switch to Garrison WebUI" script.
 - The installer and the shipped units: file modes, credentials, polkit rules

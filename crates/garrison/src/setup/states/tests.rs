@@ -171,6 +171,13 @@ fn keys() -> Rows {
              account [setup-stalwart-error]) [setup-account-unseen]",
         ),
         (
+            keys_unreadable(&stalwart_error("x:ApiKey/get", "forbidden", "Forbidden")),
+            "Stalwart does not let the administrator read its API keys: run setup as an \
+             administrator who holds the keys' permissions, as one with Stalwart's administrator \
+             role (x:ApiKey/get: forbidden Forbidden [setup-stalwart-error]) \
+             [setup-keys-unreadable]",
+        ),
+        (
             account_full("'garrison broker', 'backup'", "garrison broker"),
             "Stalwart takes no more API keys in the administrator's account, which holds \
              'garrison broker', 'backup': setup makes a new key before it removes the one it \
@@ -214,53 +221,6 @@ fn keys() -> Rows {
             "Restart garrison-broker so it reads the new secret. [setup-restart-asked] Until then \
              it holds the API key the new one replaces, which stays in Stalwart \
              [setup-old-key-kept]",
-        ),
-    ]
-}
-
-/// What the macro filter's entry meets.
-fn milter() -> Rows {
-    let other: crate::doctor::milter::entries::Entry = serde_json::from_value(
-        serde_json::json!({"id": "o", "host": "127.0.0.1", "port": 11332, "tempFailOnError": true}),
-    )
-    .unwrap();
-    let forbidden = stalwart_error("x:MtaMilter/get", "forbidden", "Forbidden");
-    vec![
-        (
-            unchanged(milter_unseen()),
-            "garrison-milter.service runs, but setup cannot see where it listens, so it cannot \
-             tell which of Stalwart's entries ask it. Nothing was changed [setup-milter-unseen]",
-        ),
-        (
-            milter_port_taken(8097, "Address already in use (os error 98)"),
-            "The macro milter cannot move to 127.0.0.1:8097 (Address already in use (os error 98)). \
-             Nothing was changed: free that port, or give the filter another \
-             [setup-milter-port-taken]",
-        ),
-        (
-            milter_silent(8096, "Connection refused (os error 111)"),
-            "The macro milter does not answer on 127.0.0.1:8096 (Connection refused (os error \
-             111)): while Stalwart asks it there, it defers all incoming mail. `journalctl -u \
-             garrison-milter.service -n 20` shows why it does not run. [setup-milter-silent]",
-        ),
-        (
-            again(
-                milter_stranded(&[crate::doctor::milter::stray(&other)]),
-                "garrison stalwart setup",
-            ),
-            "Stalwart asks a milter at 127.0.0.1:11332 (entry o), where nothing answers: Stalwart \
-             defers all incoming mail [doctor-milter-stranded]
-      If nothing is to answer there, remove that entry in the Stalwart WebUI (Settings ▸ MTA ▸ \
-             Milters) and reload its settings.
-Setup changed nothing. Run `garrison stalwart setup` again once this is mended. \
-             [setup-milter-stranded]",
-        ),
-        (
-            milters_unreadable(&forbidden),
-            "Stalwart does not let the administrator read its milter entries: run setup as an \
-             administrator who holds the keys' permissions, as one with Stalwart's administrator \
-             role (x:MtaMilter/get: forbidden Forbidden [setup-stalwart-error]) \
-             [setup-milters-unreadable]",
         ),
     ]
 }
@@ -352,12 +312,8 @@ fn others() -> Rows {
 
 #[test]
 fn every_state_of_setup_says_its_line() {
-    let rows = [before(), answers(), keys(), milter(), outcomes()].concat();
-    let sources = [
-        include_str!("../states.rs"),
-        include_str!("keys.rs"),
-        include_str!("milter.rs"),
-    ];
+    let rows = [before(), answers(), keys(), outcomes()].concat();
+    let sources = [include_str!("../states.rs"), include_str!("keys.rs")];
     crate::state::table(&sources, &rows);
     for (state, line) in others() {
         assert_eq!(state.to_string(), line, "{}", state.name);
@@ -371,7 +327,6 @@ fn a_failure_keeps_its_name_with_what_it_leaves() {
     let refused = administrator_unusable;
     for said in [
         again(refused(), "garrison setup"),
-        unchanged(refused()),
         until(refused(), true, false),
         unreturned(refused()),
         taken_out(refused()),

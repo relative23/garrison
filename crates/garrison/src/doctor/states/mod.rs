@@ -195,7 +195,7 @@ mod tests {
         );
         // What a state says for other data, where the tests before it held
         // those words: its line is the table's too.
-        let entry = |defer: bool| -> crate::doctor::milter::entries::Entry {
+        let entry = |defer: bool| -> crate::doctor::milter::Entry {
             serde_json::from_value(serde_json::json!({"id": "m", "host": "127.0.0.1",
                 "port": 8096, "tempFailOnError": defer}))
             .unwrap()
@@ -210,17 +210,11 @@ mod tests {
                 "the last collection run finished 0 minutes ago [doctor-collection-recent]",
             ),
             (
-                milter::unanswered(&entry(true), None, false),
-                "Stalwart asks the macro milter at 127.0.0.1:8096, where nothing answers: \
-                 Stalwart defers all incoming mail [doctor-milter-entry-unanswered]\n      Run \
-                 `garrison stalwart setup`.",
-            ),
-            (
                 milter::stranded(&entry(true)),
                 "Stalwart asks a milter at 127.0.0.1:8096 (entry m), where nothing answers: \
-                 Stalwart defers all incoming mail [doctor-milter-stranded]\n      If nothing is \
-                 to answer there, remove that entry in the Stalwart WebUI (Settings ▸ MTA ▸ \
-                 Milters) and reload its settings.",
+                 Stalwart defers all incoming mail [doctor-milter-stranded]\n      Start the \
+                 milter that is to answer there. If nothing is to answer there, remove that entry \
+                 in the Stalwart WebUI (Settings ▸ MTA ▸ Milters) and reload its settings.",
             ),
         ] {
             assert_eq!(state.to_string(), line);

@@ -104,49 +104,6 @@ impl Notifications {
     }
 }
 
-/// What the macro milter does with a message that carries macros.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MacroAction {
-    /// Refuse it while the sender's server is still connected.
-    Reject,
-    /// Take it, with a header that says what was found.
-    Tag,
-}
-
-/// What the macro milter does with a message it could not scan completely:
-/// one that is too large, holds more packed data than is unpacked, is packed
-/// in a way the scan does not read, or whose scan ran out of time.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum IncompleteAction {
-    /// Take it, with a header that says it was not scanned.
-    #[default]
-    Tag,
-    /// Have the sending server bring it again later.
-    Defer,
-    /// Refuse it while the sender's server is still connected.
-    Refuse,
-}
-
-/// The macro milter, which Stalwart asks about each incoming message.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MilterConfig {
-    /// The loopback port it listens on.
-    pub port: u16,
-    pub action: MacroAction,
-    pub on_incomplete: IncompleteAction,
-    /// A message larger than this is not scanned.
-    pub max_message_bytes: u64,
-    /// Whether Stalwart defers mail while the milter cannot be reached; if
-    /// not, it takes mail unscanned then.
-    pub defer_when_unreachable: bool,
-}
-
-impl MilterConfig {
-    /// The largest `max_message_mib`. The filter's unit allows the memory
-    /// that this takes, and no more.
-    pub const MOST_MESSAGE_MIB: i64 = 256;
-}
-
 /// Mail for notifications, submitted signed in over TLS.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MailSettings {
@@ -241,8 +198,6 @@ pub struct Config {
     pub collector: CollectorConfig,
     pub broker: BrokerConfig,
     pub notifications: Notifications,
-    /// The macro milter; `None` where the section is absent and it does not run.
-    pub milter: Option<MilterConfig>,
     /// The modules this installation offers, an upper bound for every grant.
     pub modules: BTreeSet<ModuleId>,
     /// Where systemd loads credentials from (`LoadCredential=` source files).

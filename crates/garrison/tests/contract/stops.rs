@@ -3,7 +3,7 @@
 //! credentials directory together. The test stops setup at each of its
 //! requests to Stalwart in turn, in three ways (interrupted, the answer
 //! lost, Stalwart unreachable from there on), in each kind of run that
-//! `scene::Kind` names: a first setup, also one with the macro filter, a
+//! `scene::Kind` names: a first setup, a
 //! rotation, also one after which Stalwart reloads its settings on its own
 //! and one where the administrator's account holds as many API keys as
 //! Stalwart takes, a plain run after the key files were emptied, and runs
@@ -26,8 +26,7 @@
 //! Not held here: what root alone does (the restart itself, and how it
 //! looks at the copies systemd keeps, which a user cannot read; a unit test
 //! of `setup/restart.rs` holds the look); a configuration changed between a
-//! stopped run and the next, such as `[milter]` taken out after a stop that
-//! entered the filter; and two installations of Garrison against one
+//! stopped run and the next; and two installations of Garrison against one
 //! Stalwart.
 
 use std::any::Any;
@@ -42,16 +41,13 @@ use serde_json::json;
 use super::held::{Stopped, apart, looked, reloaded, restarted};
 use super::scene::{KINDS, Kind, Scene};
 use super::stopper::{Stop, Stopper};
-use super::together::{
-    Capture, assert_exporter_held, assert_keys_held_in, assert_milter_held, assert_webhook_held,
-};
+use super::together::{Capture, assert_exporter_held, assert_keys_held_in, assert_webhook_held};
 use super::{Setup, lab, names_its_mend, support, text};
 
 /// A setup run of `kind` through a relay that stops it at request `at`:
 /// the request it stopped at, if it got so far, what it said, and what it
 /// asked.
 fn stopped(
-    scene: &Scene,
     setup: &Setup,
     lab: &Lab,
     kind: Kind,
@@ -60,7 +56,7 @@ fn stopped(
 ) -> (Option<String>, Output, Vec<String>) {
     let stopper = Stopper::new(&lab.url, at, stop);
     let settings = setup.directory.join("garrison.toml");
-    let relayed = scene.settings(&setup.directory, &stopper.url, kind.milter());
+    let relayed = Scene::settings(&setup.directory, &stopper.url);
     fs::write(&settings, relayed).unwrap();
     let child = Command::new(env!("CARGO_BIN_EXE_garrison"))
         .arg("--config")
@@ -74,7 +70,7 @@ fn stopped(
         .unwrap();
     stopper.watch(child.id());
     let output = child.wait_with_output().unwrap();
-    let direct = scene.settings(&setup.directory, &lab.url, kind.milter());
+    let direct = Scene::settings(&setup.directory, &lab.url);
     fs::write(&settings, direct).unwrap();
     (stopper.stopped(), output, stopper.asked())
 }
@@ -101,17 +97,11 @@ fn agree(
 ) -> Vec<String> {
     let credentials = setup.directory.join("credentials");
     let accounts = scene.accounts(kind);
-    let milter = || {
-        if kind.milter() {
-            assert_milter_held(lab, scene.port, context);
-        }
-    };
     // Each check on its own, so that every fault of a stop is named.
-    let checks: [&dyn Fn(); 4] = [
+    let checks: [&dyn Fn(); 3] = [
         &|| assert_keys_held_in(lab, &accounts, &credentials, &setup.gateway, context),
         &|| assert_webhook_held(lab, &credentials, capture, context),
         &|| assert_exporter_held(lab, &credentials, context),
-        &milter,
     ];
     checks
         .into_iter()
@@ -135,7 +125,7 @@ fn mended(
         Ok(held) => held,
         Err(why) => return Outcome::Unready(format!("{kind:?} at request {at}: {why}")),
     };
-    let (request, output, asked) = stopped(scene, setup, lab, kind, at, stop);
+    let (request, output, asked) = stopped(setup, lab, kind, at, stop);
     let Some(request) = request else {
         return Outcome::Past;
     };
@@ -233,22 +223,6 @@ fn said_by(panic: &(dyn Any + Send)) -> String {
         .unwrap_or_default()
 }
 
-/// The first request to stop a run of `kind` at: for the macro filter's
-/// kind the last read of the filter's entries, before setup changes them,
-/// since those before it are the requests of runs that the other kinds stop.
-fn first_stop(scene: &Scene, setup: &Setup, lab: &Lab, kind: Kind) -> usize {
-    if !kind.milter() {
-        return 1;
-    }
-    scene.start(kind, setup, lab).unwrap();
-    let (_, output, asked) = stopped(scene, setup, lab, kind, usize::MAX, Stop::Lost);
-    assert_eq!(output.status.code(), Some(0), "{}", text(&output));
-    let last = asked
-        .iter()
-        .rposition(|asked| asked.starts_with("x:MtaMilter/get"));
-    last.unwrap() + 1
-}
-
 /// The lab's limits of requests and of failed sign-ins, raised: Stalwart
 /// sees every request of this host at the lab's gateway, thousands a minute,
 /// and counts each narrowed key's try as a failed sign-in. They stay raised
@@ -290,11 +264,10 @@ fn every_stop_of_setup_is_mended_by_the_next_run() {
     let (mut stops, mut failures) = (0, Vec::new());
     for kind in KINDS {
         scene.enter(kind, &setup, &mut lab);
-        let from = first_stop(&scene, &setup, &lab, kind);
         let before = stops;
         for stop in [Stop::Interrupted, Stop::Lost, Stop::Unreachable] {
             // Setup asks Stalwart some twenty times; far more is a fault.
-            'requests: for at in from..=64 {
+            'requests: for at in 1..=64 {
                 for next in [&[][..], &["--rotate"][..]] {
                     let scenario = (kind, stop, at);
                     let tried = std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -323,7 +296,7 @@ fn every_stop_of_setup_is_mended_by_the_next_run() {
                 }
             }
         }
-        println!("{kind:?}: {} stops from request {from}", stops - before);
+        println!("{kind:?}: {} stops", stops - before);
         if kind.full() {
             failures.extend(with_room(&mut scene, &setup, &mut lab, &capture, kind));
         }

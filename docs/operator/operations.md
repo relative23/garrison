@@ -9,7 +9,6 @@
 | `garrison-collect.timer` | garrison-collector | Collects status every minute |
 | `garrison-watch.timer` | garrison-collector | Looks every five minutes whether the collector still runs |
 | `garrison-broker.socket` | garrison-broker | Starts the broker on demand for actions and access checks |
-| `garrison-milter.service` | garrison-milter | Only with a `[milter]` section: refuses or marks mail with Office macros on 127.0.0.1:8096 |
 
 ```sh
 systemctl status 'garrison-*'
@@ -43,9 +42,8 @@ would, Garrison's certificate and answer under its own name and on the port
 public hosts do not serve its metrics, that Stalwart knows Garrison's
 sign-in client and names itself the `issuer` garrison.toml names (asked of
 Stalwart's own listener), that it takes the broker's and the collector's API
-keys from this host, where the macro filter is switched on that it answers and
-that Stalwart's entry asks it there, that Stalwart asks no milter where
-nothing answers (both read with the collector's API key), and that the issuer's name shows Stalwart's own
+keys from this host, that Stalwart asks no milter where
+nothing answers (read with the collector's API key), and that the issuer's name shows Stalwart's own
 sign-in page with the scripts and style sheets it loads. For that it holds the page behind
 the public name against the page Stalwart serves itself, so the check is the
 same whatever else shares that name: a webmail that answers with a sign-in
@@ -157,8 +155,7 @@ The installer backs up the state to `/var/backups/garrison/pre-upgrade-*`,
 switches `/opt/garrison/current` to the new release and starts it. The
 services report ready only once they serve, and they must then stay up
 without a restart for eight seconds, so a release that fails right after it
-starts, or keeps restarting, counts as not started; where the macro filter
-runs, it must stay up as well. Run where its release runs as installed, the
+starts, or keeps restarting, counts as not started. Run where its release runs as installed, the
 installer changes nothing, stops nothing and says so (`… is running as
 installed; nothing was changed.`, exit status 0); it starts the services
 where a file it writes changed, or `garrison.toml` changed since they
@@ -294,9 +291,7 @@ says so. After an uninstallation
 the command lives on in every release archive: `./bin/garrison uninstall
 --purge`. If a server block still includes a Garrison snippet by its exact name,
 the uninstallation stops before changing anything and says so; remove the
-include first. It also stops first while Stalwart still asks the macro
-filter, which would leave Stalwart deferring all mail: remove the `[milter]`
-section and run `garrison stalwart setup`, then uninstall. Garrison's
+include first. Garrison's
 webhook, API keys and sign-in client in Stalwart stay; remove them in the
 Stalwart WebUI if you no longer need them.
 
@@ -353,9 +348,7 @@ setup's steps, carry none.
 | `garrison-collect.service` or `garrison-watch.service` fails with `status=243/CREDENTIALS` | A file in `/etc/garrison/credentials` that the unit loads is missing, and systemd starts no unit without each of its credential files ("Failed to set up credentials" in its journal). `garrison doctor` names the file and the command that makes it (`doctor-credential-missing-empty`, or `doctor-credential-missing-read` where a check reads it); the installer keeps an empty one, which means none, for each that may be empty, such as `metrics-credential` where Stalwart's exporter is another's. |
 | A notification says the collector has stopped | No collection run has finished for ten minutes, so nothing is checked. `systemctl status garrison-collect.service garrison-collect.timer` shows whether it fails or was stopped; `garrison check-config` names a configuration it no longer loads. A second message follows when it runs again. |
 | No notification arrives | `garrison notify-test` says how each channel took the message. For ntfy and a webhook, 401 or 403 means the token in `/etc/garrison/credentials`; for mail, "did not sign in" means the account or its password, and "the certificate is not valid for this name" means that `mail_host` is not a name the server's certificate carries, which the message names ([configuration](configuration.md#notifications)). The Alerts page names the last notification a channel did not take, with its time, until the next one goes out; a channel taken out of the configuration is no longer named there. |
-| Incoming mail is deferred since the macro filter was switched on | Stalwart cannot reach the filter where its entry asks it: `garrison doctor` says whether it answers (`doctor-milter-silent`) and where Stalwart asks it (`doctor-milter-entry-unanswered`), `systemctl status garrison-milter` why it does not answer. A Stalwart in a container network of its own cannot reach this host's loopback; run it in the host network. To stop asking the filter at once, remove the `[milter]` section and run `garrison stalwart setup`. |
-| `stalwart setup` says Stalwart asks a milter where nothing answers | An entry in Stalwart asks a milter where none answers, such as the macro filter's at an old `port` once the filter left it, and Stalwart defers all incoming mail. Setup changed nothing: unless something is to answer there, remove the entry in the Stalwart WebUI (Settings ▸ MTA ▸ Milters), reload its settings and run setup again. |
-| A sender is told "an attached Office document contains macros" | The macro filter refused the message ([configuration](configuration.md#milter)). `journalctl -u garrison-milter` shows when and what kind of document, never whose. With `on_macro = "tag"` such mail is taken and marked instead. |
+| `garrison doctor` says Stalwart asks a milter where nothing answers | An entry in Stalwart asks a milter where none answers, such as a virus scanner's that is down, and Stalwart defers all incoming mail (`doctor-milter-stranded`), or takes it unscanned where the entry says so (`doctor-milter-stranded-unscanned`). Start that milter; if nothing is to answer there, remove the entry in the Stalwart WebUI (Settings ▸ MTA ▸ Milters) and reload its settings. |
 | An action says "not installed or loaded" | The configured unit does not exist on this host. |
 | An action is denied by systemd | The polkit rule is older than the configuration; run the installer again or write the rule (see [configuration](configuration.md#actions)). |
 | nginx answers 502 for Garrison | `garrison doctor` names the cause. Under SELinux the module `garrison` must be loaded for `web.port`, which doctor compares with the module SELinux has loaded; run the installer again to load it (`doctor-selinux-other-port`), or, where the installer's last load failed, the `semodule -i` doctor names (`doctor-selinux-load-failed`). `garrison check-config` warns when nginx's include names another port than `web.port`. Where nothing listens on `web.port`, doctor says so (`doctor-interface-web-down`): restart `garrison-web` after changing the port, and `systemctl status garrison-web` says why it does not run. |

@@ -6,6 +6,7 @@
 
 pub mod http;
 pub mod lab;
+pub mod milter;
 pub mod noise;
 pub mod relay;
 pub mod silent;

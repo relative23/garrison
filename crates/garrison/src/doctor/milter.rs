@@ -1,34 +1,130 @@
-//! The macro milter: where the configuration has it, the filter answers as
-//! a milter and Stalwart asks it as the configuration has it; where it does
-//! not, Stalwart no longer asks it. And whatever the configuration has,
-//! every entry Stalwart asks where no milter answers, which makes Stalwart
-//! defer mail. doctor asks Stalwart with the collector's API key, as the
-//! collector reads Stalwart's milters, and tells the filter's entries from
-//! others by the rules setup acts by (`entries`).
+//! Stalwart's milters: every entry Stalwart asks where no milter answers,
+//! which makes it defer all mail, or take it unscanned. A virus scanner's
+//! milter that is down shows here. doctor asks Stalwart with the collector's
+//! API key, as the collector reads Stalwart's milters.
+//!
+//! Stalwart asks an entry in vain where no milter answers at the addresses
+//! its host and port resolve to, whatever the host, and then does with all
+//! incoming mail what the entry says.
 
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
+use garrison_collector::providers::stalwart::answers::{Fixed, Written};
 use garrison_core::config::Config;
 use garrison_core::credentials::Credentials;
 use garrison_stalwart::jmap::JmapClient;
+use serde::Deserialize;
+use serde_json::Value;
 
 use super::Finding;
 use super::states::milter as states;
-use crate::state::State;
-use entries::Entry;
-
-pub(crate) mod entries;
 
 /// How long a milter has to answer the opening doctor sends.
-pub(crate) const WITHIN: Duration = Duration::from_secs(3);
+const WITHIN: Duration = Duration::from_secs(3);
 /// What doctor reads of each of Stalwart's milters.
-const PROPERTIES: [&str; 6] = ["id", "host", "port", "enable", "stages", "tempFailOnError"];
+const PROPERTIES: [&str; 5] = ["id", "host", "port", "enable", "tempFailOnError"];
 
-/// What `answered` says of the filter on `port`.
-pub(super) fn answering(port: u16, answered: Result<(), String>) -> Finding {
-    match answered {
-        Ok(()) => Finding::ok(states::answers(port)),
-        Err(error) => Finding::fail(states::silent(port, &error)),
+/// One of Stalwart's milters.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Entry {
+    pub(crate) id: String,
+    #[serde(default)]
+    host: Written,
+    #[serde(default)]
+    port: Written,
+    #[serde(default)]
+    enable: Fixed,
+    #[serde(default)]
+    temp_fail_on_error: Fixed,
+}
+
+impl Entry {
+    /// The port it asks, where it names one.
+    fn port(&self) -> Option<u16> {
+        match &self.port.0 {
+            Some(Value::Number(number)) => {
+                number.as_u64().and_then(|port| u16::try_from(port).ok())
+            }
+            Some(Value::String(text)) => text.parse().ok(),
+            _ => None,
+        }
+    }
+
+    /// The addresses Stalwart asks it at: its host and port as this host's
+    /// resolver gives them, as Stalwart looks a milter's host up (it fails
+    /// to read its settings with the resolver's words for a name that does
+    /// not resolve, measured on 1.1.0 only).
+    fn addresses(&self) -> Vec<SocketAddr> {
+        let host = self.host.0.as_ref().and_then(Value::as_str);
+        match (host, self.port()) {
+            (Some(host), Some(port)) => format!("{host}:{port}")
+                .to_socket_addrs()
+                .map(Iterator::collect)
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Whether a milter answers where Stalwart asks it, at any of its
+    /// addresses, as Stalwart tries each.
+    fn answers(&self, within: Duration) -> bool {
+        self.addresses()
+            .into_iter()
+            .any(|address| answers_at(address, within))
+    }
+
+    /// Where it asks, as Stalwart holds it.
+    pub(crate) fn address(&self) -> String {
+        format!("{}:{}", self.host.text(), self.port.text())
+    }
+
+    /// What Stalwart does with `mail` while the milter does not answer.
+    pub(crate) fn meanwhile(&self, mail: &str) -> String {
+        match self.temp_fail_on_error.0 {
+            Some(true) => format!("defers {mail}"),
+            Some(false) => format!("takes {mail} unscanned"),
+            None => format!("decides by conditions of its own what to do with {mail}"),
+        }
+    }
+}
+
+/// Whether a milter answers at `address`: the opening a mail server sends,
+/// and a milter's answer to it.
+fn answers_at(address: SocketAddr, within: Duration) -> bool {
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, within) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(within));
+    let _ = stream.set_write_timeout(Some(within));
+    // Version 6, every action and every step on offer.
+    let mut opening = vec![0, 0, 0, 13, b'O'];
+    for value in [6_u32, 0x0000_01ff, 0x001f_ffff] {
+        opening.extend_from_slice(&value.to_be_bytes());
+    }
+    let mut answer = [0; 5];
+    let answered = stream.write_all(&opening).is_ok() && stream.read_exact(&mut answer).is_ok();
+    let _ = stream.write_all(&[0, 0, 0, 1, b'Q']);
+    answered && answer[4] == b'O'
+}
+
+/// The entries of `entries` that Stalwart asks in vain: switched on, also
+/// under conditions, where no milter answers, as `answers` finds it.
+fn vain<'a>(entries: &'a [Entry], answers: &dyn Fn(&Entry) -> bool) -> Vec<&'a Entry> {
+    entries
+        .iter()
+        .filter(|entry| entry.enable.0 != Some(false) && entry.port().is_some() && !answers(entry))
+        .collect()
+}
+
+/// What doctor says of an entry Stalwart asks in vain.
+fn stranded(entry: &Entry) -> Finding {
+    if entry.temp_fail_on_error.0 == Some(false) {
+        Finding::warn(states::stranded_unscanned(entry))
+    } else {
+        Finding::fail(states::stranded(entry))
     }
 }
 
@@ -44,144 +140,14 @@ fn asked(config: &Config, credentials: &Credentials) -> Result<Vec<Entry>, Strin
         .map_err(|error| states::unasked(url, error))
 }
 
-/// Whether `entry` is one of `entries`.
-fn among(entry: &Entry, entries: &[&Entry]) -> bool {
-    entries.iter().any(|other| other.id == entry.id)
-}
-
-/// An entry Stalwart asks in vain that is not the filter's: setup leaves
-/// it, and refuses to run while it is there.
-fn stranded(entry: &Entry) -> Finding {
-    if entry.temp_fail_on_error.0 == Some(false) {
-        Finding::warn(states::stranded_unscanned(entry))
-    } else {
-        Finding::fail(states::stranded(entry))
-    }
-}
-
-/// What doctor says of such an entry, as setup says it where it refuses.
-pub(crate) fn stray(entry: &Entry) -> State {
-    stranded(entry).state
-}
-
-/// Stalwart's side of a filter the configuration has on `port`, deferring
-/// mail while it does not answer where `defer` says so: one of the filter's
-/// entries asks it there, where it answers, about every message, switched
-/// on, as the configuration has it. `vain`: the entries Stalwart asks in
-/// vain; `others`, whether one of them is not the filter's, which setup
-/// refuses to leave so.
-fn configured(
-    (port, defer): (u16, bool),
-    ours: &[&Entry],
-    vain: &[&Entry],
-    others: bool,
-) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    for stale in ours
-        .iter()
-        .filter(|entry| !entry.asks(port) || among(entry, vain))
-    {
-        findings.push(Finding::fail(if among(stale, vain) {
-            let elsewhere = (!stale.asks(port)).then_some(port);
-            states::unanswered(stale, elsewhere, others)
-        } else {
-            states::moved(stale, port, others)
-        }));
-    }
-    let at: Vec<&&Entry> = ours
-        .iter()
-        .filter(|entry| entry.asks(port) && !among(entry, vain))
-        .collect();
-    if at.is_empty() && findings.is_empty() {
-        findings.push(Finding::warn(states::no_entry(port, others)));
-    }
-    if at.len() > 1 {
-        findings.push(Finding::warn(states::several(at.len(), port, others)));
-    }
-    let Some(entry) = at.first() else {
-        return findings;
-    };
-    match entry.enable.0 {
-        Some(true) => {}
-        Some(false) => findings.push(Finding::warn(states::off(port, others))),
-        None => findings.push(Finding::warn(states::conditional(port, others))),
-    }
-    if entry.stages.0.data.0 != Some(true) {
-        findings.push(Finding::warn(states::before_data(port, others)));
-    }
-    if entry.temp_fail_on_error.0 != Some(defer) {
-        findings.push(Finding::warn(states::when_unreachable(
-            entry, defer, others,
-        )));
-    }
-    if findings.is_empty() {
-        findings.push(Finding::ok(states::asked(entry, port)));
-    }
-    findings
-}
-
-/// Stalwart's side where the configuration no longer has the filter: none
-/// of the filter's entries is left.
-fn dropped(ours: &[&Entry], vain: &[&Entry], others: bool) -> Vec<Finding> {
-    ours.iter()
-        .map(|entry| Finding::fail(states::dropped(entry, among(entry, vain), others)))
-        .collect()
-}
-
-/// What doctor says of Stalwart's `entries`, where garrison.toml has the
-/// filter on a port and defers mail while it does not answer (`filter`) or
-/// does not have it, the running filter listens on `listening` and a milter
-/// answers where `answers` says so.
-fn judged(
-    filter: Option<(u16, bool)>,
-    entries: &[Entry],
-    listening: &[u16],
-    answers: &dyn Fn(&Entry) -> bool,
-) -> Vec<Finding> {
-    let ours = entries::ours(entries, filter.map(|(port, _)| port), listening);
-    let vain = entries::vain(entries, answers);
-    let mut findings: Vec<Finding> = vain
-        .iter()
-        .filter(|entry| !among(entry, &ours))
-        .map(|entry| stranded(entry))
-        .collect();
-    let others = !findings.is_empty();
-    match filter {
-        Some(filter) => findings.extend(configured(filter, &ours, &vain, others)),
-        None => findings.extend(dropped(&ours, &vain, others)),
-    }
-    findings
-}
-
-/// What doctor says where Stalwart's milters could not be asked (`why`).
-fn unasked(port: Option<u16>, why: &str) -> Finding {
-    Finding::unknown(match port {
-        Some(port) => states::entry_unknown(port, why),
-        None => states::stranded_unknown(why),
-    })
-}
-
 pub(super) fn checks(config: &Config, credentials: &Credentials) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    if let Some(milter) = &config.milter {
-        findings.push(answering(
-            milter.port,
-            garrison_milter::answers(milter.port, WITHIN),
-        ));
-    }
-    let filter = config
-        .milter
-        .as_ref()
-        .map(|milter| (milter.port, milter.defer_when_unreachable));
     match asked(config, credentials) {
-        Ok(entries) => {
-            let listening = entries::listening().unwrap_or_default();
-            let answers = |entry: &Entry| entry.answers(WITHIN);
-            findings.extend(judged(filter, &entries, &listening, &answers));
-        }
-        Err(why) => findings.push(unasked(filter.map(|(port, _)| port), &why)),
+        Ok(entries) => vain(&entries, &|entry| entry.answers(WITHIN))
+            .into_iter()
+            .map(stranded)
+            .collect(),
+        Err(why) => vec![Finding::unknown(states::stranded_unknown(&why))],
     }
-    findings
 }
 
 #[cfg(test)]

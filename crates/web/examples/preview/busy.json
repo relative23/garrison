@@ -359,38 +359,6 @@
     "maxAge": 180
   },
   {
-    "id": "systemd.garrison-milter.service",
-    "provider": "systemd",
-    "title": "Garrison macro filter",
-    "modules": ["antivirus", "services"],
-    "evidence": "process",
-    "state": "ok",
-    "checkedAt": "2026-10-29T12:00:00+00:00",
-    "source": "systemctl show garrison-milter.service",
-    "kind": "service",
-    "scope": "A running process does not prove that it handled mail correctly.",
-    "fields": [
-      {
-        "label": "Load state",
-        "value": "loaded",
-        "format": "text"
-      },
-      {
-        "label": "Active state",
-        "value": "active (running)",
-        "format": "text"
-      }
-    ],
-    "table": null,
-    "findings": [],
-    "value": {
-      "unit": "garrison-milter.service",
-      "activeState": "active",
-      "subState": "running"
-    },
-    "maxAge": 180
-  },
-  {
     "id": "systemd.garrison-web.service",
     "provider": "systemd",
     "title": "Garrison web service",
@@ -1220,7 +1188,7 @@
         [
           "Office document with macros (test document)",
           "2026-10-29T04:10:01+00:00",
-          "refused: 550 5.7.1 Message refused: an attached Office document contains macros."
+          "refused: 554 5.7.1 Message rejected by a milter"
         ],
         ["Harmless message (control)", "2026-10-29T04:10:01+00:00", "accepted"]
       ]

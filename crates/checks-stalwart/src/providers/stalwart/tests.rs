@@ -171,7 +171,7 @@ fn without_a_name_every_milter_counts_and_each_is_judged() {
             .unwrap();
         found.value.clone()
     };
-    // A scanner's milter and Garrison's macro filter beside it: in order.
+    // A scanner's milter and another filter beside it: in order.
     let both = json!([
         {"host": "127.0.0.1", "port": 7357, "enable": true, "tempFailOnError": true,
          "stages": {"data": true}},

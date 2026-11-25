@@ -38,11 +38,9 @@ pub(super) enum Kind {
     /// where the second one's own account holds as many API keys as
     /// Stalwart takes.
     SecondFull,
-    /// The first setup with `[milter]`, while the filter answers at its port.
-    Milter,
 }
 
-pub(super) const KINDS: [Kind; 8] = [
+pub(super) const KINDS: [Kind; 7] = [
     Kind::First,
     Kind::Rotation,
     Kind::Reloaded,
@@ -50,7 +48,6 @@ pub(super) const KINDS: [Kind; 8] = [
     Kind::Full,
     Kind::Second,
     Kind::SecondFull,
-    Kind::Milter,
 ];
 
 impl Kind {
@@ -64,12 +61,6 @@ impl Kind {
         } else {
             &[]
         }
-    }
-
-    /// Whether the configuration of the stopped run and the runs after it
-    /// has `[milter]`.
-    pub(super) fn milter(self) -> bool {
-        self == Kind::Milter
     }
 
     /// Whether the account the runs make their keys in has no room for
@@ -92,9 +83,8 @@ pub(super) fn holding(credentials: &Path) -> [String; 2] {
     HELD.map(|name| fs::read_to_string(credentials.join(name)).unwrap_or_default())
 }
 
-/// What the kinds need beside the lab: the two administrators, the
-/// filter's port, where a filter answers, and the operators' own keys
-/// while a kind whose account is full runs.
+/// What the kinds need beside the lab: the two administrators and the
+/// operators' own keys while a kind whose account is full runs.
 pub(super) struct Scene {
     first: String,
     second: String,
@@ -102,7 +92,6 @@ pub(super) struct Scene {
     second_user: String,
     /// The second administrator's account.
     pub(super) account: String,
-    pub(super) port: u16,
     /// The operators' own keys, each with its account: the first
     /// administrator's where that is `None`.
     own: Vec<(Option<String>, String)>,
@@ -125,25 +114,18 @@ impl Scene {
                 "permissions": {"@type": "Inherit"},
             }),
         );
-        let port = super::entries::filter();
         Scene {
             first: json!({"username": user, "secret": secret}).to_string(),
             second: json!({"username": name, "secret": password}).to_string(),
             second_user: format!("{name}:{password}"),
             account,
-            port,
             own: Vec::new(),
         }
     }
 
-    /// The configuration for Stalwart at `url`, with the filter or without.
-    pub(super) fn settings(&self, directory: &Path, url: &str, milter: bool) -> String {
-        let text = config_text(directory, url);
-        if milter {
-            format!("{text}\n[milter]\nport = {}\n", self.port)
-        } else {
-            text
-        }
+    /// The configuration for Stalwart at `url`.
+    pub(super) fn settings(directory: &Path, url: &str) -> String {
+        config_text(directory, url)
     }
 
     /// The accounts that may hold setup's keys in `kind`.
@@ -160,9 +142,9 @@ impl Scene {
         write_private(Path::new(&setup.credential), document.as_bytes());
     }
 
-    fn configure(&self, setup: &Setup, url: &str, milter: bool) {
+    fn configure(setup: &Setup, url: &str) {
         let path = setup.directory.join("garrison.toml");
-        fs::write(path, self.settings(&setup.directory, url, milter)).unwrap();
+        fs::write(path, Scene::settings(&setup.directory, url)).unwrap();
     }
 
     /// Bring the lab and the folder to where a stopped run of `kind` starts,
@@ -175,9 +157,9 @@ impl Scene {
     ) -> Result<Option<[String; 2]>, String> {
         let credentials = setup.directory.join("credentials");
         self.act_as(setup, false);
-        if matches!(kind, Kind::First | Kind::Milter) {
+        if kind == Kind::First {
             self.forget(lab, &credentials);
-            self.configure(setup, &lab.url, kind.milter());
+            Scene::configure(setup, &lab.url);
             return Ok(None);
         }
         // The others start where both places agree; a second
@@ -186,7 +168,7 @@ impl Scene {
         if kind.second() {
             self.forget(lab, &credentials);
         }
-        self.configure(setup, &lab.url, false);
+        Scene::configure(setup, &lab.url);
         let ready = setup.run(&[]);
         if ready.status.code() != Some(0) {
             return Err(format!("the run before the stop failed: {}", text(&ready)));
@@ -218,7 +200,7 @@ impl Scene {
         self.forget(lab, &credentials);
         match kind {
             Kind::Full => {
-                self.configure(setup, &lab.url, false);
+                Scene::configure(setup, &lab.url);
                 let ready = setup.run(&[]);
                 assert_eq!(ready.status.code(), Some(0), "{}", text(&ready));
                 let listed = lab.call("x:ApiKey/get", &json!({"ids": null}));
@@ -282,10 +264,8 @@ impl Scene {
         }
     }
 
-    /// Setup's keys out of both administrators' accounts, the filter's
-    /// entries out of Stalwart, which then reads its settings again, so
-    /// that it no longer asks the filter, and the folder emptied, as before
-    /// a first setup.
+    /// Setup's keys out of both administrators' accounts and the folder
+    /// emptied, as before a first setup.
     pub(super) fn forget(&self, lab: &Lab, credentials: &Path) {
         let theirs = lab.call(
             "x:ApiKey/get",
@@ -295,22 +275,6 @@ impl Scene {
             lab.call(
                 "x:ApiKey/set",
                 &json!({"accountId": self.account, "destroy": [key]}),
-            );
-        }
-        let entries = lab.call("x:MtaMilter/get", &json!({"ids": null}));
-        let asking: Vec<&Value> = entries["list"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|entry| entry["host"] == "127.0.0.1" && entry["port"] == self.port)
-            .collect();
-        for entry in &asking {
-            lab.call("x:MtaMilter/set", &json!({"destroy": [entry["id"]]}));
-        }
-        if !asking.is_empty() {
-            lab.call(
-                "x:Action/set",
-                &json!({"create": {"r": {"@type": "ReloadSettings"}}}),
             );
         }
         forget(lab, credentials);

@@ -6,14 +6,44 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Removed
+
+- **The macro filter is gone.** Garrison no longer reads mail: the section
+  `[milter]`, the service `garrison-milter.service`, the command `garrison
+  milter` and, on new installations, the user `garrison-milter`. A virus
+  scanner refuses documents with macros instead; with ClamAV that is
+  `AlertOLE2Macros yes` in clamd's configuration
+  ([installation](docs/operator/installation.md#10-mail-with-office-macros-optional)).
+  An installation that runs the filter switches it off **before** the
+  upgrade, with the release that is installed: remove `[milter]` from
+  `garrison.toml` and run `garrison stalwart setup`, which takes the filter
+  out of Stalwart and stops it. Until then this release changes nothing: its
+  installer refuses while the filter runs (`install-macro-filter-runs`), and
+  its `check-config` refuses the section by name. Otherwise Stalwart would
+  defer all mail for a filter that no longer answers
+  ([configuration](docs/operator/configuration.md#milter)). Nothing sets the
+  headers `X-Garrison-Macro` and `X-Garrison-Scan` any more.
+- With the filter go its states: `install-milter-held`, `-asked`, `-unasked`,
+  `-unseen`, `-unloaded`, `-kept` and `-still-asked`; `setup-milter-unseen`,
+  `-port-taken`, `-silent` and `-stranded`, and `setup-milters-unreadable`;
+  `doctor-milter-answers`, `-silent`, `-when-unreachable`,
+  `doctor-milter-entries-several` and `doctor-milter-entry-asked`, `-moved`,
+  `-unanswered`, `-missing`, `-off`, `-conditional`, `-before-data`,
+  `-dropped` and `-unknown`.
+
 ### Changed
 
-- The macro filter is named experimental. It stays off unless `[milter]` is
-  configured, and nothing in the filter itself changes. The documents now say
-  that their lists of what it finds and what it does not see are what is
-  known today, and that its keys, its headers and what it does with a message
-  may change in a minor release, with a line here
-  ([configuration](docs/operator/configuration.md#milter)).
+- With `macro_document = true` the mail test sends a document that a virus
+  scanner reports: a `.docm` with a real macro project that has no module,
+  where it sent one that only carried a project's file name. ClamAV 1.0, 1.4
+  and 1.5 with `AlertOLE2Macros yes` report it; switch the test on once the
+  scanner's milter refuses such mail ([mail-test](docs/operator/checks.md#mail-test)).
+- `garrison doctor` still names every milter that Stalwart asks where none
+  answers (`doctor-milter-stranded`, `doctor-milter-stranded-unscanned`), as
+  a virus scanner's that is down, and now says to start it.
+- `garrison stalwart setup` no longer reads Stalwart's milters, and no longer
+  stops for one that does not answer. A user without administrator rights is
+  told so at its first read, of the API keys (`setup-keys-unreadable`).
 
 ## [0.2.1] - 2026-11-25
 

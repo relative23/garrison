@@ -124,7 +124,28 @@ scenario_refusals() {
     # A script that keeps only standard error finds the reason there.
     once "the installer names the refused setting on standard error" \
         'umask 077 && /root/release/bin/garrison install 2>&1 >/dev/null | grep -q unknown_setting'
+    # The section of the macro filter that releases up to 0.2 had.
+    inside 'cp -p /root/garrison.toml.good /etc/garrison/garrison.toml &&
+        printf "\n[milter]\n" >> /etc/garrison/garrison.toml'
+    refused "the macro filter's section stops the upgrade" \
+        '/root/release/bin/garrison install' install-config-refused
+    check "and the answer says how the release installed switches the filter off" \
+        'grep -q -F "[milter] is no longer a section" /root/answer && grep -q -F "garrison stalwart setup" /root/answer'
     inside 'cp -p /root/garrison.toml.good /etc/garrison/garrison.toml'
+    # That filter still running, which Stalwart then asks about every
+    # message: a unit of its name stands in for it, as a drop-in of the
+    # release's own unit where it has one.
+    inside 'mkdir -p /etc/systemd/system/garrison-milter.service.d &&
+        printf "[Service]\nExecStart=\nExecStart=/bin/sleep infinity\n" \
+            > /etc/systemd/system/garrison-milter.service.d/acceptance.conf &&
+        { test -e /etc/systemd/system/garrison-milter.service ||
+            printf "[Service]\nExecStart=/bin/sleep infinity\n" > /run/systemd/system/garrison-milter.service; } &&
+        systemctl daemon-reload && systemctl start garrison-milter.service'
+    refused "a macro filter that still runs stops the upgrade" \
+        '/root/release/bin/garrison install' install-macro-filter-runs
+    check "and it runs on" 'systemctl is-active --quiet garrison-milter.service'
+    inside 'systemctl stop garrison-milter.service; rm -r /etc/systemd/system/garrison-milter.service.d &&
+        rm -f /run/systemd/system/garrison-milter.service && systemctl daemon-reload'
     check "the refused upgrade backed nothing up" "test \$(ls /var/backups/garrison | wc -l) -eq $backups"
     # Too little room for the backup: a small file system over the backups.
     inside 'mount -t tmpfs -o size=8m garrison-full /var/backups/garrison'
@@ -372,7 +393,7 @@ scenario_stopped_collector() {
     running "after the stopped collector" "$new"
 }
 
-# The scenarios of setup and the macro filter beside Stalwart.
+# The scenarios of setup beside Stalwart.
 # shellcheck source=scripts/acceptance-failures-stalwart.sh
 . "$(dirname "$0")/acceptance-failures-stalwart.sh"
 
@@ -411,7 +432,7 @@ for scenario in ${SCENARIOS:-refusals hidden_policy hidden_check base_hidden fai
     rollback_refused_config rollback_room \
     interrupted killed_late reinstall rollback_without_state stopped_collector warnings unloaded policy_elsewhere \
     policy_foreign unwritten \
-    rotation milter_asked milter_port milter_sandbox collect_beside restore_leftovers access_links access_folder access_actions}; do
+    rotation collect_beside restore_leftovers access_links access_folder access_actions}; do
     "scenario_$scenario"
 done
 

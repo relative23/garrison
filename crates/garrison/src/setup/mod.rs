@@ -5,8 +5,7 @@
 //!   * a read-only API key for the broker (account and role metadata),
 //!   * a read-only API key for the collector (status observations),
 //!   * the Prometheus exporter with a dedicated scrape credential (if not in use).
-//!   * Garrison's OAuth client, for sign-in only,
-//!   * the macro filter's entry, where the configuration has `[milter]`.
+//!   * Garrison's OAuth client, for sign-in only.
 //!
 //! API keys use Replace permissions, may be used only from loopback and are
 //! tried from this host as soon as they are made or updated (see `keys`).
@@ -46,7 +45,6 @@ mod client;
 mod exporter;
 mod folder;
 mod keys;
-mod milter;
 mod objects;
 mod restart;
 mod states;
@@ -75,8 +73,8 @@ const MAX_ANSWER: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-    /// Connect Stalwart: the webhook, the API keys, the sign-in client, the
-    /// metrics access and the macro filter's entry.
+    /// Connect Stalwart: the webhook, the API keys, the sign-in client and the
+    /// metrics access.
     Setup {
         /// The Stalwart administrator: a 0600 JSON file with {"username","secret"}
         /// or {"apiKey"}, or `-` for that JSON on standard input. Without it, the
@@ -135,7 +133,7 @@ fn setup(config: &Config, source: &Source, asked: &Asked<'_>) -> Result<(), Stat
 /// done. What Stalwart holds is read first, so that what refuses refuses
 /// before anything changes, and only what differs from what was asked is
 /// written. Then the keys, each taken up by its service before the keys it
-/// replaces go; the sign-in client and the macro filter's entry; the webhook
+/// replaces go; the sign-in client; the webhook
 /// and the exporter, each new secret in its file before Stalwart is given
 /// it. Stalwart then reloads its settings, which is when it takes them, and
 /// the receiver starts again with its new key, as each service does that
@@ -147,10 +145,6 @@ fn configure(
     networks: &Enabled,
 ) -> Result<(), State> {
     let (directory, rotate) = (&config.credentials_directory, asked.rotate);
-    let started = milter::prepare(admin, config)?;
-    if let Some(step) = &started {
-        say(&format!("- {step}"));
-    }
     let found = keys::find(admin, directory, &[&BROKER, &COLLECTOR], rotate)?;
     let hook = webhook::find(admin)?;
     let client = client::find(admin, config)?;
@@ -168,7 +162,6 @@ fn configure(
     }
     // What Stalwart takes only when it reads its settings again.
     let mut steps = vec![client::ensure(admin, config, client)?];
-    steps.push(milter::ensure(admin, config)?);
     let signing = webhook::key(directory, rotate)?;
     let url = asked.webhook_url;
     let hooked = webhook::ensure(admin, config, url, hook.as_ref(), &signing);
@@ -208,17 +201,13 @@ fn configure(
         Ok(said) => said,
         Err(asked) => Some(asked),
     };
-    let retired = milter::retire(config)?;
-    let changed = started.is_some() || keys_changed || !steps.is_empty();
+    let changed = keys_changed || !steps.is_empty();
     // Where it finds everything as asked, the one line on standard output.
-    if !changed && stale.is_empty() && retired.is_empty() {
+    if !changed && stale.is_empty() {
         say(&states::as_asked().to_string());
         return Ok(());
     }
     say(&states::reloaded(restarted.as_ref()).to_string());
-    for step in &retired {
-        say(&format!("- {step}"));
-    }
     Ok(())
 }
 

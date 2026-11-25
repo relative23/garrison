@@ -206,14 +206,14 @@ minutes. They count; none of them is a verdict, except where it says so.
   other cards need no account, and a Stalwart that is slow to answer costs
   them nothing: it is asked before the history is read.
 - `milter`: what Stalwart's milters said of the mail they were shown (a
-  virus scanner's, Garrison's own macro filter), by day, on the Antivirus
+  virus scanner's, for one), by day, on the Antivirus
   page. A milter that could not be reached since yesterday is a warning,
   and so is a deferral of every message the milters were shown since
   yesterday, as a scanner gives that cannot scan, also where another milter
   passed them first. The history names no milter, so a message is told by
   its session: a session in which a milter deferred anything counts as
-  deferred. A reply of the milter's own, with which Garrison's
-  macro filter refuses a message, is counted apart: Stalwart's event does
+  deferred. A reply in the milter's own words, with which a milter may
+  refuse or defer a message, is counted apart: Stalwart's event does
   not say whether it refused or deferred, so a milter that defers with one
   is not warned of. A host without a milter has no such card.
 - `authentication`: how many senders passed SPF, DKIM, DMARC, ARC and the
@@ -540,18 +540,22 @@ A refusal that an earlier release kept is sent again in the first run. A
 deferral is no verdict: Stalwart defers a message
 where a milter defers it, as a scanner that cannot scan does
 (clamav-milter's `OnFail Defer` while clamd is down), and where it cannot
-reach a milter whose entry says to defer then, as setup writes Garrison's
-filter for `when_unreachable = "defer"`.
+reach a milter whose entry says to defer then.
 The results are those of the tests as configured: a change of
 `recipient`, `sender`, `host`, `port` or `macro_document` sends the tests
 anew in the next run, and nothing kept for what was configured before is
 shown.
 
-With `macro_document = true` a third message carries a document that a macro
-filter takes for one with macros (it holds none, only the name a macro
-project has inside a document). It must be refused. Switch this on together
-with [`[milter]`](configuration.md#milter) and `on_macro = "reject"`; a filter that only
-marks takes the document, and the check then reports that nothing refused it.
+With `macro_document = true` a third message carries a document that a virus
+scanner told to report macros takes for one with macros: a `.docm` whose
+macro project has no module, so it holds no macro. It must be refused. Switch
+this on once the scanner reports such documents and its milter refuses them:
+with ClamAV, `AlertOLE2Macros yes` in clamd's configuration and an
+`OnInfected` of clamav-milter that refuses
+([installation](installation.md#10-mail-with-office-macros-optional)). Until
+then the document is taken, and the check reports that nothing refused it.
+ClamAV 1.0, 1.4 and 1.5 report the document (measured on 2026-11-26), and so
+does a filter that goes by the name of the project's file.
 
 ## `clamav`
 

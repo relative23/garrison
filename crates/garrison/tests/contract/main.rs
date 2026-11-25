@@ -2,8 +2,7 @@
 //! the webhook, both API keys and the exporter credential, is idempotent and
 //! leaves other applications' OAuth clients alone;
 //! `access init` then finds the native administrator role with the broker's
-//! key. The macro filter is entered only while it answers and taken out with
-//! its section of the configuration. Run with `cargo test --workspace --test contract -- --ignored` and the
+//! key. Run with `cargo test --workspace --test contract -- --ignored` and the
 //! variables of `cargo xtask lab start`. The lab runs in Docker, where
 //! Stalwart sees the bridge gateway (`GARRISON_LAB_CALLBACK_HOST`) instead of
 //! 127.0.0.1, so the keys allow that address as well.
@@ -26,14 +25,9 @@ use serde_json::json;
 // The parts of this test, in files beside this one.
 mod access;
 mod clients;
-mod entries;
-mod entry_refusals;
-mod entry_stalwart;
-mod entry_stops;
 mod exporter;
 mod held;
 mod keys;
-mod milter;
 mod refused;
 mod scene;
 mod secrets;
@@ -260,7 +254,6 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
     rotate(&mut lab, directory.path(), &credential, &gateway);
 
     access_after_the_rotation(&lab, directory.path());
-    milter::macro_filter(&mut lab, directory.path(), &credential, &gateway);
     refused_without_the_gateway(&mut lab, directory.path(), &credential);
 }
 

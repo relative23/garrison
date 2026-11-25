@@ -4,10 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use garrison_core::config::Database;
-use garrison_testing::http::{json, serve};
 
 use super::super::Level;
-use super::super::{Finding, files, host, milter, notify, policy};
+use super::super::{Finding, files, host, notify, policy};
 use super::Broken;
 
 /// The events database is a folder, as a restore gone wrong may leave it:
@@ -153,41 +152,6 @@ pub(super) fn selinux_module_for_another_port() -> Broken {
     }
 }
 
-/// The macro milter moved to another port without setup: Stalwart's entry
-/// still asks the old one, where nothing answers, which is then no entry of
-/// the filter's.
-pub(super) fn milter_on_another_port() -> Broken {
-    let port = super::super::answering_milter();
-    // Held, so that the stand-in for Stalwart is not given it.
-    let (_held, old) = super::super::silent_port();
-    let stalwart = serve(vec![json(&serde_json::json!({"methodResponses": [[
-        "x:MtaMilter/get",
-        {"list": [{"id": "m", "host": "127.0.0.1", "port": old,
-            "enable": {"match": {}, "else": "true"}, "stages": {"data": true},
-            "tempFailOnError": true}]},
-        "0"
-    ]]}))]);
-    let directory = tempfile::tempdir().unwrap();
-    let text = format!(
-        "{}\n[milter]\nport = {port}\n",
-        garrison_testing::config_text(directory.path(), &stalwart.url)
-    );
-    let config = garrison_core::config::from_text(&text).unwrap();
-    let credentials = garrison_core::credentials::Credentials::new(&config.credentials_directory);
-    fs::create_dir_all(&config.credentials_directory).unwrap();
-    garrison_testing::write_private(
-        &credentials.path(&config.collector.native_key),
-        garrison_testing::NATIVE_KEY.as_bytes(),
-    );
-    let found = milter::checks(&config, &credentials);
-    stalwart.requests();
-    Broken {
-        host: "the macro milter on another port than Stalwart's entry",
-        found,
-        said: (Level::Fail, "doctor-milter-stranded"),
-    }
-}
-
 /// No release where the installer puts it.
 pub(super) fn no_release() -> Broken {
     let directory = tempfile::tempdir().unwrap();
@@ -262,15 +226,6 @@ pub(super) fn space_unknown() -> Broken {
         // A path through a file, whose disk statvfs cannot be asked.
         found: vec![host::room("/proc/self/status/garrison")],
         said: (Level::Unknown, "doctor-space-unknown"),
-    }
-}
-
-/// A macro milter that does not answer on its port.
-pub(super) fn milter_silent() -> Broken {
-    Broken {
-        host: "a macro milter that does not answer",
-        found: vec![milter::answering(8096, Err("Connection refused".into()))],
-        said: (Level::Fail, "doctor-milter-silent"),
     }
 }
 
