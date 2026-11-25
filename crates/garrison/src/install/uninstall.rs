@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use super::files::{Step, announce, io, lock, must, run};
 use super::requirements::root_with_systemctl;
 use super::system::snippets;
-use super::{BACKUPS, BASE, CONFIG, LOCK, SYSTEMCTL, UNITS, command, states};
+use super::{BACKUPS, BASE, CONFIG, LOCK, SYSTEMCTL, UNITS, command, housekeeping, states};
 use crate::state::State;
 
 const USERS: [&str; 5] = [
@@ -129,7 +129,8 @@ fn policy_unknown(settings: &Path) -> Option<State> {
     Some(states::policy_unknown(settings, error))
 }
 
-/// The installer's own backups and the link to the one a rollback restores.
+/// The installer's own backups, told as housekeeping tells them, and the
+/// link to the one a rollback restores.
 fn installer_backups(backups: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = fs::read_dir(backups)
         .into_iter()
@@ -140,10 +141,7 @@ fn installer_backups(backups: &Path) -> Vec<PathBuf> {
             path.file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| {
-                    name == super::LAST
-                        || name.starts_with("pre-upgrade-")
-                        || name.starts_with("pre-reinstall-")
-                        || name.starts_with("pre-restore-")
+                    name == super::LAST || housekeeping::installers_stamp(name).is_some()
                 })
         })
         .collect();

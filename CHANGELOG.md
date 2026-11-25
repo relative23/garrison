@@ -166,7 +166,8 @@ Notable changes for operators and users. The format follows
   failed, backs up into a folder of its own in every run, says which file it
   could not write, and no longer makes another user's policy file the
   broker's; an uninstallation's test of nginx no longer renames Garrison's
-  snippets.
+  snippets, and a purge keeps a backup you wrote into `/var/backups/garrison`
+  under a name such as `pre-upgrade-before-migration`.
 - **`garrison stalwart setup` keeps every service on a secret Stalwart takes,
   wherever a run stops.** Rotating the API keys no longer interrupts sign-in;
   a stopped run leaves Stalwart no signature key or scrape credential that no

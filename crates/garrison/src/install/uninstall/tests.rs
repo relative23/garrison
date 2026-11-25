@@ -17,6 +17,7 @@ fn host() -> tempfile::TempDir {
         "var/backups/garrison/pre-upgrade-20261030T132151",
         "var/backups/garrison/pre-restore-20261030T132152",
         "var/backups/garrison/latest",
+        "var/backups/garrison/pre-upgrade-before-migration",
     ] {
         fs::create_dir_all(root.join(folder)).unwrap();
     }
@@ -102,11 +103,13 @@ fn a_purge_also_takes_data_users_and_the_installers_backups_only() {
     ] {
         assert!(paths.contains(&gone.to_owned()), "{gone}");
     }
-    assert!(
-        !paths
-            .iter()
-            .any(|path| path.ends_with("latest") || path.ends_with("other.conf"))
-    );
+    // What the operator wrote with `garrison backup --to` stays, under a
+    // name of the installer's kind too.
+    assert!(!paths.iter().any(|path| {
+        path.ends_with("latest")
+            || path.ends_with("pre-upgrade-before-migration")
+            || path.ends_with("other.conf")
+    }));
 }
 
 /// A policy kept elsewhere goes with its lock and its backups, and
