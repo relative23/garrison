@@ -10,9 +10,11 @@
 #
 # Only the second archive is soaked; the first is installed and upgraded from,
 # as in production. SOAK_RATE is events per second; the load reaches about nine
-# tenths of it. The receiver's limit is set to 200,000 events here (its default
-# is a million), which the events pass after about 90 minutes at the defaults,
-# so the limit is applied under load as well.
+# tenths of it, and a run in which it stays below four fifths fails. The
+# receiver's limit is set to 200,000 events here (its default is a million),
+# which the events pass after about 90 minutes at the defaults, so the limit is
+# applied under load as well. A run too short to pass it for certain says at
+# its start and in its last line that it does not test the limit.
 # Accepted at the end: no service restarted or logged an error, the receiver
 # refused no batch, every accepted event is stored or lies in a gap the receiver
 # recorded when it applied its limit, the events stayed within that limit, the
@@ -39,6 +41,14 @@ soak_limit=200000
 soak_every=600
 # Growth of the database file once the limit applies, in percent.
 soak_growth=25
+# The least the load may reach, and whether the events then pass the limit by
+# more than the receiver lets them until it next applies it: only such a run
+# tests the limit.
+soak_floor=$((rate * 4 / 5))
+soak_tests_limit=
+if [ $((minutes * 60 * soak_floor)) -gt $((soak_limit + rate * soak_every)) ]; then
+    soak_tests_limit=yes
+fi
 # shellcheck source=scripts/acceptance-lib.sh
 . "$(dirname "$0")/acceptance-lib.sh"
 
@@ -61,6 +71,9 @@ installer '/root/release/bin/garrison install'
 services "upgraded"
 
 step "Loading the receiver with $rate events a second for $minutes minutes"
+if [ -z "$soak_tests_limit" ]; then
+    echo "      not tested: the receiver's limit of $soak_limit events, which this run is too short to pass"
+fi
 # A batch every half second; each line of /root/sent.log is
 # "batch created-at HTTP-status stored".
 inside_input 'cat > /root/load.sh' <<'LOAD'
@@ -80,7 +93,6 @@ while [ "$(date +%s)" -lt "$end" ]; do
     sleep 0.5
 done
 LOAD
-before=$(events)
 collected=$(inside 'sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT max(id) FROM snapshots"')
 inside "systemd-run --quiet --unit=soak-load sh /root/load.sh $minutes $per"
 check "the receiver accepts the load" 'grep -q " 200 " /root/sent.log'
@@ -174,21 +186,25 @@ result=$(inside "sh /root/account.sh $per")
 read -r accepted stored dropped lost refused skipped gaps <<EOF
 $result
 EOF
-echo "      $accepted events accepted ($((accepted / (minutes * 60))) a second), $stored kept," \
+achieved=$((accepted / (minutes * 60)))
+echo "      $accepted events accepted ($achieved a second), $stored kept," \
     "$dropped removed by the limit, $lost lost; $refused batches refused, $skipped events skipped"
+verdict "the load reached four fifths of $rate events a second ($achieved)" [ "$achieved" -ge "$soak_floor" ]
 verdict "the receiver refused no batch" [ "$refused" -eq 0 ]
 verdict "the receiver stored every event of every batch" [ "$skipped" -eq 0 ]
 verdict "no accepted event was lost: each is kept or inside the limit's recorded window" [ "$lost" -eq 0 ]
-if [ $((before + accepted)) -gt $((soak_limit + rate * soak_every)) ]; then
+verdict "the stored events stayed within the limit (at most $most_events)" \
+    [ "$most_events" -le $((soak_limit + rate * soak_every + 1000)) ]
+if [ -n "$soak_tests_limit" ]; then
     verdict "the receiver applied its limit of $soak_limit events under load and recorded it" [ "$gaps" -gt 0 ]
     verdict "what a limit removed is one recorded window, however often it removed ($gaps)" [ "$gaps" -le 2 ]
     verdict "the limit dropped the oldest events ($dropped)" [ "$dropped" -gt 0 ]
-fi
-verdict "the stored events stayed within the limit (at most $most_events)" \
-    [ "$most_events" -le $((soak_limit + rate * soak_every + 1000)) ]
-if [ -n "$at_limit" ]; then
+    verdict "a sample saw the stored events at the limit" [ -n "$at_limit" ]
     verdict "the database stopped growing once the limit applied ($at_limit -> at most $largest bytes)" \
         [ $((largest * 100)) -le $((at_limit * (100 + soak_growth))) ]
+    soak_limit_said="the limit applied"
+else
+    soak_limit_said="the limit not tested"
 fi
 now=$(inside 'sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT max(id) FROM snapshots"')
 verdict "the collector kept collecting ($((now - collected)) runs)" [ $((now - collected)) -ge $((minutes / 2)) ]
@@ -208,4 +224,4 @@ fi
 verdict "no Garrison service logged an error" [ -z "$errors" ]
 services "after the soak"
 
-step "Accepted: $minutes minutes at $rate events a second without a restart, a loss or a leak"
+step "Accepted: $minutes minutes at $rate events a second without a restart, a loss or a leak; $soak_limit_said"
