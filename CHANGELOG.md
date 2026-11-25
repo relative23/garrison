@@ -169,7 +169,9 @@ Notable changes for operators and users. The format follows
   snippets, and a purge keeps a backup you wrote into `/var/backups/garrison`
   under a name such as `pre-upgrade-before-migration`.
 - **`garrison stalwart setup` keeps every service on a secret Stalwart takes,
-  wherever a run stops.** Rotating the API keys no longer interrupts sign-in;
+  wherever a run stops.** Rotating the API keys no longer leaves a time in
+  which sign-in fails (a request that is under way while the broker restarts
+  is still answered "Authorization is temporarily unavailable" once);
   a stopped run leaves Stalwart no signature key or scrape credential that no
   file holds; and a failed run names the run that mends it and no longer takes
   the receiver down.
@@ -228,11 +230,12 @@ Notable changes for operators and users. The format follows
   many times stops when the run's time is up, a slow check no longer costs the
   whole status, and two runs at once or within a minute no longer count events
   twice or erase what the first counted.
-- **A clock that jumps no longer costs data or order.** One that jumps ahead
+- **A clock that jumps costs less data and no order.** One that jumps ahead
   no longer takes the metric history with it; a job, an event or a signature
   database dated ahead of the clock no longer holds back every action or
   passes as fresh; and a session ends when the server ends it, whatever the
-  browser's clock says.
+  browser's clock says. The event history is still cleaned up by the host's
+  clock: see [operations](docs/operator/operations.md#troubleshooting).
 - **A notification channel shows only its server.** Its name and its errors no
   longer show an address's path or key, and the Alerts page no longer shows an
   earlier release's record of a failed notification, which could hold a
