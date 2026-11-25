@@ -98,7 +98,8 @@ denials() {
 }
 mac=$(inside 'if command -v getenforce >/dev/null 2>&1; then getenforce;
     elif aa-status --enabled 2>/dev/null; then echo AppArmor; else echo none; fi')
-echo "      access control: $mac"
+echo "      access control: $mac; its denials are read from the kernel log$(inside \
+    'if systemctl is-active --quiet auditd.service; then echo " and from the log of auditd, which runs"; fi')"
 
 undenied() {
     if ! found=$(denials); then
