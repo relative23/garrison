@@ -432,7 +432,7 @@ sudo garrison notify-test
 A topic that needs an access token, the webhook, mail and what is sent when:
 [configuration](configuration.md#notifications).
 
-## 10. Macro filter (optional)
+## 10. Macro filter (optional, experimental)
 
 Garrison watches and reports; it changes nothing in the mail flow. The one
 exception is a filter that has Stalwart refuse or mark mail with Office
@@ -446,7 +446,8 @@ sudo garrison stalwart setup
 Setup starts the filter, makes sure it answers and only then tells Stalwart
 of it. Then send the server a mail from outside and see that it arrives. To
 switch it off again, remove the section and run the same command; keep to
-that order. What the filter finds, what it does not, and its settings:
+that order. The filter is experimental: what it finds, what it does not, what
+of it may change in a later release, and its settings:
 [configuration](configuration.md#milter).
 
 ## Unattended installation

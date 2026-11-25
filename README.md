@@ -51,7 +51,7 @@ Status: 0.2.1. Supported Stalwart releases:
 | Menu | Content |
 |---|---|
 | Services | Process and schedule states, installed versions, newer releases of Garrison and Stalwart; pending security updates, a restart that is due, the clock, a disk forecast and the firewall service |
-| Protection ▸ Antivirus, Spam filter, Attacks & bans | Scanner, signatures, the milters' verdicts by day, test messages through the mail server, an optional filter for Office macros; spam filter, classifier and rule updates, spam and ham by day and domain, how incoming senders fare with SPF, DKIM, DMARC and ARC; failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account, and sender addresses that send unusually much |
+| Protection ▸ Antivirus, Spam filter, Attacks & bans | Scanner, signatures, the milters' verdicts by day, test messages through the mail server, an optional, experimental filter for Office macros; spam filter, classifier and rule updates, spam and ham by day and domain, how incoming senders fare with SPF, DKIM, DMARC and ARC; failed sign-ins, Stalwart's bans and TLS handshake errors by address, network and account, and sender addresses that send unusually much |
 | Backups | Backup jobs with their last run and result, schedules, receipts and restore tests; a restic or borg repository with its newest snapshot, size, integrity check and test restore |
 | DNS & TLS | Each domain's DNS records against what Stalwart names, with its MTA-STS policy and TLSA records; blocklists (IPv4 and IPv6) and reverse names of the sending addresses; the certificate of every listener that speaks TLS; how much mail travels without TLS; resolver process |
 | Alerts | Notifications through ntfy, a webhook or mail when a check fails, warns or is in order again, and when the collector itself stops; monitor receipts |
@@ -113,7 +113,7 @@ receiver, the broker, the collector and the watch over it on timers, and the
 macro filter where it is switched on. Each runs under a system user of its
 own, but the watch under the collector's, and none as root. Garrison
 watches and reports; it changes nothing in the mail flow. The one exception
-is optional and off by default: a
+is optional, off by default and experimental: a
 [macro filter](docs/operator/configuration.md#milter) that has Stalwart refuse
 or mark mail with Office macros.
 Details:

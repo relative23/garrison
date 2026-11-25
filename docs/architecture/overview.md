@@ -130,8 +130,8 @@ the ids are kept like an interface ([observation ids](../operator/observations.m
 
 - No changes to Stalwart's binaries, WebUI files or license checks.
 - No shell, no arbitrary command, no Docker socket, no raw mail in the
-  interface or on disk. The optional macro filter reads each incoming message
-  in memory to judge it and keeps nothing of it.
+  interface or on disk. The optional, experimental macro filter reads each
+  incoming message in memory to judge it and keeps nothing of it.
 - No per-domain tenant isolation: profiles are server-wide.
 - No reconstruction of events from before the webhook existed.
 
