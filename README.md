@@ -82,7 +82,7 @@ success.
     <td><a href=".github/screenshots/dns-tls.png"><img src=".github/screenshots/dns-tls.png" alt="DNS and TLS in the dark theme: reverse names of four sending addresses and the certificates of five TLS listeners"></a><br>DNS &amp; TLS: the reverse names of the sending addresses and the certificate of every listener, under each mail host's name.</td>
   </tr>
   <tr>
-    <td><a href=".github/screenshots/antivirus.png"><img src=".github/screenshots/antivirus.png" alt="Antivirus in the dark theme: the daily test messages, one of them an Office document with macros that was refused, and the running scanner"></a><br>Antivirus: the daily test messages through the server, among them a document that a scanner told to report Office macros must refuse.</td>
+    <td><a href=".github/screenshots/antivirus.png"><img src=".github/screenshots/antivirus.png" alt="Antivirus in the dark theme: the daily test messages, one of them an Office document with macros that was refused, beside a harmless message that was taken"></a><br>Antivirus: the daily test messages through the server, among them a document that a scanner told to report Office macros must refuse.</td>
     <td><a href=".github/screenshots/backups.png"><img src=".github/screenshots/backups.png" alt="Backups: the local backup job's last run and a restic repository with its newest snapshot, size, integrity check and test restore"></a><br>Backups: the backup job's last run, and a restic repository with its newest snapshot, integrity check and test restore.</td>
   </tr>
   <tr>
