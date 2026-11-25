@@ -271,11 +271,17 @@ done
 exit 1
 STATE
     # The collector and the watch run once and end, as their timers start
-    # them. The scripts start them oftener than systemd lets a unit be started
-    # (five times in ten seconds), so each start begins that count anew.
+    # them. A start while a run is under way would only wait for that run,
+    # which began before whatever the script has just changed; and the scripts
+    # start them oftener than systemd lets a unit be started (five times in
+    # ten seconds). So a run of the script's own waits for one under way to
+    # end and begins the unit's count anew.
     inside_input 'cat > /usr/local/bin/acceptance-run && chmod 755 /usr/local/bin/acceptance-run' <<'RUN'
 #!/bin/sh
-# acceptance-run UNIT: start UNIT and wait for its end, whatever was started before.
+# acceptance-run UNIT: a run of UNIT that begins now, waited for to its end.
+while case $(systemctl show -p ActiveState --value "$1") in activating | deactivating) true ;; *) false ;; esac; do
+    sleep 0.2
+done
 systemctl reset-failed "$1" 2>/dev/null
 exec systemctl start "$1"
 RUN
