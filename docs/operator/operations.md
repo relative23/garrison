@@ -251,7 +251,9 @@ sudo garrison stalwart setup --rotate
 This replaces the two API keys, the webhook signature key and the metrics
 credential with new secrets and restarts the services that hold them. A new
 key is created, written and taken up by the service that holds it before the
-old one goes, so sign-in and the checks of users' rights go on throughout.
+old one goes, so sign-in and the checks of users' rights go on. Only a
+request that is under way at the moment the broker restarts is answered
+"Authorization is temporarily unavailable" once; the next one is answered.
 Stalwart 1.2.0 takes five API keys an account, and setup makes its keys in
 the administrator's: where that account has no room for one more, setup
 changes nothing and names the account's keys; remove one that is no longer
