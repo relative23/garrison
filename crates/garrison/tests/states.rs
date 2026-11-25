@@ -122,3 +122,61 @@ fn a_state_is_told_from_a_path_and_a_command() {
         ["install-running", "install-as-installed"]
     );
 }
+
+/// The states the operators' page lists: each of its blocks holds one
+/// state's whole line, which may carry other states' lines inside it, so a
+/// block's state is the last name in brackets that has a state's form. A
+/// block that names none is listed as it stands, which no state is called.
+fn listed(page: &str) -> Vec<&str> {
+    page.split("```text\n")
+        .skip(1)
+        .map(|rest| {
+            let (entry, _) = rest.split_once("\n```").unwrap();
+            entry
+                .rmatch_indices(" [")
+                .find_map(|(at, _)| {
+                    let bracketed = &entry[at + 2..];
+                    let name = &bracketed[..bracketed.find(']')?];
+                    (looked_for(name) == [name]).then_some(name)
+                })
+                .unwrap_or(entry)
+        })
+        .collect()
+}
+
+#[test]
+fn the_page_of_the_states_lists_each_state_once_and_no_other() {
+    let crate_folder = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut states = BTreeSet::new();
+    made(&crate_folder.join("src"), &mut states);
+    // The tests of the table itself make states of no area.
+    states.retain(|name| looked_for(name) == [name.as_str()]);
+    let page = std::fs::read_to_string(crate_folder.join("../../docs/operator/states.md")).unwrap();
+    let names = listed(&page);
+    let once: BTreeSet<String> = names.iter().map(|name| (*name).to_owned()).collect();
+    let twice: Vec<&&str> = names
+        .iter()
+        .filter(|name| names.iter().filter(|other| other == name).count() > 1)
+        .collect();
+    assert!(twice.is_empty(), "the page lists a state twice: {twice:?}");
+    assert_eq!(once, states);
+}
+
+#[test]
+fn a_block_of_the_page_is_the_state_its_last_name_says() {
+    assert_eq!(
+        listed(
+            "# States\n\nOutside a block [install-io] counts for nothing.\n\n\
+             ```text\nRun as root. [install-not-root]\n```\n\
+             ```text\nthe clock is not synchronized [doctor-clock-unsynchronized]\n      \
+             Enable a time service [see timedatectl]\n```\n\
+             ```text\nStalwart asks a milter [doctor-milter-stranded]\n      Remove it.\n\
+             Setup changed nothing. [setup-milter-stranded]\n```\n"
+        ),
+        [
+            "install-not-root",
+            "doctor-clock-unsynchronized",
+            "setup-milter-stranded"
+        ]
+    );
+}

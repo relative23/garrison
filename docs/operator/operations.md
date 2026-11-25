@@ -53,7 +53,8 @@ page of its own fails it, and so does a proxy that passes the page but not
 its files, which leaves a page nobody can sign in on. Every problem comes
 with what to do; it exits with 1 when something fails. Each line ends with
 the name of its state in brackets, which stays the same across releases:
-`ok    the clock is synchronized [doctor-clock-synchronized]`. Run it after every
+`ok    the clock is synchronized [doctor-clock-synchronized]`
+([state names](states.md#doctor) lists them). Run it after every
 update of Stalwart, of the proxy in front of it or of an application beside
 it.
 
@@ -80,6 +81,10 @@ credentials. To verify a restored copy:
 ```sh
 sudo garrison self-check --state /path/to/restored/latest
 ```
+
+With `--receipt FILE` the command also writes its result to that file as JSON
+(`date`, `result` with `passed` or `failed`, and each database), for a
+[`receipt`](checks.md#receipt) check to show.
 
 To put such a copy back, on the host it came from or on a new one where
 Garrison is installed and configured:
@@ -135,9 +140,11 @@ Put the new archive and its `.minisig` signature side by side, then:
 sudo garrison upgrade garrison-<version>-<arch>.tar.gz
 ```
 
-The installed release checks the signature with the keys compiled into it,
-refuses an archive for another architecture or an older version, unpacks
-exactly the bytes it checked and runs that release's installer.
+It reads the signature from the archive's name plus `.minisig`; `--signature
+FILE` names one that lies elsewhere. The installed release checks the
+signature with the keys compiled into it, refuses an archive for another
+architecture or an older version, unpacks exactly the bytes it checked and
+runs that release's installer.
 Releases that trust no key yet, and every archive you checked by hand, are
 installed directly:
 
@@ -302,7 +309,7 @@ brackets, such as `[install-no-room]`: the name of that state, which stays from
 release to release while its words may change. So do the lines the services and
 the watch over the collector write to the journal when a service stops, a
 collection run collects nothing or the watch has looked. A script looks for the
-name. Lines that only report progress, such as the installer's `==>` lines and
+name; [state names](states.md) lists every one with an example of its line. Lines that only report progress, such as the installer's `==>` lines and
 setup's steps, carry none.
 
 | Symptom | Check |

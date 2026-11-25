@@ -6,6 +6,21 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The page [state names](docs/operator/states.md) lists every state a command
+  ends with and every line of `garrison doctor`, each with an example of its
+  line, for scripts that look for the names.
+
+### Changed
+
+- The documents name what they left out: `backup-check --report`,
+  `self-check --receipt`, `upgrade --signature`, `garrison stalwart-switch`,
+  every variable of the Ansible role, and that `check-config` only warns
+  about a path the collector cannot see in a file other than
+  `/etc/garrison/garrison.toml`. The installation guide's tested systems and
+  memory figures are those of 2026-11-25.
+
 ## [0.2.0] - 2026-11-25
 
 ### Upgrade notes

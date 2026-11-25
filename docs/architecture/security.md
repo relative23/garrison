@@ -101,7 +101,7 @@ brokers never repeat a job; pending jobs become "uncertain".
   minute after the flood ends everyone can sign in again.
 - Stalwart limits requests and blocks addresses on its own, by the client
   address it sees, which by default is the connection's (`clientIpSource`
-  is `peer`; measured on Stalwart 1.1.0 only, with its defaults). Where it
+  is `peer` on a fresh Stalwart 1.2.0, read on 2026-11-25). Where it
   runs on this host, natively or in the host network, it sees Garrison and
   nginx at 127.0.0.1, which it neither limits nor blocks: Garrison is never
   refused for Stalwart's limits, but neither are password guesses that nginx

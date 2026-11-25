@@ -8,23 +8,25 @@ one static binary without runtime dependencies on the host. It goes to
 `/opt/garrison`, which may be a link to another disk, but not one under
 `/home`, `/root`, `/tmp` or `/var/tmp`, which Garrison's services do not see.
 
-Tested on 2026-11-11 in virtual machines from the distributions' own cloud
+Tested on 2026-11-25 in virtual machines from the distributions' own cloud
 images, each with its access control as shipped: Debian 12 and 13, Ubuntu
 24.04 and 26.04 (AppArmor); AlmaLinux 9 and 10, Rocky Linux 9 and 10, CentOS
 Stream 10, Fedora 44 and openSUSE Leap 16.0 (SELinux enforcing); Amazon Linux
-2023 (SELinux permissive), all on x86_64, and AlmaLinux 10 on aarch64. Ubuntu
-22.04 is refused before anything changes: its polkit 0.105 has no JavaScript
-rules. Debian 11 (polkit 0.105) and the RHEL 8 family (systemd 239) do not
-meet the requirements either.
+2023 (SELinux permissive), all on x86_64, and AlmaLinux 10 on an emulated
+aarch64 machine. Ubuntu 22.04 is refused before anything changes: its polkit
+0.105 has no JavaScript rules. Debian 11 (polkit 0.105) and the RHEL 8 family
+(systemd 239) do not meet the requirements either.
 
-Garrison needs little of the host. Measured on 2026-11-13 in an AlmaLinux 10
-container (x86_64) under 37 events a second for 30 minutes, the event
-receiver held 16 MiB of memory, the broker 6 MiB and the web service 7 MiB,
-which answered only health checks there; none of them grew. A collection run
-takes about 4 MiB for a moment each minute. When host care asks the package
-manager for pending updates, every six hours and after packages change, dnf
-takes about 95 MiB for that moment. On disk, the event history stays within
-`ingest.max_database_mib` (256 MiB by default). The metric history keeps
+Garrison needs little of the host. Measured on 2026-11-25 in an AlmaLinux 10
+container (x86_64) under 37 events a second for two hours, the event
+receiver held at most 26 MiB of memory, the web service 15 MiB, which
+answered only health checks there, and the broker 10 MiB; the web service and
+the broker stood still after the first twenty minutes, the receiver once the
+event history had reached its limit. A collection run takes about 5 MiB for a
+moment each minute. When host care asks the package manager for pending
+updates, every six hours and after packages change, dnf takes about 95 MiB
+for that moment (measured on 2026-11-13). On disk, the event history stays
+within `ingest.max_database_mib` (256 MiB by default). The metric history keeps
 every minute of the last eight days, about 21 MiB with every check, and
 ten-minute values before them: some 48 MiB at its 90 days
 (`collector.history_days`, see [configuration](configuration.md)).
@@ -270,6 +272,10 @@ location ^~ /admin/ {
     include /etc/nginx/snippets/garrison-stalwart-switch*.conf;
 }
 ```
+
+The installer writes that file and keeps it current; `garrison
+stalwart-switch` prints what it holds, for a proxy whose configuration is
+kept elsewhere.
 
 Both switch rows stay hidden until a user turns them on in Garrison's
 settings; the row in the Stalwart WebUI then shows while that user is signed

@@ -21,6 +21,23 @@ reaches a host.
         garrison_extra_config: "{{ lookup('file', 'garrison-providers.toml') }}"
 ```
 
+The role's variables, with what each is where the play does not set it:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `garrison_version` | none, required | The release to install, as published. |
+| `garrison_signing_key` | none | The release signing key from the README. Without it the role installs nothing, unless `garrison_unsigned` is set. |
+| `garrison_unsigned` | `false` | `true` skips the signature check, for an archive that has no signature, such as one you built yourself. Check its checksum yourself. |
+| `garrison_archives` | `archives/` next to the playbook | The folder on the control node that holds the archive and its `.minisig`. |
+| `garrison_arch` | the host's architecture | `x86_64` or `aarch64`, as in the archive's name. |
+| `garrison_public_origin` | none, required | `deployment.public_origin`. |
+| `garrison_issuer` | none, required | `deployment.issuer`. |
+| `garrison_stalwart_url` | `http://127.0.0.1:8080` | `deployment.stalwart_url`. |
+| `garrison_admin_url` | `<issuer>/admin/` | `deployment.admin_url`. |
+| `garrison_modules` | all modules | The modules besides the dashboard and services. |
+| `garrison_extra_config` | none | Further configuration, appended as TOML: providers, actions, `[web]` and the like. |
+| `garrison_stalwart_admin` | none | The Stalwart administrator for `garrison stalwart setup`: `{username, secret}` or `{apiKey}`. Keep it in Ansible Vault. Without it the role does not run setup. |
+
 Put `garrison-<version>-<arch>.tar.gz` and its `.minisig` in `archives/` next
 to the playbook. Changing `garrison_version` upgrades; the installer backs up
 and switches back on failure as always. Every play has the release check the
