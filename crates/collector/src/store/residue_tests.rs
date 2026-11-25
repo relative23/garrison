@@ -287,3 +287,16 @@ fn the_copy_is_made_with_the_mode_owner_group_and_label_of_the_database() {
         );
     }
 }
+
+/// The copy's owner is asked for only where it differs from the database's:
+/// in the collector's unit it does not, and the unit ends a collector that
+/// asks all the same.
+#[test]
+fn a_copy_made_with_the_databases_owner_and_group_is_given_none() {
+    assert_eq!(replace::owner_to_give((985, 987), (985, 987)), None);
+    assert_eq!(replace::owner_to_give((0, 0), (985, 987)), Some((985, 987)));
+    assert_eq!(
+        replace::owner_to_give((985, 985), (985, 987)),
+        Some((985, 987))
+    );
+}
