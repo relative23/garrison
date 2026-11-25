@@ -270,6 +270,15 @@ for state in "$@"; do
 done
 exit 1
 STATE
+    # The collector and the watch run once and end, as their timers start
+    # them. The scripts start them oftener than systemd lets a unit be started
+    # (five times in ten seconds), so each start begins that count anew.
+    inside_input 'cat > /usr/local/bin/acceptance-run && chmod 755 /usr/local/bin/acceptance-run' <<'RUN'
+#!/bin/sh
+# acceptance-run UNIT: start UNIT and wait for its end, whatever was started before.
+systemctl reset-failed "$1" 2>/dev/null
+exec systemctl start "$1"
+RUN
     copy_in "$previous" /root/previous.tar.gz
     copy_in "$release" /root/release.tar.gz
     inside 'cd /root && mkdir previous release &&
@@ -370,7 +379,7 @@ services() {
         signature=$(printf %s "$body" | openssl dgst -sha256 -hmac "$key" -binary | base64)
         curl -s -H "Content-Type: application/json" -H "X-Signature: $signature" \
             --data-binary "$body" http://127.0.0.1:8094/webhook | grep -q "\"stored\":1"'
-    once "$1: one collection run succeeds" 'systemctl start garrison-collect.service'
+    once "$1: one collection run succeeds" 'acceptance-run garrison-collect.service'
     # The host care checks run their commands inside the collector's sandbox.
     # Where the package manager is one they read, its answer must be known.
     check "$1: the host care and sender checks answer from the collector's sandbox" '
@@ -383,7 +392,7 @@ services() {
         fi'
     # In its own sandbox the watch reads the collector's database. The check
     # runs on the previous releases too, which print no name: hence the words.
-    once "$1: the watch over the collector finds it running" 'systemctl start garrison-watch.service' \
+    once "$1: the watch over the collector finds it running" 'acceptance-run garrison-watch.service' \
         'journalctl -u garrison-watch.service -n 5 --no-pager | grep -q "The collector runs"'
     # A version command runs inside the collector's sandbox and still answers.
     check "$1: the collector's version command reports a version" \

@@ -115,7 +115,7 @@ step "The collector's files where setup made none"
 credentials=/etc/garrison/credentials
 inside "rm -f $credentials/metrics-credential $credentials/spamhaus-dqs-key"
 once "systemd starts no collection run whose credential file is missing" "
-    ! systemctl start garrison-collect.service 2>/dev/null &&
+    ! acceptance-run garrison-collect.service 2>/dev/null &&
         systemctl status garrison-collect.service --no-pager 2>&1 |
             grep -E -q -i '243/CREDENTIALS|set up credentials'"
 again=$(mktemp)
@@ -128,7 +128,7 @@ rm -f "$again"
 # From here on every run reads the files the installer kept; a run of the
 # timer's from before may still end within the second before.
 since=$(inside 'sleep 1 && date +%s')
-once "after the installer, a collection run starts" 'systemctl start garrison-collect.service'
+once "after the installer, a collection run starts" 'acceptance-run garrison-collect.service'
 check "the installer keeps both files, empty and root's alone" "
     for name in metrics-credential spamhaus-dqs-key; do
         test -f $credentials/\$name && test ! -s $credentials/\$name &&
@@ -144,7 +144,7 @@ check "doctor names the missing metrics credential" \
      grep -F '[doctor-credential-missing-empty]' /root/doctor.log | grep -q '^FAIL  metrics-credential '"
 inside "sed -n '/^FAIL  metrics-credential /{n;s/^.*: //;p;}' /root/doctor.log > /root/doctor-fix.sh &&
     grep -q /etc/garrison/credentials/metrics-credential /root/doctor-fix.sh && sh -e /root/doctor-fix.sh"
-once "the file doctor's command makes lets a collection run start" 'systemctl start garrison-collect.service'
+once "the file doctor's command makes lets a collection run start" 'acceptance-run garrison-collect.service'
 check "doctor finds both empty files in order where nothing reads them" "
     garrison doctor > /root/doctor.log 2>&1;
     ! grep -E -q 'FAIL  .*(metrics-credential|spamhaus-dqs-key)' /root/doctor.log &&
@@ -160,7 +160,7 @@ keys='collector-native-key broker-native-key webhook-signature-key'
 made='run .garrison stalwart setup., which makes it'
 inside "for key in $keys; do cp -p $credentials/\$key /root/\$key.kept && : > $credentials/\$key; done"
 since=$(inside 'sleep 1 && date +%s')
-run_collector='systemctl reset-failed garrison-collect.service; systemctl start garrison-collect.service'
+run_collector='acceptance-run garrison-collect.service'
 once "with an empty key file collection runs start" "$run_collector && $run_collector"
 check "the collector's journal says once that its key file is empty, and what makes a key" "
     test \"\$(journalctl -u garrison-collect.service --since @$since --no-pager | grep -c \
@@ -222,7 +222,7 @@ check "check-config refuses a list written without its key while collector.dqs_k
 inside 'printf "\n[collector]\ndqs_key = \"credential:spamhaus-dqs-key\"\n" >> /etc/garrison/garrison.toml'
 check "check-config takes it with collector.dqs_key" 'garrison check-config >/dev/null'
 # One collection run each; a check repeats only its look at what the run left.
-collect='systemctl reset-failed garrison-collect.service; systemctl start garrison-collect.service'
+collect='acceptance-run garrison-collect.service'
 # The card's words where a check fails, and the resolver's questions.
 card='sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT document FROM snapshots ORDER BY id DESC LIMIT 1" |
     tee /root/latest.json | tr "[]" "\n\n" | grep -E "Data Query|could be asked|dq\.spamhaus" | head -n 4'

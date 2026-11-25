@@ -141,7 +141,7 @@ for unit in garrison-web.service garrison-ingest.service garrison-broker.socket 
     garrison-watch.timer; do
     check "set up: $unit is active" "systemctl is-active --quiet $unit"
 done
-once "set up: a collection run with the new collector key succeeds" 'systemctl start garrison-collect.service'
+once "set up: a collection run with the new collector key succeeds" 'acceptance-run garrison-collect.service'
 check "set up: self-check passes" "$garrison --config /etc/garrison/garrison.toml self-check"
 
 step "nginx with the server block setup printed"
@@ -235,7 +235,7 @@ check "Stalwart no longer takes the keys from before, and takes the new ones" \
         set -- /root/before/\$key-native-key; $taken = 401 || exit 1
         set -- /etc/garrison/credentials/\$key-native-key; $taken = 200 || exit 1
     done"
-once "a collection run with the new collector key succeeds" 'systemctl start garrison-collect.service'
+once "a collection run with the new collector key succeeds" 'acceptance-run garrison-collect.service'
 before=$(events)
 inside 'curl -s --max-time 20 smtp://127.0.0.1:25 --mail-from a@example.org --mail-rcpt nobody@example.test \
     -T /root/mail.txt >/dev/null 2>&1 || true'
