@@ -214,16 +214,103 @@ check "doctor finds no problem but the reserved test names" \
 
 step "Rotating the secrets beside the running services"
 # As root on the installed host, against Stalwart itself: each new key is
-# made, written and taken up by its service before the old one goes.
+# made, written and taken up by its service before the old one goes, so an
+# administrator signs in and has the rights checked all the while. The sign-in
+# is the browser's: Garrison's redirect, Stalwart's own sign-in answered as
+# its page answers it, and the callback, which makes the session.
+inside_input 'cat > /root/signed-in.py' <<'PYTHON'
+import http.cookiejar, json, os, sys, threading, time, urllib.error, urllib.parse, urllib.request
+
+admin = json.load(open("/root/stalwart-admin.json"))
+
+class Stay(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *arguments, **named):
+        return None
+
+def session():
+    """A browser signed in to Garrison as the administrator."""
+    browser = urllib.request.build_opener(Stay, urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    def get(url):
+        try:
+            return browser.open(url, timeout=20)
+        except urllib.error.HTTPError as answer:
+            return answer
+    query = urllib.parse.urlsplit(get("https://admin.example.test/auth/login").headers["Location"]).query
+    def stalwart(body):
+        request = urllib.request.Request("https://mail.example.test/api/auth", json.dumps(body).encode(),
+                                         {"Content-Type": "application/json"})
+        return json.load(urllib.request.urlopen(request, timeout=20))
+    answer = stalwart({"type": "authCode", "accountName": admin["username"],
+                       "accountSecret": admin["secret"], "query": query})
+    if answer.get("type") == "consentRequired":
+        answer = stalwart({"type": "authConsent", "token": answer["token"], "query": query, "consent": True})
+    get(answer["location"])
+    return lambda path: get("https://admin.example.test" + path)
+
+def tried():
+    """A sign-in, and whether the web service then checks that user's rights."""
+    try:
+        return "signed in" if session()("/api/actions").status == 200 else "sign-in failed"
+    except (OSError, KeyError, ValueError) as error:
+        return "sign-in failed: " + type(error).__name__
+
+if sys.argv[1] == "once":
+    print(tried())
+else:
+    # Until the file named is there, one session asks for its rights about
+    # twenty times a second. From the moment the rotation begins, six more
+    # sign-ins are made one after the other (the web service takes ten a
+    # minute). Each line begins with its time; a sign-in's ends with the time
+    # it began.
+    asks, one = session(), threading.Lock()
+    with open("/root/watched", "w") as seen:
+        def note(*what):
+            with one:
+                print(*what, file=seen, flush=True)
+        def sign_ins():
+            while not os.path.exists("/root/began"):
+                time.sleep(0.01)
+            for _ in range(6):
+                begun = time.time()
+                said = tried()
+                note(time.time(), said, "from", begun)
+        threading.Thread(target=sign_ins, daemon=True).start()
+        while not os.path.exists(sys.argv[2]):
+            try:
+                note(time.time(), asks("/api/actions").status)
+            except OSError as error:
+                note(time.time(), "no answer: " + type(error).__name__)
+            time.sleep(0.05)
+PYTHON
+once "before: the administrator signs in and has the rights checked" \
+    'python3 /root/signed-in.py once | grep -qx "signed in"'
+inside 'systemd-run --quiet --unit=acceptance-signed-in python3 /root/signed-in.py watch /root/rotated &&
+    for attempt in $(seq 20); do test -s /root/watched && exit 0; sleep 1; done; exit 1'
 taken='test "$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $(cat "$1")" \
     http://127.0.0.1:8080/jmap/session)"'
 inside 'mkdir /root/before && cd /etc/garrison/credentials &&
     cp -p broker-native-key collector-native-key webhook-signature-key /root/before/'
 check "before: Stalwart takes both API keys" \
     "for key in broker collector; do set -- /root/before/\$key-native-key; $taken = 200 || exit 1; done"
-once "a rotation finishes" \
-    "$garrison stalwart setup --rotate --admin-credential /root/stalwart-admin.json > /root/rotate.log 2>&1"
+once "a rotation finishes" "date +%s.%N > /root/began
+    $garrison stalwart setup --rotate --admin-credential /root/stalwart-admin.json > /root/rotate.log 2>&1
+    status=\$?; date +%s.%N > /root/ended; exit \$status"
 inside 'python3 /root/masked.py /root/rotate.log | sed "s/^/      | /"'
+# The rotation is over in less than a second, so the watch is judged by what
+# overlaps it: the rights checks answered between its first moment and its
+# last, and the sign-ins that began before it ended and ended after it began.
+window='-v from="$(cat /root/began)" -v to="$(cat /root/ended)"'
+checked="awk $window '\$2 == 200 && \$1 >= from && \$1 <= to' /root/watched"
+signed="awk $window '/ signed in from / && \$5 <= to && \$1 >= from' /root/watched"
+inside "sleep 3 && touch /root/rotated && while systemctl is-active --quiet acceptance-signed-in; do sleep 1; done
+    echo \"      | the rotation took \$(awk $window 'BEGIN { printf \"%.2f\", to - from }') seconds, in which\" \\
+        \"\$($checked | wc -l) rights checks were answered and \$($signed | wc -l) sign-ins were under way; in all:\"
+    sed -E 's/^[0-9.]+ //; s/ from [0-9.]+\$//' /root/watched | sort | uniq -c | sed 's/^/      | /'"
+check "a session had its rights checked while it ran, and none was refused then, before or after" \
+    "$checked | grep -q . && ! grep -v -E '^[0-9.]+ (200|signed in from [0-9.]+)\$' /root/watched"
+check "the administrator signed in while it ran" "$signed | grep -q ."
+once "after: the administrator signs in and has the rights checked with the broker's new key" \
+    'python3 /root/signed-in.py once | grep -qx "signed in"'
 check "it restarted the broker and the receiver with their new secrets" \
     'grep -F "[setup-restarted]" /root/rotate.log | grep -q -F garrison-broker &&
         grep -F "[setup-restarted]" /root/rotate.log | grep -q -F garrison-ingest'
