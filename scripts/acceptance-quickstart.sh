@@ -146,11 +146,14 @@ check "set up: self-check passes" "$garrison --config /etc/garrison/garrison.tom
 
 step "nginx with the server block setup printed"
 # The certificate where certbot would put it, signed by this run's authority.
+# Both carry what a strict reader asks of a certificate (key usage, the key
+# identifiers), as Python's does since 3.13, which signs in further down.
 inside 'live=/etc/letsencrypt/live/admin.example.test && mkdir -p "$live" /etc/nginx/tls && cd /etc/nginx/tls &&
     openssl req -x509 -newkey rsa:2048 -nodes -days 90 -subj "/CN=Garrison quick start CA" \
+        -addext keyUsage=critical,keyCertSign,cRLSign \
         -keyout ca.key -out ca.pem 2>/dev/null &&
     openssl req -newkey rsa:2048 -nodes -subj /CN=admin.example.test -keyout key.pem -out server.csr 2>/dev/null &&
-    printf "subjectAltName=DNS:admin.example.test,DNS:mail.example.test\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n" > server.ext &&
+    printf "subjectAltName=DNS:admin.example.test,DNS:mail.example.test\nbasicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n" > server.ext &&
     openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 90 \
         -extfile server.ext -out cert.pem 2>/dev/null &&
     cp cert.pem "$live/fullchain.pem" && cp key.pem "$live/privkey.pem" &&
