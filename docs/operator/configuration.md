@@ -266,6 +266,13 @@ message before taking it. The filter looks for Office documents that carry
 macros and has such a message refused or marked. Nothing else is judged, and
 no message is kept or written anywhere.
 
+The filter is experimental. It reads files that a sender may shape to get past
+it, in many formats and encodings, and the two lists below of what it finds
+and what it does not see say what is known today, not that nothing else gets
+through. Its keys, its headers and what it does with a message may change in
+a minor release; the changelog says so when they do. Do not count on it alone
+for mail with macros.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `port` | 8096 | Loopback port the filter listens on. |

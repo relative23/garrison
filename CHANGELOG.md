@@ -6,6 +6,15 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The macro filter is named experimental. It stays off unless `[milter]` is
+  configured, and nothing in the filter itself changes. The documents now say
+  that their lists of what it finds and what it does not see are what is
+  known today, and that its keys, its headers and what it does with a message
+  may change in a minor release, with a line here
+  ([configuration](docs/operator/configuration.md#milter)).
+
 ## [0.2.1] - 2026-11-25
 
 ### Added
