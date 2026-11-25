@@ -212,6 +212,40 @@ inside 'sed "s/^/      | /" /root/doctor.log'
 check "doctor finds no problem but the reserved test names" \
     '! grep "^FAIL" /root/doctor.log | grep -vF "[doctor-origin-placeholder]" | grep -q .'
 
+step "Rotating the secrets beside the running services"
+# As root on the installed host, against Stalwart itself: each new key is
+# made, written and taken up by its service before the old one goes.
+taken='test "$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $(cat "$1")" \
+    http://127.0.0.1:8080/jmap/session)"'
+inside 'mkdir /root/before && cd /etc/garrison/credentials &&
+    cp -p broker-native-key collector-native-key webhook-signature-key /root/before/'
+check "before: Stalwart takes both API keys" \
+    "for key in broker collector; do set -- /root/before/\$key-native-key; $taken = 200 || exit 1; done"
+once "a rotation finishes" \
+    "$garrison stalwart setup --rotate --admin-credential /root/stalwart-admin.json > /root/rotate.log 2>&1"
+inside 'python3 /root/masked.py /root/rotate.log | sed "s/^/      | /"'
+check "it restarted the broker and the receiver with their new secrets" \
+    'grep -F "[setup-restarted]" /root/rotate.log | grep -q -F garrison-broker &&
+        grep -F "[setup-restarted]" /root/rotate.log | grep -q -F garrison-ingest'
+check "every secret is another one" \
+    'for file in /root/before/*; do
+        test "$(cat "$file")" != "$(cat "/etc/garrison/credentials/${file##*/}")" || exit 1; done'
+check "Stalwart no longer takes the keys from before, and takes the new ones" \
+    "for key in broker collector; do
+        set -- /root/before/\$key-native-key; $taken = 401 || exit 1
+        set -- /etc/garrison/credentials/\$key-native-key; $taken = 200 || exit 1
+    done"
+once "a collection run with the new collector key succeeds" 'systemctl start garrison-collect.service'
+before=$(events)
+inside 'curl -s --max-time 20 smtp://127.0.0.1:25 --mail-from a@example.org --mail-rcpt nobody@example.test \
+    -T /root/mail.txt >/dev/null 2>&1 || true'
+check "Stalwart's events reach Garrison under the new signature key" \
+    "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -gt $before"
+inside "$garrison doctor > /root/doctor-rotated.log 2>&1 || true"
+check "doctor: Stalwart takes both new keys, and nothing else is wrong" \
+    'test "$(grep -c -F "[doctor-key-taken]" /root/doctor-rotated.log)" = 2 &&
+        ! grep "^FAIL" /root/doctor-rotated.log | grep -vF "[doctor-origin-placeholder]" | grep -q .'
+
 step "The macro milter, switched on and off again"
 # A document as Word writes one with macros, and one without, handed to
 # Stalwart the way a stranger's server would.
