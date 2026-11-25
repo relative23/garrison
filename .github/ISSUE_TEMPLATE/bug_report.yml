@@ -12,7 +12,7 @@ body:
     attributes:
       label: Garrison version
       description: The output of `garrison --version`, or the commit.
-      placeholder: garrison 0.1.2
+      placeholder: garrison 0.2.0
     validations:
       required: true
   - type: input

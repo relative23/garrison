@@ -6,6 +6,8 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-25
+
 ### Upgrade notes
 
 - **This release needs Stalwart 1.2.0: update Stalwart first.** Garrison's
@@ -537,7 +539,8 @@ The first release.
 - **Releases.** Reproducible static archives for x86_64 and aarch64, each
   with the third-party notices and a CycloneDX SBOM.
 
-[Unreleased]: https://github.com/relative23/garrison/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/relative23/garrison/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/relative23/garrison/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/relative23/garrison/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/relative23/garrison/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/relative23/garrison/releases/tag/v0.1.0
