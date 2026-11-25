@@ -212,6 +212,17 @@ case $distro in
     opensuse-*) resolver='zypper -n -q install dnsmasq >/dev/null' ;;
     *) resolver='dnf -y -q install dnsmasq >/dev/null' ;;
 esac
+# Under SELinux dnsmasq may listen only on a port of DNS's type; 5353 has
+# another one, and dnsmasq would end with "Permission denied".
+inside 'if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != Disabled ]; then
+        command -v semanage >/dev/null 2>&1 ||
+            { dnf -y -q install policycoreutils-python-utils >/dev/null 2>&1 ||
+              zypper -n -q install policycoreutils-python-utils >/dev/null; }
+        for protocol in tcp udp; do
+            semanage port -a -t dns_port_t -p $protocol 5353 2>/dev/null ||
+                semanage port -m -t dns_port_t -p $protocol 5353 || exit 1
+        done
+    fi'
 inside "$resolver && systemd-run --quiet --unit=acceptance-dns dnsmasq --keep-in-foreground --user=root \
     --no-resolv --no-hosts --listen-address=127.0.0.1 --port=5353 --bind-interfaces \
     --log-queries --log-facility=- --host-record=mail.example.test,192.0.2.25 \
