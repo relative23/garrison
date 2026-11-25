@@ -150,6 +150,23 @@ check() {
     done
     echo "ok    $1"
 }
+# `once DESCRIPTION COMMAND [LOOK]`: a command that changes something runs
+# once, and its exit status decides: a second try would hide that the first
+# failed. Only the look after it, such as a line in a journal, waits as a
+# check does.
+once() {
+    if ! once_said=$(inside "$2" 2>&1); then
+        echo "FAIL  $1"
+        printf '%s\n' "$once_said" | tail -n 20
+        inside "journalctl -u 'garrison-*' --no-pager -n 40" || true
+        exit 1
+    fi
+    if [ $# -ge 3 ]; then
+        check "$1" "$3"
+    else
+        echo "ok    $1"
+    fi
+}
 
 # UPDATE=1: every package the distribution has an update for, before anything
 # else is installed. A virtual machine restarts into what it got, a new
@@ -435,13 +452,13 @@ services() {
     check "$1: web answers without a session" \
         'curl -s http://127.0.0.1:8091/api/session | grep -E -q "\"session\": ?null|Sign-in required"'
     check "$1: ingest answers" 'curl -sf http://127.0.0.1:8094/health'
-    check "$1: a signed batch is stored" '
+    once "$1: a signed batch is stored" '
         key=$(cat /etc/garrison/credentials/webhook-signature-key)
         body="{\"events\": [{\"id\": \"$(date +%s%N)\", \"createdAt\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"type\": \"auth.failed\", \"data\": {}}]}"
         signature=$(printf %s "$body" | openssl dgst -sha256 -hmac "$key" -binary | base64)
         curl -s -H "Content-Type: application/json" -H "X-Signature: $signature" \
             --data-binary "$body" http://127.0.0.1:8094/webhook | grep -q "\"stored\":1"'
-    check "$1: one collection run succeeds" 'systemctl start garrison-collect.service'
+    once "$1: one collection run succeeds" 'systemctl start garrison-collect.service'
     # The host care checks run their commands inside the collector's sandbox.
     # Where the package manager is one they read, its answer must be known.
     check "$1: the host care and sender checks answer from the collector's sandbox" '
@@ -454,9 +471,8 @@ services() {
         fi'
     # In its own sandbox the watch reads the collector's database. The check
     # runs on the previous releases too, which print no name: hence the words.
-    check "$1: the watch over the collector finds it running" \
-        'systemctl start garrison-watch.service &&
-            journalctl -u garrison-watch.service -n 5 --no-pager | grep -q "The collector runs"'
+    once "$1: the watch over the collector finds it running" 'systemctl start garrison-watch.service' \
+        'journalctl -u garrison-watch.service -n 5 --no-pager | grep -q "The collector runs"'
     # A version command runs inside the collector's sandbox and still answers.
     check "$1: the collector's version command reports a version" \
         'sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT document FROM snapshots ORDER BY id DESC LIMIT 1" |

@@ -114,7 +114,7 @@ step "The collector's files where setup made none"
 # unit loads both, and systemd starts no unit whose credential file is missing.
 credentials=/etc/garrison/credentials
 inside "rm -f $credentials/metrics-credential $credentials/spamhaus-dqs-key"
-check "systemd starts no collection run whose credential file is missing" "
+once "systemd starts no collection run whose credential file is missing" "
     ! systemctl start garrison-collect.service 2>/dev/null &&
         systemctl status garrison-collect.service --no-pager 2>&1 |
             grep -E -q -i '243/CREDENTIALS|set up credentials'"
@@ -128,7 +128,7 @@ rm -f "$again"
 # From here on every run reads the files the installer kept; a run of the
 # timer's from before may still end within the second before.
 since=$(inside 'sleep 1 && date +%s')
-check "after the installer, a collection run starts" 'systemctl start garrison-collect.service'
+once "after the installer, a collection run starts" 'systemctl start garrison-collect.service'
 check "the installer keeps both files, empty and root's alone" "
     for name in metrics-credential spamhaus-dqs-key; do
         test -f $credentials/\$name && test ! -s $credentials/\$name &&
@@ -144,7 +144,7 @@ check "doctor names the missing metrics credential" \
      grep -F '[doctor-credential-missing-empty]' /root/doctor.log | grep -q '^FAIL  metrics-credential '"
 inside "sed -n '/^FAIL  metrics-credential /{n;s/^.*: //;p;}' /root/doctor.log > /root/doctor-fix.sh &&
     grep -q /etc/garrison/credentials/metrics-credential /root/doctor-fix.sh && sh -e /root/doctor-fix.sh"
-check "the file doctor's command makes lets a collection run start" 'systemctl start garrison-collect.service'
+once "the file doctor's command makes lets a collection run start" 'systemctl start garrison-collect.service'
 check "doctor finds both empty files in order where nothing reads them" "
     garrison doctor > /root/doctor.log 2>&1;
     ! grep -E -q 'FAIL  .*(metrics-credential|spamhaus-dqs-key)' /root/doctor.log &&
@@ -161,7 +161,7 @@ made='run .garrison stalwart setup., which makes it'
 inside "for key in $keys; do cp -p $credentials/\$key /root/\$key.kept && : > $credentials/\$key; done"
 since=$(inside 'sleep 1 && date +%s')
 run_collector='systemctl reset-failed garrison-collect.service; systemctl start garrison-collect.service'
-check "with an empty key file collection runs start" "$run_collector && $run_collector"
+once "with an empty key file collection runs start" "$run_collector && $run_collector"
 check "the collector's journal says once that its key file is empty, and what makes a key" "
     test \"\$(journalctl -u garrison-collect.service --since @$since --no-pager | grep -c \
         'The collector has no API key for Stalwart: Protected file is empty: /run/credentials/garrison-collect.service/collector-native-key; $made')\" = 1"
@@ -171,23 +171,24 @@ check "doctor fails each empty key file with the setup that makes it" "
         grep -A 1 -F '[doctor-credential-no-key]' /root/doctor.log |
             grep -A 1 \"^FAIL  \$key \" | grep -q 'garrison stalwart setup' || exit 1
     done"
-check "the receiver does not start with an empty signature key, and says why" "
-    ! systemctl restart garrison-ingest.service 2>/dev/null &&
-        journalctl -u garrison-ingest.service --since @$since --no-pager | grep -q \
+once "the receiver does not start with an empty signature key, and says why" \
+    '! systemctl restart garrison-ingest.service 2>/dev/null' "
+    journalctl -u garrison-ingest.service --since @$since --no-pager | grep -q \
             'signature key: Protected file is empty: /run/credentials/garrison-ingest.service/webhook-signature-key; $made'"
 catalog_ask='printf "%s\n" "{\"op\": \"catalog\", \"token\": \"acceptance-token-0123456789abcdef\"}" |
     timeout 10 runuser -u garrison -- /usr/local/bin/acceptance-connect /run/garrison/broker.sock'
-check "the broker checks no rights with an empty key, and its journal says why" "
-    systemctl restart garrison-broker.service && $catalog_ask | grep -q 'not set up to check access rights' &&
+once "the broker checks no rights with an empty key, and its journal says why" \
+    'systemctl restart garrison-broker.service' "
+    $catalog_ask | grep -q 'not set up to check access rights' &&
         journalctl -u garrison-broker.service --since @$since --no-pager | grep -q \
             \"the broker's API key: Protected file is empty: /run/credentials/garrison-broker.service/broker-native-key; $made\""
 inside "for key in $keys; do cp -p /root/\$key.kept $credentials/\$key; done && systemctl restart garrison-broker.service"
 check "with the keys back the receiver, which systemd starts again meanwhile, runs" '
     for attempt in $(seq 20); do systemctl is-active --quiet garrison-ingest.service && exit 0; sleep 1; done; exit 1'
-check "with the keys back the collector's journal says once that it has its key again" "
-    $run_collector && $run_collector &&
-        test \"\$(journalctl -u garrison-collect.service --since @$since --no-pager |
-            grep -c 'The collector has an API key for Stalwart again')\" = 1"
+once "with the keys back the collector's journal says once that it has its key again" \
+    "$run_collector && $run_collector" "
+    test \"\$(journalctl -u garrison-collect.service --since @$since --no-pager |
+        grep -c 'The collector has an API key for Stalwart again')\" = 1"
 check "doctor finds the key files in order again" "
     garrison doctor > /root/doctor.log 2>&1;
     for key in $keys; do

@@ -290,7 +290,7 @@ scenario_upgrade_came_up() {
     again=$(another_release)
     killed_at '/root/again/bin/garrison install' \
         "$(current_is "$again") && systemctl is-active --quiet garrison-web.service" 0 install-running
-    check "the release of the killed upgrade runs and collects" \
+    once "the release of the killed upgrade runs and collects" \
         'systemctl is-active --quiet garrison-collect.timer && systemctl start garrison-collect.service &&
             systemctl start garrison-collect.service'
     first=$(inside 'sqlite3 -readonly /var/lib/garrison/collector/status.sqlite "SELECT min(collected_at) FROM snapshots"')

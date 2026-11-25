@@ -185,7 +185,7 @@ sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT value FROM snapshots,
 SQL
 check "check-config takes the two places" \
     '/opt/garrison/current/bin/garrison --config /etc/garrison/garrison.toml check-config'
-check "with the drop-in a collection run succeeds" \
+once "with the drop-in a collection run succeeds" \
     'systemctl reset-failed garrison-collect.service; systemctl start garrison-collect.service'
 check "the collector reads the receipt of /home where the drop-in shows it" \
     'sh /root/card.sh receipt.home-backup | grep "\"state\":\"ok\""'

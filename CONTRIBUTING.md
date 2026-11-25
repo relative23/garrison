@@ -572,7 +572,9 @@ that step, and the checksums in its log and artifact are what to compare.
 
 A release is accepted on hosts that are made for the run and removed after
 it. Each script takes release archives, prints one line for every check and
-stops at the first `FAIL`.
+stops at the first `FAIL`. A command that changes something runs once
+(`once`); only a look, at a service that is active before it listens or at a
+line in a journal, is tried again for a while (`check`).
 
 | Script | Archives | What it proves |
 |---|---|---|

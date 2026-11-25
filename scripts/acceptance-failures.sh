@@ -122,7 +122,7 @@ scenario_refusals() {
     refused "a configuration the release refuses stops the upgrade" \
         '/root/release/bin/garrison install' install-config-refused
     # A script that keeps only standard error finds the reason there.
-    check "the installer names the refused setting on standard error" \
+    once "the installer names the refused setting on standard error" \
         'umask 077 && /root/release/bin/garrison install 2>&1 >/dev/null | grep -q unknown_setting'
     inside 'cp -p /root/garrison.toml.good /etc/garrison/garrison.toml'
     check "the refused upgrade backed nothing up" "test \$(ls /var/backups/garrison | wc -l) -eq $backups"
@@ -206,7 +206,7 @@ MIGRATE
 scenario_migrated_then_failed() {
     step "A release that migrated a database and then failed is switched back with the state from before"
     migrating_release
-    check "a collection run wrote the status database" 'systemctl start garrison-collect.service'
+    once "a collection run wrote the status database" 'systemctl start garrison-collect.service'
     current=$(inside 'basename "$(readlink -f /opt/garrison/current)"')
     earlier=$(inside 'readlink -f /opt/garrison/previous 2>/dev/null || true')
     schema=$(status_schema)
@@ -340,11 +340,11 @@ scenario_stopped_collector() {
         printf "\n[notifications]\nntfy_url = \"https://localhost:8443/acceptance\"\n" >> /etc/garrison/garrison.toml &&
         cp -p /etc/garrison/garrison.toml /root/garrison.toml.topic'
     check "the configuration with a topic is accepted" '/opt/garrison/current/bin/garrison check-config'
-    check "a collection run leaves the topic for the watch" \
+    once "a collection run leaves the topic for the watch" \
         'systemctl start garrison-collect.service &&
             sqlite3 /var/lib/garrison/collector/status.sqlite \
                 "SELECT value FROM memory WHERE key = '"'"'notify.channel'"'"'" | grep -q localhost:8443'
-    check "the watch finds the collector running and says nothing" \
+    once "the watch finds the collector running and says nothing" \
         'systemctl start garrison-watch.service && ! grep -q "collector" /root/ntfy-bodies'
     # The collector stops: no timer, the last run an hour old, and a
     # configuration that no release loads.
@@ -353,18 +353,15 @@ scenario_stopped_collector() {
             "UPDATE snapshots SET collected_at = collected_at - 3600" &&
         echo "nonsense = 1" >> /etc/garrison/garrison.toml'
     check "the collector refuses the configuration" '! /opt/garrison/current/bin/garrison check-config'
-    check "the watch tells the topic that the collector has stopped" \
-        'systemctl start garrison-watch.service &&
-            grep -q "the collector has stopped" /root/ntfy-bodies &&
+    once "the watch tells the topic that the collector has stopped" 'systemctl start garrison-watch.service' \
+        'grep -q "the collector has stopped" /root/ntfy-bodies &&
             test -e /var/lib/garrison/watch/collector-stopped'
-    check "a second look tells nothing more" \
-        'systemctl start garrison-watch.service &&
-            test "$(grep -c "the collector has stopped" /root/ntfy-bodies)" = 1'
+    once "a second look tells nothing more" 'systemctl start garrison-watch.service' \
+        'test "$(grep -c "the collector has stopped" /root/ntfy-bodies)" = 1'
     inside 'cat /root/garrison.toml.topic > /etc/garrison/garrison.toml &&
         systemctl start garrison-collect.timer garrison-collect.service'
-    check "the watch tells the topic that the collector runs again" \
-        'systemctl start garrison-watch.service &&
-            grep -q "the collector runs again" /root/ntfy-bodies &&
+    once "the watch tells the topic that the collector runs again" 'systemctl start garrison-watch.service' \
+        'grep -q "the collector runs again" /root/ntfy-bodies &&
             test ! -e /var/lib/garrison/watch/collector-stopped'
     inside 'cat /root/garrison.toml.kept > /etc/garrison/garrison.toml &&
         rm -r /etc/systemd/system/garrison-collect.service.d /etc/systemd/system/garrison-watch.service.d &&
@@ -387,14 +384,14 @@ scenario_collect_beside() {
     before=$(inside "$newest")
     # A run by hand under way holds the collector's state directory.
     inside 'systemd-run --quiet --unit=acceptance-collecting flock /var/lib/garrison/collector sleep 300'
-    check "a run beside it ends as a success and says why" \
+    once "a run beside it ends as a success and says why" \
         'systemctl start garrison-collect.service &&
-            test "$(systemctl show -p Result --value garrison-collect.service)" = success &&
-            journalctl -u garrison-collect.service -n 20 --no-pager > /root/collect.log &&
+            test "$(systemctl show -p Result --value garrison-collect.service)" = success' \
+        'journalctl -u garrison-collect.service -n 20 --no-pager > /root/collect.log &&
             acceptance-state /root/collect.log collect-busy'
     check "and stores no snapshot" "test \"\$($newest)\" = '$before'"
     inside 'systemctl stop acceptance-collecting'
-    check "once that run is over, the next one stores its snapshot" \
+    once "once that run is over, the next one stores its snapshot" \
         "systemctl start garrison-collect.service && test \"\$($newest)\" -gt '$before'"
     inside 'systemctl start garrison-collect.timer'
     running "after the run beside one" "$new"
