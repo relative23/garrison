@@ -90,6 +90,9 @@ elif [ -z "${image:-}" ]; then
     echo "$distro runs only in a virtual machine (HOST=vm)" >&2
     exit 2
 fi
+# The stand-in for Stalwart that finish_host starts.
+# shellcheck source=scripts/acceptance-stalwart.sh
+. "$(dirname "$0")/acceptance-stalwart.sh"
 
 # KEEP=1 leaves the container running for a look inside; remove it afterwards.
 cleanup() {
@@ -149,6 +152,23 @@ check() {
         sleep 1
     done
     echo "ok    $1"
+}
+# `once DESCRIPTION COMMAND [LOOK]`: a command that changes something runs
+# once, and its exit status decides: a second try would hide that the first
+# failed. Only the look after it, such as a line in a journal, waits as a
+# check does.
+once() {
+    if ! once_said=$(inside "$2" 2>&1); then
+        echo "FAIL  $1"
+        printf '%s\n' "$once_said" | tail -n 20
+        inside "journalctl -u 'garrison-*' --no-pager -n 40" || true
+        exit 1
+    fi
+    if [ $# -ge 3 ]; then
+        check "$1" "$3"
+    else
+        echo "ok    $1"
+    fi
 }
 
 # UPDATE=1: every package the distribution has an update for, before anything
@@ -228,98 +248,7 @@ finish_host() {
         step "Installing ClamAV without starting it"
         inside "$clamav"
     fi
-    # A stand-in for Stalwart that knows one administrator token: subject 1, native
-    # account b, role e. Any other token is invalid, as in production. With it the
-    # broker authorizes a request as usual, so an action runs through polkit and
-    # systemctl for real. It also answers what `garrison stalwart setup` asks
-    # and shows what it wrote, without the secrets: the API keys it makes with
-    # their permissions in /root/stand-in-keys, refused while
-    # /root/stand-in-refuses exists, its other objects in /root/stand-in-objects.
-    inside_input 'cat > /root/stalwart-stub.sh' <<'STUB'
-read -r method path rest
-length=0
-authorization=
-while IFS= read -r line; do
-    line=$(printf %s "$line" | tr -d '\r')
-    [ -z "$line" ] && break
-    case "$line" in
-        [Cc]ontent-[Ll]ength:*) length=$(printf %s "${line#*:}" | tr -d ' ') ;;
-        [Aa]uthorization:*) authorization=$(printf %s "${line#*:}" | sed 's/^ *//') ;;
-    esac
-done
-body=$(head -c "$length")
-answer=
-status="200 OK"
-# The form Stalwart 1.1.0 answers in: a list names its account, b, the
-# administrator's own.
-respond() {
-    answer="{\"methodResponses\": [[\"$1\", {\"accountId\": \"b\", \"list\": [$2], \"notFound\": []}, \"0\"]], \"sessionState\": \"0\"}"
-}
-answered() { answer="{\"methodResponses\": [[\"$1\", $2, \"0\"]], \"sessionState\": \"0\"}"; }
-rights() { printf %s "$body" | grep -o '"permissions":{"@type":"Replace","permissions":{[^}]*}}' || echo '"permissions":{}'; }
-# The object a /set created or updated, under its kind.
-keep() {
-    set -- "$(printf %s "$body" | sed -n 's/.*\/set",{"[a-z]*":{"\([^"]*\)":{\(.*\)}}},"0"\]\]}$/\1 \2/p')"
-    [ -n "$1" ] || return 0
-    mkdir -p /root/stand-in-objects
-    printf '{"id": "%s", %s}\n' "$(echo "${1%% *}" | sed "s/^new$/$kind-1/")" "${1#* }" |
-        sed 's/,"signatureKey":{[^}]*}//; s/,"authSecret":{[^}]*}//' > "/root/stand-in-objects/$kind"
-}
-case "$method $path" in
-    "GET /auth/userinfo")
-        if [ "$authorization" = "Bearer acceptance-token-0123456789abcdef" ]; then
-            answer='{"sub": "1", "email": "admin@example.test"}'
-        else
-            status="401 Unauthorized"
-        fi ;;
-    "GET /jmap/session")
-        if [ -e /root/stand-in-refuses ]; then
-            status="401 Unauthorized"
-        else
-            answer='{"primaryAccounts": {"urn:stalwart:jmap": "b"}}'
-        fi ;;
-    "POST /jmap/")
-        call=$(printf %s "$body" | grep -o 'x:[A-Za-z]*/[a-z]*' | head -n 1)
-        kind=${call#x:}; kind=${kind%/*}
-        case "$body" in
-            *x:Account/get*) respond x:Account/get '{"id": "b", "@type": "User", "memberTenantId": null,
-                "roles": {"@type": "Custom", "roleIds": {"e": true}}, "permissions": {"@type": "Inherit"}}' ;;
-            *x:Authentication/get*) respond x:Authentication/get \
-                '{"id": "singleton", "defaultAdminRoleIds": {}, "defaultUserRoleIds": {}}' ;;
-            *x:Role/get*) respond x:Role/get '{"id": "e", "roleIds": {}, "memberTenantId": null, "disabledPermissions": {},
-                "enabledPermissions": {"authenticate": true, "sysActionCreate": true, "sysRoleUpdate": true}}' ;;
-            *x:ApiKey/get*)
-                respond "$call" "$(sed 's/^\([^ ]*\) \([^ ]*\) \(.*\)$/{"id": "\1", "description": "\3", "allowedIps": {"127.0.0.1": true, "::1": true}, "createdAt": "2026-11-24T00:00:00Z", "expiresAt": null, \2, "secret": "kept"}/' \
-                    /root/stand-in-keys 2>/dev/null | paste -s -d , -)" ;;
-            *x:ApiKey/set*'"create"'*)
-                id=k$(date +%s%N)
-                printf '%s %s %s\n' "$id" "$(rights)" "$(printf %s "$body" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')" \
-                    >> /root/stand-in-keys
-                answered "$call" "{\"created\": {\"new\": {\"id\": \"$id\", \"secret\": \"stand-in-$id-secret\"}}}" ;;
-            *x:ApiKey/set*'"update"'*)
-                id=$(printf %s "$body" | sed -n 's/.*"update":{"\([^"]*\)".*/\1/p')
-                sed -i "s|^$id [^ ]* |$id $(rights) |" /root/stand-in-keys
-                answered "$call" '{}' ;;
-            *x:ApiKey/set*'"destroy"'*)
-                for id in $(cut -d ' ' -f 1 /root/stand-in-keys); do
-                    case $body in *"\"$id\""*) sed -i "/^$id /d" /root/stand-in-keys ;; esac
-                done
-                answered "$call" '{}' ;;
-            *x:WebHook/get*) respond "$call" "$(cat /root/stand-in-objects/WebHook 2>/dev/null || echo '{"id": "w1", "httpHeaders": {"X-Garrison": "events"}}')" ;;
-            # The milters a scenario puts in /root/stand-in-milters.
-            *x:MtaMilter/get*) respond "$call" "$(cat /root/stand-in-milters 2>/dev/null)" ;;
-            */get*) respond "$call" "$(cat "/root/stand-in-objects/$kind" 2>/dev/null)" ;;
-            */set*) keep; answered "$call" '{}' ;;
-        esac ;;
-esac
-printf 'HTTP/1.1 %s\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' "$status" "${#answer}" "$answer"
-STUB
-    inside 'if command -v ncat >/dev/null 2>&1; then
-            systemd-run --quiet --unit=acceptance-stalwart ncat -lk 127.0.0.1 8099 --sh-exec "sh /root/stalwart-stub.sh"
-        else
-            systemd-run --quiet --unit=acceptance-stalwart \
-                socat TCP-LISTEN:8099,bind=127.0.0.1,reuseaddr,fork SYSTEM:"sh /root/stalwart-stub.sh"
-        fi'
+    stalwart_stand_in
     # The checks talk to the broker's socket through this, as its peer would.
     inside_input 'cat > /usr/local/bin/acceptance-connect && chmod 755 /usr/local/bin/acceptance-connect' <<'CONNECT'
 #!/bin/sh
@@ -341,6 +270,15 @@ for state in "$@"; do
 done
 exit 1
 STATE
+    # The collector and the watch run once and end, as their timers start
+    # them. The scripts start them oftener than systemd lets a unit be started
+    # (five times in ten seconds), so each start begins that count anew.
+    inside_input 'cat > /usr/local/bin/acceptance-run && chmod 755 /usr/local/bin/acceptance-run' <<'RUN'
+#!/bin/sh
+# acceptance-run UNIT: start UNIT and wait for its end, whatever was started before.
+systemctl reset-failed "$1" 2>/dev/null
+exec systemctl start "$1"
+RUN
     copy_in "$previous" /root/previous.tar.gz
     copy_in "$release" /root/release.tar.gz
     inside 'cd /root && mkdir previous release &&
@@ -435,13 +373,13 @@ services() {
     check "$1: web answers without a session" \
         'curl -s http://127.0.0.1:8091/api/session | grep -E -q "\"session\": ?null|Sign-in required"'
     check "$1: ingest answers" 'curl -sf http://127.0.0.1:8094/health'
-    check "$1: a signed batch is stored" '
+    once "$1: a signed batch is stored" '
         key=$(cat /etc/garrison/credentials/webhook-signature-key)
         body="{\"events\": [{\"id\": \"$(date +%s%N)\", \"createdAt\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"type\": \"auth.failed\", \"data\": {}}]}"
         signature=$(printf %s "$body" | openssl dgst -sha256 -hmac "$key" -binary | base64)
         curl -s -H "Content-Type: application/json" -H "X-Signature: $signature" \
             --data-binary "$body" http://127.0.0.1:8094/webhook | grep -q "\"stored\":1"'
-    check "$1: one collection run succeeds" 'systemctl start garrison-collect.service'
+    once "$1: one collection run succeeds" 'acceptance-run garrison-collect.service'
     # The host care checks run their commands inside the collector's sandbox.
     # Where the package manager is one they read, its answer must be known.
     check "$1: the host care and sender checks answer from the collector's sandbox" '
@@ -454,9 +392,8 @@ services() {
         fi'
     # In its own sandbox the watch reads the collector's database. The check
     # runs on the previous releases too, which print no name: hence the words.
-    check "$1: the watch over the collector finds it running" \
-        'systemctl start garrison-watch.service &&
-            journalctl -u garrison-watch.service -n 5 --no-pager | grep -q "The collector runs"'
+    once "$1: the watch over the collector finds it running" 'acceptance-run garrison-watch.service' \
+        'journalctl -u garrison-watch.service -n 5 --no-pager | grep -q "The collector runs"'
     # A version command runs inside the collector's sandbox and still answers.
     check "$1: the collector's version command reports a version" \
         'sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT document FROM snapshots ORDER BY id DESC LIMIT 1" |

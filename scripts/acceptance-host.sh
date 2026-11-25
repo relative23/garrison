@@ -82,20 +82,30 @@ services installed
 # Every denial of the mandatory access control since boot that concerns
 # Garrison, nginx or their ports: by process, profile, path, type, unit or port,
 # never by host name (a whole journal line once matched it, for the denials of
-# Ubuntu's own profiles). Without ausearch the kernel log has both kinds.
+# Ubuntu's own profiles). The kernel hands a denial to auditd while that runs
+# and writes it to its own log otherwise, so both are read: ausearch reads
+# only auditd's log, and finds nothing where auditd does not run. A place that
+# cannot be read fails the step: no denial found is not none read.
 denials() {
-    inside 'if command -v ausearch >/dev/null 2>&1; then
-            ausearch -m AVC,USER_AVC -ts boot -i 2>/dev/null
-        else
-            journalctl -k -b -o cat --no-pager 2>/dev/null | grep -E "apparmor=\"DENIED\"|avc: +denied"
-        fi | grep -E "comm=\"?(garrison|nginx)|profile=\"[^\"]*(garrison|nginx)|name=\"?[^ \"]*garrison|garrison_[a-z_]*_t|/(opt|etc|var/lib|run)/garrison|(dest|src)=809[14]([^0-9]|\$)|garrison-[a-z]+\.(service|socket|timer)" || true'
+    inside 'kernel=$(journalctl -k -b -o cat --no-pager 2>&1) || { echo "the kernel log: $kernel"; exit 2; }
+        audit=
+        if systemctl is-active --quiet auditd.service; then
+            audit=$(ausearch -m AVC,USER_AVC -ts boot -i 2>&1) || [ "$audit" = "<no matches>" ] ||
+                { echo "the audit log: $audit"; exit 2; }
+        fi
+        printf "%s\n%s\n" "$kernel" "$audit" | grep -E "apparmor=\"DENIED\"|avc: +denied" |
+            grep -E "comm=\"?(garrison|nginx)|profile=\"[^\"]*(garrison|nginx)|name=\"?[^ \"]*garrison|garrison_[a-z_]*_t|/(opt|etc|var/lib|run)/garrison|(dest|src)=809[14]([^0-9]|\$)|garrison-[a-z]+\.(service|socket|timer)" || true'
 }
 mac=$(inside 'if command -v getenforce >/dev/null 2>&1; then getenforce;
     elif aa-status --enabled 2>/dev/null; then echo AppArmor; else echo none; fi')
-echo "      access control: $mac"
+echo "      access control: $mac; its denials are read from the kernel log$(inside \
+    'if systemctl is-active --quiet auditd.service; then echo " and from the log of auditd, which runs"; fi')"
 
 undenied() {
-    found=$(denials)
+    if ! found=$(denials); then
+        echo "FAIL  $1: what the access control denied could not be read: $found"
+        exit 1
+    fi
     if [ -n "$found" ]; then
         echo "FAIL  $1: the access control denied something"
         echo "$found" | tail -n 20
@@ -185,8 +195,8 @@ sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT value FROM snapshots,
 SQL
 check "check-config takes the two places" \
     '/opt/garrison/current/bin/garrison --config /etc/garrison/garrison.toml check-config'
-check "with the drop-in a collection run succeeds" \
-    'systemctl reset-failed garrison-collect.service; systemctl start garrison-collect.service'
+once "with the drop-in a collection run succeeds" \
+    'acceptance-run garrison-collect.service'
 check "the collector reads the receipt of /home where the drop-in shows it" \
     'sh /root/card.sh receipt.home-backup | grep "\"state\":\"ok\""'
 check "the host card measures the file system mounted at /home" \

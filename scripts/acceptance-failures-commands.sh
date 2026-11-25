@@ -166,6 +166,18 @@ scenario_access_folder() {
     running "after the policy in a folder init made" "$new"
 }
 
+# What the web service offers a signed-in administrator: a session of its own
+# sign-in, as a browser makes one, for which the stand-in exchanges any code
+# for the administrator's token. The cookies are for HTTPS only, so they go
+# back by hand.
+offered='web=http://127.0.0.1:8091
+    cookie() { tr -d "\r" | sed -n "s/^[Ss]et-[Cc]ookie: \(__Host-garrison_$1=[^;]*\);.*/\1/p"; }
+    asked=$(curl -s -o /dev/null -D - $web/auth/login) &&
+    state=$(printf "%s\n" "$asked" | tr -d "\r" | sed -n "s/^[Ll]ocation: .*[?&]state=\([^&]*\).*/\1/p") &&
+    back=$(curl -s -o /dev/null -D - -H "Cookie: $(printf "%s\n" "$asked" | cookie login)" \
+        "$web/auth/callback?code=acceptance&state=$state&iss=https%3A%2F%2Fmail.example.test") &&
+    curl -s -H "Cookie: $(printf "%s\n" "$back" | cookie session)" $web/api/actions'
+
 scenario_access_actions() {
     step "The profiles follow [[actions]]"
     upgraded
@@ -184,6 +196,7 @@ scenario_access_actions() {
     check "the broker offers it once the installer ran again" "$catalog | grep -q run_other"
     check "the installer restarted the web service with the broker" \
         "test \"\$($web_started)\" != \"\$(cat /root/web-started)\""
+    once "and the web service offers it to a signed-in administrator" "$offered | grep -q run_other"
     inside 'cat /root/garrison.toml.actions > /etc/garrison/garrison.toml'
     refused "a policy that names an action garrison.toml no longer has says what takes it out" \
         '/opt/garrison/current/bin/garrison access list' access-actions-gone
@@ -192,7 +205,7 @@ scenario_access_actions() {
     check "and the installer's check of the configuration takes the policy again" \
         '/opt/garrison/current/bin/garrison check-config && ! grep -q run_other /etc/garrison/access-policy.json'
     installer '/root/release/bin/garrison install'
-    inside 'rm /root/garrison.toml.actions /root/garrison.toml.commands /root/web-started'
+    inside 'rm -f /root/garrison.toml.actions /root/garrison.toml.commands /root/web-started'
     running "after the actions changed" "$new"
 }
 

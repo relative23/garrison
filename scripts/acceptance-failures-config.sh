@@ -30,9 +30,8 @@ scenario_unloaded() {
     inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.unloaded &&
         cp -p /etc/garrison/credentials/collector-native-key /etc/garrison/credentials/my-key &&
         printf "\n[collector]\nnative_key = \"credential:my-key\"\n" >> /etc/garrison/garrison.toml'
-    check "the collector's unit hands it no credential of another name" \
-        'systemctl start garrison-collect.service &&
-            journalctl -u garrison-collect.service -n 30 --no-pager | grep -q "The collector has no API key for Stalwart"'
+    once "the collector's unit hands it no credential of another name" 'acceptance-run garrison-collect.service' \
+        'journalctl -u garrison-collect.service -n 30 --no-pager | grep -q "The collector has no API key for Stalwart"'
     refused "the installer refuses a secret under a name its unit does not load" \
         '/root/release/bin/garrison install' check-config-unloaded
     check "and names the name its unit loads it as" \
@@ -179,14 +178,14 @@ scenario_hidden_check() {
             /etc/garrison/garrison.toml && grep -q "^path = \"/srv/garrison/jobs/nightly.json\"\$" /etc/garrison/garrison.toml'
     says "the installer takes the place shown to the collector" '/root/release/bin/garrison install' \
         "install-running install-as-installed"
-    check "the collector reads the receipt there, and root sees an empty folder" \
-        'systemctl start garrison-collect.service && test -z "$(ls -A /srv/garrison/jobs)" &&
+    once "the collector reads the receipt there, and root sees an empty folder" \
+        'acceptance-run garrison-collect.service && test -z "$(ls -A /srv/garrison/jobs)" &&
             sqlite3 /var/lib/garrison/collector/status.sqlite "SELECT document FROM snapshots ORDER BY id DESC LIMIT 1" |
                 grep -o "\"id\":\"receipt.nightly\"[^}]*\"state\":\"[a-z]*\"" | grep -q "\"state\":\"ok\""'
     inside 'rm /etc/systemd/system/garrison-collect.service.d/jobs.conf &&
         { rmdir /etc/systemd/system/garrison-collect.service.d 2>/dev/null || true; } && systemctl daemon-reload &&
         cat /root/garrison.toml.hidden > /etc/garrison/garrison.toml && rm -r /home/jobs /srv/garrison &&
-        systemctl start garrison-collect.service'
+        acceptance-run garrison-collect.service'
     running "after the check's path under /home" "$new"
 }
 

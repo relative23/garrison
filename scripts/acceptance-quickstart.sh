@@ -141,7 +141,7 @@ for unit in garrison-web.service garrison-ingest.service garrison-broker.socket 
     garrison-watch.timer; do
     check "set up: $unit is active" "systemctl is-active --quiet $unit"
 done
-check "set up: a collection run with the new collector key succeeds" 'systemctl start garrison-collect.service'
+once "set up: a collection run with the new collector key succeeds" 'acceptance-run garrison-collect.service'
 check "set up: self-check passes" "$garrison --config /etc/garrison/garrison.toml self-check"
 
 step "nginx with the server block setup printed"
@@ -212,6 +212,40 @@ inside 'sed "s/^/      | /" /root/doctor.log'
 check "doctor finds no problem but the reserved test names" \
     '! grep "^FAIL" /root/doctor.log | grep -vF "[doctor-origin-placeholder]" | grep -q .'
 
+step "Rotating the secrets beside the running services"
+# As root on the installed host, against Stalwart itself: each new key is
+# made, written and taken up by its service before the old one goes.
+taken='test "$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $(cat "$1")" \
+    http://127.0.0.1:8080/jmap/session)"'
+inside 'mkdir /root/before && cd /etc/garrison/credentials &&
+    cp -p broker-native-key collector-native-key webhook-signature-key /root/before/'
+check "before: Stalwart takes both API keys" \
+    "for key in broker collector; do set -- /root/before/\$key-native-key; $taken = 200 || exit 1; done"
+once "a rotation finishes" \
+    "$garrison stalwart setup --rotate --admin-credential /root/stalwart-admin.json > /root/rotate.log 2>&1"
+inside 'python3 /root/masked.py /root/rotate.log | sed "s/^/      | /"'
+check "it restarted the broker and the receiver with their new secrets" \
+    'grep -F "[setup-restarted]" /root/rotate.log | grep -q -F garrison-broker &&
+        grep -F "[setup-restarted]" /root/rotate.log | grep -q -F garrison-ingest'
+check "every secret is another one" \
+    'for file in /root/before/*; do
+        test "$(cat "$file")" != "$(cat "/etc/garrison/credentials/${file##*/}")" || exit 1; done'
+check "Stalwart no longer takes the keys from before, and takes the new ones" \
+    "for key in broker collector; do
+        set -- /root/before/\$key-native-key; $taken = 401 || exit 1
+        set -- /etc/garrison/credentials/\$key-native-key; $taken = 200 || exit 1
+    done"
+once "a collection run with the new collector key succeeds" 'acceptance-run garrison-collect.service'
+before=$(events)
+inside 'curl -s --max-time 20 smtp://127.0.0.1:25 --mail-from a@example.org --mail-rcpt nobody@example.test \
+    -T /root/mail.txt >/dev/null 2>&1 || true'
+check "Stalwart's events reach Garrison under the new signature key" \
+    "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -gt $before"
+inside "$garrison doctor > /root/doctor-rotated.log 2>&1 || true"
+check "doctor: Stalwart takes both new keys, and nothing else is wrong" \
+    'test "$(grep -c -F "[doctor-key-taken]" /root/doctor-rotated.log)" = 2 &&
+        ! grep "^FAIL" /root/doctor-rotated.log | grep -vF "[doctor-origin-placeholder]" | grep -q .'
+
 step "The macro milter, switched on and off again"
 # A document as Word writes one with macros, and one without, handed to
 # Stalwart the way a stranger's server would.
@@ -241,10 +275,10 @@ except smtplib.SMTPRecipientsRefused as error:
 except smtplib.SMTPResponseException as error:
     print(error.smtp_code, error.smtp_error.decode(errors="replace"))
 PYTHON
-check "before: Stalwart takes a document with a macro project" \
+once "before: Stalwart takes a document with a macro project" \
     'python3 /root/document-mail.py macro | tee /root/macro-before.log | grep -q "^250 accepted"'
 inside 'printf "\n[milter]\n" >> /etc/garrison/garrison.toml'
-check "setup starts the filter and tells Stalwart of it" \
+once "setup starts the filter and tells Stalwart of it" \
     "$garrison stalwart setup --admin-credential /root/stalwart-admin.json > /root/milter-on.log 2>&1 &&
         grep -q 'entered the macro milter (127.0.0.1:8096)' /root/milter-on.log"
 inside 'sed "s/^/      | /" /root/milter-on.log'
@@ -254,9 +288,9 @@ inside "$garrison doctor > /root/doctor-milter.log 2>&1 || true"
 check "doctor: the filter answers and Stalwart knows of it" \
     'grep -qF "[doctor-milter-answers]" /root/doctor-milter.log &&
         grep -qF "[doctor-milter-entry-asked]" /root/doctor-milter.log'
-check "a document with a macro project is refused in the filter's words" \
+once "a document with a macro project is refused in the filter's words" \
     'python3 /root/document-mail.py macro | tee /root/macro-on.log | grep -q "^550 .*contains macros"'
-check "a document without one is taken" \
+once "a document without one is taken" \
     'python3 /root/document-mail.py plain | tee /root/plain-on.log | grep -q "^250 accepted"'
 check "the filter's journal names what it refused" \
     'journalctl -u garrison-milter.service --no-pager | grep -q "Refused a message with"'
@@ -268,9 +302,9 @@ check "systemd starts the killed filter again" \
     'now=$(systemctl show -p MainPID --value garrison-milter.service) &&
         test "$now" != 0 && test "$now" != "$(cat /root/milter-pid)" &&
         systemctl is-active --quiet garrison-milter.service'
-check "the filter started again refuses a document with a macro project" \
+once "the filter started again refuses a document with a macro project" \
     'python3 /root/document-mail.py macro | grep -q "^550 .*contains macros"'
-check "an upgrade to the same release leaves the filter running" \
+once "an upgrade to the same release leaves the filter running" \
     "/root/release/bin/garrison install < /dev/null > /root/reinstall.log 2>&1 &&
         systemctl is-active --quiet garrison-milter.service &&
         python3 /root/document-mail.py macro | grep -q '^550 '"
@@ -278,14 +312,14 @@ check "uninstalling is refused while Stalwart asks the filter" \
     "! $garrison uninstall --dry-run > /root/uninstall-milter.log 2>&1 &&
         grep -q -F '[install-milter-still-asked]' /root/uninstall-milter.log"
 inside 'sed -i "/^\[milter\]$/d" /etc/garrison/garrison.toml'
-check "without the section setup takes the filter out and stops it" \
+once "without the section setup takes the filter out and stops it" \
     "$garrison stalwart setup --admin-credential /root/stalwart-admin.json > /root/milter-off.log 2>&1 &&
         grep -q \"took the macro milter's entry out of Stalwart\" /root/milter-off.log &&
         grep -q 'stopped and disabled garrison-milter.service' /root/milter-off.log"
 inside 'sed "s/^/      | /" /root/milter-off.log'
 check "garrison-milter.service is stopped and disabled" \
     '! systemctl is-active --quiet garrison-milter.service && ! systemctl is-enabled --quiet garrison-milter.service'
-check "afterwards Stalwart takes the document again, undeferred" \
+once "afterwards Stalwart takes the document again, undeferred" \
     'python3 /root/document-mail.py macro | tee /root/macro-after.log | grep -q "^250 accepted"'
 
 step "Accepted: the quick start sets Garrison up against Stalwart and nothing is left to fix"
