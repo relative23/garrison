@@ -53,7 +53,8 @@ page of its own fails it, and so does a proxy that passes the page but not
 its files, which leaves a page nobody can sign in on. Every problem comes
 with what to do; it exits with 1 when something fails. Each line ends with
 the name of its state in brackets, which stays the same across releases:
-`ok    the clock is synchronized [doctor-clock-synchronized]`. Run it after every
+`ok    the clock is synchronized [doctor-clock-synchronized]`
+([state names](states.md#doctor) lists them). Run it after every
 update of Stalwart, of the proxy in front of it or of an application beside
 it.
 
@@ -308,7 +309,7 @@ brackets, such as `[install-no-room]`: the name of that state, which stays from
 release to release while its words may change. So do the lines the services and
 the watch over the collector write to the journal when a service stops, a
 collection run collects nothing or the watch has looked. A script looks for the
-name. Lines that only report progress, such as the installer's `==>` lines and
+name; [state names](states.md) lists every one with an example of its line. Lines that only report progress, such as the installer's `==>` lines and
 setup's steps, carry none.
 
 | Symptom | Check |

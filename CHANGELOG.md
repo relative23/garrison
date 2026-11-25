@@ -6,6 +6,12 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The page [state names](docs/operator/states.md) lists every state a command
+  ends with and every line of `garrison doctor`, each with an example of its
+  line, for scripts that look for the names.
+
 ### Changed
 
 - The documents name what they left out: `backup-check --report`,

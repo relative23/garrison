@@ -442,9 +442,12 @@ is lower-case words joined by hyphens, the area first (`install-no-room`), and
 never changes once released. Functions return `Result<T, State>`. Tests compare
 a state with its constructor, or look for its name (`support::states` in
 `tests/`), never for its words; the area's table test holds each state's whole
-line once and fails for a state it lacks. An acceptance script looks for a
-state by its name with `acceptance-state`, and `tests/states.rs` fails for a
-name that no constructor makes.
+line once and fails for a state it lacks. The operators' page
+`docs/operator/states.md` shows the same line in a block of its own, and the
+table test fails for a line the page lacks or words otherwise. An acceptance
+script looks for a state by its name with `acceptance-state`, and
+`tests/states.rs` fails for a name that no constructor makes, and for a page
+that lists a state twice or one the product does not have.
 
 ### Adding a provider
 

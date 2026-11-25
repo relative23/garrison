@@ -146,6 +146,7 @@ For operators:
 [configuration](docs/operator/configuration.md) ·
 [checks](docs/operator/checks.md) ·
 [observation ids](docs/operator/observations.md) ·
+[state names](docs/operator/states.md) ·
 [access](docs/operator/access.md) ·
 [operations](docs/operator/operations.md)
 

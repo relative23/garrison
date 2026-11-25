@@ -47,12 +47,22 @@ impl fmt::Display for State {
     }
 }
 
+/// The page that lists every state for operators.
+#[cfg(test)]
+const PAGE: &str = include_str!("../../../docs/operator/states.md");
+
 /// The table test of an area: `rows` hold every state that the constructors
 /// in `sources` (their files' text) make, each once, with its whole line
-/// written out as an example. The only place in an area's tests where a
-/// state's words stand.
+/// written out as an example, which the operators' page of the states shows
+/// too. The only place in an area's tests where a state's words stand.
 #[cfg(test)]
 pub(crate) fn table(sources: &[&str], rows: &[(State, &str)]) {
+    held(PAGE, sources, rows);
+}
+
+/// `table`, against `page` as the operators' page.
+#[cfg(test)]
+fn held(page: &str, sources: &[&str], rows: &[(State, &str)]) {
     let mut made: Vec<&str> = sources.iter().flat_map(|source| names(source)).collect();
     made.sort_unstable();
     for pair in made.windows(2) {
@@ -74,7 +84,21 @@ pub(crate) fn table(sources: &[&str], rows: &[(State, &str)]) {
             state.name
         );
         assert_eq!(state.to_string(), *line, "{}", state.name);
+        assert!(
+            entries(page).any(|entry| entry == *line),
+            "docs/operator/states.md shows every state's line in a block of its own, as its \
+             table has it; that of {} is:\n{line}",
+            state.name
+        );
     }
+}
+
+/// The blocks of the operators' page, each one state's whole line.
+#[cfg(test)]
+fn entries(page: &str) -> impl Iterator<Item = &str> {
+    page.split("```text\n")
+        .skip(1)
+        .filter_map(|rest| rest.split_once("\n```").map(|(entry, _)| entry))
 }
 
 /// The names that `State::new` is given in `source`, which are literals.
@@ -164,10 +188,14 @@ mod tests {
         }
     "#;
 
+    /// The page of the two states of `SOURCE`.
+    const LISTED: &str = "```text\nOne. [area-one]\n```\n```text\nTwo 2. [area-two]\n```\n";
+
     #[test]
     fn a_table_holds_every_state_its_constructors_make() {
         assert_eq!(names(SOURCE), ["area-one", "area-two"]);
-        table(
+        held(
+            LISTED,
             &[SOURCE],
             &[
                 (State::new("area-one", "One."), "One. [area-one]"),
@@ -179,7 +207,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "the table and the constructors name other states")]
     fn a_table_without_a_state_fails() {
-        table(
+        held(
+            LISTED,
             &[SOURCE],
             &[(State::new("area-one", "One."), "One. [area-one]")],
         );
@@ -189,7 +218,8 @@ mod tests {
     #[should_panic(expected = "area-one is in the table twice")]
     fn a_table_that_names_a_state_twice_fails() {
         let one = || State::new("area-one", "One.");
-        table(
+        held(
+            LISTED,
             &[SOURCE],
             &[(one(), "One. [area-one]"), (one(), "One. [area-one]")],
         );
@@ -199,17 +229,32 @@ mod tests {
     #[should_panic(expected = "two constructors make area-one")]
     fn two_constructors_of_one_name_fail() {
         let twice = format!("{SOURCE} State::new(\"area-one\", \"Again.\")");
-        table(&[&twice], &[]);
+        held(LISTED, &[&twice], &[]);
     }
 
     #[test]
     #[should_panic(expected = "area-two")]
     fn a_line_the_state_does_not_say_fails() {
-        table(
+        held(
+            LISTED,
             &[SOURCE],
             &[
                 (State::new("area-one", "One."), "One. [area-one]"),
                 (State::new("area-two", "Two 2."), "Two 3. [area-two]"),
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "docs/operator/states.md shows every state's line")]
+    fn a_line_the_page_does_not_show_whole_and_alone_fails() {
+        // The second state's line is there, but not as a block of its own.
+        held(
+            "```text\nOne. [area-one]\n```\nTwo 2. [area-two]\n```text\nTwo 2. [area-two] and more\n```\n",
+            &[SOURCE],
+            &[
+                (State::new("area-one", "One."), "One. [area-one]"),
+                (State::new("area-two", "Two 2."), "Two 2. [area-two]"),
             ],
         );
     }
