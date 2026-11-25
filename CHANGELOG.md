@@ -6,6 +6,15 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The documents name what they left out: `backup-check --report`,
+  `self-check --receipt`, `upgrade --signature`, `garrison stalwart-switch`,
+  every variable of the Ansible role, and that `check-config` only warns
+  about a path the collector cannot see in a file other than
+  `/etc/garrison/garrison.toml`. The installation guide's tested systems and
+  memory figures are those of 2026-11-25.
+
 ## [0.2.0] - 2026-11-25
 
 ### Upgrade notes

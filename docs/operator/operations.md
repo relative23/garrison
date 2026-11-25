@@ -81,6 +81,10 @@ credentials. To verify a restored copy:
 sudo garrison self-check --state /path/to/restored/latest
 ```
 
+With `--receipt FILE` the command also writes its result to that file as JSON
+(`date`, `result` with `passed` or `failed`, and each database), for a
+[`receipt`](checks.md#receipt) check to show.
+
 To put such a copy back, on the host it came from or on a new one where
 Garrison is installed and configured:
 
@@ -135,9 +139,11 @@ Put the new archive and its `.minisig` signature side by side, then:
 sudo garrison upgrade garrison-<version>-<arch>.tar.gz
 ```
 
-The installed release checks the signature with the keys compiled into it,
-refuses an archive for another architecture or an older version, unpacks
-exactly the bytes it checked and runs that release's installer.
+It reads the signature from the archive's name plus `.minisig`; `--signature
+FILE` names one that lies elsewhere. The installed release checks the
+signature with the keys compiled into it, refuses an archive for another
+architecture or an older version, unpacks exactly the bytes it checked and
+runs that release's installer.
 Releases that trust no key yet, and every archive you checked by hand, are
 installed directly:
 

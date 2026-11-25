@@ -262,7 +262,8 @@ The command adds no secret of its own: it runs with the environment your
 backup job already has (`RESTIC_REPOSITORY`, `RESTIC_PASSWORD_FILE`,
 `BORG_REPO`, `BORG_PASSPHRASE` and the like), or takes the repository with
 `--repo`. It writes `/var/lib/garrison/backup-check/<tool>.json`, which the
-provider reads. The report names where the repository is, without what signs
+provider reads; `--report FILE` writes another file, for a provider whose
+`path` names it. The report names where the repository is, without what signs
 in to it but a login: a folder on this host as the folder its name leads to,
 whatever slashes, dots, links, `local:` or `file://` are on the way; borg's
 repository elsewhere as borg writes it, `user@host:repo` and
@@ -666,7 +667,10 @@ database folder of `clamav`, `admin_directory` of `bulwark` and the program
 a `version-command` runs. Root sees them there, the collector does not, so
 the check would read nothing there, or the free space of the collector's
 own `/home`. `disk_path = "/tmp"` and `"/var/tmp"` are in order: the
-collector's own lie on the same file systems.
+collector's own lie on the same file systems. The refusal is for the file the
+units read, `/etc/garrison/garrison.toml`: for any other file named with
+`--config`, such as a draft, `check-config` warns about such a path and about
+an access policy in such a place, and the file counts as valid.
 
 Keep such a file where the collector sees it, as under `/var/lib` or
 `/srv`. Where a check must look at one place under `/home`, show the
