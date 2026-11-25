@@ -85,13 +85,16 @@ check "upgraded: a configured action runs through the broker and polkit" '
 # else: not another operation on the action's unit, not another unit. The
 # refusal must be polkit's (systemd's default asks for an administrator, and
 # --no-ask-password turns that into a refusal), not a unit that is missing.
+# systemd says it as "Interactive authentication required." and, since 259,
+# as "Access denied as the requested operation requires interactive
+# authentication".
 check "polkit lets the broker's user start the action's unit" \
     'runuser -u garrison-broker -- /usr/bin/systemctl --no-ask-password start acceptance-check.service'
 inside 'systemctl show -p MainPID --value garrison-web.service > /root/web-pid'
 for refused in "stop acceptance-check.service" "restart garrison-web.service"; do
     check "polkit refuses the broker's user: systemctl $refused" "
         ! runuser -u garrison-broker -- /usr/bin/systemctl --no-ask-password $refused 2>/root/polkit.log &&
-            grep -q 'Interactive authentication required' /root/polkit.log"
+            grep -q -i 'interactive authentication' /root/polkit.log"
 done
 check "garrison-web.service ran on through the refused restart" \
     'test "$(systemctl show -p MainPID --value garrison-web.service)" = "$(cat /root/web-pid)"'
