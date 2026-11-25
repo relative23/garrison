@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::state::State;
+use crate::state::{State, states};
 
 /// A channel whose address alone protects it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11,11 +11,11 @@ pub(in crate::doctor) enum Open {
     Webhook,
 }
 
-pub(in crate::doctor) fn unusable(why: &str) -> State {
-    State::new("doctor-notify-unusable", format!("notifications: {why}")).with_fix(
-        "Correct the file it names (configuration.md, Notifications), then send a test message: \
-         garrison notify-test",
-    )
+states! {
+    pub(in crate::doctor) fn unusable(why: &str) = "doctor-notify-unusable":
+        "notifications: {why}"
+        => "Correct the file it names (configuration.md, Notifications), then send a test message: \
+         garrison notify-test";
 }
 
 /// `channel` takes no token, and garrison.toml, which every user may read,

@@ -4,7 +4,7 @@ use std::fmt::Display;
 
 use garrison_stalwart::{Error, SUPPORTED};
 
-use crate::state::State;
+use crate::state::{State, states};
 use crate::units;
 
 /// What mends a name whose TLS or answer fails.
@@ -91,14 +91,21 @@ pub(in crate::doctor) fn unanswered(url: &str, error: impl Display) -> State {
     State::new("doctor-interface-unanswered", format!("{url}: {error}")).with_fix(NAME)
 }
 
-pub(in crate::doctor) fn hsts() -> State {
-    State::new("doctor-hsts-sent", "nginx sends Strict-Transport-Security")
-}
-
-pub(in crate::doctor) fn no_hsts() -> State {
-    State::new("doctor-hsts-missing", "no Strict-Transport-Security header").with_fix(
-        "Include /etc/nginx/snippets/garrison.conf in the server block; it sets the header.",
-    )
+states! {
+    pub(in crate::doctor) fn hsts() = "doctor-hsts-sent":
+        "nginx sends Strict-Transport-Security";
+    pub(in crate::doctor) fn no_hsts() = "doctor-hsts-missing":
+        "no Strict-Transport-Security header"
+        => "Include /etc/nginx/snippets/garrison.conf in the server block; it sets the header.";
+    pub(in crate::doctor) fn metrics_unread(url: &str, status: u16) = "doctor-metrics-unread":
+        "{url} answers {status}";
+    pub(in crate::doctor) fn metrics_unanswered(url: &str, error: impl Display)
+        = "doctor-metrics-unanswered":
+        "{url}: {error}";
+    pub(in crate::doctor) fn client_unanswered(url: &str, error: impl Display)
+        = "doctor-client-unanswered":
+        "{url}: {error}"
+        => "Check that the issuer is reachable from this host.";
 }
 
 pub(in crate::doctor) fn metrics_private(origin: &str) -> State {
@@ -113,14 +120,6 @@ pub(in crate::doctor) fn metrics_public(url: &str, status: u16) -> State {
     )
 }
 
-pub(in crate::doctor) fn metrics_unread(url: &str, status: u16) -> State {
-    State::new("doctor-metrics-unread", format!("{url} answers {status}"))
-}
-
-pub(in crate::doctor) fn metrics_unanswered(url: &str, error: impl Display) -> State {
-    State::new("doctor-metrics-unanswered", format!("{url}: {error}"))
-}
-
 pub(in crate::doctor) fn registered() -> State {
     let text = "Stalwart knows Garrison's sign-in client as registered";
     State::new("doctor-client-registered", text)
@@ -132,11 +131,6 @@ pub(in crate::doctor) fn client_refused(client: &str, reason: Option<&str>) -> S
     let reason = reason.unwrap_or("no reason given");
     let text = format!("Stalwart refuses Garrison's sign-in client {client}: {reason}");
     State::new("doctor-client-refused", text).with_fix("Run `garrison stalwart setup` again.")
-}
-
-pub(in crate::doctor) fn client_unanswered(url: &str, error: impl Display) -> State {
-    State::new("doctor-client-unanswered", format!("{url}: {error}"))
-        .with_fix("Check that the issuer is reachable from this host.")
 }
 
 pub(in crate::doctor) fn client_limited(host: &str) -> State {

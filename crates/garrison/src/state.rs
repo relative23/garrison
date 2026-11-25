@@ -4,7 +4,9 @@
 //!
 //! One constructor function makes each state, and the constructors of an
 //! area stand together in its `states.rs`: no sentence of a state is built
-//! anywhere else.
+//! anywhere else. Where a state's sentence is one text with its values, its
+//! constructor is an entry of the area's table (`states!`); where the
+//! sentence is decided, it is a function beside the table.
 
 use std::fmt;
 
@@ -50,6 +52,35 @@ impl fmt::Display for State {
 /// The page that lists every state for operators.
 #[cfg(test)]
 const PAGE: &str = include_str!("../../../docs/operator/states.md");
+
+/// The constructor functions of the states whose sentence is one text with
+/// its values, as a table. An entry is the function's signature, the state's
+/// name and its sentence, which takes its values as `format!` does; after
+/// `=>` follows what mends the state, where that is said apart:
+///
+/// ```text
+/// pub(super) fn no_room(folder: &Path, needed: u64) = "install-no-room":
+///     "{} has no room for {needed} MiB", folder.display()
+///     => "Free the room, then install again.";
+/// ```
+///
+/// This is the one macro of the project that writes functions: several
+/// hundred states are each a name and a sentence, and as functions each of
+/// them was six lines around its one.
+macro_rules! states {
+    ($(
+        $(#[$meta:meta])*
+        $visibility:vis fn $function:ident($($argument:ident: $kind:ty),* $(,)?) = $name:literal:
+            $text:literal $(, $value:expr)* $(=> $fix:literal $(, $mend:expr)*)?;
+    )*) => {$(
+        $(#[$meta])*
+        $visibility fn $function($($argument: $kind),*) -> $crate::state::State {
+            $crate::state::State::new($name, format!($text $(, $value)*))
+                $(.with_fix(format!($fix $(, $mend)*)))?
+        }
+    )*};
+}
+pub(crate) use states;
 
 /// The table test of an area: `rows` hold every state that the constructors
 /// in `sources` (their files' text) make, each once, with its whole line
@@ -101,20 +132,23 @@ fn entries(page: &str) -> impl Iterator<Item = &str> {
         .filter_map(|rest| rest.split_once("\n```").map(|(entry, _)| entry))
 }
 
-/// The names that `State::new` is given in `source`, which are literals.
+/// The names of the states that `source` makes: those `State::new` is given,
+/// which are literals, and those of the entries of a `states!` table, each
+/// after its signature's `) = `.
 #[cfg(test)]
 fn names(source: &str) -> Vec<&str> {
-    source
-        .split("State::new(")
-        .skip(1)
-        .map(|rest| {
-            let rest = rest.trim_start();
-            let quoted = rest
-                .strip_prefix('"')
-                .unwrap_or_else(|| panic!("a state's name is a literal: {rest:.60}"));
-            &quoted[..quoted.find('"').unwrap()]
-        })
-        .collect()
+    let given = source.split("State::new(").skip(1).map(|rest| {
+        let rest = rest.trim_start();
+        let quoted = rest
+            .strip_prefix('"')
+            .unwrap_or_else(|| panic!("a state's name is a literal: {rest:.60}"));
+        &quoted[..quoted.find('"').unwrap()]
+    });
+    let entered = source.split("= \"").skip(1).filter_map(|rest| {
+        let (name, after) = rest.split_once('"')?;
+        (after.starts_with(":\n") && name.contains('-')).then_some(name)
+    });
+    given.chain(entered).collect()
 }
 
 /// Lower-case words of letters and digits joined by hyphens, two at least:

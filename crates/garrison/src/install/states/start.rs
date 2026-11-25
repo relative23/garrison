@@ -1,13 +1,30 @@
 //! The states of a start: a service that does not stay up, and what the run
 //! does then, back to the release that ran or stopped.
 
-use crate::state::State;
+use crate::state::{State, states};
 
-pub(crate) fn restarting(unit: &str, restarts: &str, seconds: u64) -> State {
-    State::new(
-        "install-restarting",
-        format!("{unit} restarted {restarts} times within {seconds} s of starting"),
-    )
+states! {
+    pub(crate) fn restarting(unit: &str, restarts: &str, seconds: u64) = "install-restarting":
+        "{unit} restarted {restarts} times within {seconds} s of starting";
+    pub(crate) fn switching_back() = "install-switching-back":
+        "Start failed; switching back to the previous release.";
+    /// What the switch back put back, `went`, before the release that ran starts.
+    pub(crate) fn migrated_back(went: &State) = "install-migrated-back":
+        "The new release had changed what the release that ran cannot read. {went} The other \
+         databases keep their data.";
+    /// The release that ran reads no state the switch back leaves it.
+    pub(crate) fn unreadable_state(old: &str, unreadable: &str) = "install-unreadable-state":
+        "{old} cannot read the current state, as its self-check says of {unreadable}";
+    /// `release` did not start for `cause`, and the release that ran runs again.
+    pub(crate) fn switched_back(release: &str, cause: &State) = "install-switched-back":
+        "Garrison {release} did not start ({cause}); the previous release is running. See the \
+         journal.";
+    /// `old` ran no service when the run began, so it was not started again.
+    pub(crate) fn not_restarted(release: &str, cause: &State, old: &str, command: &str)
+        = "install-not-restarted":
+        "Garrison {release} did not start ({cause}); {old} did not run when this run began, \
+         so it was not started again; `{command} install --rollback` returns to it. See the \
+         journal.";
 }
 
 /// `state`: systemd's `ActiveState`, empty where it named none.
@@ -16,43 +33,6 @@ pub(crate) fn not_active(unit: &str, state: &str, seconds: u64) -> State {
     State::new(
         "install-not-active",
         format!("{unit} is {state} within {seconds} s of starting"),
-    )
-}
-
-pub(crate) fn switching_back() -> State {
-    State::new(
-        "install-switching-back",
-        "Start failed; switching back to the previous release.",
-    )
-}
-
-/// What the switch back put back, `went`, before the release that ran starts.
-pub(crate) fn migrated_back(went: &State) -> State {
-    State::new(
-        "install-migrated-back",
-        format!(
-            "The new release had changed what the release that ran cannot read. {went} The other \
-             databases keep their data."
-        ),
-    )
-}
-
-/// The release that ran reads no state the switch back leaves it.
-pub(crate) fn unreadable_state(old: &str, unreadable: &str) -> State {
-    State::new(
-        "install-unreadable-state",
-        format!("{old} cannot read the current state, as its self-check says of {unreadable}"),
-    )
-}
-
-/// `release` did not start for `cause`, and the release that ran runs again.
-pub(crate) fn switched_back(release: &str, cause: &State) -> State {
-    State::new(
-        "install-switched-back",
-        format!(
-            "Garrison {release} did not start ({cause}); the previous release is running. See the \
-             journal."
-        ),
     )
 }
 
@@ -110,18 +90,6 @@ fn fallen(
              back ({links}).{went} See the journal."
         ),
     }
-}
-
-/// `old` ran no service when the run began, so it was not started again.
-pub(crate) fn not_restarted(release: &str, cause: &State, old: &str, command: &str) -> State {
-    State::new(
-        "install-not-restarted",
-        format!(
-            "Garrison {release} did not start ({cause}); {old} did not run when this run began, \
-             so it was not started again; `{command} install --rollback` returns to it. See the \
-             journal."
-        ),
-    )
 }
 
 /// `release` was stopped; `earlier`, the release a rollback returns to.

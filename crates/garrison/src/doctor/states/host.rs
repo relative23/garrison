@@ -6,7 +6,7 @@ use std::path::Path;
 use garrison_core::time;
 
 use super::counted;
-use crate::state::State;
+use crate::state::{State, states};
 use crate::units;
 
 /// `1 minute ago` for a number of seconds; less than a minute, or a time
@@ -30,13 +30,21 @@ pub(in crate::doctor) fn no_release(current: &Path) -> State {
         .with_fix("Run the installer from the release archive.")
 }
 
-pub(in crate::doctor) fn active(unit: &str) -> State {
-    State::new("doctor-service-active", format!("{unit} is active"))
-}
-
-pub(in crate::doctor) fn inactive(unit: &str, state: &str) -> State {
-    State::new("doctor-service-inactive", format!("{unit} is {state}"))
-        .with_fix(format!("journalctl -u {unit} -n 50 shows why."))
+states! {
+    pub(in crate::doctor) fn active(unit: &str) = "doctor-service-active":
+        "{unit} is active";
+    pub(in crate::doctor) fn inactive(unit: &str, state: &str) = "doctor-service-inactive":
+        "{unit} is {state}"
+        => "journalctl -u {unit} -n 50 shows why.";
+    pub(in crate::doctor) fn synchronized() = "doctor-clock-synchronized":
+        "the clock is synchronized";
+    pub(in crate::doctor) fn unsynchronized() = "doctor-clock-unsynchronized":
+        "the clock is not synchronized"
+        => "Sign-in tokens and certificates depend on the time: enable a time service \
+            (timedatectl set-ntp true).";
+    pub(in crate::doctor) fn no_event() = "doctor-events-none":
+        "no Stalwart event recorded yet"
+        => "Stalwart sends events through the webhook that `garrison stalwart setup` creates.";
 }
 
 pub(in crate::doctor) fn unanswered_service(unit: &str) -> State {
@@ -121,16 +129,6 @@ pub(in crate::doctor) fn run_unknown() -> State {
     State::new("doctor-collection-run-unknown", text)
 }
 
-pub(in crate::doctor) fn synchronized() -> State {
-    State::new("doctor-clock-synchronized", "the clock is synchronized")
-}
-
-pub(in crate::doctor) fn unsynchronized() -> State {
-    State::new("doctor-clock-unsynchronized", "the clock is not synchronized").with_fix(
-        "Sign-in tokens and certificates depend on the time: enable a time service (timedatectl set-ntp true).",
-    )
-}
-
 pub(in crate::doctor) fn clock_unknown() -> State {
     let text = "clock synchronization: timedatectl gave no answer";
     State::new("doctor-clock-unknown", text)
@@ -206,12 +204,6 @@ pub(in crate::doctor) fn quiet(seconds: i64) -> State {
     let text = format!("no Stalwart event for {} hours", seconds / 3600);
     State::new("doctor-events-quiet", text).with_fix(
         "Check the webhook in the Stalwart WebUI, or run `garrison stalwart setup` again.",
-    )
-}
-
-pub(in crate::doctor) fn no_event() -> State {
-    State::new("doctor-events-none", "no Stalwart event recorded yet").with_fix(
-        "Stalwart sends events through the webhook that `garrison stalwart setup` creates.",
     )
 }
 

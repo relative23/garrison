@@ -52,6 +52,15 @@ fn made(folder: &Path, names: &mut BTreeSet<String>) {
                     names.insert(quoted[..quoted.find('"').unwrap()].to_owned());
                 }
             }
+            // An entry of a `states!` table: the name after its signature.
+            for rest in text.split("= \"").skip(1) {
+                if let Some((name, after)) = rest.split_once('"')
+                    && after.starts_with(":\n")
+                    && name.contains('-')
+                {
+                    names.insert(name.to_owned());
+                }
+            }
         }
     }
 }

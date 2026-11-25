@@ -6,13 +6,52 @@ use std::fmt::Display;
 use std::io;
 use std::path::Path;
 
-use crate::state::State;
+use crate::state::{State, states};
 
-pub(crate) fn unknown_tool() -> State {
-    State::new(
-        "backup-check-unknown-tool",
-        "The backup tool is restic or borg.",
-    )
+states! {
+    pub(crate) fn unknown_tool() = "backup-check-unknown-tool":
+        "The backup tool is restic or borg.";
+    pub(crate) fn lock_other(lock: &Path) = "backup-check-lock-other":
+        "{} is no lock of `garrison backup-check`'s, but a link, another user's file or no \
+         file: remove it, then run the command again.", lock.display();
+    pub(crate) fn waits(report: &Path) = "backup-check-waits":
+        "Another `garrison backup-check` writes {}; this run waits until it has ended.",
+        report.display();
+    /// `problem`: the tool's own last words.
+    pub(crate) fn unlisted(tool: &str, problem: &str) = "backup-check-unlisted":
+        "{tool} did not list its snapshots: {problem}";
+    /// `detail`: what the tool said of its integrity check.
+    pub(crate) fn verified(detail: &str) = "backup-check-verified":
+        "Integrity check: passed ({detail})";
+    pub(crate) fn verify_failed(detail: &str) = "backup-check-verify-failed":
+        "Integrity check: FAILED ({detail})";
+    /// `detail`: what the test restore found.
+    pub(crate) fn restored(detail: &str) = "backup-check-restored":
+        "Restore test: passed ({detail})";
+    /// `detail`: why the test restore failed.
+    pub(crate) fn restore_failed(detail: &str) = "backup-check-restore-failed":
+        "Restore test: FAILED ({detail})";
+    pub(crate) fn not_removed(path: &Path, error: &io::Error) = "backup-check-not-removed":
+        "{} could not be removed ({error}); it holds a copy of what the backup holds: remove \
+         it as root with rm -r {}", path.display(), path.display();
+    pub(crate) fn leftover_removed(copy: &Path) = "backup-check-leftover-removed":
+        "Removed {}, a copy of restored data that an interrupted test restore left.",
+        copy.display();
+    pub(crate) fn leftover_kept(why: &State) = "backup-check-leftover-kept":
+        "A copy that an interrupted test restore left: {why}";
+    pub(crate) fn copy_kept(why: &State) = "backup-check-copy-kept":
+        "This test restore's copy: {why}";
+    pub(crate) fn report_foreign(report: &Path) = "backup-check-report-foreign":
+        "The last report, {}, can be changed by users other than root: its last integrity \
+         check and test restore are not kept.", report.display();
+    pub(crate) fn report_unread(report: &Path, kib: usize) = "backup-check-report-unread":
+        "The last report, {}, cannot be read: it must be a file, not a link, of at most {kib} \
+         KiB of valid JSON. Its last integrity check and test restore are not kept.",
+        report.display();
+    pub(crate) fn unwritten(report: &Path, error: impl Display) = "backup-check-unwritten":
+        "The report could not be written to {}: {error}", report.display();
+    pub(crate) fn written(report: &Path) = "backup-check-written":
+        "Report written to {}.", report.display();
 }
 
 /// What the system said of `what`; for an operator who is not root, that
@@ -42,27 +81,6 @@ pub(crate) fn folder_unmade(folder: &Path, error: &io::Error) -> State {
     )
 }
 
-pub(crate) fn lock_other(lock: &Path) -> State {
-    State::new(
-        "backup-check-lock-other",
-        format!(
-            "{} is no lock of `garrison backup-check`'s, but a link, another user's file or no \
-             file: remove it, then run the command again.",
-            lock.display()
-        ),
-    )
-}
-
-pub(crate) fn waits(report: &Path) -> State {
-    State::new(
-        "backup-check-waits",
-        format!(
-            "Another `garrison backup-check` writes {}; this run waits until it has ended.",
-            report.display()
-        ),
-    )
-}
-
 /// What a listing found: `count` snapshots or archives, `newest` the date of
 /// the newest.
 pub(crate) fn listed(tool: &str, count: u64, newest: Option<&str>) -> State {
@@ -77,103 +95,6 @@ pub(crate) fn listed(tool: &str, count: u64, newest: Option<&str>) -> State {
             "{tool}: {count} {noun}{}, the newest of {}.",
             if count == 1 { "" } else { "s" },
             newest.unwrap_or("no date")
-        ),
-    )
-}
-
-/// `problem`: the tool's own last words.
-pub(crate) fn unlisted(tool: &str, problem: &str) -> State {
-    State::new(
-        "backup-check-unlisted",
-        format!("{tool} did not list its snapshots: {problem}"),
-    )
-}
-
-/// `detail`: what the tool said of its integrity check.
-pub(crate) fn verified(detail: &str) -> State {
-    State::new(
-        "backup-check-verified",
-        format!("Integrity check: passed ({detail})"),
-    )
-}
-
-pub(crate) fn verify_failed(detail: &str) -> State {
-    State::new(
-        "backup-check-verify-failed",
-        format!("Integrity check: FAILED ({detail})"),
-    )
-}
-
-/// `detail`: what the test restore found.
-pub(crate) fn restored(detail: &str) -> State {
-    State::new(
-        "backup-check-restored",
-        format!("Restore test: passed ({detail})"),
-    )
-}
-
-/// `detail`: why the test restore failed.
-pub(crate) fn restore_failed(detail: &str) -> State {
-    State::new(
-        "backup-check-restore-failed",
-        format!("Restore test: FAILED ({detail})"),
-    )
-}
-
-pub(crate) fn not_removed(path: &Path, error: &io::Error) -> State {
-    State::new(
-        "backup-check-not-removed",
-        format!(
-            "{} could not be removed ({error}); it holds a copy of what the backup holds: remove \
-             it as root with rm -r {}",
-            path.display(),
-            path.display()
-        ),
-    )
-}
-
-pub(crate) fn leftover_removed(copy: &Path) -> State {
-    State::new(
-        "backup-check-leftover-removed",
-        format!(
-            "Removed {}, a copy of restored data that an interrupted test restore left.",
-            copy.display()
-        ),
-    )
-}
-
-pub(crate) fn leftover_kept(why: &State) -> State {
-    State::new(
-        "backup-check-leftover-kept",
-        format!("A copy that an interrupted test restore left: {why}"),
-    )
-}
-
-pub(crate) fn copy_kept(why: &State) -> State {
-    State::new(
-        "backup-check-copy-kept",
-        format!("This test restore's copy: {why}"),
-    )
-}
-
-pub(crate) fn report_foreign(report: &Path) -> State {
-    State::new(
-        "backup-check-report-foreign",
-        format!(
-            "The last report, {}, can be changed by users other than root: its last integrity \
-             check and test restore are not kept.",
-            report.display()
-        ),
-    )
-}
-
-pub(crate) fn report_unread(report: &Path, kib: usize) -> State {
-    State::new(
-        "backup-check-report-unread",
-        format!(
-            "The last report, {}, cannot be read: it must be a file, not a link, of at most {kib} \
-             KiB of valid JSON. Its last integrity check and test restore are not kept.",
-            report.display()
         ),
     )
 }
@@ -254,22 +175,5 @@ fn not_kept(report: &Path, why: &str, fix: &str) -> String {
     format!(
         "The last report, {}, {why}: its last integrity check and test restore are not kept.{fix}",
         report.display()
-    )
-}
-
-pub(crate) fn unwritten(report: &Path, error: impl Display) -> State {
-    State::new(
-        "backup-check-unwritten",
-        format!(
-            "The report could not be written to {}: {error}",
-            report.display()
-        ),
-    )
-}
-
-pub(crate) fn written(report: &Path) -> State {
-    State::new(
-        "backup-check-written",
-        format!("Report written to {}.", report.display()),
     )
 }
