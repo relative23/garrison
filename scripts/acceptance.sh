@@ -15,6 +15,8 @@ previous=$1
 release=$2
 # shellcheck source=scripts/acceptance-lib.sh
 . "$(dirname "$0")/acceptance-lib.sh"
+# shellcheck source=scripts/acceptance-rebuild.sh
+. "$(dirname "$0")/acceptance-rebuild.sh"
 
 start_host
 install_previous
@@ -56,6 +58,8 @@ else
 fi
 inside 'cp -p /root/garrison.toml.before-new /etc/garrison/garrison.toml'
 
+channel_before_upgrade
+
 step "Upgrading to the release under test"
 upgrade=$(mktemp)
 if ! installer '/root/release/bin/garrison install' >"$upgrade" 2>&1; then
@@ -66,6 +70,7 @@ fi
 cat "$upgrade"
 names "current is the release under test" current "$new"
 names "previous is the release it upgraded from" previous "$old"
+rebuild_after_upgrade
 check "the event history survived the upgrade" "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -ge $before"
 services upgraded
 # Laid out like Stalwart's host: the interface under /admin/, the root leads there.

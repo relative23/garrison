@@ -21,6 +21,20 @@ Notable changes for operators and users. The format follows
   `/etc/garrison/garrison.toml`. The installation guide's tested systems and
   memory figures are those of 2026-11-25.
 
+### Fixed
+
+- The collector's own unit no longer ends it while it rebuilds the status
+  database. After an upgrade from 0.1 with a notification channel or a list
+  of Spamhaus' Data Query Service configured, the first collection run of
+  0.2.0 rebuilds that database so that no freed page keeps a secret, and it
+  asked for the copy's owner on the way, which `garrison-collect.service`
+  forbids: the run ended with a core dump (`status=31/SYS` in the journal)
+  once its snapshot was stored, and the rebuild, which is tried again a day
+  later, could not finish. The runs between were not affected. With this
+  release the rebuild finishes in the first run a day after the last try. A
+  core dump that systemd kept of such a run holds what the collector had in
+  memory and is root's alone: `coredumpctl list garrison` shows it.
+
 ## [0.2.0] - 2026-11-25
 
 ### Upgrade notes

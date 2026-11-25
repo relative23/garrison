@@ -53,7 +53,11 @@ pub(super) fn made_with(path: &Path, copy: &Path, attribute: &str) -> io::Result
         .open(copy)?;
     // The umask may take bits away, and root, running it by hand, makes the
     // file its own.
-    fchown(&file, Some(metadata.uid()), Some(metadata.gid()))?;
+    let fresh = file.metadata()?;
+    let wanted = (metadata.uid(), metadata.gid());
+    if let Some((owner, group)) = owner_to_give((fresh.uid(), fresh.gid()), wanted) {
+        fchown(&file, Some(owner), Some(group))?;
+    }
     file.set_permissions(fs::Permissions::from_mode(mode))?;
     // A new file gets the label the policy gives the folder's, which is the
     // database's unless someone relabelled that.
@@ -63,6 +67,17 @@ pub(super) fn made_with(path: &Path, copy: &Path, attribute: &str) -> io::Result
         rustix::fs::fsetxattr(&file, attribute, &label, XattrFlags::empty())?;
     }
     Ok(())
+}
+
+/// The owner and group to give a file made with `made`, where the database
+/// has `wanted`: none where they are the same already. The collector's unit
+/// makes the copy with the database's own (`User=`, `Group=`) and filters
+/// the call that would change them, with every other one a service has no
+/// business with (`SystemCallFilter=~@privileged`), and a call it filters
+/// ends the collector. Root, running a collection by hand, makes the file
+/// its own and may give it away.
+pub(super) fn owner_to_give(made: (u32, u32), wanted: (u32, u32)) -> Option<(u32, u32)> {
+    (made != wanted).then_some(wanted)
 }
 
 /// The value of `name` on `file`; `None` where it has none, or the file
