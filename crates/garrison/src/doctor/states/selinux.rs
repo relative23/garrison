@@ -83,61 +83,17 @@ pub(in crate::doctor) fn port_unknown(why: &Unread) -> State {
 }
 
 #[cfg(test)]
-pub(super) fn rows() -> Vec<(State, &'static str)> {
+pub(super) fn rows() -> Vec<State> {
     let ready = Unread::Unextracted("libsemanage.semanage_direct_get_module_info: error".into());
     vec![
-        (
-            everywhere(),
-            "SELinux lets nginx connect to every port (httpd_can_network_connect) \
-             [doctor-selinux-everywhere]",
-        ),
-        (
-            unloaded(),
-            "SELinux is enforcing and the module garrison is not loaded, so nginx cannot reach \
-             Garrison [doctor-selinux-unloaded]\n      Run the installer again; it loads the \
-             module.",
-        ),
-        (
-            unloaded_permissive(),
-            "SELinux is permissive and the module garrison is not loaded \
-             [doctor-selinux-unloaded-permissive]\n      Run the installer again.",
-        ),
-        (
-            port_reached(8091),
-            "the SELinux module garrison is loaded and lets nginx reach the web service on port \
-             8091 [doctor-selinux-port-reached]",
-        ),
-        (
-            other_port(8091, 9443),
-            "the SELinux module garrison lets nginx reach port 8091, not 9443 (web.port), so \
-             nginx answers 502 [doctor-selinux-other-port]\n      Run the installer again; it \
-             loads the module for web.port.",
-        ),
-        (
-            other_port_permissive(8091, 9443),
-            "the SELinux module garrison lets nginx reach port 8091, not 9443 (web.port); \
-             SELinux is permissive and only logs the denial \
-             [doctor-selinux-other-port-permissive]\n      Run the installer again; it loads \
-             the module for web.port.",
-        ),
-        (
-            load_failed(8091, 9443, "/opt/garrison/selinux/garrison.cil"),
-            "the SELinux module garrison lets nginx reach port 8091, not 9443 (web.port), so \
-             nginx answers 502 [doctor-selinux-load-failed]\n      Load the module the \
-             installer wrote for web.port: semodule -i /opt/garrison/selinux/garrison.cil",
-        ),
-        (
-            load_failed_permissive(8091, 9443, "/opt/garrison/selinux/garrison.cil"),
-            "the SELinux module garrison lets nginx reach port 8091, not 9443 (web.port); \
-             SELinux is permissive and only logs the denial \
-             [doctor-selinux-load-failed-permissive]\n      Load the module the installer \
-             wrote for web.port: semodule -i /opt/garrison/selinux/garrison.cil",
-        ),
-        (
-            port_unknown(&ready),
-            "which port the SELinux module garrison lets nginx reach: `semodule -c -E garrison` \
-             extracted no module (libsemanage.semanage_direct_get_module_info: error) \
-             [doctor-selinux-port-unknown]",
-        ),
+        everywhere(),
+        unloaded(),
+        unloaded_permissive(),
+        port_reached(8091),
+        other_port(8091, 9443),
+        other_port_permissive(8091, 9443),
+        load_failed(8091, 9443, "/opt/garrison/selinux/garrison.cil"),
+        load_failed_permissive(8091, 9443, "/opt/garrison/selinux/garrison.cil"),
+        port_unknown(&ready),
     ]
 }

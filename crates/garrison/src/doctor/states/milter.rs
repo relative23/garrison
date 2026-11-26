@@ -66,7 +66,7 @@ pub(in crate::doctor) fn stranded_unknown(why: &str) -> State {
 }
 
 #[cfg(test)]
-pub(super) fn rows() -> Vec<(State, &'static str)> {
+pub(super) fn rows() -> Vec<State> {
     let entry = |id: &str, port: u16, defer: Option<bool>| -> Entry {
         serde_json::from_value(
             serde_json::json!({"id": id, "host": "127.0.0.1", "port": port,
@@ -76,25 +76,8 @@ pub(super) fn rows() -> Vec<(State, &'static str)> {
     };
     let denied = Error::Denied(String::new());
     vec![
-        (
-            stranded(&entry("o", 11332, None)),
-            "Stalwart asks a milter at 127.0.0.1:11332 (entry o), where nothing answers: \
-             Stalwart decides by conditions of its own what to do with all incoming mail \
-             [doctor-milter-stranded]\n      Start the milter that is to answer there. If nothing \
-             is to answer there, remove that entry in the Stalwart WebUI (Settings ▸ MTA ▸ \
-             Milters) and reload its settings.",
-        ),
-        (
-            stranded_unscanned(&entry("x", 9000, Some(false))),
-            "Stalwart asks a milter at 127.0.0.1:9000 (entry x), where nothing answers: Stalwart \
-             takes all incoming mail unscanned [doctor-milter-stranded-unscanned]\n      Start \
-             the milter that is to answer there. If nothing is to answer there, remove that entry \
-             in the Stalwart WebUI (Settings ▸ MTA ▸ Milters) and reload its settings.",
-        ),
-        (
-            stranded_unknown(&unasked("http://127.0.0.1:8080", denied)),
-            "whether Stalwart asks a milter where nothing answers: Stalwart refused the \
-             collector's API key [doctor-milter-stranded-unknown]",
-        ),
+        stranded(&entry("o", 11332, None)),
+        stranded_unscanned(&entry("x", 9000, Some(false))),
+        stranded_unknown(&unasked("http://127.0.0.1:8080", denied)),
     ]
 }

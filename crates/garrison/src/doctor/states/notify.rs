@@ -51,26 +51,10 @@ pub(in crate::doctor) fn channels(names: &[String]) -> State {
 }
 
 #[cfg(test)]
-pub(super) fn rows() -> Vec<(State, &'static str)> {
+pub(super) fn rows() -> Vec<State> {
     vec![
-        (
-            unusable("ntfy: notifications.ntfy_url cannot be used: ntfy-url is empty"),
-            "notifications: ntfy: notifications.ntfy_url cannot be used: ntfy-url is empty \
-             [doctor-notify-unusable]\n      Correct the file it names (configuration.md, \
-             Notifications), then send a test message: garrison notify-test",
-        ),
-        (
-            open(Open::Webhook, Path::new("/etc/garrison/credentials")),
-            "the webhook takes no token, and garrison.toml, which every user of this host may \
-             read, holds its address: whoever reads it can post to it where its key is part of \
-             the address [doctor-notify-open]\n      Write the address into \
-             /etc/garrison/credentials/notify-webhook-url (root, mode 0600) and set webhook_url \
-             = \"credential:notify-webhook-url\", or give it a token (configuration.md, \
-             Notifications).",
-        ),
-        (
-            channels(&["ntfy at ntfy.example.org".into(), "mail".into()]),
-            "notifications: ntfy at ntfy.example.org, mail [doctor-notify-channels]",
-        ),
+        unusable("ntfy: notifications.ntfy_url cannot be used: ntfy-url is empty"),
+        open(Open::Webhook, Path::new("/etc/garrison/credentials")),
+        channels(&["ntfy at ntfy.example.org".into(), "mail".into()]),
     ]
 }

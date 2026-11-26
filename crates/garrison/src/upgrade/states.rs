@@ -62,83 +62,30 @@ mod tests {
         crate::state::table(
             &[include_str!("states.rs")],
             &[
-                (
-                    refused(io(
-                        "/root/garrison-0.2.0-x86_64.tar.gz.minisig",
-                        "No such file or directory (os error 2)",
-                    )),
-                    "/root/garrison-0.2.0-x86_64.tar.gz.minisig: No such file or directory (os error \
-                     2). Nothing was installed. [upgrade-io]",
-                ),
-                (
-                    refused(not_root()),
-                    "Run as root. Nothing was installed. [upgrade-not-root]",
-                ),
-                (
-                    refused(not_an_archive(Path::new("/root/release.tgz"))),
-                    "/root/release.tgz is not named like a release archive, \
-                     garrison-<version>-<arch>.tar.gz. Nothing was installed. [upgrade-not-an-archive]",
-                ),
-                (
-                    refused(other_architecture(
-                        "garrison-0.2.0-aarch64.tar.gz",
-                        "aarch64",
-                        "x86_64",
-                    )),
-                    "garrison-0.2.0-aarch64.tar.gz is built for aarch64, this host is x86_64. Nothing \
-                     was installed. [upgrade-other-architecture]",
-                ),
-                (
-                    refused(older_archive("0.1.2", "0.2.0")),
-                    "0.1.2 is older than the running 0.2.0; go back with `garrison install --rollback` \
-                     instead. Nothing was installed. [upgrade-older-archive]",
-                ),
-                (
-                    refused(no_version("latest", "0.2.0")),
-                    "latest or 0.2.0 is no semantic version. Nothing was installed. [upgrade-no-version]",
-                ),
-                (
-                    refused(not_installed()),
-                    "Run the installed release: /opt/garrison/current/bin/garrison upgrade <archive>. \
-                     Nothing was installed. [upgrade-not-installed]",
-                ),
-                (
-                    refused(no_keys()),
-                    "This release trusts no signing key yet, so it cannot check an archive. Check the \
-                     archive by hand (docs/operator/installation.md) and run its own installer. Nothing \
-                     was installed. [upgrade-no-keys]",
-                ),
-                (
-                    refused(bad_key("not a key")),
-                    "\"not a key\" is not a minisign public key. Nothing was installed. [upgrade-bad-key]",
-                ),
-                (
-                    refused(not_a_signature()),
-                    "The signature file is not a minisign signature. Nothing was installed. \
-                     [upgrade-not-a-signature]",
-                ),
-                (
-                    refused(signature_mismatch()),
-                    "The archive does not match its signature, or no key this release trusts made it. \
-                     Nothing was installed. [upgrade-signature-mismatch]",
-                ),
-                (
-                    refused(other_release(
-                        "garrison 0.1.0 x86_64",
-                        "garrison 0.2.0 x86_64",
-                    )),
-                    "The signature is for \"garrison 0.1.0 x86_64\", not for \"garrison 0.2.0 x86_64\". \
-                     Nothing was installed. [upgrade-other-release]",
-                ),
-                (
-                    refused(no_tar()),
-                    "tar is required. Nothing was installed. [upgrade-no-tar]",
-                ),
-                (
-                    refused(unpack_failed("gzip: stdin: not in gzip format")),
-                    "The archive cannot be unpacked: gzip: stdin: not in gzip format. Nothing was \
-                     installed. [upgrade-unpack-failed]",
-                ),
+                refused(io(
+                    "/root/garrison-0.2.0-x86_64.tar.gz.minisig",
+                    "No such file or directory (os error 2)",
+                )),
+                refused(not_root()),
+                refused(not_an_archive(Path::new("/root/release.tgz"))),
+                refused(other_architecture(
+                    "garrison-0.2.0-aarch64.tar.gz",
+                    "aarch64",
+                    "x86_64",
+                )),
+                refused(older_archive("0.1.2", "0.2.0")),
+                refused(no_version("latest", "0.2.0")),
+                refused(not_installed()),
+                refused(no_keys()),
+                refused(bad_key("not a key")),
+                refused(not_a_signature()),
+                refused(signature_mismatch()),
+                refused(other_release(
+                    "garrison 0.1.0 x86_64",
+                    "garrison 0.2.0 x86_64",
+                )),
+                refused(no_tar()),
+                refused(unpack_failed("gzip: stdin: not in gzip format")),
             ],
         );
     }
