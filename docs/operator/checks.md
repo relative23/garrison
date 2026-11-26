@@ -522,6 +522,10 @@ with `macro_document` a harmless document too, in each round in which the
 server refuses a test, one round a day by default and two where a test was
 tried again an hour later, and one from a test that goes wrong.
 
+A run opens up to eight sessions, each test with its copy and the harmless
+messages after them, a quarter of a second apart: Stalwart takes five
+connections a second from one address as it comes and turns the sixth away.
+
 Each test is sent again `every_hours` after it was sent. One that did not
 happen, because no session came about, the server turned it away before
 the message or it deferred the message with a temporary reply (4xx), is

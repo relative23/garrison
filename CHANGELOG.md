@@ -43,7 +43,16 @@ Notable changes for operators and users. The format follows
   a virus scanner's that is down, and now says to start it.
 - `garrison stalwart setup` no longer reads Stalwart's milters, and no longer
   stops for one that does not answer. A user without administrator rights is
-  told so at its first read, of the API keys (`setup-keys-unreadable`).
+  told so at the first read Stalwart refuses, of the webhooks
+  (`setup-webhooks-unreadable`).
+
+### Fixed
+
+- The mail test waits a quarter of a second before each of its sessions. A
+  run opens up to eight, and Stalwart takes five connections a second from
+  one address as it comes: with `macro_document = true` and a scanner that
+  refuses the tests, the harmless messages after them were turned away and
+  the card said "not tested: the server closed the session".
 
 ## [0.2.1] - 2026-11-25
 

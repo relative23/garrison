@@ -175,3 +175,22 @@ fn a_server_that_sends_a_line_now_and_then_does_not_hold_a_session_beyond_its_ti
         ]
     );
 }
+
+/// Stalwart takes five connections a second from one address and turns the
+/// sixth away, and a run opens more: each session waits its pace first, so
+/// five sessions take five paces at the least.
+#[test]
+fn every_session_waits_its_pace_before_it_begins() {
+    let (port, handle) = server([
+        "550 5.7.1 Virus found",
+        "550 5.7.1 Virus found",
+        "550 5.7.1 Spam",
+        "550 5.7.1 Spam",
+        "250 2.0.0 Message queued with id c.",
+    ]);
+    let provider = provider(port).paced(Duration::from_millis(40));
+    let (observation, took) = collected(&provider, &Remembered::default(), 0, Deadline::NONE);
+    assert_eq!(handle.join().unwrap().len(), 5);
+    assert_eq!(results(&observation).len(), 3);
+    assert!(took >= Duration::from_millis(200), "{took:?}");
+}

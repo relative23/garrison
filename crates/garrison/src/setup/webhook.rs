@@ -56,7 +56,14 @@ pub(super) fn find(admin: &Admin) -> Result<Option<Stored>, State> {
         let headers = item.fields.get("httpHeaders");
         headers.and_then(|headers| headers.get(MARKER.0)?.as_str()) == Some(MARKER.1)
     };
-    let listed = admin.list::<Stored>("WebHook")?;
+    // The first read Stalwart refuses a user without administrator rights.
+    let listed = admin.list::<Stored>("WebHook").map_err(|failed| {
+        if failed.is("forbidden") {
+            states::webhooks_unreadable(&failed.state)
+        } else {
+            failed.state
+        }
+    })?;
     Ok(listed.into_iter().find(marked))
 }
 

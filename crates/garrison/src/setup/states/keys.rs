@@ -23,10 +23,12 @@ states! {
         "Stalwart does not show the administrator the account that the API key in {} \
          belongs to: run setup as an administrator who holds the keys' permissions, as one \
          with Stalwart's administrator role ({error})", file.display();
-    /// Stalwart does not let the administrator read its own API keys (`error`,
-    /// JMAP's forbidden), as it answers a user without its administrator rights.
-    pub(in crate::setup) fn keys_unreadable(error: &State) = "setup-keys-unreadable":
-        "Stalwart does not let the administrator read its API keys: run setup as an \
+    /// Stalwart does not let the administrator read its webhooks (`error`,
+    /// JMAP's forbidden), as it answers a user without its administrator
+    /// rights, who may read its own API keys and nothing else of what setup
+    /// reads (measured on Stalwart 1.2.0).
+    pub(in crate::setup) fn webhooks_unreadable(error: &State) = "setup-webhooks-unreadable":
+        "Stalwart does not let the administrator read its webhooks: run setup as an \
          administrator who holds the keys' permissions, as one with Stalwart's administrator \
          role ({error})";
     /// Stalwart's quota leaves the administrator's account, which holds the

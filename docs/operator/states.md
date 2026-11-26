@@ -394,7 +394,7 @@ Asking Stalwart whose API key /etc/garrison/credentials/broker-native-key holds:
 Stalwart does not show the administrator the account that the API key in /etc/garrison/credentials/broker-native-key belongs to: run setup as an administrator who holds the keys' permissions, as one with Stalwart's administrator role (x:ApiKey/get: accountNotFound The accountId does not correspond to a valid account [setup-stalwart-error]) [setup-account-unseen]
 ```
 ```text
-Stalwart does not let the administrator read its API keys: run setup as an administrator who holds the keys' permissions, as one with Stalwart's administrator role (x:ApiKey/get: forbidden Forbidden [setup-stalwart-error]) [setup-keys-unreadable]
+Stalwart does not let the administrator read its webhooks: run setup as an administrator who holds the keys' permissions, as one with Stalwart's administrator role (x:WebHook/get: forbidden Forbidden [setup-stalwart-error]) [setup-webhooks-unreadable]
 ```
 ```text
 Stalwart takes no more API keys in the administrator's account, which holds 'garrison broker', 'backup': setup makes a new key before it removes the one it replaces. Remove a key the account no longer needs in the Stalwart WebUI; setup made no new key 'garrison broker' and removed none [setup-account-full]

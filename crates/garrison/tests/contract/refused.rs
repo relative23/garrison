@@ -32,8 +32,9 @@ fn garrisons_keys(lab: &Lab) -> usize {
 /// are all answered 401, an API key of the administrator's that does not
 /// allow this host's address 403: setup says that the administrator was
 /// refused and what to check, where it said "x:ApiKey/get: HTTP 401", and
-/// changes nothing. A user without administrator rights is stopped at its
-/// first read, of its API keys, which Stalwart does not let it make.
+/// changes nothing. A user without administrator rights may read its own
+/// API keys and is stopped at the next read, of the webhooks, which Stalwart
+/// does not let it make.
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn a_refused_administrator_is_said_as_such() {
@@ -95,7 +96,7 @@ fn a_refused_administrator_is_said_as_such() {
         let expected = match status {
             401 => "setup-administrator-refused",
             403 => "setup-administrator-refused-here",
-            _ => "setup-keys-unreadable",
+            _ => "setup-webhooks-unreadable",
         };
         let named = support::states(said.as_bytes());
         assert!(

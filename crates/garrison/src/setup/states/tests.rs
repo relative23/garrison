@@ -73,7 +73,7 @@ fn keys() -> Rows {
         no_random("getrandom: this target is not supported"),
         owner_unknown(file, LIMITED),
         account_unseen(file, &missing),
-        keys_unreadable(&stalwart_error("x:ApiKey/get", "forbidden", "Forbidden")),
+        webhooks_unreadable(&stalwart_error("x:WebHook/get", "forbidden", "Forbidden")),
         account_full("'garrison broker', 'backup'", "garrison broker"),
         key_not_granted("garrison broker", &forbidden),
         secret_missing(),

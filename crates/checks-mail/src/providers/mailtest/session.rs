@@ -19,6 +19,15 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 /// A session has this long in all, so that a server that sends a line now
 /// and then cannot hold the run.
 pub(super) const SESSION: Duration = Duration::from_secs(20);
+/// A session begins this long after the one before it ended. Stalwart takes
+/// five connections a second from one address as it comes and turns the
+/// sixth away (measured on 1.2.0), and a run opens up to eight: each test
+/// and its copy, and the harmless messages after them.
+#[cfg(not(test))]
+pub(super) const PACE: Duration = Duration::from_millis(250);
+/// The crate's own tests wait for nothing, but for the one of the pace.
+#[cfg(test)]
+pub(super) const PACE: Duration = Duration::ZERO;
 /// `Message queued with id 4b786a616e00000.` names the queue ID in hex; the
 /// event history writes it as a number.
 pub(super) fn queue_id(reply: &str) -> Option<String> {
@@ -34,6 +43,7 @@ impl MailTest {
             reply,
             ..Sent::default()
         };
+        std::thread::sleep(self.pace);
         let until = Instant::now() + self.session;
         let connected = (self.host.as_str(), self.port)
             .to_socket_addrs()
