@@ -170,7 +170,7 @@ pub(in crate::doctor) fn unusable(name: &str, lacks: Lacks, reader: &Reader) -> 
 }
 
 #[cfg(test)]
-pub(super) fn rows() -> Vec<(State, &'static str)> {
+pub(super) fn rows() -> Vec<State> {
     let credentials = Path::new("/etc/garrison/credentials");
     let file = |name: &str| credentials.join(name);
     let dqs = Reader::Dqs {
@@ -178,87 +178,33 @@ pub(super) fn rows() -> Vec<(State, &'static str)> {
         path: file("spamhaus-dqs-key"),
     };
     vec![
-        (
-            path_hidden((
-                "providers[receipt].path is /home/jobs/nightly.json, under /home, which \
+        path_hidden((
+            "providers[receipt].path is /home/jobs/nightly.json, under /home, which \
                  garrison-collect.service hides from the collector (ProtectHome=true): the check \
                  cannot read it there"
-                    .into(),
-                "Keep it where the collector sees it".into(),
-            )),
-            "providers[receipt].path is /home/jobs/nightly.json, under /home, which \
-             garrison-collect.service hides from the collector (ProtectHome=true): the check \
-             cannot read it there [doctor-path-hidden]\n      Keep it where the collector sees \
-             it.",
+                .into(),
+            "Keep it where the collector sees it".into(),
+        )),
+        missing("broker-native-key", &file("broker-native-key"), SETUP),
+        not_a_file(
+            "metrics-credential",
+            &file("metrics-credential"),
+            &made_empty(&file("metrics-credential")),
         ),
-        (
-            missing("broker-native-key", &file("broker-native-key"), SETUP),
-            "broker-native-key is missing: /etc/garrison/credentials/broker-native-key \
-             [doctor-credential-missing]\n      Run `garrison stalwart setup`, which makes it.",
+        private("webhook-signature-key", 0o600),
+        open(&file("broker-native-key"), 0o644),
+        no_key(
+            "webhook-signature-key",
+            Lacks::Empty,
+            &file("webhook-signature-key"),
         ),
-        (
-            not_a_file(
-                "metrics-credential",
-                &file("metrics-credential"),
-                &made_empty(&file("metrics-credential")),
-            ),
-            "metrics-credential is a link or a folder, not a file: \
-             /etc/garrison/credentials/metrics-credential [doctor-credential-not-a-file]\n      \
-             Remove it; then `install -m 600 /dev/null \
-             /etc/garrison/credentials/metrics-credential` makes the file itself there.",
-        ),
-        (
-            private("webhook-signature-key", 0o600),
-            "webhook-signature-key is private (600) [doctor-credential-private]",
-        ),
-        (
-            open(&file("broker-native-key"), 0o644),
-            "/etc/garrison/credentials/broker-native-key is not root-owned with mode 600 or less \
-             (mode 644) [doctor-credential-open]\n      Make it root's with mode 600: chown root \
-             /etc/garrison/credentials/broker-native-key && chmod 600 \
-             /etc/garrison/credentials/broker-native-key",
-        ),
-        (
-            no_key(
-                "webhook-signature-key",
-                Lacks::Empty,
-                &file("webhook-signature-key"),
-            ),
-            "webhook-signature-key is empty, so garrison-ingest.service has no key: \
-             /etc/garrison/credentials/webhook-signature-key [doctor-credential-no-key]\n      \
-             Run `garrison stalwart setup`, which makes it.",
-        ),
-        (
-            missing_empty("ntfy-token", &file("ntfy-token")),
-            "ntfy-token is missing: /etc/garrison/credentials/ntfy-token; systemd starts \
-             garrison-collect.service and garrison-watch.service only with it \
-             [doctor-credential-missing-empty]\n      Make it, empty, which means none: install \
-             -m 600 /dev/null /etc/garrison/credentials/ntfy-token",
-        ),
-        (
-            missing_read("spamhaus-dqs-key", &file("spamhaus-dqs-key"), &dqs),
-            "spamhaus-dqs-key is missing: /etc/garrison/credentials/spamhaus-dqs-key; systemd \
-             starts garrison-collect.service only with it [doctor-credential-missing-read]\n      \
-             Write the key into it (zen.dq.spamhaus.net is asked with it): install -m 600 \
-             /dev/null /etc/garrison/credentials/spamhaus-dqs-key && sh -c 'cat > \
-             /etc/garrison/credentials/spamhaus-dqs-key', then paste the key and press Enter and \
-             Ctrl-D.",
-        ),
-        (
-            empty("metrics-credential", 0o600),
-            "metrics-credential is empty, which means none (600) [doctor-credential-empty]",
-        ),
-        (
-            unusable(
-                "metrics-credential",
-                Lacks::NoCredential,
-                &Reader::Prometheus,
-            ),
-            "metrics-credential holds no credential, but the prometheus check reads Stalwart's \
-             exporter with it [doctor-credential-unusable]\n      Run `garrison stalwart \
-             setup`, which writes it while Stalwart's exporter is Garrison's or off; for an \
-             exporter of another's, write its user name and password into it as \
-             configuration.md says (collector.metrics_credential).",
+        missing_empty("ntfy-token", &file("ntfy-token")),
+        missing_read("spamhaus-dqs-key", &file("spamhaus-dqs-key"), &dqs),
+        empty("metrics-credential", 0o600),
+        unusable(
+            "metrics-credential",
+            Lacks::NoCredential,
+            &Reader::Prometheus,
         ),
     ]
 }

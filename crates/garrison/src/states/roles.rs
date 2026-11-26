@@ -6,7 +6,7 @@ use std::fmt::Display;
 use std::path::Path;
 
 use crate::access::Candidate;
-use crate::state::State;
+use crate::state::{State, states};
 
 /// `init` bound no role and wrote the policy anew.
 pub(crate) fn unbound(candidates: &BTreeMap<String, Candidate>) -> State {
@@ -44,73 +44,37 @@ pub(crate) fn kept(
     State::new("access-kept", lines.join("\n"))
 }
 
-pub(crate) fn bound(role: &str, description: Option<&str>) -> State {
-    State::new(
-        "access-bound",
-        format!(
-            "Bound native role {} to profile administrator.",
-            named(role, description)
-        ),
-    )
-}
-
-pub(crate) fn no_role(role: &str) -> State {
-    State::new(
-        "access-no-role",
-        format!(
-            "Stalwart has no role {role}: bind one of the roles the native administration shows \
-             (Roles)."
-        ),
-    )
-}
-
-/// `role`'s rights cannot be evaluated for `why`.
-pub(crate) fn role_unjudged(role: &str, profile: &str, why: &State) -> State {
-    State::new(
-        "access-role-unjudged",
-        format!(
-            "Note: the rights of role {role} cannot be evaluated ({why}), so whether its users \
-             get the profile {profile} is not known; `garrison access check <subject>` shows \
-             what a user gets."
-        ),
-    )
-}
-
-/// `role` lacks the rights `lacks` that `profile` requires, and meets the
-/// profiles `meets` as it is.
-pub(crate) fn role_lacks(role: &str, profile: &str, lacks: &[String], meets: &[String]) -> State {
-    State::new(
-        "access-role-lacks",
-        format!(
-            "Note: role {role} lacks {}, which the profile {profile} requires, so its users get \
-             nothing of it until Stalwart's administrator gives the role {} in the native \
-             administration (Roles). {}",
-            listed(lacks),
-            those(lacks),
-            as_it_is(meets)
-        ),
-    )
-}
-
-pub(crate) fn too_many_roles(max: usize) -> State {
-    State::new(
-        "access-too-many-roles",
-        format!("it inherits from more than {max} roles, more than Garrison evaluates"),
-    )
-}
-
-pub(crate) fn inherits_missing(gone: &str) -> State {
-    State::new(
-        "access-inherits-missing",
-        format!("it inherits from role {gone}, which Stalwart does not have"),
-    )
-}
-
-pub(crate) fn role_unreadable(id: &str) -> State {
-    State::new(
-        "access-role-unreadable",
-        format!("this release cannot read role {id}"),
-    )
+states! {
+    pub(crate) fn bound(role: &str, description: Option<&str>) = "access-bound":
+        "Bound native role {} to profile administrator.", named(role, description);
+    pub(crate) fn no_role(role: &str) = "access-no-role":
+        "Stalwart has no role {role}: bind one of the roles the native administration shows \
+         (Roles).";
+    /// `role`'s rights cannot be evaluated for `why`.
+    pub(crate) fn role_unjudged(role: &str, profile: &str, why: &State) = "access-role-unjudged":
+        "Note: the rights of role {role} cannot be evaluated ({why}), so whether its users \
+         get the profile {profile} is not known; `garrison access check <subject>` shows \
+         what a user gets.";
+    /// `role` lacks the rights `lacks` that `profile` requires, and meets the
+    /// profiles `meets` as it is.
+    pub(crate) fn role_lacks(role: &str, profile: &str, lacks: &[String], meets: &[String])
+        = "access-role-lacks":
+        "Note: role {role} lacks {}, which the profile {profile} requires, so its users get \
+         nothing of it until Stalwart's administrator gives the role {} in the native \
+         administration (Roles). {}", listed(lacks), those(lacks), as_it_is(meets);
+    pub(crate) fn too_many_roles(max: usize) = "access-too-many-roles":
+        "it inherits from more than {max} roles, more than Garrison evaluates";
+    pub(crate) fn inherits_missing(gone: &str) = "access-inherits-missing":
+        "it inherits from role {gone}, which Stalwart does not have";
+    pub(crate) fn role_unreadable(id: &str) = "access-role-unreadable":
+        "this release cannot read role {id}";
+    pub(crate) fn every_users_role() = "access-every-users-role":
+        "it is every user's default role too, and binding it would make every user an \
+         administrator";
+    pub(crate) fn no_such_role() = "access-no-such-role":
+        "Stalwart has no role of that ID";
+    pub(crate) fn rights_unevaluated(why: &State) = "access-rights-unevaluated":
+        "its rights cannot be evaluated ({why})";
 }
 
 /// The role, or `parent`, one it inherits from, belongs to a tenant.
@@ -125,25 +89,6 @@ pub(crate) fn tenant_role(parent: Option<&str>) -> State {
 /// `error`: why the evaluation of the role's rights failed, in its words.
 pub(crate) fn unevaluable(error: impl Display) -> State {
     State::new("access-unevaluable", error.to_string())
-}
-
-pub(crate) fn every_users_role() -> State {
-    State::new(
-        "access-every-users-role",
-        "it is every user's default role too, and binding it would make every user an \
-         administrator",
-    )
-}
-
-pub(crate) fn no_such_role() -> State {
-    State::new("access-no-such-role", "Stalwart has no role of that ID")
-}
-
-pub(crate) fn rights_unevaluated(why: &State) -> State {
-    State::new(
-        "access-rights-unevaluated",
-        format!("its rights cannot be evaluated ({why})"),
-    )
 }
 
 /// A role as messages name it: its ID, with its description where it has one.

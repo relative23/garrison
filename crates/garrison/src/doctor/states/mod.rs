@@ -89,68 +89,35 @@ pub(super) fn dqs_key_written((what, fix): (String, String)) -> State {
 }
 
 #[cfg(test)]
-fn rows() -> Vec<(State, &'static str)> {
+fn rows() -> Vec<State> {
     let said = |what: &str, fix: &str| (what.to_owned(), fix.to_owned());
     vec![
-        (
-            not_root(),
-            "Run as root: the checks read files only root may read. [doctor-not-root]",
-        ),
-        (
-            in_order(30),
-            "All 30 checks are in order. [doctor-summary-in-order]",
-        ),
-        (
-            no_problem(1, 1, 30),
-            "0 problems, 1 warning, 1 unknown, of 30 checks. [doctor-summary-no-problem]",
-        ),
-        (
-            problems(2, 0, 0, 30),
-            "2 problems, 0 warnings, 0 unknown, of 30 checks. [doctor-summary-problems]",
-        ),
-        (
-            placeholder("issuer", "https://mail.example.org"),
-            "issuer is still the placeholder https://mail.example.org [doctor-origin-placeholder]\n      \
-             Set the real address in /etc/garrison/garrison.toml.",
-        ),
-        (
-            unfollowed(Unfollowed {
-                what: "broker.socket is /run/broker.sock, but garrison-broker.socket listens on \
+        not_root(),
+        in_order(30),
+        no_problem(1, 1, 30),
+        problems(2, 0, 0, 30),
+        placeholder("issuer", "https://mail.example.org"),
+        unfollowed(Unfollowed {
+            what: "broker.socket is /run/broker.sock, but garrison-broker.socket listens on \
                        /run/garrison/broker.sock"
-                    .into(),
-                fix: "Remove the setting.".into(),
-            }),
-            "broker.socket is /run/broker.sock, but garrison-broker.socket listens on \
-             /run/garrison/broker.sock [doctor-setting-unfollowed]\n      Remove the setting.",
-        ),
-        (
-            unloaded(Unloaded {
-                setting: "broker.native_key",
-                what: "broker.native_key is credential:key, but garrison-broker.service loads \
+                .into(),
+            fix: "Remove the setting.".into(),
+        }),
+        unloaded(Unloaded {
+            setting: "broker.native_key",
+            what: "broker.native_key is credential:key, but garrison-broker.service loads \
                        this secret only as credential:broker-native-key"
-                    .into(),
-                fix: "Write broker.native_key = \"credential:broker-native-key\".".into(),
-            }),
-            "broker.native_key is credential:key, but garrison-broker.service loads this secret \
-             only as credential:broker-native-key [doctor-secret-unloaded]\n      Write \
-             broker.native_key = \"credential:broker-native-key\".",
-        ),
-        (
-            dqs_unasked(said(
-                "providers[1].lists names zen.dq.spamhaus.net",
-                "Set collector.dqs_key.",
-            )),
-            "providers[1].lists names zen.dq.spamhaus.net [doctor-dqs-list-unasked]\n      \
-             Set collector.dqs_key.",
-        ),
-        (
-            dqs_key_written(said(
-                "providers[1].lists names ….sbl.dq.spamhaus.net with the key",
-                "Write the zone without the key.",
-            )),
-            "providers[1].lists names ….sbl.dq.spamhaus.net with the key \
-             [doctor-dqs-key-in-config]\n      Write the zone without the key.",
-        ),
+                .into(),
+            fix: "Write broker.native_key = \"credential:broker-native-key\".".into(),
+        }),
+        dqs_unasked(said(
+            "providers[1].lists names zen.dq.spamhaus.net",
+            "Set collector.dqs_key.",
+        )),
+        dqs_key_written(said(
+            "providers[1].lists names ….sbl.dq.spamhaus.net with the key",
+            "Write the zone without the key.",
+        )),
     ]
 }
 
@@ -159,7 +126,7 @@ mod tests {
     use super::*;
 
     /// Every state of doctor's, with its whole line as an example.
-    fn every() -> Vec<(State, &'static str)> {
+    fn every() -> Vec<State> {
         [
             rows(),
             host::rows(),
@@ -227,7 +194,7 @@ mod tests {
     #[test]
     fn every_name_the_scripts_look_for_is_a_state_of_doctors() {
         let rows = every();
-        let known: Vec<&str> = rows.iter().map(|(state, _)| state.name).collect();
+        let known: Vec<&str> = rows.iter().map(|state| state.name).collect();
         let mut looked_for = 0;
         for script in [
             include_str!("../../../../../scripts/acceptance-quickstart.sh"),

@@ -349,7 +349,8 @@ Source, comments, identifiers, file names and documents are in English.
 - **No `unsafe`.** The workspace forbids it; system calls go through `rustix`.
 - **Keep paths as paths.** Use `Path` and `OsStr` until a value is displayed;
   converting to `str` loses or rejects names that are valid on Linux.
-- **Macros sparingly.** A function is easier to read, test and change.
+- **Macros sparingly.** A function is easier to read, test and change. The
+  one macro that writes functions is the table of the states (`states!`).
 - **One writer per database.** Each SQLite file has exactly one writing
   service (`config::Database`). Readers use `core::sqlite::reading()` and never
   keep a connection beyond one request.
@@ -428,15 +429,39 @@ A refusal a command ends with, and an outcome another program acts on, is a
 `State` (`crates/garrison/src/state.rs`): its name, its sentence and, where it
 is said apart, what mends it. One constructor function makes each, in the
 `states.rs` of its area (`install/`, `upgrade/`, `setup/`, and `src/states/`
-for the other commands); no sentence of a state is built anywhere else. A name
-is lower-case words joined by hyphens, the area first (`install-no-room`), and
-never changes once released. Functions return `Result<T, State>`. Tests compare
-a state with its constructor, or look for its name (`support::states` in
-`tests/`), never for its words; the area's table test holds each state's whole
-line once and fails for a state it lacks. The operators' page
-`docs/operator/states.md` shows the same line in a block of its own, and the
-table test fails for a line the page lacks or words otherwise. An acceptance
-script looks for a state by its name with `acceptance-state`, and
+for the other commands); no sentence of a state is built anywhere else. A
+state whose sentence is one text with its values is an entry of the area's
+table, which writes its function:
+
+```rust
+states! {
+    /// `folder`: where the release was to go.
+    pub(super) fn no_room(folder: &Path, needed: u64) = "install-no-room":
+        "{} has no room for {needed} MiB", folder.display()
+        => "Free the room, then install again.";
+}
+```
+
+A state whose sentence is decided (a match, a condition, a list) is a function
+beside the table that calls `State::new`. A name is lower-case words joined by
+hyphens, the area first (`install-no-room`), and never changes once released.
+Functions return `Result<T, State>`. Tests compare a state with its
+constructor, or look for its name (`support::states` in `tests/`), never for
+its words.
+
+Each state's whole line stands written out in one place, the operators' page
+`docs/operator/states.md`, in a block of its own. The area's table test makes
+every state once with values such as a host has and fails for a state it
+lacks, and for a line the page does not show. After a change of a sentence,
+write the page with the test and read its difference, which is what an
+operator will see:
+
+```sh
+GARRISON_STATES=write cargo test -p garrison --bin garrison
+```
+
+A new state's block is entered by hand in its area's section first. An
+acceptance script looks for a state by its name with `acceptance-state`, and
 `tests/states.rs` fails for a name that no constructor makes, and for a page
 that lists a state twice or one the product does not have.
 

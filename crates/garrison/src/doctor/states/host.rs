@@ -6,7 +6,7 @@ use std::path::Path;
 use garrison_core::time;
 
 use super::counted;
-use crate::state::State;
+use crate::state::{State, states};
 use crate::units;
 
 /// `1 minute ago` for a number of seconds; less than a minute, or a time
@@ -30,13 +30,21 @@ pub(in crate::doctor) fn no_release(current: &Path) -> State {
         .with_fix("Run the installer from the release archive.")
 }
 
-pub(in crate::doctor) fn active(unit: &str) -> State {
-    State::new("doctor-service-active", format!("{unit} is active"))
-}
-
-pub(in crate::doctor) fn inactive(unit: &str, state: &str) -> State {
-    State::new("doctor-service-inactive", format!("{unit} is {state}"))
-        .with_fix(format!("journalctl -u {unit} -n 50 shows why."))
+states! {
+    pub(in crate::doctor) fn active(unit: &str) = "doctor-service-active":
+        "{unit} is active";
+    pub(in crate::doctor) fn inactive(unit: &str, state: &str) = "doctor-service-inactive":
+        "{unit} is {state}"
+        => "journalctl -u {unit} -n 50 shows why.";
+    pub(in crate::doctor) fn synchronized() = "doctor-clock-synchronized":
+        "the clock is synchronized";
+    pub(in crate::doctor) fn unsynchronized() = "doctor-clock-unsynchronized":
+        "the clock is not synchronized"
+        => "Sign-in tokens and certificates depend on the time: enable a time service \
+            (timedatectl set-ntp true).";
+    pub(in crate::doctor) fn no_event() = "doctor-events-none":
+        "no Stalwart event recorded yet"
+        => "Stalwart sends events through the webhook that `garrison stalwart setup` creates.";
 }
 
 pub(in crate::doctor) fn unanswered_service(unit: &str) -> State {
@@ -121,16 +129,6 @@ pub(in crate::doctor) fn run_unknown() -> State {
     State::new("doctor-collection-run-unknown", text)
 }
 
-pub(in crate::doctor) fn synchronized() -> State {
-    State::new("doctor-clock-synchronized", "the clock is synchronized")
-}
-
-pub(in crate::doctor) fn unsynchronized() -> State {
-    State::new("doctor-clock-unsynchronized", "the clock is not synchronized").with_fix(
-        "Sign-in tokens and certificates depend on the time: enable a time service (timedatectl set-ntp true).",
-    )
-}
-
 pub(in crate::doctor) fn clock_unknown() -> State {
     let text = "clock synchronization: timedatectl gave no answer";
     State::new("doctor-clock-unknown", text)
@@ -209,160 +207,54 @@ pub(in crate::doctor) fn quiet(seconds: i64) -> State {
     )
 }
 
-pub(in crate::doctor) fn no_event() -> State {
-    State::new("doctor-events-none", "no Stalwart event recorded yet").with_fix(
-        "Stalwart sends events through the webhook that `garrison stalwart setup` creates.",
-    )
-}
-
 #[cfg(test)]
-pub(super) fn rows() -> Vec<(State, &'static str)> {
+pub(super) fn rows() -> Vec<State> {
     [runs(), times()].concat()
 }
 
 /// The release, the services and the collector's runs.
 #[cfg(test)]
-fn runs() -> Vec<(State, &'static str)> {
+fn runs() -> Vec<State> {
     let at = |path: &'static str| Path::new(path);
     vec![
-        (
-            release("0.2.0", Some("0.1.2")),
-            "release 0.2.0, previous 0.1.2 [doctor-release-installed]",
-        ),
-        (
-            no_release(at("/opt/garrison/current")),
-            "no installed release in /opt/garrison/current [doctor-release-missing]\n      Run \
-             the installer from the release archive.",
-        ),
-        (
-            active("garrison-web.service"),
-            "garrison-web.service is active [doctor-service-active]",
-        ),
-        (
-            inactive("garrison-web.service", "failed"),
-            "garrison-web.service is failed [doctor-service-inactive]\n      journalctl -u \
-             garrison-web.service -n 50 shows why.",
-        ),
-        (
-            unanswered_service("garrison-web.service"),
-            "garrison-web.service: systemctl gave no answer [doctor-service-unknown]",
-        ),
-        (
-            collection_unreadable("file is not a database"),
-            "when the collector last finished a run: the status database cannot be read (file \
-             is not a database) [doctor-collection-unreadable]",
-        ),
-        (
-            no_collection(),
-            "no collection run has finished yet [doctor-collection-none]\n      The collector \
-             runs every minute; if this stays, `systemctl status garrison-collect.service \
-             garrison-collect.timer` and `garrison check-config` say why.",
-        ),
-        (
-            collection_undated(i64::MAX),
-            "when the collector last finished a run: the newest status snapshot is dated \
-             9223372036854775807, which is no time [doctor-collection-undated]",
-        ),
-        (
-            collection_stopped(1_793_999_399, 601),
-            "no collection run has finished since 2026-11-06T21:09:59+00:00, 10 minutes ago \
-             [doctor-collection-stopped]\n      Until one does, Garrison checks nothing and \
-             reports nothing: `systemctl status garrison-collect.service \
-             garrison-collect.timer` and `garrison check-config` say why.",
-        ),
-        (
-            snapshot_ahead(3600),
-            "the newest status snapshot is dated 60 minutes ahead of this host's clock, so its \
-             age is not known [doctor-collection-ahead]\n      The clock went back after it \
-             was written; `timedatectl` shows whether it is synchronized.",
-        ),
-        (
-            collection_recent(90),
-            "the last collection run finished 1 minute ago [doctor-collection-recent]",
-        ),
-        (
-            run_failed("exit-code"),
-            "the last collection run ended with exit-code [doctor-collection-run-failed]\n      \
-             journalctl -u garrison-collect.service -n 50 shows why.",
-        ),
-        (
-            run_unknown(),
-            "garrison-collect.service: systemctl gave no answer about its last run \
-             [doctor-collection-run-unknown]",
-        ),
+        release("0.2.0", Some("0.1.2")),
+        no_release(at("/opt/garrison/current")),
+        active("garrison-web.service"),
+        inactive("garrison-web.service", "failed"),
+        unanswered_service("garrison-web.service"),
+        collection_unreadable("file is not a database"),
+        no_collection(),
+        collection_undated(i64::MAX),
+        collection_stopped(1_793_999_399, 601),
+        snapshot_ahead(3600),
+        collection_recent(90),
+        run_failed("exit-code"),
+        run_unknown(),
     ]
 }
 
 /// The clock, free space and the events.
 #[cfg(test)]
-fn times() -> Vec<(State, &'static str)> {
+fn times() -> Vec<State> {
     let at = |path: &'static str| Path::new(path);
     vec![
-        (
-            synchronized(),
-            "the clock is synchronized [doctor-clock-synchronized]",
+        synchronized(),
+        unsynchronized(),
+        clock_unknown(),
+        space_unknown(
+            "/proc/self/status/garrison",
+            "Not a directory (os error 20)",
         ),
-        (
-            unsynchronized(),
-            "the clock is not synchronized [doctor-clock-unsynchronized]\n      Sign-in tokens \
-             and certificates depend on the time: enable a time service (timedatectl set-ntp \
-             true).",
+        room("/var/backups", at("/var"), 2048),
+        little_room("/var/lib/garrison", at("/var/lib/garrison"), 512),
+        events_unreadable(
+            at("/var/lib/garrison/ingest/events.sqlite"),
+            "file is not a database",
         ),
-        (
-            clock_unknown(),
-            "clock synchronization: timedatectl gave no answer [doctor-clock-unknown]",
-        ),
-        (
-            space_unknown(
-                "/proc/self/status/garrison",
-                "Not a directory (os error 20)",
-            ),
-            "free space of /proc/self/status/garrison: Not a directory (os error 20) \
-             [doctor-space-unknown]",
-        ),
-        (
-            room("/var/backups", at("/var"), 2048),
-            "/var/backups does not exist yet; /var, where it will be made, has 2048 MiB free \
-             [doctor-space-enough]",
-        ),
-        (
-            little_room("/var/lib/garrison", at("/var/lib/garrison"), 512),
-            "/var/lib/garrison has only 512 MiB free [doctor-space-low]\n      Databases and \
-             backups grow; make room before the next upgrade.",
-        ),
-        (
-            events_unreadable(
-                at("/var/lib/garrison/ingest/events.sqlite"),
-                "file is not a database",
-            ),
-            "when the last Stalwart event arrived: the events database \
-             /var/lib/garrison/ingest/events.sqlite cannot be read (file is not a database) \
-             [doctor-events-unreadable]",
-        ),
-        (
-            event_undated(i64::MIN),
-            "when the last Stalwart event arrived: the newest event is recorded at \
-             -9223372036854775808, which is no time [doctor-events-undated]",
-        ),
-        (
-            event_ahead(3630),
-            "the last Stalwart event is recorded 60 minutes ahead of this host's clock, so when \
-             it arrived is not known [doctor-events-ahead]\n      The clock went back after it \
-             arrived; `timedatectl` shows whether it is synchronized.",
-        ),
-        (
-            event_recent(615),
-            "the last Stalwart event arrived 10 minutes ago [doctor-events-recent]",
-        ),
-        (
-            quiet(30 * 3600),
-            "no Stalwart event for 30 hours [doctor-events-quiet]\n      Check the webhook in \
-             the Stalwart WebUI, or run `garrison stalwart setup` again.",
-        ),
-        (
-            no_event(),
-            "no Stalwart event recorded yet [doctor-events-none]\n      Stalwart sends events \
-             through the webhook that `garrison stalwart setup` creates.",
-        ),
+        event_undated(i64::MIN),
+        event_ahead(3630),
+        event_recent(615),
+        quiet(30 * 3600),
+        no_event(),
     ]
 }

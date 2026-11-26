@@ -161,123 +161,48 @@ pub(in crate::doctor) fn hidden((what, fix): (String, String)) -> State {
 }
 
 #[cfg(test)]
-pub(super) fn rows() -> Vec<(State, &'static str)> {
+pub(super) fn rows() -> Vec<State> {
     [taken(), grants()].concat()
 }
 
 /// Whether the broker takes the policy's file.
 #[cfg(test)]
-fn taken() -> Vec<(State, &'static str)> {
+fn taken() -> Vec<State> {
     let path = Path::new("/etc/garrison/access-policy.json");
     vec![
-        (
-            missing(path),
-            "the access policy is missing: /etc/garrison/access-policy.json \
-             [doctor-policy-missing]\n      Run `garrison access init`, which makes it.",
+        missing(path),
+        not_a_file(path),
+        refused(
+            "root:garrison-broker",
+            0o664,
+            &[GROUP_WRITES, OTHERS_READ],
+            path,
         ),
-        (
-            not_a_file(path),
-            "the access policy is a link or a folder, not a file: \
-             /etc/garrison/access-policy.json [doctor-policy-not-a-file]\n      Remove it; then \
-             `garrison access init` makes the file itself there.",
-        ),
-        (
-            refused(
-                "root:garrison-broker",
-                0o664,
-                &[GROUP_WRITES, OTHERS_READ],
-                path,
-            ),
-            "the broker does not take the access policy (root:garrison-broker, mode 664): its \
-             group may change it, and others may read it, so nobody can sign in: \
-             /etc/garrison/access-policy.json [doctor-policy-refused]\n      Run `chown \
-             root:garrison-broker /etc/garrison/access-policy.json && chmod 640 \
-             /etc/garrison/access-policy.json`.",
-        ),
-        (
-            no_broker(),
-            "whether the broker can read the access policy: this host has no user \
-             garrison-broker [doctor-policy-no-broker]",
-        ),
-        (
-            folder_closed(Path::new("/etc/garrison"), "root:root", 0o700),
-            "garrison-broker may not enter /etc/garrison (root:root, mode 700), so it cannot \
-             read the access policy and nobody can sign in [doctor-policy-folder-closed]\n      \
-             Run `chmod 755 /etc/garrison`.",
-        ),
-        (
-            folder_closed_elsewhere(Path::new("/srv/private"), "root:root", 0o700),
-            "garrison-broker may not enter /srv/private (root:root, mode 700), so it cannot read \
-             the access policy and nobody can sign in [doctor-policy-folder-closed-elsewhere]\n      \
-             Move the policy to /etc/garrison/access-policy.json and set broker.policy to it.",
-        ),
-        (
-            unreadable("root:root", 0o600, path),
-            "garrison-broker may not read the access policy (root:root, mode 600), so nobody can \
-             sign in: /etc/garrison/access-policy.json [doctor-policy-unreadable]\n      Run \
-             `chown root:garrison-broker /etc/garrison/access-policy.json && chmod 640 \
-             /etc/garrison/access-policy.json`.",
-        ),
-        (
-            broker_owner("garrison-broker:garrison-broker", 0o600, path),
-            "garrison-broker owns the access policy (garrison-broker:garrison-broker, mode 600), \
-             which the installer keeps root's, so that only root may change what it grants \
-             [doctor-policy-broker-owner]\n      Run `chown root:garrison-broker \
-             /etc/garrison/access-policy.json && chmod 640 /etc/garrison/access-policy.json`.",
-        ),
-        (
-            readable("root:garrison-broker", 0o640),
-            "the broker may read the access policy, which only root may change \
-             (root:garrison-broker, mode 640) [doctor-policy-readable]",
-        ),
+        no_broker(),
+        folder_closed(Path::new("/etc/garrison"), "root:root", 0o700),
+        folder_closed_elsewhere(Path::new("/srv/private"), "root:root", 0o700),
+        unreadable("root:root", 0o600, path),
+        broker_owner("garrison-broker:garrison-broker", 0o600, path),
+        readable("root:garrison-broker", 0o640),
     ]
 }
 
 /// What the policy grants, and where the broker's unit hides it.
 #[cfg(test)]
-fn grants() -> Vec<(State, &'static str)> {
+fn grants() -> Vec<State> {
     let path = Path::new("/etc/garrison/access-policy.json");
     vec![
-        (
-            too_large(path, 64),
-            "the access policy is larger than the broker reads (64 KiB), so nobody can sign in: \
-             /etc/garrison/access-policy.json [doctor-policy-too-large]\n      Move it away and \
-             run `garrison access init`, or copy back the newest backup beside it \
-             (/etc/garrison/access-policy.json.<time>.bak) with sudo cp where there is one.",
-        ),
-        (
-            actions_dropped(&["run_reports".into()]),
-            "the access policy names actions garrison.toml does not have (run_reports), so \
-             nobody can sign in [doctor-policy-actions-dropped]\n      Run `garrison access \
-             update`, which mends it.",
-        ),
-        (
-            invalid("schemaVersion must be 1"),
-            "the access policy does not read (schemaVersion must be 1), so nobody can sign in \
-             [doctor-policy-invalid]\n      Correct it as docs/operator/access.md shows.",
-        ),
-        (
-            unbound(),
-            "the access policy binds no role and no account, so nobody can sign in \
-             [doctor-policy-unbound]\n      Bind the role of your administrators: garrison \
-             access bind-role <role-id> --profile administrator",
-        ),
-        (
-            bound(1, 0),
-            "the access policy binds 1 role and 0 accounts [doctor-policy-bound]",
-        ),
-        (
-            hidden((
-                "broker.policy is /home/admin/access-policy.json, under /home, which \
+        too_large(path, 64),
+        actions_dropped(&["run_reports".into()]),
+        invalid("schemaVersion must be 1"),
+        unbound(),
+        bound(1, 0),
+        hidden((
+            "broker.policy is /home/admin/access-policy.json, under /home, which \
                  garrison-broker.service hides from the broker (ProtectHome=true): the broker \
                  cannot read it there, and nobody can sign in"
-                    .into(),
-                "Keep the policy where the broker sees it".into(),
-            )),
-            "broker.policy is /home/admin/access-policy.json, under /home, which \
-             garrison-broker.service hides from the broker (ProtectHome=true): the broker cannot \
-             read it there, and nobody can sign in [doctor-policy-hidden]\n      Keep the policy \
-             where the broker sees it.",
-        ),
+                .into(),
+            "Keep the policy where the broker sees it".into(),
+        )),
     ]
 }

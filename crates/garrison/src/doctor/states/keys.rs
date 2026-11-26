@@ -102,47 +102,18 @@ pub(in crate::doctor) fn reads_unknown(service: Service, file: &str, why: &str) 
 }
 
 #[cfg(test)]
-pub(super) fn rows() -> Vec<(State, &'static str)> {
+pub(super) fn rows() -> Vec<State> {
     use Service::{Broker, Collector};
     vec![
-        (
-            taken(Broker, "broker-native-key"),
-            "Stalwart takes the broker's API key (broker-native-key) from this host \
-             [doctor-key-taken]",
-        ),
-        (
-            not_known(Collector, "collector-native-key"),
-            "Stalwart does not know the collector's API key in collector-native-key, so every \
-             card that reads Stalwart stays unknown [doctor-key-not-known]\n      Run `garrison \
-             stalwart setup`, which makes a new one.",
-        ),
-        (
-            other_address(Broker, "broker-native-key"),
-            "Stalwart refuses the broker's API key in broker-native-key from this host's address \
-             (HTTP 403), so nobody can sign in [doctor-key-other-address]\n      The key may be \
-             used only from this host: run Stalwart in the host network.",
-        ),
-        (
-            untried(Broker, "broker-native-key", &answered(500)),
-            "whether Stalwart takes the broker's API key in broker-native-key: it answered HTTP \
-             500 for the key's JMAP session [doctor-key-untried]",
-        ),
-        (
-            narrowed(Collector, "collector-native-key", "forbidden"),
-            "Stalwart takes the collector's API key (collector-native-key) but refuses what the \
-             collector reads with it (forbidden), so the cards that read Stalwart's domains and \
-             accounts stay unknown [doctor-key-narrowed]\n      Run `garrison stalwart setup`, \
-             which gives the key the permissions it needs.",
-        ),
-        (
-            reads_unknown(
-                Broker,
-                "broker-native-key",
-                &silent("http://127.0.0.1:8080/jmap/", "timed out"),
-            ),
-            "whether Stalwart lets the broker's API key (broker-native-key) read what the broker \
-             reads: Stalwart did not answer at http://127.0.0.1:8080/jmap/ (timed out) \
-             [doctor-key-reads-unknown]",
+        taken(Broker, "broker-native-key"),
+        not_known(Collector, "collector-native-key"),
+        other_address(Broker, "broker-native-key"),
+        untried(Broker, "broker-native-key", &answered(500)),
+        narrowed(Collector, "collector-native-key", "forbidden"),
+        reads_unknown(
+            Broker,
+            "broker-native-key",
+            &silent("http://127.0.0.1:8080/jmap/", "timed out"),
         ),
     ]
 }
