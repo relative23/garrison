@@ -6,6 +6,8 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-27
+
 ### Removed
 
 - **The macro filter is gone.** Garrison no longer reads mail: the section
@@ -618,7 +620,8 @@ The first release.
 - **Releases.** Reproducible static archives for x86_64 and aarch64, each
   with the third-party notices and a CycloneDX SBOM.
 
-[Unreleased]: https://github.com/relative23/garrison/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/relative23/garrison/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/relative23/garrison/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/relative23/garrison/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/relative23/garrison/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/relative23/garrison/compare/v0.1.1...v0.1.2
