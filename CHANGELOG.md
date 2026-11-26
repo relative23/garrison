@@ -43,7 +43,8 @@ Notable changes for operators and users. The format follows
   a virus scanner's that is down, and now says to start it.
 - `garrison stalwart setup` no longer reads Stalwart's milters, and no longer
   stops for one that does not answer. A user without administrator rights is
-  told so at its first read, of the API keys (`setup-keys-unreadable`).
+  told so at the first read Stalwart refuses, of the webhooks
+  (`setup-webhooks-unreadable`).
 
 ## [0.2.1] - 2026-11-25
 

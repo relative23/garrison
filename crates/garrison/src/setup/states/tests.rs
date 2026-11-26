@@ -171,11 +171,11 @@ fn keys() -> Rows {
              account [setup-stalwart-error]) [setup-account-unseen]",
         ),
         (
-            keys_unreadable(&stalwart_error("x:ApiKey/get", "forbidden", "Forbidden")),
-            "Stalwart does not let the administrator read its API keys: run setup as an \
+            webhooks_unreadable(&stalwart_error("x:WebHook/get", "forbidden", "Forbidden")),
+            "Stalwart does not let the administrator read its webhooks: run setup as an \
              administrator who holds the keys' permissions, as one with Stalwart's administrator \
-             role (x:ApiKey/get: forbidden Forbidden [setup-stalwart-error]) \
-             [setup-keys-unreadable]",
+             role (x:WebHook/get: forbidden Forbidden [setup-stalwart-error]) \
+             [setup-webhooks-unreadable]",
         ),
         (
             account_full("'garrison broker', 'backup'", "garrison broker"),
