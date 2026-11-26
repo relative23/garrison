@@ -35,6 +35,9 @@ Notable changes for operators and users. The format follows
 
 ### Changed
 
+- Every release of Stalwart's 1.2 line is supported (1.2.x), where 1.2.0
+  alone was: the contract tests run against 1.2.0 and 1.2.1, and against
+  each new release of the line when it is published.
 - With `macro_document = true` the mail test sends a document that a virus
   scanner reports: a `.docm` with a real macro project that has no module,
   where it sent one that only carried a project's file name. ClamAV 1.0, 1.4

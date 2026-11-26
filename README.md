@@ -43,8 +43,9 @@ Garrison depends on Stalwart. If you run Stalwart Community, please consider
 [sponsoring Stalwart Labs](https://github.com/sponsors/stalwartlabs).
 
 Status: 0.3.0. Supported Stalwart releases:
-**1.2.0**, verified by contract tests against the real server
-(`cargo test --test contract`, see [contributing](CONTRIBUTING.md)).
+**1.2.x**, each release of the line verified by contract tests against the
+real server as it is published (`cargo test --test contract`, see
+[contributing](CONTRIBUTING.md)).
 
 ## What it shows
 
@@ -119,7 +120,7 @@ Details:
 ## Installing
 
 Garrison needs Linux on x86_64 or aarch64 with systemd 247 and polkit 0.106
-or newer, nginx or another TLS proxy, and Stalwart 1.2.0 on the same host. It
+or newer, nginx or another TLS proxy, and Stalwart 1.2.x on the same host. It
 is tested on Debian, Ubuntu, AlmaLinux, Rocky Linux, CentOS Stream, Fedora,
 openSUSE Leap and Amazon Linux; the
 [installation guide](docs/operator/installation.md) names the releases.

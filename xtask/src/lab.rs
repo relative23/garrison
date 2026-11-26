@@ -22,21 +22,29 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
 
-/// The supported Stalwart releases, newest first, each pinned by the digest
-/// of its image. `start` takes the first unless it is given another. The
-/// contract job in `.github/workflows/ci.yml` runs every one of them.
-const IMAGES: [(&str, &str); 1] = [(
-    "1.2.0",
-    "stalwartlabs/stalwart:v1.2.0\
-     @sha256:79ea09d25baad7e074d8df53db474571c5dc62621298e35e09e9cfd764333ed8",
-)];
+/// The releases of the supported lines (the README names a line, as in
+/// 1.2.x), newest first, each pinned by the digest of its image. `start`
+/// takes the first unless it is given another. The contract job in
+/// `.github/workflows/ci.yml` runs every one of them.
+const IMAGES: [(&str, &str); 2] = [
+    (
+        "1.2.1",
+        "stalwartlabs/stalwart:v1.2.1\
+         @sha256:ed3153af935f0125ed0424b2a6d7d5891915a9249189dda76860a27f906b64ea",
+    ),
+    (
+        "1.2.0",
+        "stalwartlabs/stalwart:v1.2.0\
+         @sha256:79ea09d25baad7e074d8df53db474571c5dc62621298e35e09e9cfd764333ed8",
+    ),
+];
 /// Stalwart's newest release, pinned by the digest of its image. Renovate
 /// moves it to each new release and to a new image of the same release
 /// (`customManagers` in renovate.json). The job contract-newest in
 /// `.github/workflows/ci.yml` runs it while it is none of [`IMAGES`], so the
 /// pull request shows whether Garrison still fits before the release becomes
 /// a supported one (CONTRIBUTING.md, "Supporting a new Stalwart release").
-const NEWEST: &str = "stalwartlabs/stalwart:v1.2.0@sha256:79ea09d25baad7e074d8df53db474571c5dc62621298e35e09e9cfd764333ed8";
+const NEWEST: &str = "stalwartlabs/stalwart:v1.2.1@sha256:ed3153af935f0125ed0424b2a6d7d5891915a9249189dda76860a27f906b64ea";
 const NAME: &str = "garrison-lab-stalwart";
 const PORT: u16 = 18180;
 const RECOVERY: &str = "contract-recovery:Contract-Recovery-2026";
@@ -276,7 +284,7 @@ mod tests {
         }
         assert_eq!(
             image(Some("0.16.0")),
-            Err("no supported Stalwart release \"0.16.0\"; the lab has 1.2.0".to_owned())
+            Err("no supported Stalwart release \"0.16.0\"; the lab has 1.2.1, 1.2.0".to_owned())
         );
     }
 
@@ -299,10 +307,11 @@ mod tests {
         assert_eq!(unsupported_newest().is_none(), supported);
     }
 
-    /// The README states what is supported and the contract job proves it,
-    /// so both must name exactly the releases a lab can start.
+    /// The README states which lines are supported (as in 1.2.x) and the
+    /// contract job proves it: the job runs exactly the releases a lab can
+    /// start, and those are of exactly the lines the README names.
     #[test]
-    fn the_readme_and_the_contract_job_name_the_same_releases() {
+    fn the_contract_job_runs_the_releases_of_the_lines_the_readme_names() {
         let mut releases: Vec<&str> = IMAGES.iter().map(|(name, _)| *name).collect();
         releases.sort_unstable();
         let workflow = include_str!("../../.github/workflows/ci.yml");
@@ -326,6 +335,14 @@ mod tests {
             .join(" ");
         let mut stated: Vec<&str> = supported.split("**").skip(1).step_by(2).collect();
         stated.sort_unstable();
-        assert_eq!(stated, releases, "{supported}");
+        let mut lines: Vec<String> = releases
+            .iter()
+            .map(|release| {
+                let (line, _) = release.rsplit_once('.').expect("a release as in 1.2.0");
+                format!("{line}.x")
+            })
+            .collect();
+        lines.dedup();
+        assert_eq!(stated, lines, "{supported}");
     }
 }

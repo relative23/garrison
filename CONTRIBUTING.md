@@ -150,12 +150,13 @@ cargo test --workspace --locked --test contract -- --ignored
 cargo xtask lab stop
 ```
 
-CI runs the contract tests against every supported release (`IMAGES` in
-`xtask/src/lab.rs`), on every change and once a week without one, because
+The README names the supported lines, as in 1.2.x. CI runs the contract
+tests against every release of them (`IMAGES` in `xtask/src/lab.rs`), on
+every change and once a week without one, because
 Stalwart serves its WebUI from outside the release and changes it without a
 new version. The job `contract-newest` runs them against Stalwart's newest
-release (`NEWEST`, `cargo xtask lab start newest`) while it is not a
-supported one. Renovate moves `NEWEST` to each new release and to a new
+release (`NEWEST`, `cargo xtask lab start newest`) while it is not one of
+them. Renovate moves `NEWEST` to each new release and to a new
 image of the same release at any time, outside the weekly schedule, so its pull request
 shows whether Garrison still fits.
 
@@ -493,12 +494,13 @@ remembered. The release after takes the entry out again.
 1. Add the image and its digest to `IMAGES` in `xtask/src/lab.rs` (Renovate's
    pull request has them in `NEWEST`) and the release to the contract job in
    `.github/workflows/ci.yml`, then run the contract tests against it. A
-   release stays in both for as long as it is supported.
+   release stays in both for as long as its line is supported.
 2. Regenerate the event labels from the new schema while the lab runs:
    `curl -sL -u "$GARRISON_LAB_ADMIN" "$GARRISON_LAB_URL/api/schema" | gunzip > schema.json`,
    then `cargo xtask event-types schema.json`.
-3. Review webhook fields and permission names, then update the supported
-   releases in `README.md`.
+3. Review webhook fields and permission names. A release of a line the
+   README names needs nothing more there; a new line (as in 1.3.x) is named
+   in `README.md` once its contract tests pass.
 
 ## Dependencies
 
