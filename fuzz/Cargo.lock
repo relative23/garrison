@@ -487,7 +487,6 @@ dependencies = [
  "base64",
  "garrison-checks",
  "garrison-core",
- "garrison-milter",
  "garrison-stalwart",
  "rusqlite",
  "serde",
@@ -573,7 +572,6 @@ dependencies = [
  "garrison-collector",
  "garrison-core",
  "garrison-ingest",
- "garrison-milter",
  "garrison-stalwart",
  "garrison-testing",
  "garrison-web",
@@ -599,17 +597,6 @@ dependencies = [
  "sha2",
  "thiserror",
  "tokio",
-]
-
-[[package]]
-name = "garrison-milter"
-version = "0.2.1"
-dependencies = [
- "base64",
- "flate2",
- "garrison-core",
- "log",
- "memchr",
 ]
 
 [[package]]

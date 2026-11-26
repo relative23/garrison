@@ -163,25 +163,7 @@ nginx: [emerg] unknown directive "x" [install-nginx-not-reloaded]
 The SELinux module did not load, so nginx may not reach Garrison: libsemanage: conflict. `setsebool -P httpd_can_network_connect 1` allows it more broadly. [install-selinux-failed]
 ```
 ```text
-The macro filter stays on the port it listens on, which garrison.toml no longer names: Stalwart asks its milter entry m1 at 127.0.0.1:8096 [install-milter-asked]. `garrison stalwart setup` moves it to port 8097. [install-milter-held]
-```
-```text
-Stalwart asks its milter entry m1 at 127.0.0.1:8096 [install-milter-asked]
-```
-```text
-Stalwart's milters could not be asked (Stalwart: connection refused [install-io]) [install-milter-unasked]
-```
-```text
-where garrison-milter.service listens cannot be seen [install-milter-unseen]
-```
-```text
-/etc/garrison/garrison.toml does not load, so Stalwart's milters cannot be asked [install-milter-unloaded]
-```
-```text
-The macro milter, which the configuration no longer has, keeps running: Stalwart asks its milter entry m1 at 127.0.0.1:8096 [install-milter-asked]. Run `garrison stalwart setup`: it takes the filter out of Stalwart and stops it. [install-milter-kept]
-```
-```text
-Stalwart still asks Garrison's macro milter about every message, as far as this host can tell, and would defer mail without it: Stalwart asks its milter entry m1 at 127.0.0.1:8096 [install-milter-asked]; nothing was changed. Remove the [milter] section from /etc/garrison/garrison.toml, run `garrison stalwart setup` and uninstall then. [install-milter-still-asked]
+garrison-milter.service runs: Stalwart asks the macro filter of the release installed about every message, and this release has no macro filter, so Stalwart would defer mail; nothing was changed. With the release installed, remove the [milter] section from garrison.toml and run `garrison stalwart setup`, which takes the filter out of Stalwart and stops it; then install this release. [install-macro-filter-runs]
 ```
 ```text
 There is no previous release to return to. [install-no-previous]
@@ -412,6 +394,9 @@ Asking Stalwart whose API key /etc/garrison/credentials/broker-native-key holds:
 Stalwart does not show the administrator the account that the API key in /etc/garrison/credentials/broker-native-key belongs to: run setup as an administrator who holds the keys' permissions, as one with Stalwart's administrator role (x:ApiKey/get: accountNotFound The accountId does not correspond to a valid account [setup-stalwart-error]) [setup-account-unseen]
 ```
 ```text
+Stalwart does not let the administrator read its webhooks: run setup as an administrator who holds the keys' permissions, as one with Stalwart's administrator role (x:WebHook/get: forbidden Forbidden [setup-stalwart-error]) [setup-webhooks-unreadable]
+```
+```text
 Stalwart takes no more API keys in the administrator's account, which holds 'garrison broker', 'backup': setup makes a new key before it removes the one it replaces. Remove a key the account no longer needs in the Stalwart WebUI; setup made no new key 'garrison broker' and removed none [setup-account-full]
 ```
 ```text
@@ -431,23 +416,6 @@ Stalwart refuses the API key in broker-native-key from this host (HTTP 403): it 
 ```
 ```text
 Restart garrison-broker so it reads the new secret. [setup-restart-asked] Until then it holds the API key the new one replaces, which stays in Stalwart [setup-old-key-kept]
-```
-```text
-garrison-milter.service runs, but setup cannot see where it listens, so it cannot tell which of Stalwart's entries ask it. Nothing was changed [setup-milter-unseen]
-```
-```text
-The macro milter cannot move to 127.0.0.1:8097 (Address already in use (os error 98)). Nothing was changed: free that port, or give the filter another [setup-milter-port-taken]
-```
-```text
-The macro milter does not answer on 127.0.0.1:8096 (Connection refused (os error 111)): while Stalwart asks it there, it defers all incoming mail. `journalctl -u garrison-milter.service -n 20` shows why it does not run. [setup-milter-silent]
-```
-```text
-Stalwart asks a milter at 127.0.0.1:11332 (entry o), where nothing answers: Stalwart defers all incoming mail [doctor-milter-stranded]
-      If nothing is to answer there, remove that entry in the Stalwart WebUI (Settings ▸ MTA ▸ Milters) and reload its settings.
-Setup changed nothing. Run `garrison stalwart setup` again once this is mended. [setup-milter-stranded]
-```
-```text
-Stalwart does not let the administrator read its milter entries: run setup as an administrator who holds the keys' permissions, as one with Stalwart's administrator role (x:MtaMilter/get: forbidden Forbidden [setup-stalwart-error]) [setup-milters-unreadable]
 ```
 ```text
 Stalwart is set up as asked; nothing was changed. [setup-as-asked]
@@ -688,61 +656,12 @@ Stalwart takes the collector's API key (collector-native-key) but refuses what t
 whether Stalwart lets the broker's API key (broker-native-key) read what the broker reads: Stalwart did not answer at http://127.0.0.1:8080/jmap/ (timed out) [doctor-key-reads-unknown]
 ```
 ```text
-the macro milter answers on 127.0.0.1:8096 [doctor-milter-answers]
-```
-```text
-the macro milter does not answer on 127.0.0.1:8096: Connection refused (os error 111) [doctor-milter-silent]
-      journalctl -u garrison-milter.service -n 50 shows why.
-```
-```text
 Stalwart asks a milter at 127.0.0.1:11332 (entry o), where nothing answers: Stalwart decides by conditions of its own what to do with all incoming mail [doctor-milter-stranded]
-      If nothing is to answer there, remove that entry in the Stalwart WebUI (Settings ▸ MTA ▸ Milters) and reload its settings.
+      Start the milter that is to answer there. If nothing is to answer there, remove that entry in the Stalwart WebUI (Settings ▸ MTA ▸ Milters) and reload its settings.
 ```
 ```text
 Stalwart asks a milter at 127.0.0.1:9000 (entry x), where nothing answers: Stalwart takes all incoming mail unscanned [doctor-milter-stranded-unscanned]
-      If nothing is to answer there, remove that entry in the Stalwart WebUI (Settings ▸ MTA ▸ Milters) and reload its settings.
-```
-```text
-Stalwart asks the macro milter at 127.0.0.1:8096, but the configuration has it on 127.0.0.1:8097 [doctor-milter-entry-moved]
-      Run `garrison stalwart setup`.
-```
-```text
-Stalwart asks the macro milter at 127.0.0.1:8096, but the configuration has it on 127.0.0.1:8097, where nothing answers: Stalwart defers all incoming mail [doctor-milter-entry-unanswered]
-      Run `garrison stalwart setup` once the milters named above are out of Stalwart.
-```
-```text
-Stalwart has no entry for the macro milter on 127.0.0.1:8096 and asks it nothing [doctor-milter-entry-missing]
-      Run `garrison stalwart setup`.
-```
-```text
-Stalwart has 2 entries for the macro milter on 127.0.0.1:8096 [doctor-milter-entries-several]
-      Run `garrison stalwart setup`.
-```
-```text
-Stalwart's entry for the macro milter on 127.0.0.1:8096 is switched off [doctor-milter-entry-off]
-      Run `garrison stalwart setup`.
-```
-```text
-Stalwart's entry for the macro milter on 127.0.0.1:8096 is switched on only under conditions of its own [doctor-milter-entry-conditional]
-      Run `garrison stalwart setup`.
-```
-```text
-Stalwart does not ask the macro milter on 127.0.0.1:8096 once a message's data has arrived, so it sees no attachment [doctor-milter-entry-before-data]
-      Run `garrison stalwart setup`.
-```
-```text
-Stalwart defers mail while the macro milter does not answer, though when_unreachable is "accept" [doctor-milter-when-unreachable]
-      Run `garrison stalwart setup`.
-```
-```text
-Stalwart asks the macro milter on 127.0.0.1:8096 about every message and defers mail while it does not answer [doctor-milter-entry-asked]
-```
-```text
-Stalwart still asks the macro milter at 127.0.0.1:8096, which the configuration no longer has [doctor-milter-entry-dropped]
-      Run `garrison stalwart setup`. It takes the filter out of Stalwart; until then mail may be deferred.
-```
-```text
-whether Stalwart asks the macro milter on 127.0.0.1:8096: Stalwart did not answer at http://127.0.0.1:8080 (connection refused) [doctor-milter-entry-unknown]
+      Start the milter that is to answer there. If nothing is to answer there, remove that entry in the Stalwart WebUI (Settings ▸ MTA ▸ Milters) and reload its settings.
 ```
 ```text
 whether Stalwart asks a milter where nothing answers: Stalwart refused the collector's API key [doctor-milter-stranded-unknown]

@@ -8,7 +8,6 @@
 | **ingest** | `garrison ingest`, user `garrison-ingest` | signed webhook batches on 127.0.0.1:8094 | `events.sqlite` |
 | **collector** | `garrison collect` (timer), user `garrison-collector` | providers: host, systemd, Stalwart API, Prometheus, files, the event history (read-only), DNS and blocklists, TLS listeners, test mail, GitHub's release list | `status.sqlite`: snapshots, metric samples and what the checks remember between runs; messages on the notification channels |
 | **watch** | `garrison watch` (timer), user `garrison-collector` | when the collector last finished a run, read-only | a marker file; a message on the notification channels when the collector stops |
-| **milter** | `garrison milter`, user `garrison-milter`, only where `[milter]` is configured | each incoming message, shown by Stalwart on 127.0.0.1:8096 | nothing: it answers Stalwart and logs what kind of macro it found |
 | **broker** | `garrison broker` (socket-activated), user `garrison-broker` | policy, Stalwart account/role metadata | `jobs.sqlite`: audit and idempotency |
 
 Each database has exactly one writer. Databases another user reads use
@@ -29,13 +28,12 @@ checks-stalwart/ checks of Stalwart: management API, mailboxes, metrics exporter
 checks-mail/     checks of the mail flow: event numbers, sending addresses, test mail, antivirus
 checks-network/  checks of the network: DNS records, blocklists and reverse names, TLS certificates
 collector/       provider registry, status store, notifications, one collection run
-milter/          the macro filter: scan of a message, milter protocol, listener
 web/             axum app, sessions, security gate, routes, API models and OpenAPI document
 garrison/        the one binary: services, operator commands, installer
 ```
 
-`core`, `stalwart`, `authz`, `broker`, the `checks` crates, `collector` and
-`milter` are synchronous and depend on no web framework or async runtime
+`core`, `stalwart`, `authz`, `broker`, the `checks` crates and `collector`
+are synchronous and depend on no web framework or async runtime
 (enforced by `cargo xtask layering`); axum and tokio run only in the web and
 ingest services. Each `checks-*` crate names only the libraries its own checks
 use, so one that a single check needs stays out of the others. `testing`
@@ -130,8 +128,9 @@ the ids are kept like an interface ([observation ids](../operator/observations.m
 
 - No changes to Stalwart's binaries, WebUI files or license checks.
 - No shell, no arbitrary command, no Docker socket, no raw mail in the
-  interface or on disk. The optional, experimental macro filter reads each
-  incoming message in memory to judge it and keeps nothing of it.
+  interface or on disk.
+- No reading of mail: what a message carries is a virus scanner's to judge.
+  Garrison sends test messages and counts what the scanner's milter answered.
 - No per-domain tenant isolation: profiles are server-wide.
 - No reconstruction of events from before the webhook existed.
 

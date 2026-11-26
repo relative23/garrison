@@ -190,19 +190,6 @@ pub(super) fn assert_exporter_held(lab: &Lab, credentials: &Path, context: &str)
     );
 }
 
-/// Where the configuration has the macro filter at `port`, one of
-/// Stalwart's entries asks it there.
-pub(super) fn assert_milter_held(lab: &Lab, port: u16, context: &str) {
-    let entries = lab.call("x:MtaMilter/get", &json!({"ids": null}));
-    let asking = entries["list"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|entry| entry["host"] == "127.0.0.1" && entry["port"] == port)
-        .count();
-    assert_eq!(asking, 1, "{context}: entries for the filter");
-}
-
 /// All three.
 pub(super) fn assert_together(
     lab: &Lab,

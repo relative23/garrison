@@ -326,67 +326,16 @@ pub(super) fn selinux_failed(said: Option<&str>, status: ExitStatus) -> State {
     )
 }
 
-/// `why`: what keeps the filter on the port it listens on.
-pub(super) fn milter_held(why: &State, port: u16) -> State {
+/// `unit`: the macro filter's unit of a release up to 0.2, which runs.
+pub(super) fn filter_runs(unit: &str) -> State {
     State::new(
-        "install-milter-held",
+        "install-macro-filter-runs",
         format!(
-            "The macro filter stays on the port it listens on, which garrison.toml no longer \
-             names: {why}. `garrison stalwart setup` moves it to port {port}."
-        ),
-    )
-}
-
-pub(super) fn milter_asked(id: &str, address: &str) -> State {
-    State::new(
-        "install-milter-asked",
-        format!("Stalwart asks its milter entry {id} at {address}"),
-    )
-}
-
-pub(super) fn milter_unasked(why: &State) -> State {
-    State::new(
-        "install-milter-unasked",
-        format!("Stalwart's milters could not be asked ({why})"),
-    )
-}
-
-pub(super) fn milter_unseen(unit: &str) -> State {
-    State::new(
-        "install-milter-unseen",
-        format!("where {unit} listens cannot be seen"),
-    )
-}
-
-pub(super) fn milter_unloaded(settings: &Path) -> State {
-    State::new(
-        "install-milter-unloaded",
-        format!(
-            "{} does not load, so Stalwart's milters cannot be asked",
-            settings.display()
-        ),
-    )
-}
-
-/// `why`: what may still ask the filter the configuration no longer has.
-pub(super) fn milter_kept(why: &State) -> State {
-    State::new(
-        "install-milter-kept",
-        format!(
-            "The macro milter, which the configuration no longer has, keeps running: {why}. Run \
-             `garrison stalwart setup`: it takes the filter out of Stalwart and stops it."
-        ),
-    )
-}
-
-pub(super) fn milter_still_asked(why: &State, settings: &Path) -> State {
-    State::new(
-        "install-milter-still-asked",
-        format!(
-            "Stalwart still asks Garrison's macro milter about every message, as far as this host \
-             can tell, and would defer mail without it: {why}; nothing was changed. Remove the \
-             [milter] section from {}, run `garrison stalwart setup` and uninstall then.",
-            settings.display()
+            "{unit} runs: Stalwart asks the macro filter of the release installed about every \
+             message, and this release has no macro filter, so Stalwart would defer mail; nothing \
+             was changed. With the release installed, remove the [milter] section from \
+             garrison.toml and run `garrison stalwart setup`, which takes the filter out of \
+             Stalwart and stops it; then install this release."
         ),
     )
 }

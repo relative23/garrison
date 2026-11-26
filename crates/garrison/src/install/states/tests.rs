@@ -292,49 +292,15 @@ fn system() -> Rows {
     ]
 }
 
-fn milter() -> Rows {
-    let settings = Path::new("/etc/garrison/garrison.toml");
-    let asked = milter_asked("m1", "127.0.0.1:8096");
-    vec![
-        (
-            milter_held(&asked, 8097),
-            "The macro filter stays on the port it listens on, which garrison.toml no longer names: \
-             Stalwart asks its milter entry m1 at 127.0.0.1:8096 [install-milter-asked]. `garrison \
-             stalwart setup` moves it to port 8097. [install-milter-held]",
-        ),
-        (
-            asked.clone(),
-            "Stalwart asks its milter entry m1 at 127.0.0.1:8096 [install-milter-asked]",
-        ),
-        (
-            milter_unasked(&io("Stalwart", "connection refused")),
-            "Stalwart's milters could not be asked (Stalwart: connection refused [install-io]) \
-             [install-milter-unasked]",
-        ),
-        (
-            milter_unseen("garrison-milter.service"),
-            "where garrison-milter.service listens cannot be seen [install-milter-unseen]",
-        ),
-        (
-            milter_unloaded(settings),
-            "/etc/garrison/garrison.toml does not load, so Stalwart's milters cannot be asked \
-             [install-milter-unloaded]",
-        ),
-        (
-            milter_kept(&asked),
-            "The macro milter, which the configuration no longer has, keeps running: Stalwart asks \
-             its milter entry m1 at 127.0.0.1:8096 [install-milter-asked]. Run `garrison stalwart \
-             setup`: it takes the filter out of Stalwart and stops it. [install-milter-kept]",
-        ),
-        (
-            milter_still_asked(&asked, settings),
-            "Stalwart still asks Garrison's macro milter about every message, as far as this host \
-             can tell, and would defer mail without it: Stalwart asks its milter entry m1 at \
-             127.0.0.1:8096 [install-milter-asked]; nothing was changed. Remove the [milter] \
-             section from /etc/garrison/garrison.toml, run `garrison stalwart setup` and uninstall \
-             then. [install-milter-still-asked]",
-        ),
-    ]
+fn filter() -> Rows {
+    vec![(
+        filter_runs("garrison-milter.service"),
+        "garrison-milter.service runs: Stalwart asks the macro filter of the release installed \
+         about every message, and this release has no macro filter, so Stalwart would defer mail; \
+         nothing was changed. With the release installed, remove the [milter] section from \
+         garrison.toml and run `garrison stalwart setup`, which takes the filter out of Stalwart \
+         and stops it; then install this release. [install-macro-filter-runs]",
+    )]
 }
 
 #[test]
@@ -344,7 +310,7 @@ fn every_state_of_the_installer_says_its_line() {
         runs(),
         starts(),
         system(),
-        milter(),
+        filter(),
         back::rollback(),
         back::restore(),
         back::places(),

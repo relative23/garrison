@@ -33,7 +33,6 @@ Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 | `crates/checks-*` | The checks, by what they look at: `host`, `stalwart`, `mail` and `network` |
 | `crates/collector` | Runs the configured checks into `status.sqlite` and sends the notifications |
 | `crates/ingest` | The webhook receiver and the event history queries |
-| `crates/milter` | The optional macro filter: the scan of a message and the milter protocol |
 | `crates/web` | The HTTP service: sign-in, API, interface files |
 | `crates/garrison` | The single binary: every service, the installer, the CLI |
 | `crates/testing` | Fixtures shared by tests; never a normal dependency |
@@ -130,7 +129,7 @@ npm run audit                                  # known vulnerabilities, needs th
 |---|---|
 | `clippy` | Pedantic lints; `unsafe` is forbidden, and `unwrap`, `expect` and `panic!` outside tests are warnings, so errors |
 | `fuzz/` format and `check --locked` | The fuzz targets, which `--all` and `--workspace` do not reach, keep the format and build from their own lockfile; running them is the weekly fuzz workflow's |
-| `cargo xtask layering` | `core`, `stalwart`, `authz`, `broker`, the `checks` crates, `collector` and `milter` never depend on a web framework or an async runtime |
+| `cargo xtask layering` | `core`, `stalwart`, `authz`, `broker`, the `checks` crates and `collector` never depend on a web framework or an async runtime |
 | `cargo xtask sizes` | Handwritten files stay at or below 500 lines |
 | `cargo xtask scripts` | A script that names its interpreter is executable, so that `scripts/<name>.sh` runs as its header shows |
 | `contract_files` test | `frontend/api/openapi.json` and `modules.json` match the code |
@@ -312,28 +311,20 @@ cargo run -p garrison-web --example preview -- 18091 --busy
 Garrison does not write itself: the strict JSON parser (`json`), a line on the
 broker's socket (`broker_request`), the text of Stalwart's metrics endpoint
 (`prometheus`), a resolver's answer (`dns_answer`), a batch of events together
-with every view of the stored history (`events`), any request to the web
+with every view of the stored history (`events`) and any request to the web
 service's routes, signed in or not, with real databases behind them
-(`web_request`), a message as the macro milter scans it (`milter_scan`),
-what a mail server sends that milter on a connection (`milter_session`) and a
-part's base64 as mail programs' decoders read it (`milter_base64`). A
-target fails on a panic, on an answer "Internal error", where what was
-stored cannot be read again, and where the macro scan calls clean a message
-from which a decoder it follows rebuilds a document with macros. Running the
+(`web_request`). A target fails on a panic, on an answer "Internal error" and
+where what was stored cannot be read again. Running the
 targets needs a nightly compiler and cargo-fuzz, so that is no part of the
 checks before a commit (their
 format and their lockfile are, see [Checks](#checks));
 `.github/workflows/fuzz.yml` runs each for five minutes every week and
-whenever `fuzz/` changes. The three milter targets get inputs of up to a
-megabyte there (`-max_len=1048576`), and an input that takes longer than 20
-seconds fails the run: the time a scan takes must not grow faster than its
-message.
+whenever `fuzz/` changes.
 
 ```sh
 cargo install --locked cargo-fuzz@0.13.2
 cd fuzz
 cargo +nightly fuzz run web_request corpus/web_request seeds/web_request -- -max_total_time=300
-cargo +nightly fuzz run milter_scan corpus/milter_scan seeds/milter_scan -- -max_total_time=300 -max_len=1048576
 ```
 
 `seeds/` holds the inputs to start from, such as one request for every route;
@@ -587,7 +578,7 @@ line in a journal, is tried again for a while (`check`).
 | `acceptance-uninstall.sh` | previous, new | A dry run changes nothing, its test of nginx without Garrison's snippets none of them also where it is killed, an uninstallation keeps configuration and data for the next installation, and a purge leaves nothing of Garrison but the operator's own backups, also where polkit's rules folder is gone |
 | `acceptance-host.sh` | previous, new | In a virtual machine, what a container cannot show: Garrison under the distribution's own SELinux or AppArmor, whose denials are read from the kernel log and, while auditd runs, from its log, behind nginx with TLS, after a reboot and after an upgrade there, and the collector reading a place under `/home` that a drop-in shows it |
 | `acceptance-ansible.sh` | `OUT` | In a virtual machine, the Ansible role in `deploy/ansible`: a first installation, a second run that runs setup and the installer and changes nothing, a dry run that changes nothing and an upgrade by version, which runs setup, then plays that stop on the way, each finished by the next: a setup that fails, which says why and shows no secret, a configuration the release refuses, which stops the play before setup changes Stalwart, `access init` without a role to bind, a policy kept elsewhere, an unpacking cut short, a first install that did not finish, an upgrade the installer had no room for, where a changed configuration of the running release needs none, an upgrade that did not start, an installer that failed under `ignore_errors`, and a restart in the middle; and a `garrison.toml` changed by hand and an archive of the same version built again, each in force after the next play. Needs `ansible-playbook` (`ANSIBLE` names another one) and `minisign` |
-| `acceptance-quickstart.sh` | new | In a virtual machine, the quick start against a real Stalwart (the image `xtask/src/lab.rs` pins, run with Podman in the host network): the install at a terminal, `garrison setup` answered as an operator would, nginx with the server block setup printed, the sign-in redirect to Stalwart, a mail session that arrives as events, `garrison doctor` without a problem but the reserved test names, `garrison stalwart setup --rotate` beside the running services, through which an administrator signs in at Stalwart and has the rights checked, where nothing may fail but a request that is under way when the broker restarts, and after which Stalwart takes the new keys and no longer the old and its events arrive under the new signature key, and the macro filter switched on and off again |
+| `acceptance-quickstart.sh` | new | In a virtual machine, the quick start against a real Stalwart (the image `xtask/src/lab.rs` pins, run with Podman in the host network): the install at a terminal, `garrison setup` answered as an operator would, nginx with the server block setup printed, the sign-in redirect to Stalwart, a mail session that arrives as events, `garrison doctor` without a problem but the reserved test names, `garrison stalwart setup --rotate` beside the running services, through which an administrator signs in at Stalwart and has the rights checked, where nothing may fail but a request that is under way when the broker restarts, and after which Stalwart takes the new keys and no longer the old and its events arrive under the new signature key |
 | `soak.sh` | previous, new | `SOAK_MINUTES` (120) under `SOAK_RATE` (40) events a second, of which the load must reach four fifths: no service restarts, logs an error or grows by more than 64 MiB after warm-up; the event store stays within its limit and stops growing once the limit applies; every accepted event is stored or lies in the window the receiver recorded for what the limit removed. A run too short to pass the limit says that it does not test it |
 
 `scripts/signed-releases.sh OUT` builds what they take: two archives of the

@@ -8,13 +8,12 @@ use crate::state::State;
 use crate::units;
 
 const SETTLE: std::time::Duration = std::time::Duration::from_secs(8);
-/// The services that must stay up; the macro milter with them where it runs.
+/// The services that must stay up.
 const WATCHED: [&str; 3] = [units::WEB, units::INGEST, units::BROKER];
 
-pub(super) fn settle(milter: bool) -> Step {
+pub(super) fn settle() -> Step {
     std::thread::sleep(SETTLE);
-    let watched = WATCHED.into_iter().chain(milter.then_some(units::MILTER));
-    for unit in watched {
+    for unit in WATCHED {
         let output = run(
             SYSTEMCTL,
             &["show", "-p", "ActiveState", "-p", "NRestarts", unit],

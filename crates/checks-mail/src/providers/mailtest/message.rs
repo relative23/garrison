@@ -2,13 +2,14 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use garrison_milter::sample;
+
+use super::document;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Test {
     Eicar,
     Gtube,
-    /// A document that a macro filter takes for one with macros.
+    /// A document that a filter for macros takes for one with macros.
     Macro,
     /// A message that carries nothing to refuse, sent beside a test the
     /// server refused: only where the server takes it is that refusal the
@@ -19,25 +20,8 @@ pub(super) enum Test {
     Document,
 }
 
-/// The harmless document's name and type.
-const HARMLESS: &str = "garrison-harmless-test.docx";
+/// The harmless document's type.
 const DOCX: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-/// A document built as the macro test's is, with no macro project in it.
-fn harmless_document() -> Vec<u8> {
-    sample::archive(&[
-        (
-            "[Content_Types].xml",
-            b"<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>",
-            true,
-        ),
-        (
-            "word/document.xml",
-            b"Garrison mail test: this document holds no macro.",
-            false,
-        ),
-    ])
-}
 
 /// Who a test message is from and for, and when it was written.
 pub(super) struct Envelope<'a> {
@@ -101,7 +85,7 @@ impl Test {
             ]
             .concat(),
             Test::Macro => "The attached document is harmless: it holds no macro,\r\n\
-                            only the name a macro project has in a document."
+                            only a macro project with no module in it."
                 .to_owned(),
             Test::Control => "This message carries nothing to refuse. Garrison sends it beside \
                               a test\r\nthe server refused, to tell a verdict from a server \
@@ -131,11 +115,11 @@ impl Test {
     fn content(self) -> String {
         let (document, kind, name) = match self {
             Test::Macro => (
-                sample::document(),
+                document::with_project(),
                 "application/vnd.ms-word.document.macroEnabled.12",
-                sample::NAME,
+                document::NAME,
             ),
-            Test::Document => (harmless_document(), DOCX, HARMLESS),
+            Test::Document => (document::harmless(), DOCX, document::HARMLESS),
             Test::Eicar | Test::Gtube | Test::Control => {
                 return format!(
                     "Content-Type: text/plain; charset=us-ascii\r\n\r\n{}",

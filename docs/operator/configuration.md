@@ -194,8 +194,8 @@ counts as taken. A token in the file `notify-webhook-token` goes along as
 
 ### An address that is a secret
 
-Every user of this host may read `garrison.toml`: the macro filter and the
-broker read it as users of their own. Some addresses are a secret, though:
+Every user of this host may read `garrison.toml`: the broker reads it as a
+user of its own. Some addresses are a secret, though:
 an ntfy topic that takes no token is open to whoever knows its address, and
 some webhooks, such as Slack's and Discord's, carry their key in their
 address. Keep such an address in a file of its own and name the file
@@ -260,118 +260,26 @@ it.
 
 ## `[milter]`
 
-Optional, and the one part of Garrison that acts on mail. With this section
-a filter runs (`garrison-milter.service`) that Stalwart shows every incoming
-message before taking it. The filter looks for Office documents that carry
-macros and has such a message refused or marked. Nothing else is judged, and
-no message is kept or written anywhere.
+Gone. Releases up to 0.2 had a macro filter of their own, which this section
+switched on: a service that Stalwart showed every incoming message. Garrison
+no longer reads mail. A virus scanner refuses documents with macros instead
+([installation](installation.md#10-mail-with-office-macros-optional)), and
+the [mail test](checks.md#mail-test) shows that it does.
 
-The filter is experimental. It reads files that a sender may shape to get past
-it, in many formats and encodings, and the two lists below of what it finds
-and what it does not see say what is known today, not that nothing else gets
-through. Its keys, its headers and what it does with a message may change in
-a minor release; the changelog says so when they do. Do not count on it alone
-for mail with macros.
+A file that still has the section is refused by name, and so is an upgrade:
+this release takes the filter's service away, and Stalwart would defer all
+mail while its entry still asks a filter that no longer answers. So have the
+release that runs the filter switch it off before you upgrade:
 
-| Key | Default | Meaning |
-|---|---|---|
-| `port` | 8096 | Loopback port the filter listens on. |
-| `on_macro` | `"reject"` | `"reject"`: the sending server gets `550 5.7.1 Message refused: an attached Office document contains macros.` and tells its sender. `"tag"`: the message is taken with the header `X-Garrison-Macro: yes`, for a Sieve rule or a mail program to act on. |
-| `on_incomplete` | `"tag"` | What a message gets that the filter could not scan completely (see below). `"tag"`: it is taken with the header `X-Garrison-Scan: unscanned`. `"defer"`: the sending server is told to bring it again later. `"refuse"`: the sending server gets `550 5.7.1 Message refused: its attachments could not be scanned completely.` |
-| `max_message_mib` | 64 | A larger message is not scanned and gets what `on_incomplete` says; at most 256, which is what the unit's memory limit of 1 GiB allows. The filter holds 256 MiB of arriving mail in all and has the sending server bring a message again that finds no room. |
-| `when_unreachable` | `"defer"` | What Stalwart does while the filter does not answer: `"defer"` has the sending server try again later, `"accept"` takes the mail unscanned. |
+1. Remove the `[milter]` section from `/etc/garrison/garrison.toml`.
+2. Run `sudo garrison stalwart setup` with the release that is installed. It
+   takes the filter's entry out of Stalwart and stops the filter.
+3. Upgrade.
 
-To switch it on, add the section (`[milter]` alone takes every default) and
-run `garrison stalwart setup` as root. Setup starts the filter, makes sure it
-answers and only then enters it in Stalwart (Settings ▸ MTA ▸ Milters shows
-the entry for `127.0.0.1`). Run setup again after changing a key.
-
-Then send the server a mail from outside and see that it arrives. Stalwart
-must reach `127.0.0.1` of this host, as it does for the webhook; a Stalwart
-in a container network of its own cannot, and would defer all mail. The
-Antivirus page warns when Stalwart did not reach its milter.
-
-To switch it off, remove the section and run `garrison stalwart setup` again:
-it takes the entry out of Stalwart first and stops the filter afterwards.
-Keep to that order. While Stalwart has the entry and the filter does not run,
-Stalwart defers all incoming mail (or takes it unscanned, with `"accept"`).
-For the same reason `garrison uninstall` refuses while the entry is there,
-and `garrison doctor`, which reads Stalwart's entries with the collector's API
-key, reports every entry that Stalwart asks where no milter answers, whatever
-host it names. An entry is the filter's where it asks this host, under any
-name of it, at `port` or where the running filter listens; setup changes
-nothing while Stalwart asks another entry in vain, and names it for you to
-remove in the Stalwart WebUI.
-
-What the filter finds: a VBA project in Word, Excel and PowerPoint files of
-the newer format (`.docm`, `.xlsm`, `.pptm`, also under another name such as
-`.docx`) and in Word and Excel files of the old one (`.doc`, `.xls`), Excel
-4.0 macro sheets in the newer format, and Word's single-file web pages and
-XML files (Word 2003 XML, and the newer format saved as one XML file) with an
-embedded macro store, each also inside zip archives up to three levels deep.
-A file counts as soon as it has a macro project, also an empty one. The filter
-looks for the document without reading the message's structure: it reads the
-message as it stands, decodes the base64 of the whole message (ignoring any
-byte outside the alphabet, so folding, odd line ends or junk a sender put in
-the base64 fall away) in each way the decoders of PHP, Python, Perl,
-Thunderbird, Evolution, Geary and Balsa (GLib, GMime 3), MimeKit and Jakarta
-Mail read a `=` in it, undoes quoted-printable (also with `=` before a lone CR
-taken for a soft break, as Thunderbird and PHP take it) and reads what comes
-of it the same ways, and reads a uuencode block wherever it stands, by the
-characters, line lengths and `begin` lines a mail program takes.
-A body wrapped again in a transfer encoding (a base64-encoded forwarded
-message with its own base64 attachment) is read in turn, three encodings deep.
-No boundary, nesting depth or header is read to decide this, so none of them
-hides a document. What it does not see: an archive with a password, other
-archive formats such as 7z and RAR, Excel 4.0 macro sheets in an old `.xls`
-file, the macros of an old `.ppt` file, macros in LibreOffice's own formats, a
-document behind a link or split over the parts of a message/partial, and a
-document only these decoders rebuild: Node's mail parsers (libbase64,
-postal-mime), Node's `Buffer` with `-` and `_` in the base64, GMime 2.6, a
-program that counts `=` in base64 under quoted-printable soft line breaks, and
-some programs' reading of quoted-printable that is not well formed. How
-Outlook and Apple Mail decode is not known. It complements a virus scanner and
-does not replace one.
-
-A message the filter could not scan completely is never passed as if it were
-clean. That is a message
-
-- larger than `max_message_mib`,
-- with an archive whose files unpack to more than 16 MiB each or 64 MiB
-  together, or that holds more packed files than a zip archive lists
-  (65 535),
-- with a zip archive packed otherwise than by deflate (bzip2, LZMA, zstd,
-  Deflate64 and the like),
-- with a part that declares a transfer encoding the filter does not decode
-  (any but 7bit, 8bit, binary, base64, quoted-printable and uuencode; also
-  such a header line quoted in a body, as a forwarded raw message holds, which
-  the filter cannot tell from a real one), that
-  holds a yEnc or a BinHex block, which the filter does not decode either, or
-  a uuencode block begun and not ended, or that nests more than three
-  transfer encodings deep,
-- that needs more decoding than 48 times its size, as a message attached as
-  base64 inside another does that holds a quoted-printable part and an
-  attachment, or
-- whose scan was not done 20 seconds after the message's end, the wait for
-  other messages' scans included.
-
-Macros the filter did see count first: such a message is refused or marked
-as `on_macro` says. Otherwise `on_incomplete` decides, and the journal of
-`garrison-milter.service` names the kind of reason, never the message. With
-`"tag"`, the default, the mail arrives and a Sieve rule or mail program acts
-on `X-Garrison-Scan: unscanned`; without such a rule it is delivered like any
-other. With `"defer"` a message that is too large or holds more than the
-filter unpacks never arrives: the sending server tries until it gives up and
-tells its sender.
-`"refuse"` tells the sender at once. Large archives are common in ordinary
-mail, so look at the journal for a while before choosing one of the two.
-
-The Antivirus page lists the milters Stalwart asks, this one beside a
-scanner's, and warns of each that lets mail pass while it is away (the
-`stalwart` check; its `milter_host` and `milter_port` name one milter to look
-at alone). It also counts what Stalwart heard from its milters by day
-(`mail-flow`), and the [`mail-test`](checks.md#mail-test) check can send a harmless
-test document through the mail server every day.
+While `garrison-milter.service` still runs, the installer changes nothing and
+says so (`install-macro-filter-runs`). Mail that the filter marked with
+`X-Garrison-Macro` or `X-Garrison-Scan` keeps those headers; nothing sets
+them any more, so a Sieve rule that goes by them matches no new mail.
 
 ## `[[actions]]`
 

@@ -19,11 +19,9 @@ pub(crate) const COLLECT_TIMER: &str = "garrison-collect.timer";
 /// five minutes.
 pub(crate) const WATCH: &str = "garrison-watch.service";
 pub(crate) const WATCH_TIMER: &str = "garrison-watch.timer";
-/// The macro milter; it runs only where the configuration switches it on.
-pub(crate) const MILTER: &str = "garrison-milter.service";
-/// Where earlier releases noted the ID of the filter's entry in Stalwart,
-/// in the credentials directory; setup removes it.
-pub(crate) const MILTER_ENTRY: &str = "stalwart-milter-id";
+/// The macro filter's unit, which releases up to 0.2 had. The installer
+/// refuses to replace such a release while it runs, and removes its file.
+pub(crate) const EARLIER_MILTER: &str = "garrison-milter.service";
 
 /// What is active on a host where Garrison runs, in the order `detect` and
 /// `doctor` name the units.
@@ -92,7 +90,7 @@ mod tests {
 
     use super::*;
 
-    const SHIPPED: [(&str, &str); 7] = [
+    const SHIPPED: [(&str, &str); 6] = [
         (
             WEB,
             include_str!("../../../deploy/systemd/garrison-web.service"),
@@ -116,10 +114,6 @@ mod tests {
         (
             BROKER_SOCKET,
             include_str!("../../../deploy/systemd/garrison-broker.socket"),
-        ),
-        (
-            MILTER,
-            include_str!("../../../deploy/systemd/garrison-milter.service"),
         ),
     ];
 
@@ -162,7 +156,7 @@ mod tests {
         assert_eq!(values("ListenStream="), [(BROKER_SOCKET, BROKER_PATH)]);
     }
 
-    /// Under `/proc` the web service, the receiver and the macro filter read
+    /// Under `/proc` the web service and the receiver read
     /// only their own process (the web service its binary's path, to find the
     /// interface), so they see nothing else there. The collector's `host`
     /// check reads the host's figures there (`meminfo`, `loadavg`, `uptime`).
@@ -170,7 +164,7 @@ mod tests {
     fn the_services_that_read_only_their_own_process_see_nothing_else_in_proc() {
         for (key, value) in [("ProtectProc=", "invisible"), ("ProcSubset=", "pid")] {
             let set = values(key);
-            for unit in [WEB, INGEST, MILTER] {
+            for unit in [WEB, INGEST] {
                 assert!(set.contains(&(unit, value)), "{unit} lacks {key}{value}");
             }
         }
@@ -186,7 +180,7 @@ mod tests {
     #[test]
     fn the_units_start_every_service_with_the_default_configuration() {
         let started = values("ExecStart=");
-        assert_eq!(started.len(), 6, "{started:?}");
+        assert_eq!(started.len(), 5, "{started:?}");
         for (unit, command) in started {
             assert!(
                 command.starts_with("/opt/garrison/current/bin/garrison ")

@@ -1,10 +1,7 @@
 # shellcheck shell=sh
 # Sourced by scripts/acceptance-failures.sh: what `garrison stalwart setup`
-# and the installer leave between Garrison and Stalwart where a run fails
-# or the two say different things. A rotation that failed is finished by
-# the next run; the installer neither stops the macro filter while Stalwart
-# still asks it nor moves it from the port Stalwart asks; the filter's unit
-# writes nowhere.
+# leaves between Garrison and Stalwart where a run fails: a rotation that
+# failed is finished by the next run.
 # They use that script's helpers and its `new`.
 # shellcheck disable=SC2154
 
@@ -54,70 +51,4 @@ scenario_rotation() {
                 "$(cat /etc/garrison/credentials/broker-native-key)"'
     inside 'rm /root/stalwart-admin.json'
     running "after the rotation" "$new"
-}
-
-scenario_milter_asked() {
-    step "The installer does not stop a macro filter that Stalwart still asks"
-    upgraded
-    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.milter &&
-        printf "\n[milter]\n" >> /etc/garrison/garrison.toml'
-    installer '/root/release/bin/garrison install'
-    check "the filter runs with the [milter] section" 'systemctl is-active --quiet garrison-milter.service'
-    # An entry of Stalwart's at the filter's port that setup did not note,
-    # and the section gone.
-    inside 'printf "%s" "{\"id\": \"m1\", \"host\": \"127.0.0.1\", \"port\": 8096, \"enable\": true}" \
-            > /root/stand-in-milters && cat /root/garrison.toml.milter > /etc/garrison/garrison.toml'
-    says "the next installer run says why the filter keeps running" '/root/release/bin/garrison install' \
-        install-milter-kept
-    check "and that Stalwart asks its entry there" \
-        'acceptance-state /root/answer install-milter-asked && grep -q -w m1 /root/answer &&
-            grep -q -F 127.0.0.1:8096 /root/answer'
-    check "and the filter runs on" 'systemctl is-active --quiet garrison-milter.service'
-    inside 'rm /root/stand-in-milters'
-    installer '/root/release/bin/garrison install'
-    check "once nothing asks it, the next run stops it" '! systemctl is-active --quiet garrison-milter.service'
-    running "after the filter Stalwart asked" "$new"
-}
-
-scenario_milter_port() {
-    step "The installer leaves the macro filter on the port Stalwart asks until setup moves it"
-    upgraded
-    inside 'cp -p /etc/garrison/garrison.toml /root/garrison.toml.port &&
-        printf "\n[milter]\n" >> /etc/garrison/garrison.toml'
-    installer '/root/release/bin/garrison install'
-    check "the filter listens on its port" 'ncat -z 127.0.0.1 8096'
-    # Stalwart's entry asks that port, and the configuration names another,
-    # as before `garrison stalwart setup` has moved the entry.
-    inside 'printf "%s" "{\"id\": \"m1\", \"host\": \"127.0.0.1\", \"port\": 8096, \"enable\": true}" \
-            > /root/stand-in-milters && printf "port = 8097\n" >> /etc/garrison/garrison.toml'
-    says "the next installer run leaves the filter where Stalwart asks it, and names setup" \
-        '/root/release/bin/garrison install' install-milter-held
-    check "and the port setup moves it to" 'grep -q -F 8097 /root/answer'
-    check "and the filter still answers there" 'ncat -z 127.0.0.1 8096 && ! ncat -z 127.0.0.1 8097'
-    inside 'rm /root/stand-in-milters'
-    installer '/root/release/bin/garrison install'
-    check "once nothing asks that port, the next run moves the filter" \
-        'ncat -z 127.0.0.1 8097 && ! ncat -z 127.0.0.1 8096'
-    inside 'cat /root/garrison.toml.port > /etc/garrison/garrison.toml'
-    installer '/root/release/bin/garrison install'
-    check "without the section the next run stops it" '! systemctl is-active --quiet garrison-milter.service'
-    running "after the filter's port" "$new"
-}
-
-scenario_milter_sandbox() {
-    step "The macro filter's unit writes nowhere: no /tmp of its own, not the host's shared memory"
-    upgraded
-    # Tried within the unit before its service starts, as the filter itself
-    # would; it needs no [milter] section for that.
-    inside_input 'mkdir -p /etc/systemd/system/garrison-milter.service.d &&
-        cat > /etc/systemd/system/garrison-milter.service.d/acceptance-probe.conf && systemctl daemon-reload' <<'PROBE'
-[Service]
-ExecStartPre=/bin/sh -c 'for place in /dev/shm /dev/mqueue /tmp /var/tmp; do if : > "$$place/garrison-milter-probe" 2>/dev/null; then echo "writable $$place"; fi; done'
-PROBE
-    inside 'systemctl start garrison-milter.service >/dev/null 2>&1; systemctl stop garrison-milter.service;
-        systemctl reset-failed garrison-milter.service' || true
-    check "the filter's unit writes in none of those places" \
-        '! journalctl -u garrison-milter.service --no-pager | grep "writable /" && test ! -e /dev/shm/garrison-milter-probe'
-    inside 'rm -r /etc/systemd/system/garrison-milter.service.d && systemctl daemon-reload'
-    running "after the filter's unit" "$new"
 }

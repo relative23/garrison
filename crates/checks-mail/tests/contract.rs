@@ -4,8 +4,7 @@
 //! A milter that answers every message "not now", as a scanner that cannot
 //! scan does (clamav-milter with its default `OnFail Defer` while clamd is
 //! down), and a milter Stalwart cannot reach whose entry has
-//! `tempFailOnError`, as `garrison stalwart setup` writes Garrison's filter
-//! for `when_unreachable = "defer"`: Stalwart defers each test message at its
+//! `tempFailOnError`: Stalwart defers each test message at its
 //! end, and the card says "not tested", Unknown. A milter that refuses every
 //! message, as a scanner that fails closed does, refuses the harmless
 //! message beside the tests too: no test is judged, and the card is a
@@ -28,8 +27,8 @@ use garrison_checks::context::Provider;
 use garrison_checks::testing::{Canned, context, table};
 use garrison_checks_mail::providers::MailTest;
 use garrison_core::observations::{Observation, State};
-use garrison_milter::protocol::{self, Command, Reply};
 use garrison_testing::lab::Lab;
+use garrison_testing::milter::{self as protocol, Command, Reply};
 use serde_json::{Value, json};
 
 /// One test at a time: each sets Stalwart's milters for the lab as a whole.
@@ -104,8 +103,8 @@ fn milter(host: &str, judge: Judge) -> u16 {
     port
 }
 
-/// Stalwart's milter entry to `port` on `host`, as setup writes it, read
-/// again by Stalwart.
+/// Stalwart's milter entry to `port` on `host`, switched on and asked at a
+/// message's end, read again by Stalwart.
 fn milter_entry(lab: &mut Lab, host: &str, port: u16) {
     lab.create(
         "MtaMilter",
@@ -444,7 +443,7 @@ fn stalwart_records_what_a_milter_answered() {
     );
 }
 
-/// Two milters on one message, as Garrison's macro filter beside
+/// Two milters on one message, as another filter beside
 /// clamav-milter while clamd is down: Stalwart asks the second after the
 /// first passed the message, defers it for the second, and records both
 /// answers under the message's session, by which the milter card counts

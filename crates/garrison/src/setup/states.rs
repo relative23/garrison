@@ -1,6 +1,6 @@
 //! Every state `garrison stalwart setup` reports: its one constructor each.
-//! Those of the API keys are in `states/keys.rs`, those of the macro filter
-//! in `states/milter.rs`. A failure that reaches the end of a run is said
+//! Those of the API keys are in `states/keys.rs`. A failure that reaches
+//! the end of a run is said
 //! with the run that mends it (`again`), and keeps its name; so does one
 //! with what else it leaves, but a new secret Stalwart may not have taken,
 //! which is a state of its own inside it (`until`).
@@ -13,9 +13,7 @@ use garrison_stalwart::SUPPORTED;
 use crate::state::State;
 
 mod keys;
-mod milter;
 pub(super) use keys::*;
-pub(super) use milter::*;
 
 /// A failure, with the run that mends it said after it: the same state.
 pub(super) fn again(state: State, command: &str) -> State {
@@ -24,15 +22,6 @@ pub(super) fn again(state: State, command: &str) -> State {
             "{}. Run `{command}` again once this is mended.",
             state.text.trim_end_matches('.')
         ),
-        ..state
-    }
-}
-
-/// A failure before anything changed, whose sentence has no full stop yet,
-/// with that said: the same state.
-pub(super) fn unchanged(state: State) -> State {
-    State {
-        text: format!("{}. Nothing was changed", state.text),
         ..state
     }
 }

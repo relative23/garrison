@@ -181,19 +181,20 @@ pub(crate) fn silent_port() -> (std::os::fd::OwnedFd, u16) {
     (held, bound.port())
 }
 
-/// A port of this host where a milter answers, served until the test ends.
+/// A port of this host where a milter answers, served until the test ends:
+/// it answers a mail server's opening with its own and nothing else.
 #[cfg(test)]
 pub(crate) fn answering_milter() -> u16 {
+    use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || {
-        garrison_milter::server::serve(
-            &listener,
-            garrison_milter::Settings {
-                max_bytes: 1024,
-                ..Default::default()
-            },
-        );
+        for mut stream in listener.incoming().flatten() {
+            let mut opening = [0; 17];
+            if stream.read_exact(&mut opening).is_ok() {
+                let _ = stream.write_all(&[0, 0, 0, 13, b'O', 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0]);
+            }
+        }
     });
     port
 }

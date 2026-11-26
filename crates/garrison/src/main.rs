@@ -134,8 +134,6 @@ enum Task {
     Collect,
     /// The maintenance broker (systemd).
     Broker,
-    /// The macro milter, where the configuration switches it on (systemd).
-    Milter,
     /// Validate the configuration, the providers and the access policy.
     CheckConfig,
     /// Choose the modules this installation offers (root).
@@ -293,7 +291,6 @@ fn dispatch(task: Task, config: &Config, path: &Path) -> u8 {
             "broker",
             garrison_broker::run(config, path, credentials(config)),
         ),
-        Task::Milter => service("milter", garrison_milter::run(config)),
         Task::CheckConfig => check_config::run(config, path),
         Task::Modules { set, yes, adopt } => {
             selection::run(path, config, set.as_deref(), yes, adopt)

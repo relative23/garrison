@@ -20,7 +20,6 @@ garrison-broker.workspace = true
 garrison-collector.workspace = true
 garrison-core.workspace = true
 garrison-ingest.workspace = true
-garrison-milter.workspace = true
 garrison-stalwart.workspace = true
 garrison-web.workspace = true
 getrandom.workspace = true

@@ -12,7 +12,6 @@ publish.workspace = true
 base64.workspace = true
 garrison-checks.workspace = true
 garrison-core.workspace = true
-garrison-milter.workspace = true
 garrison-stalwart.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
@@ -25,6 +24,8 @@ garrison-checks = { workspace = true, features = ["testing"] }
 garrison-ingest.workspace = true
 garrison-testing.workspace = true
 rustix.workspace = true
+# The digests of the mail test's two documents.
+sha2.workspace = true
 tempfile.workspace = true
 
 [lints]

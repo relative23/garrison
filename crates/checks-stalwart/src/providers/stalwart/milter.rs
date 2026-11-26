@@ -30,8 +30,7 @@ impl Stalwart {
             })
             .collect();
         // With a host or a port named, the one milter that is meant. Without,
-        // every milter Stalwart asks: a scanner's, and Garrison's own macro
-        // filter beside it.
+        // every milter Stalwart asks.
         let named = self.milter_host.is_some() || self.milter_port != 0;
         let endpoint = |row: &Milter| format!("{}:{}", row.host.text(), row.port.text());
         let mut findings = Vec::new();

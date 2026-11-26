@@ -17,6 +17,7 @@ use super::{BACKUPS, BASE, CONFIG, LOCK, SYSTEMCTL, UNITS, command, housekeeping
 use crate::state::State;
 
 const USERS: [&str; 5] = [
+    // The macro filter's, which releases up to 0.2 made.
     "garrison-milter",
     "garrison-ingest",
     "garrison-collector",
@@ -246,7 +247,6 @@ fn uninstall(purge: bool, dry_run: bool) -> Step {
     let root = Path::new("/");
     let items = plan(root, purge, module_loaded(), &super::policy());
     let unknown = policy_unknown(&Path::new(CONFIG).join("garrison.toml")).filter(|_| purge);
-    super::milter::forgotten(Path::new(CONFIG))?;
     nginx_stays_valid(&snippets(root))?;
     if dry_run {
         for item in &items {

@@ -91,7 +91,7 @@ none_active uninstalled
 check "the configuration stays" 'test -f /etc/garrison/garrison.toml && test -f /etc/garrison/access-policy.json'
 check "the credentials stay" 'test -s /etc/garrison/credentials/webhook-signature-key'
 check "the data stays" 'test -s /var/lib/garrison/ingest/events.sqlite'
-check "the service users stay" 'getent passwd garrison-broker >/dev/null && getent passwd garrison-milter >/dev/null'
+check "the service users stay" 'getent passwd garrison-broker >/dev/null && getent passwd garrison-collector >/dev/null'
 if [ -n "$selinux" ]; then
     check "the SELinux module is gone" '! semodule -l | grep -qw garrison'
 fi

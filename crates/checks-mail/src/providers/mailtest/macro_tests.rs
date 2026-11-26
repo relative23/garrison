@@ -1,9 +1,22 @@
-//! The test document for a macro filter, where it is switched on: what it
-//! carries and how its result is kept.
+//! The test document for a filter of macros, where it is switched on: what
+//! it carries and how its result is kept.
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 
 use super::tests::{collected, provider, results, server};
 use super::*;
 use crate::testing::{Remembered, table};
+
+/// The attachment of a test message, as a mail program reads it.
+fn attached(body: &str) -> Vec<u8> {
+    let encoded = body
+        .split_once("Content-Transfer-Encoding: base64\r\n\r\n")
+        .and_then(|(_, rest)| rest.split_once("\r\n--garrison-mail-test--"))
+        .unwrap()
+        .0;
+    STANDARD.decode(encoded.replace("\r\n", "")).unwrap()
+}
 
 #[test]
 fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
@@ -14,7 +27,7 @@ fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
         )))
         .unwrap()
     };
-    let refusal = "550 5.7.1 Message refused: an attached Office document contains macros.";
+    let refusal = "550 5.7.1 Message refused: Heuristics.OLE2.ContainsMacros.VBA";
     let (port, handle) = server([
         "550 virus",
         "550 virus",
@@ -40,24 +53,17 @@ fn the_macro_document_is_sent_where_it_is_switched_on_and_must_be_refused() {
     assert!(message.contains("Content-Type: multipart/mixed; boundary=\"garrison-mail-test\"\r\n"));
     assert!(message.contains("filename=\"garrison-macro-test.docm\"\r\n"));
     assert!(message.ends_with("\r\n--garrison-mail-test--\r\n.\r\nQUIT\r\n"));
-    // What travels is what the milter's scan finds, in lines a mail may have.
+    // What travels is the test document, in lines a mail may have.
     let body = message.split_once("\r\nDATA\r\n").unwrap().1;
-    assert!(matches!(
-        garrison_milter::scan::macros(body.as_bytes()),
-        garrison_milter::scan::Outcome::Macros(_)
-    ));
+    assert_eq!(attached(body), document::with_project());
     // No line near the 998 bytes a mail's line may have.
     assert!(body.lines().all(|line| line.len() <= 100), "{body}");
-    // Beside it a harmless document of the same build, in which the scan
-    // finds nothing.
+    // Beside it a harmless document of the same build, with no project.
     let harmless = &sessions[7];
     assert!(harmless.contains("Subject: Garrison mail test: Harmless document (control)\r\n"));
     assert!(harmless.contains("filename=\"garrison-harmless-test.docx\"\r\n"));
     let body = harmless.split_once("\r\nDATA\r\n").unwrap().1;
-    assert!(matches!(
-        garrison_milter::scan::macros(body.as_bytes()),
-        garrison_milter::scan::Outcome::Clean
-    ));
+    assert_eq!(attached(body), document::harmless());
 
     // The result was kept with the macro test: switched off, the provider
     // tests anew, without the document; and on again likewise.

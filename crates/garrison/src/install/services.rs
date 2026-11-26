@@ -5,13 +5,9 @@ use std::fs;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
-use garrison_core::config;
-
-use super::files::{Step, announce, io, must, run};
+use super::files::{Step, io, must, run};
 use super::system::unit_file;
-use super::{CONFIG, SYSTEMCTL, UNITS, cli, milter, settle, states};
-use crate::doctor::milter::entries::{self, Entry};
-use crate::state::State;
+use super::{CONFIG, SYSTEMCTL, UNITS, cli, settle, states};
 use crate::units;
 
 pub(super) const ENABLE: [&str; 5] = [
@@ -23,9 +19,7 @@ pub(super) const ENABLE: [&str; 5] = [
 ];
 // Everything that writes Garrison's state: the services, the timers, and a
 // collection run or a watch that a timer started, which stopping the timer
-// alone would leave running. The macro milter is not among them: it keeps
-// nothing, and while it is down Stalwart defers mail. It starts anew with
-// the others.
+// alone would leave running.
 const STOP: [&str; 8] = [
     units::WEB,
     units::INGEST,
@@ -93,73 +87,18 @@ pub(super) fn start(release: &Path) -> Step {
     reset_failed();
     // Only what this release ships: an older one has fewer units.
     let shipped = ENABLE.into_iter().filter(|unit| unit_file(unit).exists());
-    let mut shipped: Vec<&str> = shipped.collect();
-    let milter = milter::runs();
-    if milter {
-        shipped.push(units::MILTER);
-    }
+    let shipped: Vec<&str> = shipped.collect();
     let mut enable = vec!["enable"];
     enable.extend(&shipped);
     must(SYSTEMCTL, &enable)?;
-    let held = milter && filter_held();
     // One start per unit: `restart` also starts a stopped unit. The units are
     // ready only once they serve, so a release that cannot come up fails here,
     // its broker too, which otherwise its first client would start.
     let mut restart = vec!["restart"];
-    restart.extend(
-        shipped
-            .iter()
-            .filter(|unit| !held || **unit != units::MILTER),
-    );
+    restart.extend(&shipped);
     must(SYSTEMCTL, &restart)?;
     must(SYSTEMCTL, &["start", units::BROKER])?;
-    settle::settle(milter)
-}
-
-/// Whether the macro filter is to stay where it runs, and says so: it listens
-/// on a port `garrison.toml` no longer names, and a start would move it away
-/// from an entry Stalwart asks there, which would then defer every message.
-/// `garrison stalwart setup` moves the entry, then the filter.
-fn filter_held() -> bool {
-    let Ok(config) = config::load(&Path::new(CONFIG).join("garrison.toml")) else {
-        return false;
-    };
-    let Some(filter) = &config.milter else {
-        return false;
-    };
-    // A filter that does not run leaves no port.
-    let listening = entries::listening().unwrap_or_default();
-    let asked = || milter::stalwart_entries(&config);
-    let Some(why) = held(filter.port, &listening, asked) else {
-        return false;
-    };
-    announce(&states::milter_held(&why, filter.port).to_string());
-    true
-}
-
-/// Why the filter, listening on `listening`, is not to move to `port`: an
-/// entry Stalwart asks at a port it would leave, or Stalwart's milters that
-/// could not be asked; `None` where it may move.
-fn held(
-    port: u16,
-    listening: &[u16],
-    entries: impl FnOnce() -> Result<Vec<Entry>, State>,
-) -> Option<State> {
-    let left: Vec<u16> = listening
-        .iter()
-        .copied()
-        .filter(|old| *old != port)
-        .collect();
-    if left.is_empty() {
-        return None;
-    }
-    match entries() {
-        Ok(entries) => entries
-            .iter()
-            .find(|entry| entry.asked() && left.iter().any(|old| entry.asks(*old)))
-            .map(|entry| states::milter_asked(&entry.id, &entry.address())),
-        Err(why) => Some(states::milter_unasked(&why)),
-    }
+    settle::settle()
 }
 
 /// Forget failures and systemd's start limit (5 starts in 10 s) left by a
@@ -184,8 +123,8 @@ pub(super) fn runs() -> bool {
 }
 
 /// Whether the services run as `start` leaves them, on the configuration as
-/// it is; `milter` whether the macro filter is to run.
-pub(super) fn as_installed(milter: bool) -> bool {
+/// it is.
+pub(super) fn as_installed() -> bool {
     let shipped: Vec<&str> = ENABLE
         .into_iter()
         .filter(|unit| unit_file(unit).exists())
@@ -198,16 +137,10 @@ pub(super) fn as_installed(milter: bool) -> bool {
         "ExecMainStartTimestampMonotonic",
     ]);
     asked.extend(&shipped);
-    asked.extend([units::BROKER, units::MILTER]);
+    asked.push(units::BROKER);
     let changed = changed_at(&Path::new(CONFIG).join("garrison.toml"));
-    run(SYSTEMCTL, &asked).is_ok_and(|shown| {
-        installed(
-            &String::from_utf8_lossy(&shown.stdout),
-            &shipped,
-            milter,
-            changed,
-        )
-    })
+    run(SYSTEMCTL, &asked)
+        .is_ok_and(|shown| installed(&String::from_utf8_lossy(&shown.stdout), &shipped, changed))
 }
 
 /// When `file` last changed, in microseconds of the clock systemd times a
@@ -225,11 +158,10 @@ fn changed_at(file: &Path) -> Option<u64> {
 }
 
 /// `shown`, what `systemctl show` says of the units, as `start` leaves them:
-/// every unit in `shipped` enabled and active, the web service, the receiver
-/// and the broker up without a restart, and the macro filter active exactly
-/// where `milter` says; each of those that runs started since the
+/// every unit in `shipped` enabled and active, and the web service, the
+/// receiver and the broker up without a restart, each started since the
 /// configuration `changed`, which it reads as it starts.
-fn installed(shown: &str, shipped: &[&str], milter: bool, changed: Option<u64>) -> bool {
+fn installed(shown: &str, shipped: &[&str], changed: Option<u64>) -> bool {
     let unit = |id: &str| {
         shown
             .split("\n\n")
@@ -254,48 +186,12 @@ fn installed(shown: &str, shipped: &[&str], milter: bool, changed: Option<u64>) 
     let steady = [units::WEB, units::INGEST, units::BROKER]
         .into_iter()
         .all(|id| settle::unsettled(id, unit(id)).is_none() && since(id));
-    let filter = value(unit(units::MILTER), "ActiveState") == "active";
-    enabled && steady && filter == milter && (!milter || since(units::MILTER))
+    enabled && steady
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
-
-    /// The filter stays on a port it would leave where Stalwart asks an
-    /// entry there that is switched on, or where Stalwart cannot be asked;
-    /// it moves where it does not run, runs on its port already, or nothing
-    /// asks the port it leaves.
-    #[test]
-    fn the_filter_stays_where_stalwart_asks_it() {
-        let read = |list: serde_json::Value| -> Result<Vec<Entry>, State> {
-            Ok(serde_json::from_value(list).unwrap())
-        };
-        let unasked = || -> Result<Vec<Entry>, State> { panic!("asked Stalwart") };
-        assert_eq!(held(8097, &[], unasked), None);
-        assert_eq!(held(8097, &[8097], unasked), None);
-        let said = held(8097, &[8096], || {
-            read(json!([{"id": "m1", "host": "127.0.0.1", "port": 8096, "enable": true}]))
-        });
-        assert_eq!(said, Some(states::milter_asked("m1", "127.0.0.1:8096")));
-        for others in [
-            json!([{"id": "m1", "host": "127.0.0.1", "port": 8096, "enable": {"match": {}, "else": "false"}}]),
-            json!([{"id": "m1", "host": "10.0.0.5", "port": 8096}]),
-            json!([{"id": "m1", "host": "127.0.0.1", "port": 8097}]),
-            json!([]),
-        ] {
-            assert_eq!(
-                held(8097, &[8096], || read(others.clone())),
-                None,
-                "{others}"
-            );
-        }
-        let silent = || states::io("Stalwart", "did not answer");
-        let refused = held(8097, &[8096], || Err(silent()));
-        assert_eq!(refused, Some(states::milter_unasked(&silent())));
-    }
 
     fn block(id: &str, file: &str, state: &str, restarts: u32) -> String {
         format!(
@@ -305,11 +201,11 @@ mod tests {
     }
 
     /// Every unit enabled and active, the long-running ones without a
-    /// restart, the filter as the configuration has it: as installed. Any
-    /// one otherwise, or a unit systemd did not name, is not.
+    /// restart: as installed. Any one otherwise, or a unit systemd did not
+    /// name, is not.
     #[test]
     fn the_services_run_as_installed_only_where_every_unit_does() {
-        let shown = |web: (&str, &str, u32), milter: &str| {
+        let shown = |web: (&str, &str, u32)| {
             let mut units: Vec<String> = ENABLE
                 .into_iter()
                 .filter(|unit| *unit != units::WEB)
@@ -317,66 +213,36 @@ mod tests {
                 .collect();
             units.push(block(units::WEB, web.0, web.1, web.2));
             units.push(block(units::BROKER, "static", "active", 0));
-            units.push(block(units::MILTER, "disabled", milter, 0));
             units.join("\n")
         };
-        let installed_as =
-            |text: &str, milter: bool| installed(text, &ENABLE, milter, Some(4_000_000));
-        assert!(installed_as(
-            &shown(("enabled", "active", 0), "inactive"),
-            false
-        ));
-        assert!(installed_as(
-            &shown(("enabled", "active", 0), "active"),
-            true
-        ));
-        // The filter runs where the configuration no longer has it, or not
-        // where it has.
-        assert!(!installed_as(
-            &shown(("enabled", "active", 0), "active"),
-            false
-        ));
-        assert!(!installed_as(
-            &shown(("enabled", "active", 0), "inactive"),
-            true
-        ));
+        let installed_as = |text: &str| installed(text, &ENABLE, Some(4_000_000));
+        assert!(installed_as(&shown(("enabled", "active", 0))));
         for web in [
             ("disabled", "active", 0),
             ("enabled", "activating", 0),
             ("enabled", "failed", 0),
             ("enabled", "active", 2),
         ] {
-            assert!(!installed_as(&shown(web, "inactive"), false), "{web:?}");
+            assert!(!installed_as(&shown(web)), "{web:?}");
         }
-        assert!(!installed_as("", false));
+        assert!(!installed_as(""));
         // Only what the release ships is asked of it.
         let without_watch: Vec<&str> = ENABLE
             .into_iter()
             .filter(|unit| *unit != units::WATCH_TIMER)
             .collect();
-        let text = shown(("enabled", "active", 0), "inactive").replace(
+        let text = shown(("enabled", "active", 0)).replace(
             "Id=garrison-watch.timer\nUnitFileState=enabled",
             "Id=garrison-watch.timer\nUnitFileState=",
         );
-        assert!(!installed_as(&text, false));
-        assert!(installed(&text, &without_watch, false, Some(4_000_000)));
+        assert!(!installed_as(&text));
+        assert!(installed(&text, &without_watch, Some(4_000_000)));
         // The configuration changed after the services started, or nobody
         // can tell when it changed: they run on what they read before.
-        let steady = shown(("enabled", "active", 0), "inactive");
-        assert!(installed(&steady, &ENABLE, false, Some(5_000_000)));
-        assert!(!installed(&steady, &ENABLE, false, Some(5_000_001)));
-        assert!(!installed(&steady, &ENABLE, false, None));
-        // So does the filter, where it runs.
-        let filter = shown(("enabled", "active", 0), "active");
-        assert!(installed(&filter, &ENABLE, true, Some(5_000_000)));
-        let older = filter.replace(
-            "Id=garrison-milter.service\nUnitFileState=disabled\nActiveState=active\nNRestarts=0\n\
-             ExecMainStartTimestampMonotonic=5000000",
-            "Id=garrison-milter.service\nUnitFileState=disabled\nActiveState=active\nNRestarts=0\n\
-             ExecMainStartTimestampMonotonic=1000000",
-        );
-        assert_ne!(older, filter);
-        assert!(!installed(&older, &ENABLE, true, Some(4_000_000)));
+        let steady = shown(("enabled", "active", 0));
+        assert!(installed(&steady, &ENABLE, Some(5_000_000)));
+        assert!(!installed(&steady, &ENABLE, Some(5_000_001)));
+        assert!(!installed(&steady, &ENABLE, None));
     }
 
     /// A file changed just now is dated now on the clock systemd times a

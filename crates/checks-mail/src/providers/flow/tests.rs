@@ -351,7 +351,7 @@ fn a_milter_that_deferred_everything_since_yesterday_is_a_warning_and_own_replie
     let mut passed = deferred.clone();
     passed.push(event("milter.action-accept", 120, json!({})));
     assert_eq!(milter(&passed).state, State::Ok);
-    // A reply of the milter's own, as Garrison's filter refuses with, may
+    // A reply in the milter's own words may
     // have refused: it is counted apart, and is no deferral.
     let mut replied = deferred.clone();
     replied.push(event("milter.action-reply-code", 120, json!({})));
@@ -368,7 +368,7 @@ fn a_milter_that_deferred_everything_since_yesterday_is_a_warning_and_own_replie
 
 #[test]
 fn every_message_one_of_two_milters_deferred_is_a_warning() {
-    // Garrison's macro filter passes each message and clamav-milter, its
+    // One milter passes each message and clamav-milter, its
     // clamd down, defers it: Stalwart records both answers in the message's
     // session (measured with Stalwart 1.2.0), and every message was deferred.
     let mut events: Vec<Event> = Vec::new();

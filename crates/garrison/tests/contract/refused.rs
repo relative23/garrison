@@ -32,8 +32,9 @@ fn garrisons_keys(lab: &Lab) -> usize {
 /// are all answered 401, an API key of the administrator's that does not
 /// allow this host's address 403: setup says that the administrator was
 /// refused and what to check, where it said "x:ApiKey/get: HTTP 401", and
-/// changes nothing. A user without administrator rights is stopped at its
-/// first read, of the milter entries, which Stalwart does not let it make.
+/// changes nothing. A user without administrator rights may read its own
+/// API keys and is stopped at the next read, of the webhooks, which Stalwart
+/// does not let it make.
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn a_refused_administrator_is_said_as_such() {
@@ -95,7 +96,7 @@ fn a_refused_administrator_is_said_as_such() {
         let expected = match status {
             401 => "setup-administrator-refused",
             403 => "setup-administrator-refused-here",
-            _ => "setup-milters-unreadable",
+            _ => "setup-webhooks-unreadable",
         };
         let named = support::states(said.as_bytes());
         assert!(
@@ -108,9 +109,8 @@ fn a_refused_administrator_is_said_as_such() {
 /// A user without administrator rights is told to run setup as an
 /// administrator also where setup ran before: the files' keys then belong
 /// to an account that Stalwart does not show that user (JMAP's
-/// accountNotFound). The user may read what setup reads before the keys,
-/// the milter entries and its own API keys, so that setup asks for that
-/// account's keys. The keys the administrator made stay as they are, held
+/// accountNotFound). The user may read what setup reads first, its own
+/// API keys, so that setup asks for that account's keys. The keys the administrator made stay as they are, held
 /// by their files.
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
@@ -123,7 +123,7 @@ fn a_user_without_rights_is_told_so_where_setup_ran_before() {
     assert_eq!(first.status.code(), Some(0), "{}", text(&first));
     let domains = lab.call("x:Domain/get", &json!({"ids": null, "properties": ["id"]}));
     let (user, password) = (unique(), random_hex(18));
-    let reads = json!({"sysMtaMilterGet": true, "sysApiKeyGet": true});
+    let reads = json!({"sysApiKeyGet": true});
     lab.create(
         "Account",
         &json!({
@@ -142,7 +142,7 @@ fn a_user_without_rights_is_told_so_where_setup_ran_before() {
     let output = setup.run(&[]);
     write_private(Path::new(&setup.credential), &administrator);
     let said = text(&output);
-    // Stalwart shows the user the milters, but not the account of the files'
+    // Stalwart shows the user its own keys, but not the account of the files'
     // keys: setup says to run it as an administrator.
     let named = support::states(&output.stderr);
     assert!(

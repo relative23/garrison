@@ -28,7 +28,7 @@ struct Broken {
 /// The hosts where one claim does not hold.
 type Hosts = &'static [fn() -> Broken];
 
-const PLACES: [(&str, &str, Hosts); 23] = [
+const PLACES: [(&str, &str, Hosts); 21] = [
     ("host.rs", "a release is installed", &[local::no_release]),
     ("host.rs", "a unit is active", &[local::unit_failed]),
     (
@@ -88,16 +88,6 @@ const PLACES: [(&str, &str, Hosts); 23] = [
         "keys.rs",
         "Stalwart takes a service's API key from this host",
         &[outside::stalwart_does_not_know_the_brokers_key],
-    ),
-    (
-        "milter.rs",
-        "the macro milter answers",
-        &[local::milter_silent],
-    ),
-    (
-        "milter.rs",
-        "Stalwart asks the macro milter as configured",
-        &[local::milter_on_another_port],
     ),
     (
         "notify.rs",

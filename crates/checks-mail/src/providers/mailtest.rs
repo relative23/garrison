@@ -28,8 +28,9 @@
 //! which lands in that mailbox where the server takes it.
 //!
 //! Where the operator switches it on (`macro_document = true`), a third
-//! message carries a document that a macro filter such as Garrison's milter
-//! takes for one with macros; it must be refused like the test file.
+//! message carries a document that a virus scanner told to report macros
+//! takes for one with macros (`ClamAV` with `AlertOLE2Macros yes`); it must
+//! be refused like the test file.
 
 use std::time::Duration;
 
@@ -44,8 +45,9 @@ use crate::context::{Collected, Context, Provider, Report};
 use crate::kept::cached;
 use crate::options::{Checked, Options, fail};
 use message::Test;
-use session::SESSION;
+use session::{PACE, SESSION};
 
+mod document;
 mod message;
 mod schedule;
 mod session;
@@ -183,6 +185,8 @@ pub struct MailTest {
     macros: bool,
     /// How long one session may take in all.
     session: Duration,
+    /// How long a session waits before it begins.
+    pace: Duration,
 }
 
 impl MailTest {
@@ -230,7 +234,16 @@ impl MailTest {
             every: options.integer("every_hours", 24, 1, 168)? * 3600,
             macros: options.flag("macro_document", false)?,
             session: SESSION,
+            pace: PACE,
         })
+    }
+
+    /// For tests: have each session wait this long before it begins.
+    #[cfg(test)]
+    #[must_use]
+    pub fn paced(mut self, pace: Duration) -> Self {
+        self.pace = pace;
+        self
     }
 
     /// For tests: give each session this long in all.

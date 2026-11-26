@@ -5,17 +5,15 @@ use std::fs;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-use garrison_core::config;
-
 use super::fallback::Failure;
-use super::files::{Step, announce, fresh_folder, io, lock, place, switch};
+use super::files::{Step, announce, fresh_folder, io, lock, place, run, switch};
 use super::requirements::{base_shown, preflight, room, size, state_size};
 use super::services::{self, check_config, start, stop_services};
-use super::system::{install_system_files, protect_policy, unit_file};
+use super::system::{install_system_files, protect_policy};
 use super::unpack::{clear_staging, install_release, installed_now, unpacked_as};
 use super::{
-    BACKUPS, BASE, CONFIG, LAST, LOCK, cli, command, configured, fallback, here, housekeeping,
-    name, rollback, states, verify,
+    BACKUPS, BASE, CONFIG, LAST, LOCK, SYSTEMCTL, cli, command, configured, fallback, here,
+    housekeeping, name, rollback, states, verify,
 };
 use crate::state::State;
 use crate::{say, units};
@@ -118,10 +116,7 @@ fn bring_up(release: &Path, old: Option<&Path>, renewed: bool) -> Step<bool> {
     switch(&base.join("current"), release)?;
     let mut changed = install_system_files(release)?;
     changed |= services::keep_secret_files()?;
-    let milter = config::load(&Path::new(CONFIG).join("garrison.toml"))
-        .is_ok_and(|config| config.milter.is_some())
-        && unit_file(units::MILTER).exists();
-    if !renewed && !changed && services::as_installed(milter) {
+    if !renewed && !changed && services::as_installed() {
         // Its warnings, as a start passes them on. It passed a moment ago,
         // and a run that changes nothing stops nothing for it.
         let _ = check_config(release, true);
@@ -178,10 +173,24 @@ fn not_started(
     }
 }
 
+/// Releases up to 0.2 had a macro filter of their own, which Stalwart asks
+/// about every message while it runs. This release has none and takes that
+/// unit away, so the release that runs the filter switches it off first:
+/// otherwise Stalwart would defer mail from the moment of the upgrade.
+fn no_filter_runs() -> Step {
+    let runs = run(SYSTEMCTL, &["is-active", "--quiet", units::EARLIER_MILTER])
+        .is_ok_and(|output| output.status.success());
+    if runs {
+        return Err(states::filter_runs(units::EARLIER_MILTER));
+    }
+    Ok(())
+}
+
 pub(super) fn install() -> Step {
     // Root first: without it the release may not even be readable.
     preflight()?;
     base_shown()?;
+    no_filter_runs()?;
     let here = here()?;
     let version = verify::verify(&here)?;
     let _held = lock(Path::new(LOCK))?;

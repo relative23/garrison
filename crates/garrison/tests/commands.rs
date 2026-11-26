@@ -107,7 +107,7 @@ type Row = (&'static [&'static str], &'static str, Takes, Option<i32>);
 
 use Takes::{Follows, Refuses};
 
-const ROWS: [Row; 30] = [
+const ROWS: [Row; 29] = [
     (
         &["install"],
         "Install or upgrade from this extracted release, or roll back (root)",
@@ -167,12 +167,6 @@ const ROWS: [Row; 30] = [
     (
         &["broker"],
         "The maintenance broker (systemd)",
-        Follows,
-        None,
-    ),
-    (
-        &["milter"],
-        "The macro milter, where the configuration switches it on (systemd)",
         Follows,
         None,
     ),
@@ -245,7 +239,7 @@ const ROWS: [Row; 30] = [
     ),
     (
         &["stalwart", "setup"],
-        "Connect Stalwart: the webhook, the API keys, the sign-in client, the metrics access and the macro filter's entry",
+        "Connect Stalwart: the webhook, the API keys, the sign-in client and the metrics access",
         Follows,
         Some(2),
     ),

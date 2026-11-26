@@ -499,7 +499,6 @@ dependencies = [
  "garrison-collector",
  "garrison-core",
  "garrison-ingest",
- "garrison-milter",
  "garrison-stalwart",
  "garrison-testing",
  "garrison-web",
@@ -593,13 +592,13 @@ dependencies = [
  "garrison-checks",
  "garrison-core",
  "garrison-ingest",
- "garrison-milter",
  "garrison-stalwart",
  "garrison-testing",
  "rusqlite",
  "rustix",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "toml",
 ]
@@ -700,20 +699,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tower",
-]
-
-[[package]]
-name = "garrison-milter"
-version = "0.2.1"
-dependencies = [
- "base64",
- "flate2",
- "garrison-core",
- "garrison-testing",
- "log",
- "memchr",
- "rustix",
- "serde_json",
 ]
 
 [[package]]

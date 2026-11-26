@@ -44,6 +44,21 @@ pub(in crate::setup) fn account_unseen(file: &Path, error: &State) -> State {
     )
 }
 
+/// Stalwart does not let the administrator read its webhooks (`error`,
+/// JMAP's forbidden), as it answers a user without its administrator rights,
+/// who may read its own API keys and nothing else of what setup reads
+/// (measured on Stalwart 1.2.0).
+pub(in crate::setup) fn webhooks_unreadable(error: &State) -> State {
+    State::new(
+        "setup-webhooks-unreadable",
+        format!(
+            "Stalwart does not let the administrator read its webhooks: run setup as an \
+             administrator who holds the keys' permissions, as one with Stalwart's administrator \
+             role ({error})"
+        ),
+    )
+}
+
 /// Stalwart's quota leaves the administrator's account, which holds the
 /// keys `held` names, no room for a new key of `description`, which
 /// setup makes before it removes the one it replaces: nothing of that key
