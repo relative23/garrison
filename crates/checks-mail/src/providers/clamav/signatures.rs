@@ -1,7 +1,10 @@
-//! The card of the signature databases: when each file changed, and when
-//! Fangfrisch last checked it.
+//! The card of the signature databases: when each file changed, when
+//! Fangfrisch last checked it, and for a daily database that is days old
+//! whether `ClamAV` has published a newer one.
 
 use std::collections::BTreeMap;
+use std::io::Read;
+use std::net::SocketAddr;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::time::Duration;
@@ -14,10 +17,15 @@ use serde_json::json;
 
 use super::Clamav;
 use crate::context::{Context, Provider, ProviderError};
+use crate::dns::{self, Answer, Kind};
 
-/// The daily signature database is older than this only where updates no
-/// longer arrive: a new one is published every day.
+/// A daily signature database older than this is held against the newest
+/// one `ClamAV` has published: most days bring one, but not every day.
 const STALE_AFTER_HOURS: f64 = 48.0;
+/// Where `ClamAV` names its newest databases, the record freshclam asks
+/// before it downloads: `1.4.7:63:28194:...`, the engine, then the versions
+/// of the main and the daily database.
+const NEWEST: &str = "current.cvd.clamav.net";
 /// Two clocks may differ by this many hours before a file's time counts as
 /// one from the future, of which no age is known.
 const AHEAD_HOURS: f64 = 5.0 / 60.0;
@@ -106,7 +114,7 @@ impl Clamav {
         let (state, finding) = if rows.is_empty() {
             (State::Unknown, Some(self.none_found(refused)))
         } else {
-            current(daily)
+            current(daily, |name| self.behind(name))
         };
         let mut findings: Vec<String> = finding.into_iter().collect();
         // A refresh log that is named and cannot be read leaves its column
@@ -154,12 +162,62 @@ impl Clamav {
             .map(|hours| hours.max(0.0));
         Ok((observation, age))
     }
+
+    /// By which versions the daily database `name` is behind: the one its
+    /// own header names and the newer one `ClamAV` has published, or none
+    /// where it is the newest there is. `Err` says why that is not known.
+    fn behind(&self, name: &str) -> Result<Option<(u32, u32)>, String> {
+        let held = held(&self.database.join(name)).ok_or("the file names no version of its own")?;
+        let resolver = self
+            .resolver
+            .or_else(|| dns::system_resolver(None))
+            .ok_or("this host names no resolver in /etc/resolv.conf")?;
+        let published = published(resolver)?;
+        Ok((held < published).then_some((held, published)))
+    }
+}
+
+/// The version a `ClamAV` database names in its own header, the third field
+/// of `ClamAV-VDB:25 Nov 2026 06-26 +0000:28194:...`.
+fn held(path: &Path) -> Option<u32> {
+    // A named pipe would hold the open until a writer came.
+    if !std::fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
+    let mut header = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(512)
+        .read_to_end(&mut header)
+        .ok()?;
+    let mut fields = header.split(|byte| *byte == b':');
+    if fields.next()? != b"ClamAV-VDB" {
+        return None;
+    }
+    std::str::from_utf8(fields.nth(1)?).ok()?.parse().ok()
+}
+
+/// The version of the newest daily database `ClamAV` has published, as its
+/// record at [`NEWEST`] names it to `resolver`, or why it is not known.
+fn published(resolver: SocketAddr) -> Result<u32, String> {
+    let records = match dns::ask(resolver, NEWEST, Kind::Txt).map_err(|error| error.to_string())? {
+        Answer::Records(records) => records,
+        Answer::NoSuchName => Vec::new(),
+    };
+    records
+        .iter()
+        .find_map(|record| record.split(':').nth(2)?.parse().ok())
+        .ok_or_else(|| format!("{NEWEST} names no version"))
 }
 
 /// What the newest daily database, by its name and age in hours, says of
 /// how current the signatures are: files that exist are not yet signatures
-/// that are current.
-fn current(daily: Option<(&str, f64)>) -> (State, Option<String>) {
+/// that are current. One that is days old is current where `behind` finds
+/// that `ClamAV` has published none since; it is asked of no other.
+fn current(
+    daily: Option<(&str, f64)>,
+    behind: impl FnOnce(&str) -> Result<Option<(u32, u32)>, String>,
+) -> (State, Option<String>) {
     match daily {
         None => (
             State::Unknown,
@@ -177,13 +235,23 @@ fn current(daily: Option<(&str, f64)>) -> (State, Option<String>) {
                 -hours * 60.0
             )),
         ),
-        Some((name, hours)) if hours > STALE_AFTER_HOURS => (
-            State::Warning,
-            Some(format!(
-                "{name} was last updated {hours:.0} hours ago; ClamAV's signatures change every \
-                 day, so the updates do not arrive."
-            )),
-        ),
+        Some((name, hours)) if hours > STALE_AFTER_HOURS => match behind(name) {
+            Ok(None) => (State::Ok, None),
+            Ok(Some((held, published))) => (
+                State::Warning,
+                Some(format!(
+                    "{name} was last updated {hours:.0} hours ago and is version {held}; ClamAV \
+                     has published version {published} since, so the updates do not arrive."
+                )),
+            ),
+            Err(why) => (
+                State::Warning,
+                Some(format!(
+                    "{name} was last updated {hours:.0} hours ago; whether ClamAV has published \
+                     a newer one since is not known: {why}."
+                )),
+            ),
+        },
         Some(_) => (State::Ok, None),
     }
 }

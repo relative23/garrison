@@ -52,7 +52,7 @@ observation the checks report is in [observation ids](observations.md).
 | `stalwart` | `milter_host`, `milter_port` (0: none; one milter to look at alone, by host and port), `max_accounts` (1000, at most 20 000: how many of Stalwart's accounts the mailbox storage reads, the oldest first) | Spam settings, classifier, milter, queue, mailbox storage, running version |
 | `prometheus` | `path` (`/metrics/prometheus`: where Stalwart's exporter answers) | Native counters and gauges for the dashboard |
 | `dns` | `resolver` (default: the first of `/etc/resolv.conf`), `max_domains` (20, at most 100) | For each domain, the DNS records Stalwart names against what the resolver answers; see below |
-| `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning, and so is one dated more than five minutes ahead of the host's clock, whose age is not known; where both are there the newer one counts, also for the dashboard's signature age |
+| `clamav` | `milter_config`, `clamd_config`, `database_directory`, `signatures`, `fangfrisch_database`, `expect_on_infected`, `expect_on_fail` | Scanner policy and signature files; a daily database (`daily.cld`, `daily.cvd`) that was not updated for 48 hours is a warning where ClamAV has published a newer one or that cannot be asked, and so is one dated more than five minutes ahead of the host's clock, whose age is not known; where both are there the newer one counts, also for the dashboard's signature age |
 | `backup-check` | `tool` (`restic` or `borg`), `max_age_hours` (30, 1 to 8784), `verify_days` (0: not expected; at most 366), `restore_days` (0; at most 366), `path`, `modules` | What the backup tool reported of its repository; see below |
 | `bulwark` | `admin_directory`, `plugins` | Webmail plugin versions and bundle integrity: a bundle (`plugins/<id>.js`) that does not match the SHA-256 in `plugins/registry.json` is a failure. A plugin whose bundle cannot be checked, as one the registry does not list or lists twice, gives no hash for, or whose bundle is missing, a link, unreadable or larger than 2 MiB, is named with why; the card is then Partial, or Unknown where no bundle could be checked, as without `plugins`, which name the plugins to check, or where `admin_directory` holds no `plugins/registry.json`, and the card then names that option |
 | `http` | `id`, `title`, `url` (loopback), `expect_status`, `modules` | Whether an endpoint answers |
@@ -584,6 +584,16 @@ the card "Signature databases" does where none of its files is in
 folder, the card says so instead. `garrison check-config` takes for `expect_on_infected` only
 `Accept`, `Reject`, `Defer`, `Blackhole` and `Quarantine`, and for
 `expect_on_fail` only the first three.
+
+A daily database that was not updated for 48 hours is held against the
+newest one ClamAV has published, since ClamAV publishes none on some days.
+The card "Signature databases" reads the version in the file's own header
+and asks this host's resolver for the record freshclam asks,
+`current.cvd.clamav.net`. Where that names the same version, the card stays
+in order; where it names a newer one, the card warns with both versions,
+since the updates do not arrive; and where the file names no version or the
+record cannot be asked, the card warns and says which. A database of the
+last two days is asked about nowhere.
 
 Where `fangfrisch_database` names Fangfrisch's database, the card
 "Signature databases" shows when Fangfrisch last checked each file, from

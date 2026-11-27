@@ -6,6 +6,18 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The card "Signature databases" no longer warns for a daily database that
+  is the newest ClamAV has published. One that was not updated for 48 hours
+  counted as "the updates do not arrive", but ClamAV publishes none on some
+  days, as from 2026-11-25 to 27. The card now reads the version in the
+  file's own header and asks this host's resolver for the record freshclam
+  asks (`current.cvd.clamav.net`): it warns where a newer database is
+  published, with both versions, and where that cannot be asked, and says
+  which. A database of the last two days is asked about nowhere
+  ([clamav](docs/operator/checks.md#clamav)).
+
 ## [0.3.0] - 2026-11-27
 
 ### Upgrade notes

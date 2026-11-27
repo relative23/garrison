@@ -3,9 +3,11 @@
 //! Configuration values describe the files on disk; whether the running daemons
 //! loaded them is not verified. Signature file times are not proof of a
 //! successful update check; the Fangfrisch database records actual refresh
-//! times.
+//! times, and for a daily database that is days old `ClamAV`'s own record of
+//! its newest one says whether a newer exists.
 
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use garrison_core::modules::ModuleId;
@@ -73,6 +75,8 @@ pub struct Clamav {
     fangfrisch: Option<PathBuf>,
     expect_on_infected: &'static str,
     expect_on_fail: &'static str,
+    /// The resolver a test has asked instead of this host's own.
+    resolver: Option<SocketAddr>,
 }
 
 impl Clamav {
@@ -125,7 +129,16 @@ impl Clamav {
             },
             expect_on_infected: ON_INFECTED.expected(&options, "Reject")?,
             expect_on_fail: ON_FAIL.expected(&options, "Defer")?,
+            resolver: None,
         })
+    }
+
+    /// For tests: ask `resolver` what `ClamAV` has published.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_resolver(mut self, resolver: SocketAddr) -> Self {
+        self.resolver = Some(resolver);
+        self
     }
 
     /// The card of the policy and limits the two files set. A policy that

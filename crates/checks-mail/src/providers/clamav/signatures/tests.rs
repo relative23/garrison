@@ -65,13 +65,15 @@ fn signatures_that_were_not_updated_for_two_days_are_a_warning() {
     };
     let fresh = aged(47);
     assert_eq!((fresh.state, fresh.findings.len()), (State::Ok, 0));
+    // These files are no databases of ClamAV's, so nothing is asked about
+    // them and the card says what it does not know.
     let old = aged(49);
     assert_eq!(old.state, State::Warning);
     assert_eq!(
         old.findings,
         [
-            "daily.cld was last updated 49 hours ago; ClamAV's signatures change every day, so \
-          the updates do not arrive."
+            "daily.cld was last updated 49 hours ago; whether ClamAV has published a newer one \
+          since is not known: the file names no version of its own."
         ]
     );
     // Without any of the files, the card says where it looked and what
@@ -114,6 +116,117 @@ fn signatures_that_were_not_updated_for_two_days_are_a_warning() {
 
 /// The antivirus configuration card over a milter file of `text` and a
 /// scanner file of `scan`, with `options` for the check.
+/// A resolver on a free port for one question about `ClamAV`'s newest
+/// databases: it answers with `record` as the TXT record, or with the error
+/// code SERVFAIL, and ends with the name it was asked for.
+fn resolver(record: Option<&'static str>) -> (SocketAddr, std::thread::JoinHandle<String>) {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    // A card that does not ask fails its test instead of holding it.
+    socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let address = socket.local_addr().unwrap();
+    let served = std::thread::spawn(move || {
+        let mut question = [0; 512];
+        let (length, asker) = socket.recv_from(&mut question).unwrap();
+        // The header answers the question's number, then the question as it
+        // came, then one record that points back at the question's name.
+        let mut answer = question[..length].to_vec();
+        answer[2..8].copy_from_slice(&[0x81, 0x80, 0, 1, 0, 1]);
+        match record {
+            Some(text) => {
+                answer.extend_from_slice(&[0xc0, 12, 0, 16, 0, 1, 0, 0, 7, 8]);
+                let length = u8::try_from(text.len()).unwrap();
+                answer.extend_from_slice(&[0, length + 1, length]);
+                answer.extend_from_slice(text.as_bytes());
+            }
+            None => answer[2..8].copy_from_slice(&[0x81, 0x82, 0, 1, 0, 0]),
+        }
+        socket.send_to(&answer, asker).unwrap();
+        // The name as written: each label's length gives way to a dot.
+        let mut name = String::new();
+        let mut at = 12;
+        while question[at] != 0 {
+            let end = at + 1 + usize::from(question[at]);
+            name.push_str(std::str::from_utf8(&question[at + 1..end]).unwrap());
+            name.push('.');
+            at = end;
+        }
+        name
+    });
+    (address, served)
+}
+
+#[test]
+fn an_old_daily_database_warns_only_where_clamav_has_published_a_newer_one() {
+    use std::time::{Duration, SystemTime};
+    let directory = tempfile::tempdir().unwrap();
+    let daily = directory.path().join("daily.cld");
+    // The header of a database as freshclam leaves it, 512 octets, and
+    // what follows it.
+    let mut database =
+        b"ClamAV-VDB:25 Nov 2026 06-26 +0000:28194:355842:90:X:X:svc.clamav-publisher:1795588019"
+            .to_vec();
+    database.resize(512, b' ');
+    database.extend_from_slice(&[0xff; 64]);
+    std::fs::write(&daily, database).unwrap();
+    let config = config(directory.path());
+    let runner = Canned(String::new());
+    let context = context(&config, &runner);
+    let checked = SystemTime::UNIX_EPOCH
+        + Duration::from_secs(u64::try_from(context.now.as_second()).unwrap());
+    let card = |hours: u64, resolver: SocketAddr| {
+        let file = std::fs::File::options().write(true).open(&daily).unwrap();
+        file.set_modified(checked - Duration::from_secs(hours * 3600))
+            .unwrap();
+        let provider = Clamav::new(&table(&format!(
+            "type = \"clamav\"\nmilter_config = \"{0}/milter.conf\"\nclamd_config = \"{0}/scan.conf\"\ndatabase_directory = \"{0}\"",
+            directory.path().display()
+        )))
+        .unwrap()
+        .with_resolver(resolver);
+        provider.collect(&context).unwrap().observations.remove(1)
+    };
+    // ClamAV has published nothing since: the database is days old and the
+    // newest there is.
+    let (address, served) = resolver(Some("1.4.7:63:28194:1795777200:1:90:49192:339"));
+    let newest = card(52, address);
+    assert_eq!((newest.state, newest.findings.len()), (State::Ok, 0));
+    assert_eq!(served.join().unwrap(), "current.cvd.clamav.net.");
+    // Two newer ones were published and did not arrive.
+    let (address, served) = resolver(Some("1.4.7:63:28196:1795777200:1:90:49192:339"));
+    let behind = card(52, address);
+    assert_eq!(behind.state, State::Warning);
+    assert_eq!(
+        behind.findings,
+        [
+            "daily.cld was last updated 52 hours ago and is version 28194; ClamAV has published \
+          version 28196 since, so the updates do not arrive."
+        ]
+    );
+    served.join().unwrap();
+    // The resolver cannot say: the card warns and says what it does not know.
+    let (address, served) = resolver(None);
+    let unasked = card(52, address);
+    assert_eq!(unasked.state, State::Warning);
+    assert_eq!(
+        unasked.findings,
+        [
+            "daily.cld was last updated 52 hours ago; whether ClamAV has published a newer one \
+          since is not known: the resolver could not answer (SERVFAIL)."
+        ]
+    );
+    served.join().unwrap();
+    // A database of the last two days is asked about nowhere: this resolver
+    // holds its port and gets no question.
+    let silent = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    silent.set_nonblocking(true).unwrap();
+    let fresh = card(47, silent.local_addr().unwrap());
+    assert_eq!((fresh.state, fresh.findings.len()), (State::Ok, 0));
+    let unasked = silent.recv_from(&mut [0; 512]).unwrap_err();
+    assert_eq!(unasked.kind(), std::io::ErrorKind::WouldBlock);
+}
+
 #[test]
 fn a_daily_database_dated_ahead_of_the_clock_has_no_age() {
     use std::time::{Duration, SystemTime};
