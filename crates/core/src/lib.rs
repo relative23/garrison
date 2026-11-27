@@ -15,6 +15,7 @@ pub mod logging;
 pub mod modules;
 pub mod observations;
 pub mod recording;
+pub mod run_time;
 pub mod sqlite;
 pub mod systemd;
 pub mod time;
