@@ -85,6 +85,11 @@ Notable changes for operators and users. The format follows
   within ten minutes of the receiver's run time, and where the receiver was
   away for longer it ends an hour before the time the receiver has run at
   for a day.
+- The polkit rule's first lines name `garrison access update` before the
+  installer for a change of `[[actions]]`. They named the installer alone,
+  after which the rule held a new action and no profile did, so that nobody
+  was offered it and nothing said why
+  ([access](docs/operator/access.md#when-the-actions-change)).
 
 ## [0.3.1] - 2026-11-27
 
