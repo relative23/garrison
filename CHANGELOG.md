@@ -90,6 +90,11 @@ Notable changes for operators and users. The format follows
   after which the rule held a new action and no profile did, so that nobody
   was offered it and nothing said why
   ([access](docs/operator/access.md#when-the-actions-change)).
+- With `web.bind_client_ip`, a sign-in from another address no longer ends
+  a session whose cookie it brings along. Someone with a copy of that cookie
+  and an account of their own could sign the owner out that way; the copy
+  alone counted as signed out there already
+  ([configuration](docs/operator/configuration.md#web-ingest-collector-broker)).
 
 ## [0.3.1] - 2026-11-27
 

@@ -304,6 +304,25 @@ async fn a_logout_that_could_not_end_the_session_says_so() {
     );
 }
 
+/// A sign-in through the provider by a client at `address`, with the
+/// cookies the browser holds.
+async fn sign_in_from(client: &mut Client, code: &str, address: &str) {
+    let login = client.get_from("/auth/login", address).await;
+    let location = url::Url::parse(login.header("location")).unwrap();
+    let state = location
+        .query_pairs()
+        .find(|(key, _)| key == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    let callback =
+        format!("/auth/callback?state={state}&code={code}&iss=https%3A%2F%2Fmail.example.test");
+    assert_eq!(
+        client.get_from(&callback, address).await.header("location"),
+        "/admin/"
+    );
+}
+
 /// With `web.bind_client_ip`, the session's cookie from another client
 /// address is answered as if signed out, the switch row's question and the
 /// page drawn for a path too, and the session goes on from its own address. A sign-out, which needs the
@@ -319,20 +338,7 @@ async fn a_bound_session_is_signed_out_elsewhere_and_goes_on_at_its_address() {
     std::fs::write(pages.join("sign-in.html"), "sign-in").unwrap();
     std::fs::write(pages.join("dashboard.html"), "the frame").unwrap();
     let client = &mut setup.client;
-    let login = client.get_from("/auth/login", home).await;
-    let location = url::Url::parse(login.header("location")).unwrap();
-    let state = location
-        .query_pairs()
-        .find(|(key, _)| key == "state")
-        .unwrap()
-        .1
-        .into_owned();
-    let callback =
-        format!("/auth/callback?state={state}&code=code-admin&iss=https%3A%2F%2Fmail.example.test");
-    assert_eq!(
-        client.get_from(&callback, home).await.header("location"),
-        "/admin/"
-    );
+    sign_in_from(client, "code-admin", home).await;
     let csrf = client.get_from(&api("session"), home).await.json()["session"]["csrf"]
         .as_str()
         .unwrap()
@@ -424,4 +430,32 @@ async fn logout_revokes_the_token() {
         setup.client.get(&api("session")).await.json(),
         json!({"session": null})
     );
+}
+
+/// With `web.bind_client_ip`, a sign-in ends the session its browser came
+/// with only where that browser may use it. Someone who holds a copy of the
+/// owner's cookie and signs in from another address, with an account of
+/// their own, ends nothing of the owner's: the copy counts there as if
+/// signed out, and ending it would sign its owner out.
+#[tokio::test]
+async fn a_sign_in_elsewhere_with_a_copy_of_a_bound_cookie_leaves_its_owner_signed_in() {
+    let mut setup = setup_with(Duration::from_secs(5), |config| {
+        config.web.bind_client_ip = true;
+    });
+    let (home, away) = ("192.0.2.1", "198.51.100.7");
+    let client = &mut setup.client;
+    sign_in_from(client, "code-admin", home).await;
+    let owner = client.cookies.clone();
+    let at_home = client.get_from(&api("session"), home).await.json();
+    assert!(at_home["session"]["csrf"].is_string(), "{at_home}");
+    // The browser away holds the copy when its own sign-in comes back.
+    sign_in_from(client, "code-viewer", away).await;
+    assert_ne!(client.cookies[SESSION_COOKIE], owner[SESSION_COOKIE]);
+    assert_eq!(
+        *setup.provider.revoked.lock().unwrap(),
+        Vec::<String>::new()
+    );
+    // The owner's session is the one it was.
+    client.cookies = owner;
+    assert_eq!(client.get_from(&api("session"), home).await.json(), at_home);
 }

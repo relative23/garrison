@@ -328,8 +328,10 @@ fn finish(
         .min(u64::from(app.config.web.session_minutes) * 60);
     // A browser that signs in again brings the cookie of its session so
     // far: that one ends now, with its token, instead of lasting out its
-    // time under a cookie the new one replaces.
-    if let Ok(Some(before)) = app.gate.session(visitor) {
+    // time under a cookie the new one replaces. Only a session this
+    // visitor may use: a copy of a bound session's cookie, brought from
+    // another address, would otherwise sign its owner out.
+    if let Ok(Some(before)) = app.gate.bound_session(visitor) {
         let _ = app.gate.end(&before, true);
     }
     let created = app.store.create(&NewSession {

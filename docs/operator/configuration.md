@@ -37,7 +37,7 @@ either.
 |---|---|---|
 | `web.port` | 8091 | Loopback port behind nginx, 1024 to 65535; see below. |
 | `web.session_minutes` | 30 | Session lifetime, 5 to 480 minutes (never longer than the token). |
-| `web.bind_client_ip` | false | Answer the session's cookie from another client address than the sign-in's as if signed out; the session goes on from its own address, and a sign-out ends it from any. Breaks mobile users, whose address changes. |
+| `web.bind_client_ip` | false | Answer the session's cookie from another client address than the sign-in's as if signed out; the session goes on from its own address, a sign-in from another address leaves it as it is, and a sign-out ends it from any. Breaks mobile users, whose address changes. |
 | `ingest.port` | 8094 | Loopback port that Stalwart's webhook calls, 1024 to 65535. |
 | `ingest.signature_key` | `credential:webhook-signature-key` | The key Stalwart signs its event batches with; `stalwart setup` writes it, also where the file is empty or holds no key, which is as good as none. |
 | `ingest.retention_days` | 30 | Event history retention, 1 to 365 days. An event that is older than this when it arrives is not stored. |
