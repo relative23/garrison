@@ -18,6 +18,8 @@ use std::net::{IpAddr, SocketAddr, TcpStream, UdpSocket};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use crate::timed::Timed;
+
 const TIMEOUT: Duration = Duration::from_secs(3);
 /// A name may follow this many pointers; more is a loop.
 const MOST_POINTERS: usize = 16;
@@ -416,14 +418,14 @@ fn over_udp(server: SocketAddr, question: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 fn over_tcp(server: SocketAddr, question: &[u8]) -> io::Result<Vec<u8>> {
-    let mut stream = TcpStream::connect_timeout(&server, TIMEOUT)?;
-    stream.set_write_timeout(Some(TIMEOUT))?;
+    let stream = TcpStream::connect_timeout(&server, TIMEOUT)?;
+    // One time for the whole answer: a resolver that sends an octet now and
+    // then is given up like one that says nothing.
+    let mut stream = Timed::new(stream, Instant::now() + TIMEOUT, TIMEOUT);
     let length = u16::try_from(question.len()).unwrap_or(u16::MAX);
     stream.write_all(&length.to_be_bytes())?;
     stream.write_all(question)?;
-    let until = Instant::now() + TIMEOUT;
     loop {
-        stream.set_read_timeout(Some(left(until)?))?;
         let mut size = [0; 2];
         stream.read_exact(&mut size)?;
         let mut answer = vec![0; usize::from(u16::from_be_bytes(size))];

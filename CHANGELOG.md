@@ -6,6 +6,13 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A resolver that sends its answer over TCP an octet now and then no longer
+  holds a DNS question beyond its three seconds. The wait began anew with
+  each octet, so one question of the DNS, blocklist or signature checks could
+  take the time of the whole collection run.
+
 ## [0.3.1] - 2026-11-27
 
 ### Fixed
