@@ -53,6 +53,33 @@ fn objects_beyond_the_500_of_one_get_are_listed_in_pages() {
         (listed.objects.len(), ids.len()),
         (listed.total, listed.total)
     );
+    // One of the oldest accounts is removed between the first page and the
+    // second: every account Stalwart has after that is listed all the same.
+    let (_, gone) = lab.created.remove(0);
+    let removed = std::cell::Cell::new(false);
+    let changed: Listed<Value> = client
+        .listed("Account", &["id"], 100_000, || {
+            if !removed.replace(true) {
+                lab.call("x:Account/set", &json!({"destroy": [gone]}));
+            }
+            true
+        })
+        .unwrap();
+    assert!(removed.get());
+    let after: Listed<Value> = client.listed("Account", &["id"], 100_000, || true).unwrap();
+    let read: BTreeSet<&str> = changed
+        .objects
+        .iter()
+        .filter_map(|account| account["id"].as_str())
+        .collect();
+    let unread: Vec<&str> = after
+        .objects
+        .iter()
+        .filter_map(|account| account["id"].as_str())
+        .filter(|id| !read.contains(id))
+        .collect();
+    assert_eq!(unread, Vec::<&str>::new());
+    assert_eq!(after.total, listed.total - 1);
     let unqueried = keyed(
         &mut lab,
         &format!("{tag}get"),

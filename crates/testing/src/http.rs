@@ -1,5 +1,6 @@
 //! A loopback HTTP server: answers each connection with the next canned
-//! response and records the raw requests it received.
+//! response, or with what a stand-in makes of the request, and records the
+//! raw requests it received.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -36,13 +37,23 @@ pub fn json(body: &serde_json::Value) -> String {
 }
 
 pub fn serve(responses: Vec<String>) -> Server {
+    let mut responses = responses.into_iter();
+    serve_each(responses.len(), move |_| responses.next().unwrap())
+}
+
+/// A server for `count` requests that answers each with what `respond`
+/// makes of its body: a stand-in whose answer depends on what is asked.
+pub fn serve_each(
+    count: usize,
+    mut respond: impl FnMut(&str) -> String + Send + 'static,
+) -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     // Polled, so that waiting for a connection can end.
     listener.set_nonblocking(true).unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let handle = thread::spawn(move || {
         let mut requests = Vec::new();
-        for response in responses {
+        for _ in 0..count {
             let mut reader = BufReader::new(next(&listener, requests.len() + 1));
             let mut head = String::new();
             let mut length = 0;
@@ -59,7 +70,9 @@ pub fn serve(responses: Vec<String>) -> Server {
             }
             let mut body = vec![0; length];
             reader.read_exact(&mut body).unwrap();
-            requests.push(head + &String::from_utf8(body).unwrap());
+            let body = String::from_utf8(body).unwrap();
+            let response = respond(&body);
+            requests.push(head + &body);
             reader.into_inner().write_all(response.as_bytes()).unwrap();
         }
         requests

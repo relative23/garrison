@@ -1,4 +1,4 @@
-use garrison_testing::http::{json as respond, serve};
+use garrison_testing::http::{Server, json as respond, serve, serve_each};
 use serde_json::{Value, json};
 
 use super::*;
@@ -35,11 +35,11 @@ fn names(listed: &Listed<Named>) -> Vec<String> {
         .collect()
 }
 
-/// A page is a query and a get of its IDs in one request, from the
-/// position the pages before reached, up to `most`, the oldest first.
+/// A page is a query and a get of its IDs in one request, from the last
+/// object the pages before read, up to `most`, the oldest first.
 #[test]
 fn objects_come_in_pages_of_a_query_and_a_get_of_its_ids() {
-    let server = serve(vec![page(0..500, 700, None), page(500..600, 700, None)]);
+    let server = serve(vec![page(0..500, 700, None), page(499..600, 700, None)]);
     let listed: Listed<Named> = client(&server.url)
         .listed("Account", &["name"], 600, || true)
         .unwrap();
@@ -47,7 +47,7 @@ fn objects_come_in_pages_of_a_query_and_a_get_of_its_ids() {
     let expected: Vec<String> = (0..600).map(|number| format!("n{number}")).collect();
     assert_eq!(names(&listed), expected);
     let requests = server.requests();
-    for (request, position, limit) in [(&requests[0], 0, 500), (&requests[1], 500, 100)] {
+    for (request, position, limit) in [(&requests[0], 0, 500), (&requests[1], 499, 101)] {
         let body: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(
             body["methodCalls"],
@@ -84,12 +84,17 @@ fn the_pages_end_with_the_last_object_or_the_time() {
 /// that brings nothing new ends the pages.
 #[test]
 fn an_object_that_comes_again_is_listed_once() {
-    let server = serve(vec![page(0..500, 1000, None), page(400..900, 1000, None)]);
+    let server = serve(vec![
+        page(0..500, 1000, None),
+        page(400..900, 1000, None),
+        page(899..1000, 1000, None),
+    ]);
     let listed: Listed<Named> = client(&server.url)
         .listed("Account", &["name"], 1000, || true)
         .unwrap();
     server.requests();
-    assert_eq!(listed.objects.len(), 900);
+    let expected: Vec<String> = (0..1000).map(|number| format!("n{number}")).collect();
+    assert_eq!(names(&listed), expected);
     let server = serve(vec![page(0..500, 1000, None), page(0..500, 1000, None)]);
     let listed: Listed<Named> = client(&server.url)
         .listed("Account", &["name"], 1000, || true)
@@ -130,4 +135,63 @@ fn a_refused_or_unread_page_says_why() {
         server.requests();
         assert_eq!(listed, Err(error));
     }
+}
+
+/// A stand-in that answers `count` pages as Stalwart does, from the list
+/// of the accounts `a0` to `a{accounts - 1}` in that order, at the position
+/// and with the limit each page asks; after its first answer it changes the
+/// list as `change` says.
+fn changing(accounts: usize, count: usize, change: fn(&mut Vec<usize>)) -> Server {
+    let mut list: Vec<usize> = (0..accounts).collect();
+    let mut answered = 0;
+    serve_each(count, move |body| {
+        let asked: Value = serde_json::from_str(body).unwrap();
+        let query = &asked["methodCalls"][0][1];
+        let position = usize::try_from(query["position"].as_u64().unwrap()).unwrap();
+        let limit = usize::try_from(query["limit"].as_u64().unwrap()).unwrap();
+        let numbers: Vec<usize> = list.iter().skip(position).take(limit).copied().collect();
+        let ids: Vec<String> = numbers.iter().map(|number| format!("a{number}")).collect();
+        let objects: Vec<Value> = numbers
+            .iter()
+            .map(|number| json!({"id": format!("a{number}"), "name": format!("n{number}")}))
+            .collect();
+        let answer = respond(&json!({"methodResponses": [
+            ["x:Account/query", {"ids": ids, "position": position, "total": list.len()}, "0"],
+            ["x:Account/get", {"list": objects, "notFound": []}, "1"],
+        ]}));
+        answered += 1;
+        if answered == 1 {
+            change(&mut list);
+        }
+        answer
+    })
+}
+
+/// An object removed after a page held it moves the ones after it up a
+/// place: the page that follows still brings every object the list holds,
+/// where it began one too far and left one out without a word.
+#[test]
+fn an_object_removed_between_two_pages_costs_no_other_object() {
+    // One of the first page's is removed before the second is asked.
+    let server = changing(603, 4, |list| {
+        list.retain(|number| *number != 3);
+    });
+    let listed: Listed<Named> = client(&server.url)
+        .listed("Account", &["name"], 100_000, || true)
+        .unwrap();
+    server.requests();
+    let expected: Vec<String> = (0..603).map(|number| format!("n{number}")).collect();
+    assert_eq!(names(&listed), expected);
+    // Three of the first page's are removed and two are made, which come
+    // last: the ones removed stay as they were read, every other is there.
+    let server = changing(603, 4, |list| {
+        list.retain(|number| ![3, 250, 499].contains(number));
+        list.extend([603, 604]);
+    });
+    let listed: Listed<Named> = client(&server.url)
+        .listed("Account", &["name"], 100_000, || true)
+        .unwrap();
+    server.requests();
+    let expected: Vec<String> = (0..605).map(|number| format!("n{number}")).collect();
+    assert_eq!(names(&listed), expected);
 }

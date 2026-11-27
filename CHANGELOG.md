@@ -22,6 +22,12 @@ Notable changes for operators and users. The format follows
   presented. The rows of such a port now say on which address each probe
   was, as `mail.example.com:465 on 192.0.2.10`
   ([tls](docs/operator/checks.md#tls)).
+- An account or a domain removed while Stalwart's list is read costs no
+  other one. With more than 500 of them the list is read in pages, and one
+  removed between two pages moved the later ones up a place, so the page
+  that followed left one out: its mailbox was not judged in that run and
+  the card said nothing. Each page now begins with the last object read,
+  and is asked again from further back where that object is gone.
 
 ## [0.3.1] - 2026-11-27
 

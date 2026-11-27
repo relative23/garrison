@@ -4,6 +4,13 @@
 //! grows with the number of objects. A `/get` of all objects (`ids: null`)
 //! gets the first 500 from Stalwart and not a word of the rest (measured on
 //! 1.2.0).
+//!
+//! The list may change between two pages. An object made meanwhile comes
+//! last, as no ID is given again; one removed moves every later one up a
+//! place, and a page asked from the position the last one reached would
+//! leave one out. So each page after the first begins with the last object
+//! read: where that object is there, the two pages join, and where it is
+//! not, the page is asked again from further back.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -27,6 +34,14 @@ pub struct Listed<T> {
     pub objects: Vec<T>,
     /// How many objects of the kind Stalwart has.
     pub total: usize,
+}
+
+/// The objects from a position of the list, each with its ID, and how many
+/// objects the list has.
+struct Page<T> {
+    from: usize,
+    objects: Vec<(String, T)>,
+    total: usize,
 }
 
 /// What a `/query` answers: the IDs from its position, and how many there
@@ -57,12 +72,13 @@ impl JmapClient {
         let (mut objects, mut seen) = (Vec::new(), BTreeSet::new());
         let (mut total, mut position) = (0, 0);
         while objects.len() < most && (position == 0 || more()) {
-            let limit = PAGE.min(most - objects.len());
-            let (page, counted) = self.page::<T>(kind, properties, position, limit)?;
-            total = counted;
-            position += page.len();
+            // A later page begins with an object read before, so one more.
+            let wanted = most - objects.len() + usize::from(position > 0);
+            let page = self.joined::<T>(kind, properties, position, PAGE.min(wanted), &seen)?;
+            total = page.total;
+            position = page.from + page.objects.len();
             let before = objects.len();
-            for (id, object) in page {
+            for (id, object) in page.objects {
                 if seen.insert(id) {
                     objects.push(object);
                 }
@@ -78,6 +94,32 @@ impl JmapClient {
         })
     }
 
+    /// The page that follows the `position` objects read so far, whose IDs
+    /// are `seen`. It is asked from the last object read, and joins what
+    /// was read where it begins with an object of `seen`. Where it does
+    /// not, objects before it were removed since, and it is asked again
+    /// from a page further back, then from the first object, from which
+    /// every page joins.
+    fn joined<T: DeserializeOwned>(
+        &self,
+        kind: &str,
+        properties: &[&str],
+        position: usize,
+        limit: usize,
+        seen: &BTreeSet<String>,
+    ) -> Result<Page<T>, Error> {
+        let mut back = 1;
+        loop {
+            let from = position.saturating_sub(back);
+            let page = self.page::<T>(kind, properties, from, limit)?;
+            let first = page.objects.first();
+            if from == 0 || first.is_some_and(|(id, _)| seen.contains(id)) {
+                return Ok(page);
+            }
+            back = if back < PAGE { PAGE } else { position };
+        }
+    }
+
     /// The objects of `kind` from `position` on, `limit` of them at the
     /// most, each with its ID, the oldest first, and how many there are.
     fn page<T: DeserializeOwned>(
@@ -86,7 +128,7 @@ impl JmapClient {
         properties: &[&str],
         position: usize,
         limit: usize,
-    ) -> Result<(Vec<(String, T)>, usize), Error> {
+    ) -> Result<Page<T>, Error> {
         let (query, get) = (format!("x:{kind}/query"), format!("x:{kind}/get"));
         // Stalwart's IDs rise with each object made and are not given again,
         // so by ID the oldest come first and a new one comes last; a query
@@ -123,13 +165,17 @@ impl JmapClient {
                 Some((id, object))
             })
             .collect();
-        let mut page = Vec::with_capacity(ids.len());
+        let mut objects = Vec::with_capacity(ids.len());
         for id in ids {
             if let Some(object) = found.remove(&id) {
-                page.push((id, read(&get, object)?));
+                objects.push((id, read(&get, object)?));
             }
         }
-        Ok((page, total))
+        Ok(Page {
+            from: position,
+            objects,
+            total,
+        })
     }
 }
 
