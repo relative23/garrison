@@ -72,6 +72,13 @@ names "current is the release under test" current "$new"
 names "previous is the release it upgraded from" previous "$old"
 rebuild_after_upgrade
 check "the event history survived the upgrade" "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -ge $before"
+# The timer of the releases up to 0.2 counted a minute from the last run and
+# came five seconds late each time, so one minute in thirteen had no run. It
+# goes by the clock now, and an upgrade must leave the running timer so.
+check "upgraded: the collector's timer starts a run in every minute, at its thirtieth second" '
+    next=$(systemctl show garrison-collect.timer -p NextElapseUSecRealtime --value) &&
+        test "$(date -d "$next" +%S)" = 30 &&
+        systemctl show garrison-collect.timer -p TimersCalendar --value | grep -q -F "OnCalendar=*-*-* *:*:30"'
 services upgraded
 # Laid out like Stalwart's host: the interface under /admin/, the root leads there.
 check "the root leads to the interface" 'curl -s -D - -o /dev/null http://127.0.0.1:8091/ | tr -d "\r" | grep -q -i "^location: /admin/$"'

@@ -53,6 +53,12 @@ Notable changes for operators and users. The format follows
 
 ### Fixed
 
+- The collector starts once in every minute, by the clock, at the thirtieth
+  second. Its timer counted a minute from the last run and came five seconds
+  late or more each time, so the runs lay 65 seconds apart and about one
+  minute in thirteen had no run and no samples; what was counted in it was
+  stored with the next run. After an installation the first run comes within
+  a minute, and `garrison doctor` says until then that none has finished.
 - The mail test waits a quarter of a second before each of its sessions. A
   run opens up to eight, and Stalwart takes five connections a second from
   one address as it comes: with `macro_document = true` and a scanner that

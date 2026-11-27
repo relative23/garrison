@@ -6,7 +6,7 @@
 |---|---|---|
 | `garrison-web.service` | garrison | Interface and API on 127.0.0.1:8091 |
 | `garrison-ingest.service` | garrison-ingest | Receives Stalwart webhooks on 127.0.0.1:8094 |
-| `garrison-collect.timer` | garrison-collector | Collects status every minute |
+| `garrison-collect.timer` | garrison-collector | Collects status once in every minute, at its thirtieth second |
 | `garrison-watch.timer` | garrison-collector | Looks every five minutes whether the collector still runs |
 | `garrison-broker.socket` | garrison-broker | Starts the broker on demand for actions and access checks |
 

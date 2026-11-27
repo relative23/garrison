@@ -387,7 +387,9 @@ sudo garrison doctor
 ```
 
 It names every problem it finds, from a stopped service to a missing nginx
-include, and what to do about it.
+include, and what to do about it. In the first minute after the installation
+it may say that no collection run has finished yet: the collector starts once
+in every minute, at the thirtieth second.
 
 ## 8. Include Garrison in backups
 

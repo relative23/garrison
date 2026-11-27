@@ -131,6 +131,14 @@ step "Behind nginx"
 through_nginx installed
 
 step "garrison doctor"
+# Nothing here has started a collection run: the timer does, within a minute
+# of the installation, and doctor is asked once it has.
+check "the timer starts the first collection run by itself, within a minute" '
+    for attempt in $(seq 75); do
+        journalctl -u garrison-collect.service --no-pager -q | grep -q "Finished garrison-collect.service" && exit 0
+        sleep 1
+    done
+    exit 1'
 inside '/opt/garrison/current/bin/garrison doctor > /root/doctor.log 2>&1 || true'
 inside 'sed "s/^/      | /" /root/doctor.log'
 # Doctor's lines by the names of their states, which stay as they are.

@@ -2,8 +2,12 @@
 Description=Garrison - collect status every minute
 
 [Timer]
-OnBootSec=30s
-OnUnitActiveSec=60s
+# By the clock, once in every minute, so that every minute has its samples;
+# at the thirtieth second, away from the full minute at which a host's other
+# jobs begin. A timer that counts from the last run comes late by its
+# accuracy each time: with `OnUnitActiveSec=60s` the runs lay 65 seconds
+# apart, and about one minute in thirteen had none.
+OnCalendar=*:*:30
 AccuracySec=5s
 
 [Install]
