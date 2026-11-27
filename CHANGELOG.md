@@ -8,23 +8,29 @@ Notable changes for operators and users. The format follows
 
 ## [0.3.0] - 2026-11-27
 
+### Upgrade notes
+
+- An installation that runs the macro filter (a `[milter]` section in
+  `garrison.toml`) switches it off **before** the upgrade, with the release
+  that is installed: remove `[milter]` from `garrison.toml` and run `garrison
+  stalwart setup`, which takes the filter out of Stalwart and stops it. Until
+  then this release changes nothing: its installer refuses while the filter
+  runs (`install-macro-filter-runs`), and its `check-config` refuses the
+  section by name. Otherwise Stalwart would defer all mail for a filter that
+  no longer answers
+  ([configuration](docs/operator/configuration.md#milter)). Without
+  `[milter]`, as an installation is by default, nothing is to do.
+- To have documents with macros refused from now on, tell the virus scanner:
+  with ClamAV, `AlertOLE2Macros yes` in clamd's configuration
+  ([installation](docs/operator/installation.md#10-mail-with-office-macros-optional)).
+
 ### Removed
 
 - **The macro filter is gone.** Garrison no longer reads mail: the section
   `[milter]`, the service `garrison-milter.service`, the command `garrison
   milter` and, on new installations, the user `garrison-milter`. A virus
-  scanner refuses documents with macros instead; with ClamAV that is
-  `AlertOLE2Macros yes` in clamd's configuration
-  ([installation](docs/operator/installation.md#10-mail-with-office-macros-optional)).
-  An installation that runs the filter switches it off **before** the
-  upgrade, with the release that is installed: remove `[milter]` from
-  `garrison.toml` and run `garrison stalwart setup`, which takes the filter
-  out of Stalwart and stops it. Until then this release changes nothing: its
-  installer refuses while the filter runs (`install-macro-filter-runs`), and
-  its `check-config` refuses the section by name. Otherwise Stalwart would
-  defer all mail for a filter that no longer answers
-  ([configuration](docs/operator/configuration.md#milter)). Nothing sets the
-  headers `X-Garrison-Macro` and `X-Garrison-Scan` any more.
+  scanner refuses documents with macros instead (see the upgrade notes).
+  Nothing sets the headers `X-Garrison-Macro` and `X-Garrison-Scan` any more.
 - With the filter go its states: `install-milter-held`, `-asked`, `-unasked`,
   `-unseen`, `-unloaded`, `-kept` and `-still-asked`; `setup-milter-unseen`,
   `-port-taken`, `-silent` and `-stranded`, and `setup-milters-unreadable`;
