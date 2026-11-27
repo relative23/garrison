@@ -386,3 +386,55 @@ fn a_refresh_log_row_longer_than_fangfrisch_writes_costs_the_log_not_the_memory(
         Err("string or blob too big".to_owned())
     );
 }
+
+/// The folder, the two configuration files and Fangfrisch's log are where an
+/// operator names them, which may be a file system that gives no answer, as
+/// a hard NFS mount whose server is gone. Each card waits for its files no
+/// longer than the check's time and says so: here the time is past before
+/// the files are asked for.
+#[test]
+fn files_whose_file_system_does_not_answer_leave_the_cards_unknown() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = |name: &str| directory.path().join(name).display().to_string();
+    std::fs::write(path("milter.conf"), "OnInfected Reject\nOnFail Defer\n").unwrap();
+    std::fs::write(path("scan.conf"), "ScanArchive yes\n").unwrap();
+    std::fs::write(path("daily.cld"), "signatures").unwrap();
+    let provider = Clamav::new(&table(&format!(
+        "type = \"clamav\"\nmilter_config = \"{0}/milter.conf\"\nclamd_config = \"{0}/scan.conf\"\ndatabase_directory = \"{0}\"",
+        directory.path().display()
+    )))
+    .unwrap();
+    let config = config(directory.path());
+    let runner = Canned(String::new());
+    let context = context(&config, &runner);
+    let (signatures, age) = provider.signatures(&context, Instant::now()).unwrap();
+    assert_eq!(
+        (signatures.state, signatures.findings, age),
+        (
+            State::Unknown,
+            vec![format!(
+                "The signature files in {} could not be looked at: its file system did not \
+                 answer within 8 seconds.",
+                directory.path().display()
+            )],
+            None
+        )
+    );
+    let configuration = provider.configuration(&context, Instant::now()).unwrap();
+    assert_eq!(
+        (configuration.state, configuration.findings),
+        (
+            State::Unknown,
+            vec![
+                format!(
+                    "{} could not be read: its file system did not answer within 8 seconds.",
+                    path("milter.conf")
+                ),
+                format!(
+                    "{} could not be read: its file system did not answer within 8 seconds.",
+                    path("scan.conf")
+                ),
+            ]
+        )
+    );
+}

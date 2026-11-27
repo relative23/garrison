@@ -7,15 +7,16 @@ use std::io::Read;
 use std::net::SocketAddr;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use garrison_core::files::answered_by;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Column, Evidence, Format, Observation, Required, State, Table};
 use garrison_core::sqlite::reading;
 use garrison_core::time;
 use serde_json::json;
 
-use super::Clamav;
+use super::{Clamav, unanswered};
 use crate::context::{Context, Provider, ProviderError};
 use crate::dns::{self, Answer, Kind};
 
@@ -30,96 +31,181 @@ const NEWEST: &str = "current.cvd.clamav.net";
 /// one from the future, of which no age is known.
 const AHEAD_HOURS: f64 = 5.0 / 60.0;
 
-impl Clamav {
-    /// Why no listed signature file was found, where a look at `name` was
-    /// `refused` for another reason than that it is not there: another path
-    /// mends only files that are not there.
-    fn none_found(&self, refused: Option<(&String, std::io::Error)>) -> String {
-        let directory = self.database.display();
-        match refused {
-            Some((name, error)) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-                let path = self.database.join(name);
-                let folder = path
-                    .ancestors()
-                    .skip(1)
-                    .find(|folder| std::fs::symlink_metadata(folder).is_ok())
-                    .unwrap_or(&self.database)
-                    .display();
-                format!(
-                    "The signature files in {directory} cannot be looked for: the collector's \
-                     user may not search the folder {folder}; let every user search it (chmod \
-                     o+x {folder})."
-                )
-            }
-            Some((_, error)) => {
-                format!("The signature files in {directory} cannot be looked for: {error}.")
-            }
-            None => format!(
-                "None of the listed signature files is in {directory}: set `database_directory` \
-                 to clamd's, which `garrison detect --format toml` names, or `signatures` to the \
-                 files it holds."
-            ),
-        }
-    }
+/// A listed file that is there: its name, its size, when it changed, in
+/// seconds, and for a daily database the version its header names.
+struct Found {
+    name: String,
+    size: u64,
+    changed: f64,
+    version: Option<u32>,
+}
 
-    /// The card of the signature files, and the age in hours of the newest
-    /// daily database that it judges, which the dashboard's gauge shows.
+/// What the card's files say, as far as their file system is asked.
+struct Looked {
+    /// When Fangfrisch last checked each file, or why its log was not read;
+    /// none where no log is named.
+    log: Option<Result<BTreeMap<String, String>, String>>,
+    found: Vec<Found>,
+    /// Why none of the listed files was found, where none was.
+    none: Option<String>,
+}
+
+/// [`Looked`] for the files `names` in `database` and the refresh log at
+/// `fangfrisch`: every call of the card on the host's file systems.
+fn looked(database: &Path, names: &[String], fangfrisch: Option<&Path>) -> Looked {
+    let log = fangfrisch.map(|path| refresh_log(path, names));
+    let mut found = Vec::new();
+    // Why a look at a file failed where the file may be there.
+    let mut refused = None;
+    for name in names {
+        let path = database.join(name);
+        let info = match std::fs::metadata(&path) {
+            Ok(info) => info,
+            Err(error) => {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    refused.get_or_insert((name, error));
+                }
+                continue;
+            }
+        };
+        // The modification time with its fraction, in seconds.
+        #[allow(clippy::cast_precision_loss)]
+        let changed = info.mtime() as f64 + info.mtime_nsec() as f64 * 1e-9;
+        let version = name.starts_with("daily.").then(|| held(&path)).flatten();
+        found.push(Found {
+            name: name.clone(),
+            size: info.len(),
+            changed,
+            version,
+        });
+    }
+    let none = found.is_empty().then(|| none_found(database, refused));
+    Looked { log, found, none }
+}
+
+/// Why no listed signature file was found in `database`, where a look at a
+/// file was `refused` for another reason than that it is not there: another
+/// path mends only files that are not there.
+fn none_found(database: &Path, refused: Option<(&String, std::io::Error)>) -> String {
+    let directory = database.display();
+    match refused {
+        Some((name, error)) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            let path = database.join(name);
+            let folder = path
+                .ancestors()
+                .skip(1)
+                .find(|folder| std::fs::symlink_metadata(folder).is_ok())
+                .unwrap_or(database)
+                .display();
+            format!(
+                "The signature files in {directory} cannot be looked for: the collector's user \
+                 may not search the folder {folder}; let every user search it (chmod o+x \
+                 {folder})."
+            )
+        }
+        Some((_, error)) => {
+            format!("The signature files in {directory} cannot be looked for: {error}.")
+        }
+        None => format!(
+            "None of the listed signature files is in {directory}: set `database_directory` to \
+             clamd's, which `garrison detect --format toml` names, or `signatures` to the files \
+             it holds."
+        ),
+    }
+}
+
+impl Clamav {
+    /// The card of the signature files, as their file system answers by
+    /// `until`, and the age in hours of the newest daily database that it
+    /// judges, which the dashboard's gauge shows.
     pub(super) fn signatures(
         &self,
         context: &Context<'_>,
+        until: Instant,
     ) -> Result<(Observation, Option<f64>), ProviderError> {
-        let log = self
-            .fangfrisch
-            .as_deref()
-            .map(|path| refresh_log(path, &self.signatures));
-        let checked = log.as_ref().and_then(|read| read.as_ref().ok());
-        let mut rows = Vec::new();
-        // The newest daily database and its age in hours: the one file that
-        // changes every day, and so the one that shows whether updates arrive.
-        let mut daily: Option<(&str, f64)> = None;
-        // Why a look at a file failed where the file may be there.
-        let mut refused = None;
-        for name in &self.signatures {
-            let info = match std::fs::metadata(self.database.join(name)) {
-                Ok(info) => info,
-                Err(error) => {
-                    if error.kind() != std::io::ErrorKind::NotFound {
-                        refused.get_or_insert((name, error));
-                    }
-                    continue;
-                }
+        let card = |state, findings: Vec<String>, rows| {
+            let column = |label: &str, format| Column {
+                label: label.to_owned(),
+                format,
             };
-            // The modification time with its fraction, in seconds.
-            #[allow(clippy::cast_precision_loss)]
-            let seconds = info.mtime() as f64 + info.mtime_nsec() as f64 * 1e-9;
-            let modified = time::from_unix(seconds);
-            if let Some(modified) = modified.filter(|_| name.starts_with("daily.")) {
+            Ok::<_, ProviderError>(
+                Observation::new(Required {
+                    id: "clamav.signatures",
+                    provider: self.name(),
+                    title: "Signature databases",
+                    modules: [ModuleId::Antivirus],
+                    evidence: Evidence::Inventory,
+                    state,
+                    checked_at: &context.checked_at(),
+                    source: &self.database.display().to_string(),
+                })?
+                .with_scope(
+                    "File times do not prove a successful update check or a loaded database.",
+                )
+                .with_findings(findings)
+                .with_table(Table {
+                    columns: vec![
+                        column("File", Format::Text),
+                        column("Size", Format::Bytes),
+                        column("Modified", Format::Datetime),
+                        column("Last refresh check", Format::Datetime),
+                    ],
+                    rows,
+                })
+                .with_max_age(900),
+            )
+        };
+        // An operator names the folder and the log, which may lie on a file
+        // system that gives no answer: asked once, in the check's time.
+        let (database, names) = (self.database.clone(), self.signatures.clone());
+        let fangfrisch = self.fangfrisch.clone();
+        let asked = answered_by(until, move || {
+            looked(&database, &names, fangfrisch.as_deref())
+        });
+        let looked = match asked {
+            Ok(looked) => looked,
+            Err(error) => {
+                let finding = format!(
+                    "The signature files in {} could not be looked at: {}.",
+                    self.database.display(),
+                    unanswered(&error)
+                );
+                return Ok((card(State::Unknown, vec![finding], Vec::new())?, None));
+            }
+        };
+        let checked = looked.log.as_ref().and_then(|read| read.as_ref().ok());
+        let mut rows = Vec::new();
+        // The newest daily database, its age in hours and the version it
+        // names: the one file that changes on most days, and so the one that
+        // shows whether updates arrive.
+        let mut daily: Option<(&str, f64, Option<u32>)> = None;
+        for file in &looked.found {
+            let modified = time::from_unix(file.changed);
+            if let Some(modified) = modified.filter(|_| file.name.starts_with("daily.")) {
                 let hours = context.seconds_since(modified) / 3600.0;
-                if daily.is_none_or(|(_, newest)| hours < newest) {
-                    daily = Some((name.as_str(), hours));
+                if daily.is_none_or(|(_, newest, _)| hours < newest) {
+                    daily = Some((file.name.as_str(), hours, file.version));
                 }
             }
-            let modified = modified.map(time::isoformat);
             rows.push(vec![
-                json!(name),
-                json!(info.len()),
-                json!(modified),
-                json!(checked.and_then(|checks| checks.get(name))),
+                json!(file.name),
+                json!(file.size),
+                json!(modified.map(time::isoformat)),
+                json!(checked.and_then(|checks| checks.get(&file.name))),
             ]);
         }
-        let column = |label: &str, format| Column {
-            label: label.to_owned(),
-            format,
-        };
-        let (state, finding) = if rows.is_empty() {
-            (State::Unknown, Some(self.none_found(refused)))
+        let (state, finding) = if let Some(none) = looked.none {
+            (State::Unknown, Some(none))
         } else {
-            current(daily, |name| self.behind(name))
+            let version = daily.and_then(|(_, _, version)| version);
+            current(daily.map(|(name, hours, _)| (name, hours)), || {
+                self.behind(version)
+            })
         };
         let mut findings: Vec<String> = finding.into_iter().collect();
         // A refresh log that is named and cannot be read leaves its column
         // empty: the card says why, and is not in order for it.
-        let state = match (&log, self.fangfrisch.as_deref()) {
+        let state = match (&looked.log, self.fangfrisch.as_deref()) {
             (Some(Err(why)), Some(path)) => {
                 findings.push(format!(
                     "The Fangfrisch database {} could not be read: {why}; when it last checked \
@@ -134,40 +220,19 @@ impl Clamav {
             }
             _ => state,
         };
-        let observation = Observation::new(Required {
-            id: "clamav.signatures",
-            provider: self.name(),
-            title: "Signature databases",
-            modules: [ModuleId::Antivirus],
-            evidence: Evidence::Inventory,
-            state,
-            checked_at: &context.checked_at(),
-            source: &self.database.display().to_string(),
-        })?
-        .with_scope("File times do not prove a successful update check or a loaded database.")
-        .with_findings(findings)
-        .with_table(Table {
-            columns: vec![
-                column("File", Format::Text),
-                column("Size", Format::Bytes),
-                column("Modified", Format::Datetime),
-                column("Last refresh check", Format::Datetime),
-            ],
-            rows,
-        })
-        .with_max_age(900);
         let age = daily
-            .map(|(_, hours)| hours)
+            .map(|(_, hours, _)| hours)
             .filter(|hours| *hours >= -AHEAD_HOURS)
             .map(|hours| hours.max(0.0));
-        Ok((observation, age))
+        Ok((card(state, findings, rows)?, age))
     }
 
-    /// By which versions the daily database `name` is behind: the one its
-    /// own header names and the newer one `ClamAV` has published, or none
-    /// where it is the newest there is. `Err` says why that is not known.
-    fn behind(&self, name: &str) -> Result<Option<(u32, u32)>, String> {
-        let held = held(&self.database.join(name)).ok_or("the file names no version of its own")?;
+    /// By which versions a daily database that names `held` in its header
+    /// is behind: that one and the newer one `ClamAV` has published, or
+    /// none where it is the newest there is. `Err` says why that is not
+    /// known.
+    fn behind(&self, held: Option<u32>) -> Result<Option<(u32, u32)>, String> {
+        let held = held.ok_or("the file names no version of its own")?;
         let resolver = self
             .resolver
             .or_else(|| dns::system_resolver(None))
@@ -216,7 +281,7 @@ fn published(resolver: SocketAddr) -> Result<u32, String> {
 /// that `ClamAV` has published none since; it is asked of no other.
 fn current(
     daily: Option<(&str, f64)>,
-    behind: impl FnOnce(&str) -> Result<Option<(u32, u32)>, String>,
+    behind: impl FnOnce() -> Result<Option<(u32, u32)>, String>,
 ) -> (State, Option<String>) {
     match daily {
         None => (
@@ -235,7 +300,7 @@ fn current(
                 -hours * 60.0
             )),
         ),
-        Some((name, hours)) if hours > STALE_AFTER_HOURS => match behind(name) {
+        Some((name, hours)) if hours > STALE_AFTER_HOURS => match behind() {
             Ok(None) => (State::Ok, None),
             Ok(Some((held, published))) => (
                 State::Warning,

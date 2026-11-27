@@ -5,8 +5,11 @@ them providers: each `[[providers]]` entry in `/etc/garrison/garrison.toml`
 is one check, and `type` names it. The collector runs them every minute. A
 source that is missing or unreadable shows as Unknown; it never stops the
 other checks. A file system that does not answer, as a hard NFS mount whose
-server is gone, costs `host`, `host-care`, `receipt`, `bulwark` and
-`version-command` eight seconds each, and their cards say so. The checks
+server is gone, costs `host`, `host-care`, `receipt`, `backup-check`,
+`bulwark` and `version-command` eight seconds each and `clamav` eight for
+each of its two cards, and their cards say so; a command that cannot be
+started or ended in its eight seconds, as one whose interpreter lies on such
+a file system, is left behind in the same time. The checks
 that read Stalwart's domains, listeners or
 accounts with the collector's API key (`dns`, `tls`, `reputation`,
 `mail-flow`) say why where they could not: Stalwart could not be reached or

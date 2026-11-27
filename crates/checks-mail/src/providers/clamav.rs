@@ -7,13 +7,17 @@
 //! its newest one says whether a newer exists.
 
 use std::collections::BTreeMap;
+use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Instant;
 
+use garrison_core::files::answered_by;
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 
 use super::directives;
+use crate::command::{SECONDS, patience, silent};
 use crate::context::{Collected, Context, HostPath, Provider, ProviderError, Report, Use};
 use crate::options::{Checked, Options, fail};
 use policy::{ON_FAIL, ON_INFECTED};
@@ -31,6 +35,16 @@ const DEFAULT_SIGNATURES: [&str; 6] = [
 ];
 
 type Directives = BTreeMap<String, Vec<String>>;
+
+/// Why a card's files could not be asked for: their file system gave no
+/// answer in the check's time, or the call failed.
+fn unanswered(error: &io::Error) -> String {
+    if silent(error) {
+        format!("its file system did not answer within {SECONDS} seconds")
+    } else {
+        error.to_string()
+    }
+}
 
 /// `25M` and friends in bytes.
 fn size(value: Option<&str>) -> Option<u64> {
@@ -141,12 +155,29 @@ impl Clamav {
         self
     }
 
-    /// The card of the policy and limits the two files set. A policy that
-    /// was read stays what it is where the scanner's file could not be read;
-    /// only "in order" needs both.
-    fn configuration(&self, context: &Context<'_>) -> Result<Observation, ProviderError> {
-        let milter = directives::values(&self.milter_config);
-        let clamd = directives::values(&self.clamd_config);
+    /// The card of the policy and limits the two files set, as their file
+    /// system answers by `until`. A policy that was read stays what it is
+    /// where the scanner's file could not be read; only "in order" needs
+    /// both.
+    fn configuration(
+        &self,
+        context: &Context<'_>,
+        until: Instant,
+    ) -> Result<Observation, ProviderError> {
+        // Each file as it reads, and whether it is not there at all: an
+        // operator names both paths, which may lie on a file system that
+        // gives no answer.
+        let paths = [self.milter_config.clone(), self.clamd_config.clone()];
+        let read = answered_by(until, move || {
+            paths.map(|path| {
+                let absent = matches!(path.try_exists(), Ok(false));
+                (directives::values(&path), absent)
+            })
+        });
+        let [(milter, milter_absent), (clamd, clamd_absent)] = read.unwrap_or_else(|error| {
+            let why = unanswered(&error);
+            [(Err(why.clone()), false), (Err(why), false)]
+        });
         let (m, c) = (milter.as_ref().ok(), clamd.as_ref().ok());
         // Each finding with whether it needs a look.
         let mut findings: Vec<(bool, String)> = Vec::new();
@@ -162,16 +193,23 @@ impl Clamav {
             (
                 &self.milter_config,
                 &milter,
+                milter_absent,
                 "milter_config",
                 "clamav-milter's",
             ),
-            (&self.clamd_config, &clamd, "clamd_config", "clamd's"),
+            (
+                &self.clamd_config,
+                &clamd,
+                clamd_absent,
+                "clamd_config",
+                "clamd's",
+            ),
         ];
-        for (path, read, option, whose) in files {
+        for (path, read, absent, option, whose) in files {
             if let Err(why) = read {
                 // A file that is not there is elsewhere on this host, or not
                 // installed; a refused look is not that.
-                let elsewhere = matches!(path.try_exists(), Ok(false)).then(|| {
+                let elsewhere = absent.then(|| {
                     format!(
                         "; set `{option}` to {whose} file, which `garrison detect --format toml` \
                          names"
@@ -277,9 +315,12 @@ impl Provider for Clamav {
     }
 
     fn collect(&self, context: &Context<'_>) -> Collected {
-        let (signatures, age) = self.signatures(context)?;
+        // One time for each card: a file system that does not answer costs
+        // the card that reads it, not the other.
+        let configuration = self.configuration(context, patience())?;
+        let (signatures, age) = self.signatures(context, patience())?;
         let mut report = Report {
-            observations: vec![self.configuration(context)?, signatures],
+            observations: vec![configuration, signatures],
             ..Report::default()
         };
         if let Some(hours) = age {
@@ -323,7 +364,9 @@ mod tests {
         );
         let clamav = Clamav::new(&table(&raw)).unwrap();
         let (config, runner) = (config(directory.path()), Canned(String::new()));
-        let unknown = clamav.configuration(&context(&config, &runner)).unwrap();
+        let unknown = clamav
+            .configuration(&context(&config, &runner), patience())
+            .unwrap();
         assert_eq!(
             (unknown.state, unknown.findings),
             (
@@ -337,11 +380,15 @@ mod tests {
         );
         // What was seen of the policy stays what it is.
         std::fs::write(&milter, "OnInfected Accept\n").unwrap();
-        let drift = clamav.configuration(&context(&config, &runner)).unwrap();
+        let drift = clamav
+            .configuration(&context(&config, &runner), patience())
+            .unwrap();
         assert_eq!(drift.state, State::Warning, "{:?}", drift.findings);
         std::fs::write(&milter, "OnInfected Reject\nOnFail Defer\n").unwrap();
         std::fs::write(&missing, "MaxFileSize 25M\n").unwrap();
-        let known = clamav.configuration(&context(&config, &runner)).unwrap();
+        let known = clamav
+            .configuration(&context(&config, &runner), patience())
+            .unwrap();
         assert_eq!(known.state, State::Ok);
     }
 }
