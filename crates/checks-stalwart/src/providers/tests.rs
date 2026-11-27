@@ -14,6 +14,7 @@ fn listed(answer: &Value) -> Listed<stalwart::answers::MailboxAccount> {
     Listed {
         total: objects.len(),
         objects,
+        rest: None,
     }
 }
 

@@ -10,6 +10,7 @@ use garrison_stalwart::jmap::Listed;
 use serde_json::{Value, json};
 
 use super::stalwart::answers::MailboxAccount;
+use super::stalwart::unread;
 use crate::context::{Context, ProviderError};
 use crate::values::{round_one, text};
 
@@ -97,8 +98,8 @@ pub(crate) fn mailboxes(
         .take(5)
         .map(|name| format!("{name} uses 90 % or more of its quota."))
         .collect();
-    // The accounts after those read: beyond `max_accounts`, or where the
-    // run's time ended the pages.
+    // The accounts after those read: beyond `max_accounts`, where the run's
+    // time ended the pages, or where a later page failed.
     let read = listed.objects.len();
     let left = listed.total > read;
     if left {
@@ -109,6 +110,11 @@ pub(crate) fn mailboxes(
             format!(
                 "Stalwart has {total} accounts; only {read} of them were read: the collection run's \
                  time was used up."
+            )
+        } else if let Some(why) = &listed.rest {
+            format!(
+                "Stalwart has {total} accounts; {read} of them could be read: {}.",
+                unread(why)
             )
         } else {
             format!("Stalwart has {total} accounts; {read} of them could be read.")

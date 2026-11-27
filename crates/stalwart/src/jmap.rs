@@ -247,14 +247,30 @@ impl JmapClient {
 /// The objects `method`, a `/get`, answered with `result`, where it gave
 /// those of `ids`, every one of them.
 fn got(method: &str, result: Object, ids: Option<&[&str]>) -> Result<Vec<Object>, Error> {
-    let unread = |what: &str| Error::Unreadable(format!("{method} {what}"));
-    let got: Got<Value> =
-        json::object(Value::Object(result)).map_err(|_| unread("returned no list of objects"))?;
-    if got.not_found.is_some_and(|missing| !missing.is_empty()) {
+    let (objects, missing) = answered(method, result)?;
+    if !missing.is_empty() {
         return Err(Error::Denied(format!(
             "{method} found no object of an ID asked for"
         )));
     }
+    if let Some(ids) = ids {
+        whole(method, &objects, &[], ids)?;
+    }
+    Ok(objects)
+}
+
+/// The objects `method`, a `/get`, answered with `result`, and the IDs it
+/// named as not found.
+fn answered(method: &str, result: Object) -> Result<(Vec<Object>, Vec<String>), Error> {
+    let unread = |what: &str| Error::Unreadable(format!("{method} {what}"));
+    let got: Got<Value> =
+        json::object(Value::Object(result)).map_err(|_| unread("returned no list of objects"))?;
+    let missing: Vec<String> = got
+        .not_found
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|id| id.as_str().map(str::to_owned))
+        .collect();
     // Whatever is no object is no object of this kind either.
     let objects: Vec<Object> = got
         .list
@@ -264,17 +280,24 @@ fn got(method: &str, result: Object, ids: Option<&[&str]>) -> Result<Vec<Object>
             _ => None,
         })
         .collect();
-    if let Some(ids) = ids {
-        let returned: BTreeSet<Option<&str>> = objects
-            .iter()
-            .map(|item| item.get("id").and_then(Value::as_str))
-            .collect();
-        let requested: BTreeSet<Option<&str>> = ids.iter().copied().map(Some).collect();
-        if returned != requested {
-            return Err(unread("did not return the objects asked for"));
-        }
+    Ok((objects, missing))
+}
+
+/// That the `objects` `method` gave, with the IDs it named as `missing`,
+/// are those of `ids`, every one of them and no other.
+fn whole(method: &str, objects: &[Object], missing: &[String], ids: &[&str]) -> Result<(), Error> {
+    let returned: BTreeSet<Option<&str>> = objects
+        .iter()
+        .map(|item| item.get("id").and_then(Value::as_str))
+        .chain(missing.iter().map(|id| Some(id.as_str())))
+        .collect();
+    let requested: BTreeSet<Option<&str>> = ids.iter().copied().map(Some).collect();
+    if returned != requested {
+        return Err(Error::Unreadable(format!(
+            "{method} did not return the objects asked for"
+        )));
     }
-    Ok(objects)
+    Ok(())
 }
 
 /// One object `method` answered, as a `T`.

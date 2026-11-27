@@ -165,6 +165,8 @@ impl Flow {
                 format!(
                     "only {read} of them were read before the collection run's time was used up"
                 )
+            } else if let Some(why) = &listed.rest {
+                format!("only {read} of them could be read ({})", unread(why))
             } else {
                 format!("only {read} of them could be read")
             };

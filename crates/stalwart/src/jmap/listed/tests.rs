@@ -195,3 +195,39 @@ fn an_object_removed_between_two_pages_costs_no_other_object() {
     let expected: Vec<String> = (0..605).map(|number| format!("n{number}")).collect();
     assert_eq!(names(&listed), expected);
 }
+
+/// A page after the first that fails takes nothing of the pages before it:
+/// their objects are listed, with why the rest was not read.
+#[test]
+fn a_later_page_that_fails_leaves_the_pages_read() {
+    let unavailable = garrison_testing::http::answer(503, "");
+    let server = serve(vec![page(0..500, 900, None), unavailable]);
+    let listed: Listed<Named> = client(&server.url)
+        .listed("Account", &["name"], 1000, || true)
+        .unwrap();
+    server.requests();
+    assert_eq!((listed.objects.len(), listed.total), (500, 900));
+    assert_eq!(
+        listed.rest,
+        Some(Error::Unavailable("Stalwart answered HTTP 503".to_owned()))
+    );
+}
+
+/// An object removed between a page's query and its get, two calls of one
+/// request, is named as not found by the get: it is not listed, and the
+/// page stands.
+#[test]
+fn an_object_gone_between_a_pages_query_and_its_get_is_not_listed() {
+    let answer = respond(&json!({"methodResponses": [
+        ["x:Account/query", {"ids": ["a0", "a1", "a2"], "position": 0, "total": 3}, "0"],
+        ["x:Account/get", {"list": [{"id": "a0", "name": "n0"}, {"id": "a2", "name": "n2"}],
+                           "notFound": ["a1"]}, "1"],
+    ]}));
+    let server = serve(vec![answer]);
+    let listed: Listed<Named> = client(&server.url)
+        .listed("Account", &["name"], 10, || true)
+        .unwrap();
+    server.requests();
+    assert_eq!(names(&listed), ["n0", "n2"]);
+    assert_eq!(listed.rest, None);
+}

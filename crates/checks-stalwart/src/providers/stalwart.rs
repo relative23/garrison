@@ -50,8 +50,28 @@ pub fn calls() -> [(&'static str, Arguments); 6] {
 pub const ACCOUNT_PROPERTIES: [&str; 5] =
     ["id", "@type", "emailAddress", "quotas", "usedDiskQuota"];
 /// The method the pages of the accounts begin with, as the Management API
-/// card names it where they gave nothing.
+/// card names it where they gave nothing, and the one that reads what it
+/// found.
 const ACCOUNTS: &str = "x:Account/query";
+const ACCOUNTS_GET: &str = "x:Account/get";
+
+/// The method of the accounts' pages that `error` is about, as the
+/// Management API card names it: the get where the error names it, as a
+/// key refused the get alone does, and otherwise the query a page begins
+/// with.
+fn pages_method(error: &Error) -> &'static str {
+    let (Error::Unavailable(why)
+    | Error::Limited(why)
+    | Error::InvalidToken(why)
+    | Error::Denied(why)
+    | Error::Unreadable(why)
+    | Error::Misconfigured(why)) = error;
+    if why.starts_with(ACCOUNTS_GET) {
+        ACCOUNTS_GET
+    } else {
+        ACCOUNTS
+    }
+}
 
 /// What the calls answered, each as far as an observation shows it. A method
 /// that did not answer leaves its part unknown.
@@ -106,7 +126,7 @@ const SETUP: &str = "run `garrison stalwart setup` again, which gives the collec
                      the permissions it needs";
 
 /// Why Stalwart's answer gave the Management API card nothing, by its kind.
-fn unread(error: &Error) -> String {
+pub(super) fn unread(error: &Error) -> String {
     match error {
         Error::Unavailable(_) => "Stalwart unavailable".to_owned(),
         Error::Limited(_) => {
@@ -343,8 +363,15 @@ impl Provider for Stalwart {
             .zip(&answers)
             .filter_map(|((method, _), answer)| answer.as_ref().err().map(|error| (*method, error)))
             .collect();
-        if let Some(Err(error)) = &accounts {
-            failed.push((ACCOUNTS, error));
+        // The accounts' page that failed: the first, which leaves no
+        // account read, or a later one, which leaves those before it.
+        let page_failed = match &accounts {
+            Some(Err(error)) => Some(error),
+            Some(Ok(listed)) => listed.rest.as_ref(),
+            None => None,
+        };
+        if let Some(error) = page_failed {
+            failed.push((pages_method(error), error));
         }
         let unanswered = parts_unread(&failed);
         if !unanswered.is_empty() {
@@ -403,6 +430,8 @@ impl Provider for Stalwart {
 mod limit_tests;
 #[cfg(test)]
 mod many_tests;
+#[cfg(test)]
+mod pages_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

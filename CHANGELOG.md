@@ -28,6 +28,21 @@ Notable changes for operators and users. The format follows
   that followed left one out: its mailbox was not judged in that run and
   the card said nothing. Each page now begins with the last object read,
   and is asked again from further back where that object is gone.
+- A page of Stalwart's accounts that fails takes nothing of the pages
+  before it. With more than 500 accounts, a later page answered with an
+  error left the card "Mailbox storage" Unknown, and a full mailbox of the
+  first page was not warned of. The pages read now stand, the card says how
+  many accounts were read and why not the rest, and the card "Management
+  API" names the request that failed.
+- The card "Management API" names the request Stalwart refused: a key that
+  may list the accounts and not read them was told "access denied to
+  x:Account/query", the request that had answered. An account removed while
+  one page is read is no longer taken for a refusal with the setup's advice;
+  it is left out, as it is gone.
+- The security model names the keys' permissions as they are: four for the
+  broker's key and twelve for the collector's, where it said ten, and it no
+  longer names the macro filter's entry, which went with 0.3.0
+  ([security](docs/architecture/security.md)).
 
 ## [0.3.1] - 2026-11-27
 

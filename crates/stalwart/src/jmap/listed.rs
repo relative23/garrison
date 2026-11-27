@@ -19,7 +19,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use super::{JmapClient, Object, got, read};
+use super::{JmapClient, Object, answered, read, whole};
 use crate::Error;
 use crate::http::MAX_RESPONSE;
 
@@ -34,12 +34,17 @@ pub struct Listed<T> {
     pub objects: Vec<T>,
     /// How many objects of the kind Stalwart has.
     pub total: usize,
+    /// Why the objects after these were not read, where a page after the
+    /// first failed: the pages before it stand.
+    pub rest: Option<Error>,
 }
 
 /// The objects from a position of the list, each with its ID, and how many
 /// objects the list has.
 struct Page<T> {
     from: usize,
+    /// How many IDs the query gave: so far the page reaches in the list.
+    ids: usize,
     objects: Vec<(String, T)>,
     total: usize,
 }
@@ -61,7 +66,8 @@ impl JmapClient {
     ///
     /// The key needs the `/query` permission of the kind beside its `/get`
     /// one, such as `sysAccountQuery`. An object that comes again in a later
-    /// page is listed once.
+    /// page is listed once. Where a page after the first fails, the objects
+    /// of the pages before it are listed with why the rest was not read.
     pub fn listed<T: DeserializeOwned>(
         &self,
         kind: &str,
@@ -70,13 +76,22 @@ impl JmapClient {
         more: impl Fn() -> bool,
     ) -> Result<Listed<T>, Error> {
         let (mut objects, mut seen) = (Vec::new(), BTreeSet::new());
-        let (mut total, mut position) = (0, 0);
+        let (mut total, mut position, mut rest) = (0, 0, None);
         while objects.len() < most && (position == 0 || more()) {
             // A later page begins with an object read before, so one more.
             let wanted = most - objects.len() + usize::from(position > 0);
-            let page = self.joined::<T>(kind, properties, position, PAGE.min(wanted), &seen)?;
+            let page = match self.joined::<T>(kind, properties, position, PAGE.min(wanted), &seen) {
+                Ok(page) => page,
+                // The first page's failure is the list's; a later one's
+                // leaves what the pages before it gave.
+                Err(error) if position > 0 => {
+                    rest = Some(error);
+                    break;
+                }
+                Err(error) => return Err(error),
+            };
             total = page.total;
-            position = page.from + page.objects.len();
+            position = page.from + page.ids;
             let before = objects.len();
             for (id, object) in page.objects {
                 if seen.insert(id) {
@@ -91,6 +106,7 @@ impl JmapClient {
         Ok(Listed {
             total: total.max(objects.len()),
             objects,
+            rest,
         })
     }
 
@@ -158,14 +174,19 @@ impl JmapClient {
         let Queried { ids, total } = json::object(Value::Object(queried))
             .map_err(|_| Error::Unreadable(format!("{query} returned no IDs and no total")))?;
         let asked: Vec<&str> = ids.iter().map(String::as_str).collect();
-        let mut found: BTreeMap<String, Object> = got(&get, result, Some(&asked))?
+        // An ID the query gave and the get does not find is of an object
+        // removed between the two: it is no longer there to be listed.
+        let (objects, gone) = answered(&get, result)?;
+        whole(&get, &objects, &gone, &asked)?;
+        let mut found: BTreeMap<String, Object> = objects
             .into_iter()
             .filter_map(|object| {
                 let id = object.get("id")?.as_str()?.to_owned();
                 Some((id, object))
             })
             .collect();
-        let mut objects = Vec::with_capacity(ids.len());
+        let count = ids.len();
+        let mut objects = Vec::with_capacity(count);
         for id in ids {
             if let Some(object) = found.remove(&id) {
                 objects.push((id, read(&get, object)?));
@@ -173,6 +194,7 @@ impl JmapClient {
         }
         Ok(Page {
             from: position,
+            ids: count,
             objects,
             total,
         })
