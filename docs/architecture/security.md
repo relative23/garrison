@@ -29,7 +29,7 @@ it sends are its own.
 Stalwart has no API that returns another account's effective permissions, so the
 broker evaluates roles itself (inheritance, Merge/Replace, "disabled wins").
 Profiles may only require `authenticate` and `sys*` permissions, and
-`crates/stalwart/tests/contract.rs` compares exactly those with Stalwart's own
+`crates/stalwart/tests/contract/main.rs` compares exactly those with Stalwart's own
 answer (`/api/account`) for several account shapes on every CI run. Two
 differences found that way are documented in
 `crates/stalwart/src/permissions.rs`.

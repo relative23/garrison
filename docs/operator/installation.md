@@ -71,7 +71,7 @@ cd garrison-<version>-<arch>
 sudo ./bin/garrison install
 ```
 
-This first run creates five system users, installs the release into
+This first run creates four system users, installs the release into
 `/opt/garrison/releases/<version>` without network access, together with its
 systemd units, and copies an example configuration to
 `/etc/garrison/garrison.toml`. It does not start anything yet, because
