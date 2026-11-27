@@ -3,6 +3,9 @@
 //! Commands and their arguments come only from reviewed configuration; nothing
 //! is passed through a shell. A command still running at its deadline is
 //! killed; for `systemctl` that ends only the client, never the systemd job.
+//! One that cannot even be started or ended in its time, as where its
+//! program or its interpreter lies on a file system that gives no answer,
+//! is left behind, and the caller has its timeout all the same.
 
 use std::io::{self, Read};
 use std::process::{Command, Stdio};
@@ -10,7 +13,12 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::files::answered_by;
+
 const MAX_OUTPUT: u64 = 1024 * 1024;
+/// How long past its deadline a command that was ended there may take to
+/// be gone, before the caller stops waiting for it.
+const GRACE: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Output {
@@ -22,8 +30,30 @@ pub struct Output {
 
 /// Run `arguments` (the program first) and wait at most `timeout`. Standard
 /// error is discarded; a timeout is [`io::ErrorKind::TimedOut`], also when a
-/// child the command left behind keeps its output open.
+/// child the command left behind keeps its output open, and when the
+/// command could not be started or ended by then.
 pub fn run(arguments: &[&str], timeout: Duration) -> io::Result<Output> {
+    if arguments.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "no command"));
+    }
+    let arguments: Vec<String> = arguments.iter().map(ToString::to_string).collect();
+    let deadline = Instant::now() + timeout;
+    // The start waits until the program is loaded, and so for the file
+    // system of the program and of a script's interpreter; the end waits
+    // until the kernel lets the child go. Neither has a time of its own, so
+    // both run beside the caller, who waits no longer than this.
+    match answered_by(deadline + GRACE, move || ran(&arguments, deadline)) {
+        Ok(ran) => ran,
+        Err(error) if error.kind() == io::ErrorKind::TimedOut => {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "command timed out"))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// [`run`] for `arguments`, of which there is one at least, by `deadline`:
+/// started, waited for and ended in this thread.
+fn ran(arguments: &[String], deadline: Instant) -> io::Result<Output> {
     let (program, rest) = arguments
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no command"))?;
@@ -43,7 +73,6 @@ pub fn run(arguments: &[&str], timeout: Duration) -> io::Result<Output> {
         let _ = sender.send(data);
     });
     let timed_out = || io::Error::new(io::ErrorKind::TimedOut, "command timed out");
-    let deadline = Instant::now() + timeout;
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;

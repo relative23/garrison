@@ -51,6 +51,16 @@ Notable changes for operators and users. The format follows
 - A backup check's report on a file system that does not answer, as on a
   hard NFS mount whose server is gone, no longer holds the collection run:
   after eight seconds the card is Unknown and says so, as a receipt's does.
+- So do the two antivirus cards for clamav-milter's and clamd's files, the
+  signature files and Fangfrisch's database, which an operator may keep on
+  such a file system: each card waits eight seconds for its files.
+- A command that cannot be started or ended in its time no longer holds
+  whoever ran it. Starting a script waits for the file system of its
+  interpreter, and ending a command for the kernel to let it go; a
+  `version-command` of that kind held the collection run, and the broker's
+  commands run the same way. The caller now has its timeout a quarter of a
+  second after the command's time
+  ([checks](docs/operator/checks.md)).
 
 ## [0.3.1] - 2026-11-27
 
