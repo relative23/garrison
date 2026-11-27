@@ -15,7 +15,9 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use garrison_core::config::Config;
 use garrison_core::hex;
+use garrison_stalwart::Error;
 use garrison_stalwart::oidc::{CodeExchange, Provider, Token};
+use log::Level;
 
 // Garrison's client ID and callback, which the checks also send to Stalwart's
 // sign-in page.
@@ -58,20 +60,16 @@ fn policy(style: Option<&InlineStyle>) -> HeaderValue {
 
 /// The identity provider's token endpoints; tests use their own.
 pub trait Identity: Send + Sync {
-    fn exchange_code(&self, exchange: &CodeExchange<'_>)
-    -> Result<Token, garrison_stalwart::Error>;
-    fn revoke(&self, client_id: &str, token: &str) -> Result<(), garrison_stalwart::Error>;
+    fn exchange_code(&self, exchange: &CodeExchange<'_>) -> Result<Token, Error>;
+    fn revoke(&self, client_id: &str, token: &str) -> Result<(), Error>;
 }
 
 impl Identity for Provider {
-    fn exchange_code(
-        &self,
-        exchange: &CodeExchange<'_>,
-    ) -> Result<Token, garrison_stalwart::Error> {
+    fn exchange_code(&self, exchange: &CodeExchange<'_>) -> Result<Token, Error> {
         Provider::exchange_code(self, exchange)
     }
 
-    fn revoke(&self, client_id: &str, token: &str) -> Result<(), garrison_stalwart::Error> {
+    fn revoke(&self, client_id: &str, token: &str) -> Result<(), Error> {
         Provider::revoke(self, client_id, token)
     }
 }
@@ -112,7 +110,7 @@ impl App {
         let gate = {
             let identity = Arc::clone(&identity);
             let client = client_id(&config.deployment.public_origin);
-            gate.revoking_with(move |token| revoked(identity.revoke(&client, token)))
+            gate.revoking_with(move |token| revoked(&identity.revoke(&client, token)))
         };
         Arc::new(App {
             config,
@@ -148,7 +146,7 @@ impl App {
         };
         let client = self.client_id();
         for (id_hash, token) in ended {
-            if !revoked(self.identity.revoke(&client, &token)) {
+            if !revoked(&self.identity.revoke(&client, &token)) {
                 return false;
             }
             if let Err(error) = self.store.delete(&id_hash) {
@@ -163,17 +161,49 @@ impl App {
 /// Sessions that [`App::end_ended_sessions`] ends at a time.
 const ENDED_AT_ONCE: u16 = 100;
 
-/// Whether Stalwart answered a revocation; one it did not answer is said,
-/// and asked again (`end_sessions_on_time`).
-fn revoked(answer: Result<(), garrison_stalwart::Error>) -> bool {
-    answer
-        .inspect_err(|error| {
-            log::warn!(
-                "Stalwart did not answer the revocation of a token whose session has ended \
-                 ({error}); it is asked again within a minute"
+/// Whether a token's revocation is settled, and the journal's line where
+/// Stalwart did not carry it out, in the words the broker has for the same
+/// answers. One that Stalwart could not take just then is not settled and
+/// is asked again (`end_sessions_on_time`). One it refused is: asking
+/// again would be answered the same, so the session's row goes and the line
+/// says that its token serves on.
+fn settled(answer: &Result<(), Error>) -> (bool, Option<(Level, String)>) {
+    const WHAT: &str = "the revocation of a token whose session has ended";
+    match answer {
+        Ok(()) => (true, None),
+        Err(Error::Limited(how)) => {
+            let line = format!(
+                "Stalwart refused {WHAT} for its rate limit ({how}); it is asked again within \
+                 a minute"
             );
-        })
-        .is_ok()
+            (false, Some((Level::Warn, line)))
+        }
+        Err(Error::Unavailable(how)) => {
+            let line = format!(
+                "Stalwart did not complete {WHAT} ({how}): it could not be reached or failed \
+                 on its side; it is asked again within a minute"
+            );
+            (false, Some((Level::Warn, line)))
+        }
+        Err(refused) => {
+            let line = format!(
+                "Stalwart refused {WHAT} ({refused}): the token is not revoked and serves \
+                 until it expires there; it is not asked again, which would be answered the \
+                 same"
+            );
+            (true, Some((Level::Error, line)))
+        }
+    }
+}
+
+/// Whether a token's revocation is settled; what Stalwart answered instead
+/// of carrying it out is said in the journal.
+fn revoked(answer: &Result<(), Error>) -> bool {
+    let (settled, line) = settled(answer);
+    if let Some((level, line)) = line {
+        log::log!(level, "{line}");
+    }
+    settled
 }
 
 async fn headers(request: Request, next: Next) -> Response {
@@ -320,6 +350,48 @@ mod tests {
         fn call(&self, _: &Request) -> Result<Value, CallError> {
             Err(CallError::Unavailable("no broker in this test"))
         }
+    }
+
+    #[test]
+    fn a_revocation_stalwart_did_not_carry_out_is_said_as_what_it_was() {
+        assert_eq!(settled(&Ok(())), (true, None));
+        let said = |error: Error| {
+            let (settled, line) = settled(&Err(error));
+            let (level, line) = line.unwrap();
+            (settled, level, line)
+        };
+        assert_eq!(
+            said(Error::Unavailable("Stalwart answered HTTP 503".into())),
+            (
+                false,
+                Level::Warn,
+                "Stalwart did not complete the revocation of a token whose session has ended \
+                 (Stalwart answered HTTP 503): it could not be reached or failed on its side; \
+                 it is asked again within a minute"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            said(Error::Limited("Stalwart answered HTTP 429".into())),
+            (
+                false,
+                Level::Warn,
+                "Stalwart refused the revocation of a token whose session has ended for its \
+                 rate limit (Stalwart answered HTTP 429); it is asked again within a minute"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            said(Error::Denied("Stalwart answered HTTP 401".into())),
+            (
+                true,
+                Level::Error,
+                "Stalwart refused the revocation of a token whose session has ended (Stalwart \
+                 answered HTTP 401): the token is not revoked and serves until it expires \
+                 there; it is not asked again, which would be answered the same"
+                    .to_owned()
+            )
+        );
     }
 
     #[test]

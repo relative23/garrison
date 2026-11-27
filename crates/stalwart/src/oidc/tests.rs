@@ -189,9 +189,33 @@ fn code_exchange_accepts_only_bearer_tokens_with_a_lifetime() {
 }
 
 #[test]
-fn revocation_ignores_the_answer() {
-    let server = serve(vec![answer(400, "")]);
-    provider(&server.url).revoke("garrison", TOKEN).unwrap();
+fn only_an_answer_that_says_so_is_a_revocation() {
+    let server = serve(vec![
+        answer(200, ""),
+        answer(401, r#"{"error":"invalid_client"}"#),
+        answer(400, r#"{"error":"invalid_request"}"#),
+        answer(503, ""),
+        answer(429, ""),
+    ]);
+    let provider = provider(&server.url);
+    let revoke = || provider.revoke("garrison", TOKEN);
+    assert_eq!(revoke(), Ok(()));
+    assert_eq!(
+        revoke(),
+        Err(Error::Denied("Stalwart answered HTTP 401".into()))
+    );
+    assert_eq!(
+        revoke(),
+        Err(Error::Denied("Stalwart answered HTTP 400".into()))
+    );
+    assert_eq!(
+        revoke(),
+        Err(Error::Unavailable("Stalwart answered HTTP 503".into()))
+    );
+    assert_eq!(
+        revoke(),
+        Err(Error::Limited("Stalwart answered HTTP 429".into()))
+    );
     let request = server.requests().remove(0);
     assert!(request.ends_with("token=token-0123456789abcdef&client_id=garrison"));
 }

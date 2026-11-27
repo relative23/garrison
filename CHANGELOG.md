@@ -95,6 +95,15 @@ Notable changes for operators and users. The format follows
   and an account of their own could sign the owner out that way; the copy
   alone counted as signed out there already
   ([configuration](docs/operator/configuration.md#web-ingest-collector-broker)).
+- A revocation that Stalwart refuses no longer counts as one. Any answer
+  but a failure on Stalwart's side was taken for the end of a session's
+  token; a refusal (a 4xx) now gets a line in the web service's journal,
+  which says that the token serves until it expires. The lines for a
+  revocation Stalwart could not take say what happened, in the broker's
+  words: it could not be reached or failed on its side, or it refused for
+  its rate limit, where both read "did not answer". What a revocation's
+  answer cannot tell is in the
+  [security model](docs/architecture/security.md#known-limits).
 
 ## [0.3.1] - 2026-11-27
 

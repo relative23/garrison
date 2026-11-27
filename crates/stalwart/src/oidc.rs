@@ -212,17 +212,28 @@ impl Provider {
         })
     }
 
-    /// Ask the provider to revoke a token; its answer does not matter.
+    /// Ask the provider to revoke a token. Only an answer that says so is a
+    /// revocation: Stalwart answers 200 for a token it ends and for one it
+    /// does not know, so that asking again comes to an end, and refuses a
+    /// request it does not take, as one without a client, with a 4xx, which
+    /// ends nothing ([`Error::Denied`]).
     pub fn revoke(&self, client_id: &str, token: &str) -> Result<(), Error> {
         let form = form_urlencoded::Serializer::new(String::new())
             .append_pair("token", token)
             .append_pair("client_id", client_id)
             .finish();
         let url = format!("{}/auth/revoke", self.base);
-        self.request(Request::post(&url, form.as_bytes()), None)
+        let answer = self
+            .request(Request::post(&url, form.as_bytes()), None)
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .send()
-            .map(drop)
+            .send()?;
+        if (200..300).contains(&answer.status) {
+            return Ok(());
+        }
+        Err(Error::Denied(format!(
+            "Stalwart answered HTTP {}",
+            answer.status
+        )))
     }
 }
 

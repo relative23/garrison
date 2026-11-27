@@ -54,11 +54,13 @@ identifier in a `__Host-` cookie of Garrison's own host name.
 A session ends, and its token is revoked at Stalwart with it, at sign-out,
 when the policy refuses the user, when the token turns out to be another
 user's, when the same browser signs in again, and when its time is over,
-within a second of it. Its row goes once Stalwart has answered the
+within a second of it. Its row goes once Stalwart has carried out the
 revocation; until then no cookie finds it, and the web service asks again a
-minute later. A sign-out whose row could not be ended answers with an error
-and keeps the cookie, so that it can be tried again; it never answers "ok"
-for a session that is still there.
+minute later. A revocation that Stalwart refuses is not asked again: the
+journal says that the token serves until it expires there, and the row
+goes. A sign-out whose row could not be ended answers with an error and
+keeps the cookie, so that it can be tried again; it never answers "ok" for
+a session that is still there.
 
 **Every API request.** Except for sign-out and the switch row's question
 (`/api/switch`), which look only at the session, the web service sends the

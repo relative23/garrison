@@ -125,6 +125,9 @@ pub(crate) struct FakeProvider {
     pub(crate) verifiers: Mutex<Vec<String>>,
     /// Whether it answers no revocation, as Stalwart that is away.
     pub(crate) away: AtomicBool,
+    /// Whether it refuses every revocation, as Stalwart refuses a request
+    /// it does not take.
+    pub(crate) refusing: AtomicBool,
 }
 
 /// The provider as the application holds it; the test keeps the other handle.
@@ -159,6 +162,9 @@ impl Identity for Shared {
     fn revoke(&self, _: &str, token: &str) -> Result<(), Error> {
         if self.0.away.load(Ordering::SeqCst) {
             return Err(Error::Unavailable("Stalwart is unavailable".into()));
+        }
+        if self.0.refusing.load(Ordering::SeqCst) {
+            return Err(Error::Denied("Stalwart answered HTTP 401".into()));
         }
         self.0.revoked.lock().unwrap().push(token.into());
         Ok(())

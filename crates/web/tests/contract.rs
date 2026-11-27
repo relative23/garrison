@@ -322,6 +322,58 @@ impl SignIn {
     }
 }
 
+/// Another client registered with Stalwart, with the refresh grant Stalwart
+/// gives by default; its client ID.
+fn another_client(sign_in: &mut SignIn) -> String {
+    let other = format!("https://{}.example.test/oauth-client.json", unique());
+    sign_in.lab.create(
+        "OAuthClient",
+        &json!({
+            "clientId": other,
+            "description": "Another client, with the refresh grant Stalwart gives by default",
+            "redirectUris": {format!("https://{}.example.test/callback", unique()): true},
+            "postLogoutRedirectUris": {},
+            "scopes": {},
+        }),
+    );
+    other
+}
+
+/// What a revocation's answer does not tell: Stalwart answers one that
+/// names another client, registered with it or not, as it answers one it
+/// carries out, and the token serves on. Garrison's revocation names its
+/// client as `deployment.public_origin` gives it now, so a token of a
+/// sign-in under another origin outlives its session until it expires
+/// (docs/architecture/security.md). A revocation that names no client is
+/// refused, which `Provider::revoke` takes for none.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn a_revocation_in_another_clients_name_is_answered_as_one_and_ends_nothing() {
+    let mut sign_in = lab();
+    let provider = Provider::new(&sign_in.lab.url, ISSUER);
+    let (token, _) = sign_in.tokens();
+    let other = another_client(&mut sign_in);
+    let unknown = format!("https://{}.example.test/oauth-client.json", unique());
+    for client in [other.as_str(), unknown.as_str()] {
+        assert_eq!(provider.revoke(client, &token), Ok(()), "{client}");
+        assert!(provider.userinfo(&token, None).is_ok(), "{client}");
+    }
+    let nameless = form_urlencoded::Serializer::new(String::new())
+        .append_pair("token", &token)
+        .finish();
+    assert_eq!(posted(&sign_in.lab, "/auth/revoke", &nameless).status, 401);
+    assert_eq!(
+        provider.revoke("", &token),
+        Err(Error::Denied("Stalwart answered HTTP 401".into()))
+    );
+    assert!(provider.userinfo(&token, None).is_ok());
+    assert_eq!(provider.revoke(&client_id(&sign_in.origin), &token), Ok(()));
+    assert!(matches!(
+        provider.userinfo(&token, None),
+        Err(Error::InvalidToken(_))
+    ));
+}
+
 /// What ends a sign-in's token before its hour is up: its revocation, which
 /// the web service asks for whenever a session ends, by its time too. It
 /// ends that token alone, not another sign-in of the account. Asked again,
@@ -358,17 +410,7 @@ fn a_revocation_ends_its_own_sign_in_and_no_refresh_token_serves() {
         posted(&sign_in.lab, "/auth/revoke", &form).status
     };
     assert_eq!((revoking(&first), revoking(&random_hex(24))), (200, 200));
-    let other = format!("https://{}.example.test/oauth-client.json", unique());
-    sign_in.lab.create(
-        "OAuthClient",
-        &json!({
-            "clientId": other,
-            "description": "Another client, with the refresh grant Stalwart gives by default",
-            "redirectUris": {format!("https://{}.example.test/callback", unique()): true},
-            "postLogoutRedirectUris": {},
-            "scopes": {},
-        }),
-    );
+    let other = another_client(&mut sign_in);
     for client_id in refresh
         .iter()
         .flat_map(|_| [client.as_str(), other.as_str()])
