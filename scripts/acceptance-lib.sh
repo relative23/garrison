@@ -114,19 +114,23 @@ cleanup() {
 trap cleanup EXIT
 
 step() { printf '\n==> %s\n' "$*"; }
+# The sqlite3 tool gives up at once where a database's writer is in a commit,
+# and the services commit while a run looks: in a command on the host the
+# tool waits for the writer, as Garrison's own readers do.
+waiting='sqlite3() { command sqlite3 -cmd ".timeout 5000" "$@"; }'
 inside() {
     if [ "$host" = vm ]; then
-        vm_ssh -n "sh -c $(vm_quote "$1")"
+        vm_ssh -n "sh -c $(vm_quote "$waiting; $1")"
     else
-        docker exec "$name" sh -c "$1"
+        docker exec "$name" sh -c "$waiting; $1"
     fi
 }
 # Like inside, with standard input passed through.
 inside_input() {
     if [ "$host" = vm ]; then
-        vm_ssh "sh -c $(vm_quote "$1")"
+        vm_ssh "sh -c $(vm_quote "$waiting; $1")"
     else
-        docker exec -i "$name" sh -c "$1"
+        docker exec -i "$name" sh -c "$waiting; $1"
     fi
 }
 copy_in() {

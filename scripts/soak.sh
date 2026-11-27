@@ -164,9 +164,10 @@ inside_input 'cat > /root/account.sh' <<'ACCOUNT'
 # be kept in full, or have its time inside the window that the receiver
 # recorded for what its limit removed.
 db=/var/lib/garrison/ingest/events.sqlite
-sqlite3 -separator ' ' $db "SELECT substr(event_id, 6, instr(substr(event_id, 6), '-') - 1), count(*)
+# The receiver may be in a commit: wait for it (scripts/acceptance-lib.sh).
+sqlite3 -cmd '.timeout 5000' -separator ' ' $db "SELECT substr(event_id, 6, instr(substr(event_id, 6), '-') - 1), count(*)
     FROM events WHERE event_id GLOB 'soak-*' GROUP BY 1" > /root/kept.txt
-sqlite3 -separator ' ' $db "SELECT start_at, end_at FROM gaps WHERE reason LIKE 'capacity-%'" > /root/gaps.txt
+sqlite3 -cmd '.timeout 5000' -separator ' ' $db "SELECT start_at, end_at FROM gaps WHERE reason LIKE 'capacity-%'" > /root/gaps.txt
 awk -v per="$1" '
     FILENAME == ARGV[1] { kept[$1] = $2; next }
     FILENAME == ARGV[2] { from[++gaps] = $1; to[gaps] = $2; next }
