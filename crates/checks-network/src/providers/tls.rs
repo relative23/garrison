@@ -237,7 +237,7 @@ fn probe_each(endpoints: &[Endpoint], roots: &Arc<RootCertStore>, context: &Cont
     let (mut rows, mut failed, mut expiring) = (Vec::new(), Vec::new(), Vec::new());
     let (mut unchecked, mut lowest): (Vec<String>, Option<i64>) = (Vec::new(), None);
     for endpoint in endpoints {
-        let label = format!("{}:{}", endpoint.host, endpoint.port);
+        let label = endpoint.label(endpoints);
         if context.deadline.expired() {
             rows.push(bare(&label, "not checked"));
             unchecked.push(label);
@@ -477,6 +477,8 @@ impl Provider for Tls {
     }
 }
 
+#[cfg(test)]
+mod address_tests;
 #[cfg(test)]
 mod rule_tests;
 #[cfg(test)]

@@ -176,7 +176,9 @@ listener that speaks TLS (25 with STARTTLS, 465, 993, 443 and whatever else
 is set up), on the address it is bound to, or on 127.0.0.1 where it listens
 on every address, once under the name of each mail host of Stalwart's
 domains, of the `max_domains` oldest of them; the card says when Stalwart has
-more. It
+more. A port bound to more than one single address is probed on each, and
+its rows say on which, as `mail.example.com:465 on 192.0.2.10`; so do
+`endpoints` that name one host and port at two addresses. It
 probes 24 such endpoints at the most; where there are more, the card says how
 many and is Partial where it would be OK. A listener added later is then
 checked without a change here, and a certificate that does not cover a mail

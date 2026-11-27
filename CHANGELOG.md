@@ -16,6 +16,12 @@ Notable changes for operators and users. The format follows
   Where a directive was set twice, which is a note, and another let mail
   pass, the note came first, and a notification, which carries a card's
   first finding, told of the note alone.
+- The TLS check probes a port on every single address Stalwart binds it to.
+  A port bound to two addresses, by one listener or by two, was probed on
+  the first alone, and the card could be in order whatever the other
+  presented. The rows of such a port now say on which address each probe
+  was, as `mail.example.com:465 on 192.0.2.10`
+  ([tls](docs/operator/checks.md#tls)).
 
 ## [0.3.1] - 2026-11-27
 

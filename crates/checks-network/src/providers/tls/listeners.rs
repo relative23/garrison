@@ -9,7 +9,7 @@
 //! way into TLS is another one, and they present the certificate of the
 //! ports that are asked.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -68,47 +68,69 @@ fn port(bind: &str) -> Option<u16> {
 
 /// Where a probe reaches a listener bound to `bind`: at its port, on the
 /// address it is bound to, as `192.0.2.10:465`, or on 127.0.0.1 where it
-/// listens on every address, as `[::]:465`.
-fn reached(bind: &str) -> Option<(String, u16)> {
+/// listens on every address, as `[::]:465`, which the last value says.
+fn reached(bind: &str) -> Option<(String, u16, bool)> {
     let port = port(bind)?;
-    let address = match bind.parse::<SocketAddr>() {
-        Ok(bound) if !bound.ip().is_unspecified() => bound.ip().to_string(),
-        _ => LOOPBACK.to_owned(),
-    };
-    Some((address, port))
+    Some(match bind.parse::<SocketAddr>() {
+        Ok(bound) if !bound.ip().is_unspecified() => (bound.ip().to_string(), port, false),
+        _ => (LOOPBACK.to_owned(), port, true),
+    })
 }
 
 /// Each TLS port of `listeners` once for each of `hosts`, lowest port first,
-/// on the address it is reached at: 127.0.0.1 where any listener binds the
-/// port on every address.
+/// on every address it is reached at: 127.0.0.1 alone where any listener
+/// binds the port on every address, and otherwise each single address it is
+/// bound to, since the certificate one of them presents says nothing of the
+/// other's.
 pub(super) fn derived(listeners: &[Listener], hosts: &[String]) -> Vec<Endpoint> {
-    let mut ports: BTreeMap<u16, (bool, String)> = BTreeMap::new();
+    // By port: whether it begins in plain text, whether a listener binds it
+    // on every address, and the addresses to probe.
+    let mut ports: BTreeMap<u16, (bool, bool, BTreeSet<String>)> = BTreeMap::new();
     for listener in listeners.iter().filter(|listener| listener.use_tls) {
         let starttls = !listener.implicit_tls;
         if starttls && listener.protocol != "smtp" {
             continue;
         }
-        for (address, port) in listener.bind.keys().filter_map(|bind| reached(bind)) {
-            let reach = ports
+        for (address, port, every) in listener.bind.keys().filter_map(|bind| reached(bind)) {
+            let (_, everywhere, addresses) = ports
                 .entry(port)
-                .or_insert_with(|| (starttls, address.clone()));
-            if address == LOOPBACK {
-                reach.1 = address;
+                .or_insert_with(|| (starttls, false, BTreeSet::new()));
+            if every && !*everywhere {
+                *everywhere = true;
+                addresses.clear();
+            }
+            if every || !*everywhere {
+                addresses.insert(address);
             }
         }
     }
     let mut endpoints = Vec::new();
     for host in hosts {
-        for (port, (starttls, address)) in &ports {
-            endpoints.push(Endpoint {
-                host: host.clone(),
-                port: *port,
-                address: address.clone(),
-                starttls: *starttls,
-            });
+        for (port, (starttls, _, addresses)) in &ports {
+            for address in addresses {
+                endpoints.push(Endpoint {
+                    host: host.clone(),
+                    port: *port,
+                    address: address.clone(),
+                    starttls: *starttls,
+                });
+            }
         }
     }
     endpoints
+}
+
+impl Endpoint {
+    /// How the card names this endpoint among `all` it probes: its name and
+    /// port, and where those are probed on more than one address, on which.
+    pub(super) fn label(&self, all: &[Endpoint]) -> String {
+        let same = |other: &&Endpoint| other.host == self.host && other.port == self.port;
+        if all.iter().filter(same).count() > 1 {
+            format!("{}:{} on {}", self.host, self.port, self.address)
+        } else {
+            format!("{}:{}", self.host, self.port)
+        }
+    }
 }
 
 /// What to probe, asked of Stalwart, under the mail hosts of its first
@@ -223,6 +245,51 @@ mod tests {
                 (993, "2001:db8::5".to_owned()),
             ]
         );
+    }
+
+    /// A port bound to two single addresses, by one listener or by two, is
+    /// probed on each: the certificate one of them presents says nothing of
+    /// the other's. Where a listener binds the port on every address, that
+    /// one probe on 127.0.0.1 reaches it, whatever else binds it.
+    #[test]
+    fn a_port_bound_to_two_single_addresses_is_probed_on_each() {
+        let reached = |listeners: Value| -> Vec<(u16, String)> {
+            let listeners: Vec<Listener> = serde_json::from_value(listeners).unwrap();
+            derived(&listeners, &["mail.example.test".to_owned()])
+                .into_iter()
+                .map(|endpoint| (endpoint.port, endpoint.address))
+                .collect()
+        };
+        let both = [
+            (465, "192.0.2.10".to_owned()),
+            (465, "198.51.100.7".to_owned()),
+        ];
+        let one = json!([
+            {"protocol": "smtp", "bind": {"198.51.100.7:465": true, "192.0.2.10:465": true}, "useTls": true, "implicitTls": true},
+        ]);
+        assert_eq!(reached(one), both);
+        let two = json!([
+            {"protocol": "smtp", "bind": {"198.51.100.7:465": true}, "useTls": true, "implicitTls": true},
+            {"protocol": "smtp", "bind": {"192.0.2.10:465": true}, "useTls": true, "implicitTls": true},
+        ]);
+        assert_eq!(reached(two), both);
+        // A bind to 127.0.0.1 alone is one address like another.
+        let loopback = json!([
+            {"protocol": "smtp", "bind": {"127.0.0.1:465": true, "192.0.2.10:465": true}, "useTls": true, "implicitTls": true},
+        ]);
+        assert_eq!(
+            reached(loopback),
+            [
+                (465, "127.0.0.1".to_owned()),
+                (465, "192.0.2.10".to_owned())
+            ]
+        );
+        let every = json!([
+            {"protocol": "smtp", "bind": {"192.0.2.10:465": true}, "useTls": true, "implicitTls": true},
+            {"protocol": "smtp", "bind": {"0.0.0.0:465": true}, "useTls": true, "implicitTls": true},
+            {"protocol": "smtp", "bind": {"198.51.100.7:465": true}, "useTls": true, "implicitTls": true},
+        ]);
+        assert_eq!(reached(every), [(465, "127.0.0.1".to_owned())]);
     }
 
     #[test]
