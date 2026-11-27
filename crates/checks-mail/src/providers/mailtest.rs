@@ -475,7 +475,7 @@ mod kept_tests;
 #[cfg(test)]
 mod macro_tests;
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 #[cfg(test)]
 mod time_tests;
 #[cfg(test)]

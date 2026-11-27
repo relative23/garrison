@@ -8,11 +8,11 @@ use crate::testing::{Canned, Receiver, Remembered, assert_dated, config, now, ta
 
 /// One event of the history: its type, how long before the tests' clock it
 /// came, and its fields.
-type Event = (&'static str, i64, Value);
+pub(in crate::providers) type Event = (&'static str, i64, Value);
 
 /// A message handed in under the address `sender` `ago` seconds ago to
 /// `count` recipients, from the IP address `client`.
-fn queued(sender: &str, ago: i64, count: usize, client: &str) -> Event {
+pub(in crate::providers) fn queued(sender: &str, ago: i64, count: usize, client: &str) -> Event {
     let to: Vec<String> = (0..count)
         .map(|index| format!("r{index}@example.org"))
         .collect();
@@ -33,7 +33,7 @@ fn bounced(sender: &str, ago: i64) -> Event {
 
 /// The observation at `later` seconds after the tests' clock, over a
 /// history of `events` that began `days` days ago.
-fn observed(
+pub(in crate::providers) fn observed(
     provider: &Senders,
     events: &[Event],
     days: i64,

@@ -12,6 +12,10 @@ Notable changes for operators and users. The format follows
   holds a DNS question beyond its three seconds. The wait began anew with
   each octet, so one question of the DNS, blocklist or signature checks could
   take the time of the whole collection run.
+- The card "Antivirus configuration" says first what made it a warning.
+  Where a directive was set twice, which is a note, and another let mail
+  pass, the note came first, and a notification, which carries a card's
+  first finding, told of the note alone.
 
 ## [0.3.1] - 2026-11-27
 

@@ -19,4 +19,6 @@ mod pipe_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod told_tests;
+#[cfg(test)]
 mod unreadable_tests;

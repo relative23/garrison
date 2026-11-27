@@ -9,15 +9,15 @@ use crate::testing::{Canned, Receiver, Remembered, assert_dated, config, now, ta
 
 /// One event: its type, how many seconds before the tests' clock, its span
 /// and its fields.
-pub(super) type Event = (&'static str, i64, Option<&'static str>, Value);
+pub(in crate::providers) type Event = (&'static str, i64, Option<&'static str>, Value);
 
-pub(super) fn event(kind: &'static str, ago: i64, fields: Value) -> Event {
+pub(in crate::providers) fn event(kind: &'static str, ago: i64, fields: Value) -> Event {
     (kind, ago, None, fields)
 }
 
 /// The observations over a history of `events`, with Stalwart naming
 /// `accounts`; `later` seconds after the tests' clock.
-pub(super) fn observed(
+pub(in crate::providers) fn observed(
     events: &[Event],
     accounts: Option<&Value>,
     memory: &Remembered,
@@ -86,7 +86,7 @@ pub(super) fn history(
     config
 }
 
-pub(super) fn of<'a>(observations: &'a [Observation], id: &str) -> &'a Observation {
+pub(in crate::providers) fn of<'a>(observations: &'a [Observation], id: &str) -> &'a Observation {
     observations
         .iter()
         .find(|observation| observation.id == id)

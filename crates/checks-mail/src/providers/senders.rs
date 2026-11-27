@@ -372,4 +372,4 @@ impl Provider for Senders {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

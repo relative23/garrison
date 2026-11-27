@@ -196,6 +196,9 @@ impl Clamav {
         } else {
             State::Ok
         };
+        // What needs a look first, each kind in the order it was found: a
+        // notification carries a card's first finding.
+        findings.sort_by_key(|(look, _)| !*look);
         // clamav-milter takes turns with every scanner it is given.
         let scanners = m
             .and_then(|values| values.get("ClamdSocket"))
