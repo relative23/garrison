@@ -9,7 +9,7 @@
 //! may still be held.
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Column, Evidence, Format, Observation, Required, State, Table};
@@ -27,21 +27,10 @@ mod zone;
 use tally::{Tally, summed};
 use zone::{Expected, Verdict, expected, mx_hosts, needed, plain, verdict};
 
-const RESOLV_CONF: &str = "/etc/resolv.conf";
-
 /// What a check that asks a resolver says where neither its `resolver`
 /// option nor this host names one, and what mends it.
 pub(super) const NO_RESOLVER: &str =
     "this host names no resolver in /etc/resolv.conf; name one with `resolver`";
-
-/// The first resolver the host itself uses: the first that
-/// `/etc/resolv.conf` names, or for tests the file at `path`.
-pub(super) fn system_resolver(path: Option<&Path>) -> Option<SocketAddr> {
-    let text = std::fs::read_to_string(path.unwrap_or(Path::new(RESOLV_CONF))).ok()?;
-    dns::resolvers(&text)
-        .first()
-        .map(|address| (*address, 53).into())
-}
 
 /// The `resolver` option of a provider: an address, with port 53.
 pub(super) fn resolver_option(raw: &toml::Table, provider: &str) -> Checked<Option<SocketAddr>> {
@@ -183,14 +172,14 @@ impl Dns {
     /// For tests: read the host's resolver from `path`.
     #[cfg(test)]
     #[must_use]
-    pub fn with_resolv_conf(mut self, path: &Path) -> Self {
+    pub fn with_resolv_conf(mut self, path: &std::path::Path) -> Self {
         self.resolv_conf = Some(path.to_owned());
         self
     }
 
     fn resolver(&self) -> Option<SocketAddr> {
         self.resolver
-            .or_else(|| system_resolver(self.resolv_conf.as_deref()))
+            .or_else(|| dns::system_resolver(self.resolv_conf.as_deref()))
     }
 
     fn unknown(

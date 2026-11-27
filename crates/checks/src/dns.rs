@@ -15,6 +15,7 @@
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream, UdpSocket};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 const TIMEOUT: Duration = Duration::from_secs(3);
@@ -168,6 +169,15 @@ pub fn resolvers(text: &str) -> Vec<IpAddr> {
         // An address with a zone (`fe80::1%eth0`) is asked without it.
         .filter_map(|address| address.split('%').next()?.parse().ok())
         .collect()
+}
+
+/// The first resolver the host itself uses: the first that
+/// `/etc/resolv.conf` names, or for tests the file at `path`.
+pub fn system_resolver(path: Option<&Path>) -> Option<SocketAddr> {
+    let text = std::fs::read_to_string(path.unwrap_or(Path::new("/etc/resolv.conf"))).ok()?;
+    resolvers(&text)
+        .first()
+        .map(|address| (*address, 53).into())
 }
 
 /// The octets a question's header takes before the name.

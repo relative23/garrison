@@ -16,7 +16,7 @@ use std::net::{IpAddr, SocketAddr};
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Field, Format};
 
-use super::dns::{NO_RESOLVER, mail_hosts, resolver_option, system_resolver};
+use super::dns::{NO_RESOLVER, mail_hosts, resolver_option};
 use super::domains::max_domains;
 use crate::context::{Collected, Context, Provider, Report};
 use crate::dns::{self, Kind};
@@ -299,7 +299,7 @@ impl Reputation {
     fn known(&self, context: &Context<'_>) -> Kept<Read> {
         let resolver = self
             .resolver
-            .or_else(|| system_resolver(self.resolv_conf.as_deref()));
+            .or_else(|| dns::system_resolver(self.resolv_conf.as_deref()));
         let made = self.made(resolver);
         let missing = dqs::missing(&context.dqs_key);
         let keyed = context.native_key.is_some();
