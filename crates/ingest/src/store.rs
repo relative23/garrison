@@ -25,6 +25,7 @@ use garrison_core::{sqlite, time};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
 
+mod clock;
 mod failing;
 mod taking;
 
@@ -171,7 +172,8 @@ impl EventStore {
         let transaction = state
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(last) = meta(&transaction, HEARTBEAT_AT)?.and_then(|value| value.as_i64()) {
+        let last = meta(&transaction, HEARTBEAT_AT)?.and_then(|value| value.as_i64());
+        if let Some(last) = last {
             let lost_until = now - self.limits.discard_after_seconds;
             if lost_until > last {
                 transaction.execute(
@@ -180,6 +182,7 @@ impl EventStore {
                 )?;
             }
         }
+        let said = clock::looked(&transaction, now, last)?;
         if meta(&transaction, RECORDING_SINCE)?.is_none() {
             recording::set(&transaction, RECORDING_SINCE, now)?;
         }
@@ -192,6 +195,7 @@ impl EventStore {
         // A run that ended while it stored nothing: that time is not over.
         let kept = failing::kept(&transaction);
         transaction.commit()?;
+        clock::say(said);
         state.failing = state.failing.or(kept);
         Ok(())
     }
@@ -227,8 +231,15 @@ impl EventStore {
     }
 
     pub fn heartbeat(&self, now: i64) -> Result<(), SqliteError> {
-        let state = self.state();
-        recording::set(&state.db, HEARTBEAT_AT, now)?;
+        let mut state = self.state();
+        let transaction = state
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let last = meta(&transaction, HEARTBEAT_AT)?.and_then(|value| value.as_i64());
+        let said = clock::looked(&transaction, now, last)?;
+        recording::set(&transaction, HEARTBEAT_AT, now)?;
+        transaction.commit()?;
+        clock::say(said);
         Ok(())
     }
 
@@ -238,13 +249,17 @@ impl EventStore {
         let state = &mut *guard;
         let was = state.failing;
         let mut outcome = Outcome::default();
-        let arrival = Arrival {
-            at: received,
-            kept_from: received - self.retention(),
-        };
         let transaction = state
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // A batch is a look at the clock, as a heartbeat is; what the
+        // history keeps is counted from the time old events are removed by.
+        let last = meta(&transaction, HEARTBEAT_AT)?.and_then(|value| value.as_i64());
+        let said = clock::looked(&transaction, received, last)?;
+        let arrival = Arrival {
+            at: received,
+            kept_from: clock::cleaned_by(&transaction, received)? - self.retention(),
+        };
         // SQLite numbers an event one past the greatest number, but after the
         // greatest integer, which counting never reaches, at random: an event
         // that holds it moves to follow the others, so that the numbers keep
@@ -289,6 +304,7 @@ impl EventStore {
             (unchanged, _) => unchanged,
         };
         transaction.commit()?;
+        clock::say(said);
         if outcome.unreadable > 0 && was.is_none() {
             log::error!(
                 "{} events of a recorded type could not be read, or are dated as no event \
@@ -323,10 +339,10 @@ impl EventStore {
 
     fn enforce(&self, state: &mut State, now: i64) -> Result<(), SqliteError> {
         state.inserted_since_cleanup = 0;
-        let cutoff = now - self.retention();
         let transaction = state
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let cutoff = clock::cleaned_by(&transaction, now)? - self.retention();
         transaction.execute("DELETE FROM events WHERE created_at < ?", [cutoff])?;
         let count = |transaction: &Transaction<'_>| -> rusqlite::Result<i64> {
             transaction.query_row("SELECT count(*) FROM events", [], |row| row.get(0))
@@ -414,6 +430,8 @@ fn widen(db: &Connection, limit: &str, first: i64, last: i64) -> Result<(), Sqli
     Ok(())
 }
 
+#[cfg(test)]
+mod clock_tests;
 #[cfg(test)]
 mod failing_tests;
 #[cfg(test)]

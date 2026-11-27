@@ -34,7 +34,16 @@ impl EventStore {
             .iter()
             .filter_map(|event| event.get("createdAt").and_then(parse_time))
             .max();
-        self.ingest(events, newest.unwrap_or(0))
+        let received = newest.unwrap_or(0);
+        self.passed(received);
+        self.ingest(events, received)
+    }
+
+    /// The time passed to `now` under the receiver's looks, which come
+    /// every thirty seconds: for tests that ask about something else than
+    /// its clock, so that it is believed there.
+    pub(crate) fn passed(&self, now: i64) {
+        clock::passed(&self.state().db, now).unwrap();
     }
 }
 

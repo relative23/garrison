@@ -299,6 +299,7 @@ fn every_twentieth_beat_applies_retention() {
         .arriving(&[event(1, "auth.failed", AT, &json!({}))])
         .unwrap();
     let now = 1_800_000_000;
+    events.passed(now);
     let remaining = || -> i64 {
         read(directory.path())
             .query_row("SELECT count(*) FROM events", [], |row| row.get(0))

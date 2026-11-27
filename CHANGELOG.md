@@ -68,6 +68,16 @@ Notable changes for operators and users. The format follows
   the requests under way before it stops and accepts no further one, which
   waits in its socket for the broker that starts
   ([rotating secrets](docs/operator/operations.md#rotating-secrets)).
+- A clock that runs ahead no longer empties the event history. The receiver
+  removed events older than `ingest.retention_days` by the host's clock, so
+  one clean-up at a time a month ahead, as on a host that starts with a
+  wrong clock before its time server answers, took every event and left a
+  history that read complete. It now removes them by a run time of its own,
+  as the collector does for the metric history: the clock's time counts
+  again once it is back within ten minutes of that run time, or after the
+  receiver has run at it for a day, and the journal says when such a stretch
+  begins and ends
+  ([operations](docs/operator/operations.md#troubleshooting)).
 
 ## [0.3.1] - 2026-11-27
 

@@ -77,6 +77,7 @@ fn the_clean_up_is_due_after_a_thousand_events_and_left_to_the_caller() {
     let now = START + 40 * 86400;
     events.arriving(&batch(999, START)).unwrap();
     assert!(!events.cleanup_due(), "not yet");
+    events.passed(now);
     events.ingest(&batch(1, now), now).unwrap();
     // Taking a batch removes nothing: Stalwart waits for the answer.
     assert!(events.cleanup_due());
@@ -92,6 +93,7 @@ fn retention_keeps_exactly_the_configured_days() {
     let events = store(directory.path(), 1000);
     let now = START + 30 * 86400;
     events.arriving(&batch(3, START - 1)).unwrap();
+    events.passed(now);
     events.enforce_limits(now).unwrap();
     assert_eq!(count(directory.path()), 2, "older than 30 days is gone");
 }

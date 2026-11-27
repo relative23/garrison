@@ -100,6 +100,14 @@ impl Run {
         self.events = Some(store);
     }
 
+    /// The clock moves on, and it is right: the receiver's run time, which
+    /// its looks every thirty seconds carry and these runs do not make,
+    /// moves with it.
+    fn pass(&mut self, seconds: i64) {
+        self.clock += seconds;
+        self.store().passed(self.clock);
+    }
+
     fn cleaned(&mut self) {
         self.cutoff = self.clock - i64::from(self.limits.retention_days) * DAY;
         let cutoff = self.cutoff;
@@ -208,7 +216,8 @@ impl Run {
 
     /// One thing that happens to the receiver, then every rule.
     fn step(&mut self) {
-        self.clock += i64::try_from(self.noise.below(900)).unwrap();
+        let seconds = i64::try_from(self.noise.below(900)).unwrap();
+        self.pass(seconds);
         match self.noise.below(100) {
             0..62 => self.ingest(),
             62..74 => {
@@ -227,7 +236,8 @@ impl Run {
             82..92 => self.start(),
             _ => {
                 // Down for longer than Stalwart keeps events for the receiver.
-                self.clock += BUFFERED + 1 + i64::try_from(self.noise.below(7200)).unwrap();
+                let longer = i64::try_from(self.noise.below(7200)).unwrap();
+                self.pass(BUFFERED + 1 + longer);
                 self.start();
             }
         }
