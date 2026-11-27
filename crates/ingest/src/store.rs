@@ -182,7 +182,7 @@ impl EventStore {
                 )?;
             }
         }
-        let said = clock::looked(&transaction, now, last)?;
+        let said = clock::looked(&transaction, now, last, self.limits.discard_after_seconds)?;
         if meta(&transaction, RECORDING_SINCE)?.is_none() {
             recording::set(&transaction, RECORDING_SINCE, now)?;
         }
@@ -236,7 +236,7 @@ impl EventStore {
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let last = meta(&transaction, HEARTBEAT_AT)?.and_then(|value| value.as_i64());
-        let said = clock::looked(&transaction, now, last)?;
+        let said = clock::looked(&transaction, now, last, self.limits.discard_after_seconds)?;
         recording::set(&transaction, HEARTBEAT_AT, now)?;
         transaction.commit()?;
         clock::say(said);
@@ -255,7 +255,12 @@ impl EventStore {
         // A batch is a look at the clock, as a heartbeat is; what the
         // history keeps is counted from the time old events are removed by.
         let last = meta(&transaction, HEARTBEAT_AT)?.and_then(|value| value.as_i64());
-        let said = clock::looked(&transaction, received, last)?;
+        let said = clock::looked(
+            &transaction,
+            received,
+            last,
+            self.limits.discard_after_seconds,
+        )?;
         let arrival = Arrival {
             at: received,
             kept_from: clock::cleaned_by(&transaction, received)? - self.retention(),

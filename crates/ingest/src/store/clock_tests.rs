@@ -130,12 +130,91 @@ fn an_event_written_before_the_clock_went_ahead_is_taken_after_it() {
     assert_eq!(events.health().failing_since, None);
 }
 
+/// The windows of lost events, as the history has them.
+fn windows(directory: &Path) -> Vec<(i64, i64, String)> {
+    let db = read(directory);
+    let mut statement = db
+        .prepare("SELECT start_at, end_at, reason FROM gaps ORDER BY id")
+        .unwrap();
+    statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
+/// Whether the history holds the week until `now`, as a check asks it.
+fn week(directory: &Path, now: i64) -> Option<recording::Uncovered> {
+    recording::uncovered(&read(directory), now - 7 * DAY, now, recording::QUIET_AFTER).unwrap()
+}
+
+#[test]
+fn a_start_with_the_clock_ahead_leaves_no_window_once_the_clock_is_right() {
+    let directory = tempfile::tempdir().unwrap();
+    drop(an_hour(directory.path()));
+    // The host restarts in two minutes and comes up with its clock a month
+    // ahead: by that clock the receiver was away for a month.
+    let events = store(directory.path(), 1000);
+    let ahead = NOW + 31 * DAY;
+    events.start(ahead).unwrap();
+    assert_eq!(
+        windows(directory.path()),
+        [(NOW - BEAT, ahead - 3600, OFFLINE.to_owned())]
+    );
+    // The time server answers. Two minutes away are within the hour that
+    // Stalwart keeps its events for the receiver: nothing was lost.
+    events.heartbeat(NOW + 120).unwrap();
+    assert_eq!(windows(directory.path()), []);
+    assert_eq!(week(directory.path(), NOW + 120), None);
+}
+
+#[test]
+fn a_receiver_away_for_hours_keeps_the_window_of_the_clock_it_runs_at() {
+    let directory = tempfile::tempdir().unwrap();
+    drop(an_hour(directory.path()));
+    let events = store(directory.path(), 1000);
+    let back = NOW + 5 * 3600;
+    events.start(back).unwrap();
+    let away = [(NOW - BEAT, back - 3600, OFFLINE.to_owned())];
+    assert_eq!(windows(directory.path()), away);
+    // A day on the store believes the clock, and the window stands.
+    runs(&events, back, DAY + 600, 600);
+    assert_eq!(windows(directory.path()), away);
+}
+
+#[test]
+fn a_window_written_by_a_clock_ahead_ends_where_the_believed_clock_allows() {
+    let directory = tempfile::tempdir().unwrap();
+    drop(an_hour(directory.path()));
+    // Away for five hours, and the clock a month ahead at the start.
+    let events = store(directory.path(), 1000);
+    events.start(NOW + 31 * DAY).unwrap();
+    // The clock is put right; five hours after the run time it is not yet
+    // believed, and how long the receiver was away is not known. The day
+    // counts from the first heartbeat at that time.
+    let back = NOW + 5 * 3600;
+    let first = back + 600;
+    runs(&events, back, DAY, 600);
+    assert_eq!(
+        windows(directory.path()),
+        [(NOW - BEAT, NOW + 31 * DAY - 3600, OFFLINE.to_owned())]
+    );
+    // After a day at that time it is, and the window ends an hour before
+    // it: later than the receiver was away, and no month ahead.
+    runs(&events, back + DAY, 600, 600);
+    assert_eq!(
+        windows(directory.path()),
+        [(NOW - BEAT, first + DAY - 3600, OFFLINE.to_owned())]
+    );
+}
+
 #[test]
 fn the_journal_says_once_when_the_clock_goes_ahead_and_when_it_is_back() {
     let directory = tempfile::tempdir().unwrap();
     let events = an_hour(directory.path());
     let state = events.state();
-    let look = |now: i64, previous: i64| clock::looked(&state.db, now, Some(previous)).unwrap();
+    let look =
+        |now: i64, previous: i64| clock::looked(&state.db, now, Some(previous), 3600).unwrap();
     let ahead = NOW + 31 * DAY;
     assert_eq!(look(NOW + 2 * BEAT, NOW + BEAT), None);
     assert_eq!(

@@ -7,12 +7,17 @@
 //! has run at the clock's new time for a day or the clock comes back.
 //! Counted from the clock alone, one clean-up at a time a month ahead
 //! emptied the history, and nothing said that it had ever held more.
+//!
+//! A window of lost events is dated by the clock too: a start with the
+//! clock a month ahead takes the receiver for a month away. Once the clock's
+//! time is believed again, no such window ends later than events can be
+//! lost by that time.
 
-use garrison_core::recording;
+use garrison_core::recording::{self, OFFLINE, REFUSED, UNREADABLE};
 use garrison_core::run_time::{self, Kept, Pace, Turn};
 use garrison_core::time;
 use log::Level;
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 
 use super::{SqliteError, meta};
 
@@ -52,20 +57,46 @@ fn at(second: i64) -> String {
     time::Timestamp::from_second(second).map_or_else(|_| second.to_string(), time::isoformat)
 }
 
+/// The clock's time is believed again at `now`: a window of lost events
+/// that a clock ahead wrote ends where one written now would. Of a receiver
+/// that was away, and of refused batches, Stalwart kept the last `buffered`
+/// seconds and brings them again; events that did not read are lost up to
+/// now. A window that is left without a time is none.
+fn cut(db: &Connection, now: i64, buffered: i64) -> rusqlite::Result<()> {
+    db.execute(
+        "UPDATE gaps SET end_at=?1 WHERE reason IN (?2,?3) AND end_at>?1",
+        params![now - buffered, OFFLINE, REFUSED],
+    )?;
+    db.execute(
+        "UPDATE gaps SET end_at=?1 WHERE reason=?2 AND end_at>?1",
+        params![now, UNREADABLE],
+    )?;
+    db.execute(
+        "DELETE FROM gaps WHERE end_at<=start_at AND reason IN (?,?,?)",
+        [OFFLINE, REFUSED, UNREADABLE],
+    )?;
+    Ok(())
+}
+
 /// The receiver looks at its clock at `now`; `previous` is when it looked
-/// before, its last heartbeat. Where a stretch at a time ahead begins or
-/// ends, it gives the line for the journal, to [`say`] once the look is
-/// kept.
+/// before, its last heartbeat, and `buffered` for how many seconds Stalwart
+/// keeps its events for a receiver that does not take them. Where a stretch
+/// at a time ahead begins or ends, it gives the line for the journal, to
+/// [`say`] once the look is kept.
 pub(super) fn looked(
     db: &Connection,
     now: i64,
     previous: Option<i64>,
+    buffered: i64,
 ) -> Result<Option<(Level, String)>, SqliteError> {
     let before = kept(db)?;
     let looked = run_time::look(before, now, previous, PACE);
     keep(db, BELIEVED, looked.kept.believed)?;
     if looked.kept.ahead_for != before.ahead_for {
         keep(db, AHEAD_FOR, looked.kept.ahead_for)?;
+    }
+    if matches!(looked.turn, Some(Turn::Back | Turn::Held)) {
+        cut(db, now, buffered)?;
     }
     Ok(looked.turn.map(|turn| match turn {
         Turn::Ahead { believed } => (

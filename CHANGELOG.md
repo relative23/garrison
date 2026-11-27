@@ -78,6 +78,13 @@ Notable changes for operators and users. The format follows
   receiver has run at it for a day, and the journal says when such a stretch
   begins and ends
   ([operations](docs/operator/operations.md#troubleshooting)).
+- A start of the receiver while the clock is ahead no longer leaves a window
+  of lost events that reaches to that clock's time. By a clock a month ahead
+  the receiver had been away for a month, and for as long the checks that
+  count events stayed Unknown. Such a window goes once the clock is back
+  within ten minutes of the receiver's run time, and where the receiver was
+  away for longer it ends an hour before the time the receiver has run at
+  for a day.
 
 ## [0.3.1] - 2026-11-27
 
