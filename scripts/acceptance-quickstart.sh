@@ -17,6 +17,8 @@ release=$1
 previous=$1
 # shellcheck source=scripts/acceptance-lib.sh
 . "$(dirname "$0")/acceptance-lib.sh"
+# shellcheck source=scripts/acceptance-clock.sh
+. "$(dirname "$0")/acceptance-clock.sh"
 if [ "$host" != vm ]; then
     echo "acceptance-quickstart.sh needs a virtual machine: HOST=vm" >&2
     exit 2
@@ -346,5 +348,7 @@ inside "$garrison doctor > /root/doctor-rotated.log 2>&1 || true"
 check "doctor: Stalwart takes both new keys, and nothing else is wrong" \
     'test "$(grep -c -F "[doctor-key-taken]" /root/doctor-rotated.log)" = 2 &&
         ! grep "^FAIL" /root/doctor-rotated.log | grep -vF "[doctor-origin-placeholder]" | grep -q .'
+
+clock_ahead_and_back
 
 step "Accepted: the quick start sets Garrison up against Stalwart and nothing is left to fix"
