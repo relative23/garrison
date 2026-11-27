@@ -8,7 +8,7 @@ one static binary without runtime dependencies on the host. It goes to
 `/opt/garrison`, which may be a link to another disk, but not one under
 `/home`, `/root`, `/tmp` or `/var/tmp`, which Garrison's services do not see.
 
-Tested on 2026-11-25 in virtual machines from the distributions' own cloud
+Tested on 2026-11-27 in virtual machines from the distributions' own cloud
 images, each with its access control as shipped: Debian 12 and 13, Ubuntu
 24.04 and 26.04 (AppArmor); AlmaLinux 9 and 10, Rocky Linux 9 and 10, CentOS
 Stream 10, Fedora 44 and openSUSE Leap 16.0 (SELinux enforcing); Amazon Linux
