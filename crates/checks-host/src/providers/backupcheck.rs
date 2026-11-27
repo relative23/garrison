@@ -8,9 +8,11 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
-use garrison_core::files::{changed_only_by_trusted, read_json_with_metadata};
+use garrison_core::files::{answered_by, changed_only_by_trusted, read_json_with_metadata};
 use garrison_core::modules::ModuleId;
 use garrison_core::observations::{Evidence, Field, Format, Observation, Required, State};
 use garrison_core::{json, time};
@@ -18,6 +20,20 @@ use garrison_core::{json, time};
 use crate::backups::{MAX_REPORT, Report as Backup, Run, Tool};
 use crate::context::{Collected, Context, HostPath, Provider, Report, Use};
 use crate::options::{Checked, Options, fail};
+use crate::providers::hidden::{self, Seen};
+use crate::providers::ran::{SECONDS, patience, silent};
+
+/// The place under which the collector's unit hides the report at `path`,
+/// seen as `seen`, where the look at it failed with `error` for that: the
+/// report is not found or not to be looked at there.
+fn hidden_under(path: &Path, seen: &Seen, error: &io::Error) -> Option<PathBuf> {
+    let denied = error.kind() == io::ErrorKind::PermissionDenied;
+    if !denied && error.kind() != io::ErrorKind::NotFound {
+        return None;
+    }
+    let stop = hidden::stop(path);
+    stop.hidden_under(&stop.seen(seen), denied)
+}
 
 const HOUR: i64 = 3600;
 const DAY: i64 = 86_400;
@@ -63,20 +79,48 @@ impl BackupCheck {
         })
     }
 
-    /// The report, if it is there, small enough and root's own. It is read
-    /// as `receipt` reads its file: no link followed, no file that is not a
-    /// regular one, at most `MAX_REPORT` bytes of strict JSON, and the owner
-    /// and mode of the very file that was read.
-    fn read(&self) -> Result<Backup, String> {
-        // Only to say which of the two it is: the read below decides.
-        if fs::symlink_metadata(&self.path).is_err() {
-            return Err(format!(
-                "no report at {}; `garrison backup-check {}` writes it",
-                self.path.display(),
-                self.tool.name()
-            ));
-        }
-        let Some((value, metadata)) = read_json_with_metadata(&self.path, MAX_REPORT) else {
+    /// The report, if it is there, small enough and root's own, as its file
+    /// system answers by `until`, its path `seen` as this process sees it.
+    /// It is read as `receipt` reads its file: no link followed, no file
+    /// that is not a regular one, at most `MAX_REPORT` bytes of strict
+    /// JSON, and the owner and mode of the very file that was read.
+    fn read(&self, until: Instant, seen: &Seen) -> Result<Backup, String> {
+        let (path, seen) = (self.path.clone(), seen.clone());
+        // The look says which of the two it is; the read decides. Both ask
+        // the report's file system, which may give no answer.
+        let asked = answered_by(until, move || match fs::symlink_metadata(&path) {
+            Err(error) => Err(hidden_under(&path, &seen, &error)),
+            Ok(_) => Ok(read_json_with_metadata(&path, MAX_REPORT)),
+        });
+        let shown = self.path.display();
+        let read = match asked {
+            Err(error) if silent(&error) => {
+                return Err(format!(
+                    "the report at {shown} could not be read: its file system did not answer \
+                     within {SECONDS} seconds"
+                ));
+            }
+            Err(error) => return Err(format!("the report at {shown} could not be read: {error}")),
+            // Writing it again where it was mends nothing there.
+            Ok(Err(Some(place))) => {
+                return Err(format!(
+                    "the report at {shown} lies under {}, which the collector's unit hides from \
+                     it: let `garrison backup-check {} --report FILE` write it where the \
+                     collector sees it, as under /var/lib/garrison/backup-check, and set `path` \
+                     to that file (docs/operator/checks.md, \"Paths the collector cannot see\")",
+                    place.display(),
+                    self.tool.name()
+                ));
+            }
+            Ok(Err(None)) => {
+                return Err(format!(
+                    "no report at {shown}; `garrison backup-check {}` writes it",
+                    self.tool.name()
+                ));
+            }
+            Ok(Ok(read)) => read,
+        };
+        let Some((value, metadata)) = read else {
             return Err(format!(
                 "the report cannot be read: it must be a file, not a link, of at most {} KiB of \
                  valid JSON",
@@ -301,7 +345,7 @@ impl Provider for BackupCheck {
                 source: &self.path.display().to_string(),
             })
         };
-        let report = match self.read() {
+        let report = match self.read(patience(), &hidden::seen(&self.path)) {
             Ok(report) => report,
             Err(reason) => {
                 let unknown = base(State::Unknown)?
@@ -381,3 +425,5 @@ impl Provider for BackupCheck {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unseen_tests;

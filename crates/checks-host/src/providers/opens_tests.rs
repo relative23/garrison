@@ -90,7 +90,13 @@ const SYSTEM: &str = "below `root`, the host's own system folders";
 
 /// Every call on the file system in this crate's code: the file, the form,
 /// how often it stands there, and what it reads, with what bounds its wait.
-const KNOWN: [(&str, &str, usize, &str); 30] = [
+const KNOWN: [(&str, &str, usize, &str); 32] = [
+    (
+        "providers/backupcheck.rs",
+        "files::answered_by",
+        1,
+        "the report and the look at why there is none, by the check's time",
+    ),
     (
         "providers/backupcheck.rs",
         "files::changed_only_by_trusted",
@@ -101,19 +107,31 @@ const KNOWN: [(&str, &str, usize, &str); 30] = [
         "providers/backupcheck.rs",
         "files::read_json_with_metadata",
         1,
-        "the report, through core, waited for as long as its file system takes",
+        "the report, through core, in answered_by",
     ),
     (
         "providers/backupcheck.rs",
         "symlink_metadata(",
         1,
-        "the report's path, waited for as long as its file system takes",
+        "the report's path, in answered_by",
+    ),
+    (
+        "providers/hidden.rs",
+        "read_link(",
+        1,
+        "a link on the way to a receipt or a report, in the caller's answered_by",
     ),
     (
         "providers/hidden.rs",
         "read_to_string(",
         1,
         "/proc/self/mountinfo, the kernel's",
+    ),
+    (
+        "providers/hidden.rs",
+        "symlink_metadata(",
+        1,
+        "the folders on the way to a receipt or a report, in the caller's answered_by",
     ),
     (
         "providers/host.rs",
@@ -191,15 +209,9 @@ const KNOWN: [(&str, &str, usize, &str); 30] = [
     ),
     (
         "providers/receipt/unread.rs",
-        "read_link(",
-        1,
-        "a link on the way to the receipt, in answered_by",
-    ),
-    (
-        "providers/receipt/unread.rs",
         "symlink_metadata(",
-        2,
-        "the receipt's path and its folders, in answered_by",
+        1,
+        "the receipt's path, in answered_by",
     ),
     (
         "providers/version.rs",

@@ -5,7 +5,7 @@
 //! host at another place (`BindReadOnlyPaths=`), as `/proc/self/mountinfo`
 //! shows; root, which check-config runs as, sees the host's places there.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// The places that `ProtectHome=true` makes inaccessible to the collector's
 /// unit. Outside the unit they are the host's homes, which a card never
@@ -52,6 +52,82 @@ fn below(folder: &Path, rest: &Path) -> PathBuf {
 pub(crate) fn seen(path: &Path) -> Seen {
     std::fs::read_to_string("/proc/self/mountinfo")
         .map_or(Seen::Host, |mounts| seen_in(&mounts, path))
+}
+
+/// Where a look at a path stops: the path as the links on the way lead, the
+/// deepest folder of it that can be looked at, and the first link on the
+/// way with where it leads, if there is one.
+pub(crate) struct Stop {
+    pub(crate) path: PathBuf,
+    pub(crate) folder: PathBuf,
+    pub(crate) link: Option<(PathBuf, PathBuf)>,
+}
+
+/// [`Stop`] for `path`, following up to eight links on the way.
+pub(crate) fn stop(path: &Path) -> Stop {
+    let mut path = path.to_path_buf();
+    let mut link = None;
+    for _ in 0..8 {
+        let folder = path
+            .ancestors()
+            .skip(1)
+            .find(|folder| std::fs::symlink_metadata(folder).is_ok())
+            .unwrap_or(&path)
+            .to_path_buf();
+        let Ok(target) = std::fs::read_link(&folder) else {
+            return Stop { path, folder, link };
+        };
+        // A link that names no root leads from the folder that holds it.
+        let target = normal(&folder.parent().unwrap_or(Path::new("/")).join(target));
+        let rest = path
+            .strip_prefix(&folder)
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        link.get_or_insert_with(|| (folder, target.clone()));
+        path = target.join(rest);
+    }
+    let folder = path.clone();
+    Stop { path, folder, link }
+}
+
+/// `path` without its `.` and `..`, as far as the names alone tell.
+fn normal(path: &Path) -> PathBuf {
+    let mut normal = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::ParentDir => {
+                normal.pop();
+            }
+            Component::CurDir => {}
+            part => normal.push(part),
+        }
+    }
+    normal
+}
+
+impl Stop {
+    /// How the path is seen, `seen` being how the path asked for is: where a
+    /// link led elsewhere, that place is what is seen.
+    pub(crate) fn seen(&self, seen: &Seen) -> Seen {
+        match &self.link {
+            Some(_) => self::seen(&self.path),
+            None => seen.clone(),
+        }
+    }
+
+    /// The place under which the collector's unit hides the path, seen as
+    /// `seen`: the one its sandbox mounted a folder of its own over, or,
+    /// where the look was `denied`, the home it stopped at, which the unit
+    /// hides and which is opened to no user.
+    pub(crate) fn hidden_under(&self, seen: &Seen, denied: bool) -> Option<PathBuf> {
+        match seen {
+            Seen::Hidden(place) => Some(place.clone()),
+            Seen::Host | Seen::Bound { .. } => {
+                let home = denied && HOMES.iter().any(|home| self.folder == Path::new(home));
+                home.then(|| self.folder.clone())
+            }
+        }
+    }
 }
 
 /// One line of mountinfo: the file system, the folder of it that the mount

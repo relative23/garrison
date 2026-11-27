@@ -43,6 +43,14 @@ Notable changes for operators and users. The format follows
   broker's key and twelve for the collector's, where it said ten, and it no
   longer names the macro filter's entry, which went with 0.3.0
   ([security](docs/architecture/security.md)).
+- The backup check's card says where its report belongs when the collector's
+  unit hides the place it lies in, such as `/root` or `/tmp`: it said "no
+  report at …; `garrison backup-check` writes it", and writing it there
+  again mends nothing
+  ([paths the collector cannot see](docs/operator/checks.md#paths-the-collector-cannot-see)).
+- A backup check's report on a file system that does not answer, as on a
+  hard NFS mount whose server is gone, no longer holds the collection run:
+  after eight seconds the card is Unknown and says so, as a receipt's does.
 
 ## [0.3.1] - 2026-11-27
 

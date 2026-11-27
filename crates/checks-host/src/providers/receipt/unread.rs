@@ -2,7 +2,7 @@
 
 use std::fs::Metadata;
 use std::io;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use garrison_core::files::{answered_by, open_regular_file, read_json_with_metadata};
@@ -56,57 +56,6 @@ impl Receipt {
     }
 }
 
-/// Where a look at a path stops: the path as the links on the way lead, the
-/// deepest folder of it that can be looked at, and the first link on the
-/// way with where it leads, if there is one.
-struct Stop {
-    path: PathBuf,
-    folder: PathBuf,
-    link: Option<(PathBuf, PathBuf)>,
-}
-
-/// [`Stop`] for `path`, following up to eight links on the way.
-fn stop(path: &Path) -> Stop {
-    let mut path = path.to_path_buf();
-    let mut link = None;
-    for _ in 0..8 {
-        let folder = path
-            .ancestors()
-            .skip(1)
-            .find(|folder| std::fs::symlink_metadata(folder).is_ok())
-            .unwrap_or(&path)
-            .to_path_buf();
-        let Ok(target) = std::fs::read_link(&folder) else {
-            return Stop { path, folder, link };
-        };
-        // A link that names no root leads from the folder that holds it.
-        let target = normal(&folder.parent().unwrap_or(Path::new("/")).join(target));
-        let rest = path
-            .strip_prefix(&folder)
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
-        link.get_or_insert_with(|| (folder, target.clone()));
-        path = target.join(rest);
-    }
-    let folder = path.clone();
-    Stop { path, folder, link }
-}
-
-/// `path` without its `.` and `..`, as far as the names alone tell.
-fn normal(path: &Path) -> PathBuf {
-    let mut normal = PathBuf::new();
-    for part in path.components() {
-        match part {
-            Component::ParentDir => {
-                normal.pop();
-            }
-            Component::CurDir => {}
-            part => normal.push(part),
-        }
-    }
-    normal
-}
-
 /// [`Receipt::unread`] for the receipt at `path`, as the file system answers.
 fn why(path: &Path, seen: &Seen) -> String {
     let shown = path.display();
@@ -115,23 +64,12 @@ fn why(path: &Path, seen: &Seen) -> String {
     if let Err(error) = &looked
         && (denied(error) || error.kind() == io::ErrorKind::NotFound)
     {
-        let stop = stop(path);
+        let stop = hidden::stop(path);
         // Where a link leads, that place is what is seen.
-        let seen = match &stop.link {
-            Some(_) => hidden::seen(&stop.path),
-            None => seen.clone(),
-        };
+        let seen = stop.seen(seen);
         // Neither a mode nor the job mends what the sandbox hides, and a
         // home folder, which the collector's unit hides, is opened to nobody.
-        let home = denied(error)
-            && hidden::HOMES
-                .iter()
-                .any(|home| stop.folder == Path::new(home));
-        let place = match &seen {
-            Seen::Hidden(place) => Some(place.clone()),
-            Seen::Host | Seen::Bound { .. } => home.then(|| stop.folder.clone()),
-        };
-        if let Some(place) = place {
+        if let Some(place) = stop.hidden_under(&seen, denied(error)) {
             let through = stop.link.as_ref().map_or_else(String::new, |(link, _)| {
                 format!(", through the link {},", link.display())
             });
