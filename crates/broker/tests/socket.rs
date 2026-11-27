@@ -16,6 +16,7 @@ use garrison_broker::protocol::{BrokerError, Catalog, Request, Submitted};
 use garrison_broker::runner::{Outcome, Runner};
 use garrison_broker::server::serve_on;
 use garrison_broker::service::{Authorize, Broker};
+use garrison_broker::stop::Stop;
 use garrison_broker::store::{JobStatus, JobStore};
 use garrison_core::config::Action;
 use garrison_core::modules::ModuleId;
@@ -91,7 +92,12 @@ fn serve(uids: BTreeSet<u32>) -> (BrokerClient, tempfile::TempDir) {
     );
     let path = directory.path().join("b.sock");
     let listener = UnixListener::bind(&path).unwrap();
-    thread::spawn(move || serve_on(&listener, &broker, &uids));
+    thread::spawn(move || {
+        // A stop that is never asked for: the other end stays open and silent.
+        let (asked, _never) = UnixStream::pair().unwrap();
+        let stop = Stop::when_readable(asked.into());
+        serve_on(&listener, &broker, &uids, &stop);
+    });
     (
         BrokerClient::new(path).with_timeout(Duration::from_secs(2)),
         directory,

@@ -61,6 +61,13 @@ Notable changes for operators and users. The format follows
   commands run the same way. The caller now has its timeout a quarter of a
   second after the command's time
   ([checks](docs/operator/checks.md)).
+- A restart of the broker no longer costs a request its answer. A rights
+  check or a sign-in that was under way when `garrison stalwart setup
+  --rotate` or an upgrade restarted `garrison-broker` got none, and its user
+  "Authorization is temporarily unavailable" once. The broker now answers
+  the requests under way before it stops and accepts no further one, which
+  waits in its socket for the broker that starts
+  ([rotating secrets](docs/operator/operations.md#rotating-secrets)).
 
 ## [0.3.1] - 2026-11-27
 

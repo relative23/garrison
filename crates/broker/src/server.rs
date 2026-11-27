@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use crate::protocol::{BrokerError, MAX_REQUEST, Request, decode, read_line, refuse};
 use crate::quiet::Quiet;
 use crate::service::Broker;
+use crate::stop::Stop;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 /// Requests served at once. The unit allows the broker 32 tasks
@@ -40,6 +41,10 @@ const MAX_CONNECTIONS: usize = 16;
 /// that the loop neither spins nor fills the journal.
 const FIRST_PAUSE: Duration = Duration::from_millis(5);
 const LONGEST_PAUSE: Duration = Duration::from_secs(1);
+/// How long the requests under way have to be answered once the broker is
+/// asked to stop: longer than any of them takes, and well inside the time
+/// systemd gives a unit to stop.
+const LAST_REQUESTS: Duration = Duration::from_secs(30);
 
 /// The `result` of an answer line.
 fn result(answer: impl Serialize) -> Value {
@@ -152,10 +157,16 @@ impl Drop for Place {
     }
 }
 
-/// Accept connections forever, one thread each.
-pub fn serve_on(listener: &UnixListener, broker: &Arc<Broker>, allowed: &BTreeSet<u32>) {
+/// Accept connections, one thread each, until `stop` is asked for, and
+/// return once the requests under way then are answered.
+pub fn serve_on(
+    listener: &UnixListener,
+    broker: &Arc<Broker>,
+    allowed: &BTreeSet<u32>,
+    stop: &Stop,
+) {
     serve(
-        listener.incoming(),
+        stop.connections(listener),
         broker,
         &|stream| peer_allowed(stream, allowed),
         &thread::sleep,
@@ -168,12 +179,13 @@ const fn worth_a_line(count: u64) -> bool {
     count == 1 || count.is_multiple_of(100)
 }
 
-/// Serve those of `connections` that `admits` lets in, until they end;
-/// `pause` waits after a failed accept.
+/// Serve those of `connections` that `admits` lets in, until they end, and
+/// then let the requests under way be answered; `pause` waits after a
+/// failed accept.
 ///
 /// The journal gets one line when accepting starts to fail or the places run
 /// out, and none for each further connection until a request is served again.
-fn serve(
+pub(crate) fn serve(
     connections: impl Iterator<Item = io::Result<UnixStream>>,
     broker: &Arc<Broker>,
     admits: &dyn Fn(&UnixStream) -> bool,
@@ -232,6 +244,20 @@ fn serve(
         if let Err(error) = started {
             log::error!("Could not handle a broker connection: {error}");
         }
+    }
+    // No further connection is accepted. A request that is under way has a
+    // user waiting for its answer: it is given before the caller ends.
+    let until = Instant::now() + LAST_REQUESTS;
+    while taken.load(Ordering::Acquire) > 0 && Instant::now() < until {
+        thread::sleep(Duration::from_millis(2));
+    }
+    let left = taken.load(Ordering::Acquire);
+    if left > 0 {
+        log::warn!(
+            "The broker stops with {left} requests unanswered: they took longer than {} \
+             seconds",
+            LAST_REQUESTS.as_secs()
+        );
     }
 }
 

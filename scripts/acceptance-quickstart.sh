@@ -306,9 +306,9 @@ inside 'python3 /root/masked.py /root/rotate.log | sed "s/^/      | /"'
 # The rotation is over in less than a second, so the watch is judged by what
 # overlaps it: the rights checks answered between its first moment and its
 # last, and the sign-ins that began before it ended and ended after it began.
-# The broker restarts in it, and a request that is under way at that moment
-# gets no answer from it: of the session's checks and of the sign-ins one each
-# may fail for that, in the rotation and nowhere else.
+# The broker restarts in it: a request that is under way at that moment is
+# answered before the broker stops, and one that comes meanwhile waits in the
+# socket for the broker that starts, so no check and no sign-in fails.
 window='-v from="$(cat /root/began)" -v to="$(cat /root/ended)"'
 checked="awk $window '\$2 == 200 && \$1 >= from && \$1 <= to' /root/watched"
 signed="awk $window '/ signed in from / && \$NF <= to && \$1 >= from' /root/watched"
@@ -318,13 +318,11 @@ inside "sleep 3 && touch /root/rotated && while systemctl is-active --quiet acce
     sed -E 's/^[0-9.]+ //; s/ from [0-9.]+\$//' /root/watched | sort | uniq -c | sed 's/^/      | /'"
 check "a session had its rights checked while it ran" "$checked | grep -q ."
 check "the administrator signed in while it ran" "$signed | grep -q ."
-check "nothing failed but a request under way when the broker restarted, one of each kind at the most" \
-    "awk $window '
+check "no rights check and no sign-in failed, also none under way when the broker restarted" \
+    "awk '
         \$2 == 200 && NF == 2 || / signed in from [0-9.]+\$/ { next }
-        \$2 == 503 && NF == 2 && \$1 >= from && \$1 <= to { checks++; next }
-        / sign-in failed: .* from [0-9.]+\$/ && \$NF <= to && \$1 >= from { sign_ins++; next }
         { print; other = 1 }
-        END { exit other || checks > 1 || sign_ins > 1 }' /root/watched"
+        END { exit other }' /root/watched"
 once "after: the administrator signs in and has the rights checked with the broker's new key" \
     'python3 /root/signed-in.py once | grep -qx "signed in"'
 check "it restarted the broker and the receiver with their new secrets" \

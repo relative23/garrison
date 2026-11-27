@@ -9,6 +9,7 @@ mod quiet;
 pub mod runner;
 pub mod server;
 pub mod service;
+pub mod stop;
 pub mod store;
 
 use std::collections::BTreeSet;
@@ -54,10 +55,14 @@ fn peer_ids(names: &[String]) -> Result<BTreeSet<u32>, Error> {
         .collect()
 }
 
-/// Serve on the systemd socket (or the configured path) until stopped, with
-/// `config` read from `path`, where the policy's actions are looked up that
-/// the broker was not started with.
+/// Serve on the systemd socket (or the configured path) until asked to
+/// stop, with `config` read from `path`, where the policy's actions are
+/// looked up that the broker was not started with. Call it before any other
+/// thread exists.
 pub fn run(config: &Config, path: &Path, credentials: Credentials) -> Result<(), Error> {
+    // Before any thread: the signal that ends the broker is kept from them
+    // all and read where connections are accepted.
+    let stop = stop::Stop::by_signal()?;
     let broker = &config.broker;
     // Take over systemd's socket first, before any thread exists.
     let listener = server::listener(&broker.socket)?;
@@ -78,7 +83,8 @@ pub fn run(config: &Config, path: &Path, credentials: Credentials) -> Result<(),
         broker.socket.display()
     );
     garrison_core::systemd::ready();
-    server::serve_on(&listener, &service, &allowed);
+    server::serve_on(&listener, &service, &allowed, &stop);
+    log::info!("Maintenance broker stopped: the requests under way were answered");
     Ok(())
 }
 
