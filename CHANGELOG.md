@@ -154,6 +154,11 @@ Notable changes for operators and users. The format follows
   status, was larger than the page's introduction, so the page counted as
   drawn only then; the introduction says more now and the card's sentence
   less.
+- The tests pass again after 2026-11-28. A test of the services sent the
+  receiver an event with a fixed date, and the receiver takes none from
+  before what its history keeps, thirty days by default: whoever runs the
+  tests of 0.2.0 to 0.3.1 sees that one fail since that day. Nothing of an
+  installation is touched by it.
 
 ## [0.3.1] - 2026-11-27
 
