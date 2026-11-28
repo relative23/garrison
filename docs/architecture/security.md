@@ -132,6 +132,16 @@ brokers never repeat a job; pending jobs become "uncertain".
   that address is among Stalwart's allowed IPs, which neither limits nor
   blocks it (measured). One whose header names a loopback address is
   refused (400), so Garrison names no such user.
+- The broker keeps its record of jobs by this host's clock, thirty days
+  from the date each record carries
+  ([operations](../operator/operations.md#troubleshooting)). A clock that
+  ran ahead by more than that takes the records from before with the
+  broker's next clean-up, though none of them is thirty days old. The event
+  history and the status database are kept through such a jump: their
+  services count the time they ran.
+- Stalwart's lookups of a destination's TLS policy, its DANE, MTA-STS and
+  TLS-RPT records, are not recorded, so the trace of a delivery does not
+  show them.
 - Profiles are server-wide; the event history of all domains is visible to
   anyone with the Event history, Deliveries, Sessions or Attacks & bans
   module.
