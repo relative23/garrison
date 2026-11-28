@@ -201,6 +201,7 @@ export function attacks(overrides: Partial<Attacks> = {}): Attacks {
     networks: [{ network: "192.0.2.0/24", sources: 2, failedSignIns: 1205, tlsErrors: 3, bans: 1, refused: 0, lastSeen: NOW - 300 }],
     accounts: [{ name: "anna@example.test", failedSignIns: 105, sources: 2, lastSeen: NOW - 300 }],
     bans: [{ at: NOW - 600, address: "192.0.2.10", network: null, reason: "authentication" }],
+    fullListeners: [],
     ...overrides,
   };
 }

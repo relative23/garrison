@@ -144,6 +144,7 @@ event_types! {
     SecurityScanBan => "security.scan-ban",
     SecurityIpBlocked => "security.ip-blocked",
     SecurityIpUnauthorized => "security.ip-unauthorized",
+    LimitConcurrentConnection => "limit.concurrent-connection",
     MessageIngestDuplicate => "message-ingest.duplicate",
     MessageIngestError => "message-ingest.error",
     MessageIngestHam => "message-ingest.ham",

@@ -356,6 +356,13 @@
             },
             "type": "array"
           },
+          "fullListeners": {
+            "description": "The listeners that were full in the stretch, by name. The addresses\nthey refused are in the event history, not among the sources.",
+            "items": {
+              "$ref": "#/components/schemas/FullListener"
+            },
+            "type": "array"
+          },
           "networks": {
             "items": {
               "$ref": "#/components/schemas/AttackNetwork"
@@ -392,7 +399,8 @@
           "sources",
           "networks",
           "accounts",
-          "bans"
+          "bans",
+          "fullListeners"
         ],
         "type": "object"
       },
@@ -908,6 +916,26 @@
         "required": [
           "items",
           "next"
+        ],
+        "type": "object"
+      },
+      "FullListener": {
+        "additionalProperties": false,
+        "description": "A listener that held as many connections as it may and refused others.",
+        "properties": {
+          "listener": {
+            "description": "Stalwart's name of the listener, such as `smtp`.",
+            "type": "string"
+          },
+          "refused": {
+            "description": "The connections it refused for it.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "listener",
+          "refused"
         ],
         "type": "object"
       },

@@ -170,6 +170,11 @@ export function Attacks() {
         {data && (
           <>
             {data.truncated && <Notice tone="warning">{t("attacks.truncated")}</Notice>}
+            {data.fullListeners.map(({ listener, refused: count }) => (
+              <Notice key={listener} tone="warning">
+                {t("attacks.listenerFull", { listener, count })}
+              </Notice>
+            ))}
             <Figures
               items={[
                 [t("attacks.figure.failedSignIns"), data.totals.failedSignIns],

@@ -84,11 +84,21 @@ pub(crate) struct AttackTotals {
     pub(crate) sources: i64,
 }
 
+/// A listener that held as many connections as it may and refused others.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FullListener {
+    /// Stalwart's name of the listener, such as `smtp`.
+    pub(crate) listener: String,
+    /// The connections it refused for it.
+    pub(crate) refused: i64,
+}
+
 /// Failed sign-ins, bans and TLS handshake errors of a stretch of the event
 /// history. Each list has at most 50 rows, the busiest first; the bans are
 /// the newest.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct Attacks {
     pub(crate) since: i64,
     pub(crate) until: i64,
@@ -99,4 +109,7 @@ pub(crate) struct Attacks {
     pub(crate) networks: Vec<AttackNetwork>,
     pub(crate) accounts: Vec<AttackedAccount>,
     pub(crate) bans: Vec<Ban>,
+    /// The listeners that were full in the stretch, by name. The addresses
+    /// they refused are in the event history, not among the sources.
+    pub(crate) full_listeners: Vec<FullListener>,
 }

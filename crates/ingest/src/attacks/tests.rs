@@ -314,3 +314,40 @@ fn addresses_count_to_their_network() {
     assert_eq!(network("::ffff:203.0.113.200"), "203.0.113.0/24");
     assert_eq!(network("unknown"), "unknown");
 }
+
+/// A listener that holds as many connections as it may refuses the next,
+/// and Stalwart 1.2.1 says so with the listener and the address refused
+/// (measured). They count by listener; the address is no source by it,
+/// since the one refused need not be one that filled the listener.
+#[test]
+fn connections_refused_by_a_full_listener_count_by_listener() {
+    let full = |seq: u64, time: &str, listener: &str, address: &str| {
+        let data = json!({"listenerId": listener, "localPort": 25, "remoteIp": address,
+            "remotePort": 43766, "limit": 2});
+        event(
+            seq,
+            "limit.concurrent-connection",
+            &format!("{DAY}{time}Z"),
+            &data,
+        )
+    };
+    let events = [
+        full(1, "10:00:00", "smtp", "192.0.2.10"),
+        full(2, "10:00:01", "smtp", "192.0.2.11"),
+        full(3, "10:00:02", "imaps", "192.0.2.10"),
+        full(4, "23:00:00", "smtp", "192.0.2.10"),
+    ];
+    let found = summary(&events, MIDNIGHT, MIDNIGHT + 12 * 3600);
+    let listener = |listener: &str, refused| FullListener {
+        listener: listener.to_owned(),
+        refused,
+    };
+    assert_eq!(
+        found.full_listeners,
+        [listener("imaps", 1), listener("smtp", 2)]
+    );
+    assert_eq!((found.sources.len(), found.totals.sources), (0, 0));
+    // A quiet stretch names no listener.
+    let quiet = summary(&events, MIDNIGHT, MIDNIGHT + 3600);
+    assert_eq!(quiet.full_listeners, []);
+}

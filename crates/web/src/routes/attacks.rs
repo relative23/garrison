@@ -20,6 +20,7 @@ use crate::models::errors::{
 };
 use crate::models::{
     AttackNetwork, AttackSource, AttackTotals, AttackedAccount, Attacks, Ban, BanReason,
+    FullListener,
 };
 use crate::security::Visitor;
 
@@ -200,6 +201,7 @@ fn stated(summary: found::Attacks) -> ApiResult<Attacks> {
         networks,
         accounts,
         bans,
+        full_listeners,
     } = summary;
     Ok(Attacks {
         since,
@@ -210,6 +212,13 @@ fn stated(summary: found::Attacks) -> ApiResult<Attacks> {
         networks: networks.into_iter().map(AttackNetwork::from).collect(),
         accounts: accounts.into_iter().map(AttackedAccount::from).collect(),
         bans: bans.into_iter().map(ban).collect::<ApiResult<Vec<Ban>>>()?,
+        full_listeners: full_listeners
+            .into_iter()
+            .map(|found::FullListener { listener, refused }| FullListener {
+                listener,
+                refused: count(refused),
+            })
+            .collect(),
     })
 }
 

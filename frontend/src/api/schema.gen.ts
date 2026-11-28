@@ -397,6 +397,11 @@ export interface components {
         Attacks: {
             accounts: components["schemas"]["AttackedAccount"][];
             bans: components["schemas"]["Ban"][];
+            /**
+             * @description The listeners that were full in the stretch, by name. The addresses
+             *     they refused are in the event history, not among the sources.
+             */
+            fullListeners: components["schemas"]["FullListener"][];
             networks: components["schemas"]["AttackNetwork"][];
             /** Format: int64 */
             since: number;
@@ -587,6 +592,16 @@ export interface components {
         EventsPage: {
             items: components["schemas"]["EventItem"][];
             next: string | null;
+        };
+        /** @description A listener that held as many connections as it may and refused others. */
+        FullListener: {
+            /** @description Stalwart's name of the listener, such as `smtp`. */
+            listener: string;
+            /**
+             * Format: int64
+             * @description The connections it refused for it.
+             */
+            refused: number;
         };
         Gap: {
             /** Format: int64 */

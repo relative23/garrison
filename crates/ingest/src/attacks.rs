@@ -1,13 +1,14 @@
 //! Attacks and bans: who tries to sign in and fails, whom Stalwart banned,
-//! whose connections it refused while it blocked them and whose TLS
-//! handshakes fail, summed over a stretch of the event history.
+//! whose connections it refused while it blocked them, whose TLS
+//! handshakes fail and which listener was full, summed over a stretch of
+//! the event history.
 //!
 //! Stalwart counts failed sign-ins itself and bans an address after too many.
 //! This summary shows that work and what it cannot catch: an address that
 //! stays under the limit, a network that spreads its attempts over many
 //! addresses, and an account that many addresses try.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::IpAddr;
 
 use rusqlite::Connection;
@@ -112,6 +113,16 @@ pub struct Totals {
     pub sources: u64,
 }
 
+/// A listener that held as many connections as it may and refused others.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FullListener {
+    /// Stalwart's name of the listener, such as `smtp`.
+    pub listener: String,
+    /// The connections it refused for it.
+    pub refused: u64,
+}
+
 /// The summary of the stretch from `since` to `until`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +138,9 @@ pub struct Attacks {
     pub accounts: Vec<Account>,
     /// The newest bans first.
     pub bans: Vec<Ban>,
+    /// By name. The address a full listener refused is no source by that:
+    /// it need not be one of those that filled the listener.
+    pub full_listeners: Vec<FullListener>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,6 +206,7 @@ struct Sums {
     sources: HashMap<String, Seen>,
     accounts: HashMap<String, Tried>,
     bans: Vec<Ban>,
+    full_listeners: BTreeMap<String, u64>,
 }
 
 impl Sums {
@@ -300,6 +315,18 @@ impl Sums {
             0 => recorded(db, EventType::SecurityIpBlocked)?.then_some(0),
             count => Some(count),
         };
+        let mut full = BTreeMap::new();
+        let full_events = EventType::LimitConcurrentConnection;
+        sums.truncated |= newest_of(db, full_events, stretch, |_, text| {
+            if let Ok(Fields {
+                listener_id: Some(listener),
+                ..
+            }) = serde_json::from_str(text)
+            {
+                *full.entry(listener).or_default() += 1;
+            }
+        })?;
+        sums.full_listeners = full;
         Ok(sums)
     }
 }
@@ -409,6 +436,11 @@ pub fn attacks(db: &Connection, since: i64, until: i64) -> Result<Attacks> {
         networks,
         accounts,
         bans,
+        full_listeners: sums
+            .full_listeners
+            .into_iter()
+            .map(|(listener, refused)| FullListener { listener, refused })
+            .collect(),
     })
 }
 

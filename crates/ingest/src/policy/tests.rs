@@ -86,7 +86,7 @@ fn the_event_lists_are_disjoint_and_never_forbidden() {
     let mut unique = all.clone();
     unique.dedup();
     assert_eq!(unique.len(), all.len());
-    assert_eq!(all.len(), 128);
+    assert_eq!(all.len(), 129);
     assert!(FORBIDDEN_EVENTS.iter().all(|event| !is_recorded(event)));
     assert!(is_recorded("smtp.ehlo") && !is_recorded("smtp.raw-input"));
     // A name is recorded as a whole: no part of one, nothing longer.
@@ -107,7 +107,7 @@ fn the_event_lists_are_disjoint_and_never_forbidden() {
         assert!(kind.as_str().starts_with(kind.category()));
     }
     let names: std::collections::BTreeSet<&str> = event_types().into_iter().collect();
-    assert_eq!((names.len(), EventType::ALL.len()), (128, 128));
+    assert_eq!((names.len(), EventType::ALL.len()), (129, 129));
     assert_eq!(EventType::QueueRescheduled.as_str(), "queue.rescheduled");
     assert_eq!(EventType::MtaHookActionReject.category(), "mta-hook");
     assert_eq!(category("message-ingest.spam"), "message-ingest");
@@ -201,5 +201,20 @@ fn a_milter_answer_that_is_too_large_keeps_the_size_it_announced() {
             "listenerId": "smtp", "localPort": 25, "remoteIp": "172.17.0.3",
             "remotePort": 43540,
         })
+    );
+}
+
+/// A connection that a full listener refused, as Stalwart 1.2.1 sends it
+/// (measured): the listener and the address are kept, the limit, which is a
+/// setting of Stalwart's, is not.
+#[test]
+fn a_connection_refused_by_a_full_listener_keeps_its_listener_and_address() {
+    let sent = json!({
+        "listenerId": "smtp", "localPort": 25, "remoteIp": "172.17.0.3", "remotePort": 43766,
+        "limit": 2,
+    });
+    assert_eq!(
+        Value::Object(select_fields(EventType::LimitConcurrentConnection, &sent)),
+        json!({"listenerId": "smtp", "localPort": 25, "remoteIp": "172.17.0.3", "remotePort": 43766})
     );
 }

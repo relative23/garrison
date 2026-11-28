@@ -42,6 +42,7 @@ use crate::routes::{actions, api, attacks, destinations, events};
             models::Attacks,
             models::Ban,
             models::BanReason,
+            models::FullListener,
             models::Column,
             models::Coverage,
             models::DeliveriesPage,

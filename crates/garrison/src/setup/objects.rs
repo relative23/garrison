@@ -485,7 +485,7 @@ mod tests {
         use garrison_ingest::policy::{FORBIDDEN_EVENTS, event_types};
         let asked = webhook_events(event_types(), &FORBIDDEN_EVENTS).unwrap();
         assert_eq!(asked, event_types());
-        assert_eq!(asked.len(), 128);
+        assert_eq!(asked.len(), 129);
         let broken = webhook_events(vec!["smtp.ehlo", "smtp.raw-input"], &FORBIDDEN_EVENTS);
         assert_eq!(broken, Err(states::event_forbidden("smtp.raw-input")));
     }

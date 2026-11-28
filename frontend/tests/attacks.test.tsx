@@ -27,6 +27,7 @@ describe("Attacks & bans", () => {
     expect(within(table("Accounts under attack")).getByText("anna@example.test")).toBeTruthy();
     expect(within(table("Stalwart's bans")).getByText("Too many failed sign-ins")).toBeTruthy();
     expect(screen.queryByText(/More events were recorded/)).toBeNull();
+    expect(screen.queryByText(/was full/)).toBeNull();
   });
 
   it("name the /64 that Stalwart blocks with an IPv6 address it banned", async () => {
@@ -66,6 +67,22 @@ describe("Attacks & bans", () => {
       "Stalwart sends them once garrison stalwart setup has run",
     );
     expect(within(sources).queryByRole("columnheader", { name: "Refused" })).toBeNull();
+  });
+
+  it("warn of a listener that was full, with the connections it refused", async () => {
+    const fullListeners = [
+      { listener: "imaps", refused: 1 },
+      { listener: "smtp", refused: 37 },
+    ];
+    serve({ "GET coverage": { body: coverage() }, "GET attacks": { body: attacks({ fullListeners }) } });
+    renderView(<Attacks />);
+    await screen.findByRole("table", { name: "Addresses" });
+    expect(
+      screen.getByText(
+        "The listener imaps was full: Stalwart refused 1 connection in this period because the listener held as many as its limit allows. The Event history names each with its address.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/^The listener smtp was full: Stalwart refused 37 connections in this period/)).toBeTruthy();
   });
 
   it("ask for the period that is chosen", async () => {

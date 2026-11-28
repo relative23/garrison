@@ -116,6 +116,9 @@
  "delivery.start-tls-unavailable": {
   "label": "STARTTLS unavailable"
  },
+ "limit.concurrent-connection": {
+  "label": "Concurrent connection limit reached"
+ },
  "message-ingest.duplicate": {
   "label": "Skipping duplicate message"
  },

@@ -24,6 +24,7 @@ const CATEGORIES = [
   "mta-hook",
   "auth",
   "security",
+  "limit",
   "spam",
   "tls",
   "server",
