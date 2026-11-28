@@ -36,7 +36,7 @@ impl Limits {
 }
 
 /// Every type whose events are counted by day.
-pub(super) const COUNTED: [&str; 28] = [
+pub(super) const COUNTED: [&str; 30] = [
     "message-ingest.ham",
     "message-ingest.spam",
     "spam.train-completed",
@@ -50,6 +50,8 @@ pub(super) const COUNTED: [&str; 28] = [
     "milter.io-error",
     "milter.disconnected",
     "milter.frame-too-large",
+    "milter.frame-invalid",
+    "milter.unexpected-response",
     "smtp.spf-ehlo-pass",
     "smtp.spf-ehlo-fail",
     "smtp.spf-from-pass",

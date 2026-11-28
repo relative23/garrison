@@ -8,10 +8,15 @@ Notable changes for operators and users. The format follows
 
 ### Added
 
-- **The card "Milter verdicts" counts and warns of a milter answer that is
-  larger than Stalwart reads.** Stalwart then defers the mail or lets it pass
-  unscanned, as the milter's entry says, and recorded nothing the card
-  counted: a scanner that answered so let the card stay in order.
+- **The card "Milter verdicts" counts and warns of a milter answer that
+  Stalwart does not read:** one that is larger than Stalwart reads, and one
+  that is no answer of the milter protocol. Stalwart then defers the mail or
+  lets it pass unscanned, as the milter's entry says, and recorded nothing
+  the card counted: a scanner that answered so let the card stay in order
+  while every message was deferred. Of an answer that is no answer of the
+  protocol Garrison keeps the event and its session alone; the text Stalwart
+  sends with it is the milter's frame and is dropped before anything is
+  stored.
 - **Attacks & bans warns of a listener that was full.** A listener that holds
   as many connections as its limit allows closes each further one, a
   legitimate one too. The page names the listener and how many connections it
@@ -19,7 +24,7 @@ Notable changes for operators and users. The format follows
   under the new category "Limits". See
   [operations](docs/operator/operations.md#troubleshooting).
 
-Stalwart sends both events once `garrison stalwart setup` has run with this
+Stalwart sends these events once `garrison stalwart setup` has run with this
 release; until then the card and the page count none.
 
 ### Fixed

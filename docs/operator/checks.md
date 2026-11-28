@@ -220,10 +220,12 @@ minutes. They count; none of them is a verdict, except where it says so.
   deferred. A reply in the milter's own words, with which a milter may
   refuse or defer a message, is counted apart: Stalwart's event does
   not say whether it refused or deferred, so a milter that defers with one
-  is not warned of. An answer larger than Stalwart reads is no verdict
-  either, is counted apart ("Answer too large") and is a warning: Stalwart
-  then defers the mail or lets it pass unscanned, as the milter's entry
-  says. A host without a milter has no such card.
+  is not warned of. An answer that Stalwart does not read, because it is
+  larger than Stalwart reads or no answer of the milter protocol, is no
+  verdict either, is counted apart ("Answer not read") and is a warning
+  that says which of the two it was: Stalwart then defers the mail or lets
+  it pass unscanned, as the milter's entry says. A host without a milter
+  has no such card.
 - `authentication`: how many senders passed SPF, DKIM, DMARC, ARC and the
   check of the reverse name, on the Spam filter page; and the sender domains
   whose mail failed SPF or DMARC, which are forged senders or senders whose

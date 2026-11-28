@@ -18,6 +18,10 @@ const NOT_REACHED: [&str; 4] = [
     "milter.io-error",
     "milter.disconnected",
 ];
+/// The events of a milter answer that is no answer of the protocol as
+/// Stalwart reads it. They are recorded for their number alone: the
+/// receiver keeps nothing of the frame they carry.
+const NOT_OF_THE_PROTOCOL: [&str; 2] = ["milter.frame-invalid", "milter.unexpected-response"];
 
 fn column(label: &str, format: Format) -> Column {
     Column {
@@ -209,15 +213,20 @@ impl Flow {
         let of = |kind: &str| week.of(&format!("milter.action-{kind}"));
         let (accepted, rejected, discarded) = (of("accept"), of("reject"), of("discard"));
         let (deferred, replied) = (of("temp-fail"), of("reply-code"));
-        let unreached: Vec<u64> = (0..week.days.len())
-            .map(|day| NOT_REACHED.iter().map(|kind| week.of(kind)[day]).sum())
-            .collect();
-        // An answer larger than Stalwart reads (its `maxResponseSize`) is
-        // no verdict either, and no other event comes with it (measured
-        // with Stalwart 1.2.1).
+        let by_day = |kinds: &[&str]| -> Vec<u64> {
+            (0..week.days.len())
+                .map(|day| kinds.iter().map(|kind| week.of(kind)[day]).sum())
+                .collect()
+        };
+        let unreached = by_day(&NOT_REACHED);
+        // An answer larger than Stalwart reads (its `maxResponseSize`) and
+        // one that is no answer of the protocol are no verdict either, and
+        // no other event comes with them (measured with Stalwart 1.2.1).
         let oversized = week.of("milter.frame-too-large");
+        let garbled = by_day(&NOT_OF_THE_PROTOCOL);
+        let unread: Vec<u64> = oversized.iter().zip(&garbled).map(|(a, b)| a + b).collect();
         let all = [
-            &accepted, &rejected, &discarded, &deferred, &replied, &unreached, &oversized,
+            &accepted, &rejected, &discarded, &deferred, &replied, &unreached, &unread,
         ];
         if read.problem.is_none() && all.iter().all(|days| days.iter().all(|count| *count == 0)) {
             return Ok(());
@@ -233,14 +242,20 @@ impl Flow {
                  setting there."
             ));
         }
-        let oversized_lately = recent(&oversized);
-        if oversized_lately > 0 {
-            findings.push(format!(
-                "A milter answered {oversized_lately} times since yesterday with more than \
-                 Stalwart reads of an answer, so it gave no verdict for that mail. What Stalwart \
-                 does with mail then, defer it or let it pass unscanned, is the milter's setting \
-                 there."
-            ));
+        for (count, what) in [
+            (recent(&oversized), "more than Stalwart reads of an answer"),
+            (
+                recent(&garbled),
+                "what Stalwart could not read as an answer of the milter protocol",
+            ),
+        ] {
+            if count > 0 {
+                findings.push(format!(
+                    "A milter answered {count} times since yesterday with {what}, so it gave no \
+                     verdict for that mail. What Stalwart does with mail then, defer it or let it \
+                     pass unscanned, is the milter's setting there."
+                ));
+            }
         }
         // A deferral is no verdict: where a milter deferred every message,
         // as a scanner does that cannot scan, nothing was judged, whatever
@@ -273,7 +288,7 @@ impl Flow {
                     json!(deferred[day]),
                     json!(replied[day]),
                     json!(unreached[day]),
-                    json!(oversized[day]),
+                    json!(unread[day]),
                 ]
             })
             .collect();
@@ -285,7 +300,7 @@ impl Flow {
                  Stalwart's event does not say which.",
             )
             .with_table(Table {
-                columns: ["Day", "Accepted", "Rejected", "Discarded", "Deferred", "Own reply", "Not reached", "Answer too large"]
+                columns: ["Day", "Accepted", "Rejected", "Discarded", "Deferred", "Own reply", "Not reached", "Answer not read"]
                     .iter()
                     .enumerate()
                     .map(|(index, label)| column(label, if index == 0 { Format::Text } else { Format::Number }))

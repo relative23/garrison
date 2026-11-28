@@ -9,15 +9,19 @@ use super::read::DAY;
 use super::tests::{Event, event, observed, of, rows};
 use crate::testing::Remembered;
 
-/// A milter whose answer is larger than Stalwart reads gave no verdict for
-/// that mail, which Stalwart then defers or lets pass by the milter's
-/// setting: a warning that says so, and a count of its own by day.
+/// A milter whose answer is larger than Stalwart reads, or no answer of the
+/// protocol, gave no verdict for that mail, which Stalwart then defers or
+/// lets pass by the milter's setting: a warning that says which of the two,
+/// and one count of both by day.
 #[test]
-fn a_milter_whose_answer_is_larger_than_stalwart_reads_is_a_warning() {
+fn a_milter_whose_answer_stalwart_does_not_read_is_a_warning() {
     let events = [
         event("milter.action-accept", 60, json!({})),
         event("milter.frame-too-large", 61, json!({"details": 67_108_864})),
         event("milter.frame-too-large", 62, json!({"details": 67_108_864})),
+        event("milter.frame-invalid", DAY + 60, json!({})),
+        event("milter.frame-invalid", DAY + 61, json!({})),
+        event("milter.unexpected-response", DAY + 62, json!({})),
     ];
     let observations = observed(&events, None, &Remembered::default(), 0);
     let milter = of(&observations, "flow.milter");
@@ -28,7 +32,17 @@ fn a_milter_whose_answer_is_larger_than_stalwart_reads_is_a_warning() {
          so it gave no verdict for that mail. What Stalwart does with mail then, defer it or \
          let it pass unscanned, is the milter's setting there."
     );
+    assert_eq!(
+        milter.findings[1],
+        "A milter answered 3 times since yesterday with what Stalwart could not read as an \
+         answer of the milter protocol, so it gave no verdict for that mail. What Stalwart does \
+         with mail then, defer it or let it pass unscanned, is the milter's setting there."
+    );
+    assert_eq!(milter.findings.len(), 2, "{:?}", milter.findings);
     assert_eq!(rows(milter)[0], "2026-10-29 | 1 | 0 | 0 | 0 | 0 | 0 | 2");
+    assert_eq!(rows(milter)[1], "2026-10-28 | 0 | 0 | 0 | 0 | 0 | 0 | 3");
+    let columns = &milter.table.as_ref().unwrap().columns;
+    assert_eq!(columns[7].label, "Answer not read");
 }
 
 #[test]
