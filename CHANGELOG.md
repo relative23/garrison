@@ -6,6 +6,13 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Run `garrison stalwart setup` again after the upgrade.** The webhook then
+  asks Stalwart for four event types more, those of the two additions below.
+  Until it has run, the card "Milter verdicts" and Attacks & bans count none
+  of them; everything else works as before.
+
 ### Added
 
 - **The card "Milter verdicts" counts and warns of a milter answer that
@@ -23,9 +30,6 @@ Notable changes for operators and users. The format follows
   refused in the period, and the Event history shows each with its address
   under the new category "Limits". See
   [operations](docs/operator/operations.md#troubleshooting).
-
-Stalwart sends these events once `garrison stalwart setup` has run with this
-release; until then the card and the page count none.
 
 ### Fixed
 
