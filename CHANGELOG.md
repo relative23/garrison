@@ -124,6 +124,11 @@ Notable changes for operators and users. The format follows
   account that got them first, whoever runs setup, and a full account is
   named as the one it is
   ([operations](docs/operator/operations.md#troubleshooting)).
+- The Alerts page shows its largest text with its first paint on a phone
+  too. The sentence under the notification card, which comes with the
+  status, was larger than the page's introduction, so the page counted as
+  drawn only then; the introduction says more now and the card's sentence
+  less.
 
 ## [0.3.1] - 2026-11-27
 

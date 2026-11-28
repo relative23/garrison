@@ -344,7 +344,7 @@
     },
     "alerts": {
       "description": "Notifications when a check fails or warns, and monitor receipts.",
-      "intro": "The notification channel and the latest monitor run.",
+      "intro": "Where Garrison sends a message when a check fails or warns, and the receipts of your monitor's runs.",
       "label": "Alerts"
     },
     "antivirus": {

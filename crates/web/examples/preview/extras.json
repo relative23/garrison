@@ -137,7 +137,7 @@
     "checkedAt": "2026-10-29T12:00:00+00:00",
     "source": "ntfy at notify.example.test, mail to admin@example.test",
     "kind": "details",
-    "scope": "Garrison sends a message on these channels when one of its checks fails or warns in two runs in a row, and when it is in order again.",
+    "scope": "A message goes out when a check fails or warns in two runs in a row, and when it is in order again.",
     "fields": [
       { "label": "Channels", "value": "ntfy at notify.example.test, mail to admin@example.test", "format": "text" },
       { "label": "Checks not in order", "value": 9, "format": "number" },

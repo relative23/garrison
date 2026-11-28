@@ -280,8 +280,8 @@ pub(super) fn card(
     .map(|observation| {
         observation
             .with_scope(
-                "Garrison sends a message on these channels when one of its checks fails or \
-                 warns in two runs in a row, and when it is in order again.",
+                "A message goes out when a check fails or warns in two runs in a row, and when \
+                 it is in order again.",
             )
             .with_fields(vec![
                 Field::text("Channels", shown),
