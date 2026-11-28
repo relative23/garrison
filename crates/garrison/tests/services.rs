@@ -187,7 +187,12 @@ fn agent() -> ureq::Agent {
 fn the_ingest_service_stores_a_signed_batch_and_stops_cleanly() {
     let service = serving("ingest");
     let base = format!("http://127.0.0.1:{}", service.ingest);
-    let body = json!({"events": [{"id": "1", "createdAt": "2026-10-29T10:00:00Z", "type": "auth.failed", "data": {}}]}).to_string();
+    // Dated now: the service runs by the real clock and takes no event from
+    // before what its history keeps.
+    let created = garrison_core::time::now_isoformat();
+    let body =
+        json!({"events": [{"id": "1", "createdAt": created, "type": "auth.failed", "data": {}}]})
+            .to_string();
     let signature = garrison_ingest::app::signature(b"signature-key-0123456789", body.as_bytes());
     let mut answer = agent()
         .post(&format!("{base}/webhook"))
