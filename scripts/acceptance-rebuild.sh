@@ -52,6 +52,14 @@ rebuild_after_upgrade() {
         check "the status database is another file, with the owner, group, mode and label of the one before" \
             "test \"\$(stat -c %i $status)\" != \"\$(cat /root/status.inode)\" &&
                 test \"\$(acceptance-made $status)\" = \"\$(cat /root/status.made)\""
+        # Under SELinux the copy that took the database's place carries the
+        # label the host's policy gives that path, and nothing was denied
+        # the collector for it.
+        inside "echo \"      the rebuilt database: \$(acceptance-made $status); SELinux: \$(getenforce 2>/dev/null || echo none)\""
+        check "where the host labels files, it would label the rebuilt database as it is, and denied nothing for it" \
+            "! command -v restorecon >/dev/null 2>&1 ||
+                { test -z \"\$(restorecon -n -v $status 2>&1)\" &&
+                  ! { dmesg; cat /var/log/audit/audit.log 2>/dev/null; } | grep 'avc: *denied' | grep -q -e status.sqlite -e garrison-collect; }"
         check "the store noted its look, and no rebuild that began and did not end" \
             'test "$(acceptance-memory "store.secrets-%")" = store.secrets-looked'
         check "no copy of the database is left beside it" "! ls $status-clearing* 2>/dev/null | grep -q ."
