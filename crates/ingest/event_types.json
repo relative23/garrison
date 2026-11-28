@@ -161,6 +161,9 @@
  "milter.disconnected": {
   "label": "Milter disconnected"
  },
+ "milter.frame-invalid": {
+  "label": "Invalid Milter frame"
+ },
  "milter.frame-too-large": {
   "label": "Milter frame too large"
  },
@@ -172,6 +175,9 @@
  },
  "milter.tls-invalid-name": {
   "label": "Invalid TLS name for Milter"
+ },
+ "milter.unexpected-response": {
+  "label": "Unexpected Milter response"
  },
  "mta-hook.action-accept": {
   "label": "MTA hook action: Accept"

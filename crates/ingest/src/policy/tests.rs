@@ -86,7 +86,7 @@ fn the_event_lists_are_disjoint_and_never_forbidden() {
     let mut unique = all.clone();
     unique.dedup();
     assert_eq!(unique.len(), all.len());
-    assert_eq!(all.len(), 129);
+    assert_eq!(all.len(), 131);
     assert!(FORBIDDEN_EVENTS.iter().all(|event| !is_recorded(event)));
     assert!(is_recorded("smtp.ehlo") && !is_recorded("smtp.raw-input"));
     // A name is recorded as a whole: no part of one, nothing longer.
@@ -107,7 +107,7 @@ fn the_event_lists_are_disjoint_and_never_forbidden() {
         assert!(kind.as_str().starts_with(kind.category()));
     }
     let names: std::collections::BTreeSet<&str> = event_types().into_iter().collect();
-    assert_eq!((names.len(), EventType::ALL.len()), (129, 129));
+    assert_eq!((names.len(), EventType::ALL.len()), (131, 131));
     assert_eq!(EventType::QueueRescheduled.as_str(), "queue.rescheduled");
     assert_eq!(EventType::MtaHookActionReject.category(), "mta-hook");
     assert_eq!(category("message-ingest.spam"), "message-ingest");
@@ -202,6 +202,35 @@ fn a_milter_answer_that_is_too_large_keeps_the_size_it_announced() {
             "remotePort": 43540,
         })
     );
+}
+
+/// A milter's answer that Stalwart cannot read, as Stalwart 1.2.1 sends it
+/// (measured): that it happened is kept, with the session it happened in.
+/// `details` holds the milter's frame, which may quote the message, in
+/// base64 or in Stalwart's words, and is never kept; a number there would be
+/// no frame, and goes too.
+#[test]
+fn a_milter_answer_that_stalwart_cannot_read_keeps_nothing_of_the_frame() {
+    let kept = json!({
+        "spanId": "342986075850939904", "elapsed": 0, "listenerId": "smtp", "localPort": 25,
+        "remoteIp": "172.17.0.3", "remotePort": 51682,
+    });
+    for (kind, details) in [
+        (EventType::MilterFrameInvalid, json!("eTQ1MQ==")),
+        (EventType::MilterFrameInvalid, json!("")),
+        (EventType::MilterFrameInvalid, json!(451)),
+        (
+            EventType::MilterUnexpectedResponse,
+            json!("OPTNEG (version: 6, actions: [], options: [])"),
+        ),
+    ] {
+        let sent = json!({
+            "spanId": 342_986_075_850_939_904_u64, "name": "MtaMilter with id jquiae1rleqa",
+            "details": details, "reason": details, "elapsed": 0, "listenerId": "smtp",
+            "localPort": 25, "remoteIp": "172.17.0.3", "remotePort": 51682,
+        });
+        assert_eq!(Value::Object(select_fields(kind, &sent)), kept, "{kind:?}");
+    }
 }
 
 /// A connection that a full listener refused, as Stalwart 1.2.1 sends it

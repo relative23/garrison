@@ -29,6 +29,7 @@ use serde_json::{Value, json};
 mod attempts;
 mod bans;
 mod listeners;
+mod milters;
 mod refusals;
 
 /// The tests of this binary change Stalwart's settings or count on them:

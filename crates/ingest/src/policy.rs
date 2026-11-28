@@ -1,16 +1,17 @@
 //! Which Stalwart events are recorded, and which of their fields are kept.
 //!
 //! This is the privacy boundary of the event history. Raw protocol input and
-//! output, message bodies, Milter frames, request URLs and credentials are never
-//! selected. Fields not listed here are dropped before anything is written to
-//! disk.
+//! output, message bodies, request URLs and credentials are never selected. A
+//! milter's frame comes only inside the two events that say Stalwart could
+//! not read it, and is dropped here. Fields not listed here are dropped
+//! before anything is written to disk.
 
 use serde_json::{Map, Number, Value};
 
 pub(crate) use crate::event_type::EventType;
 
 /// Never requested, even if an operator edits the native webhook by hand.
-pub const FORBIDDEN_EVENTS: [&str; 14] = [
+pub const FORBIDDEN_EVENTS: [&str; 12] = [
     "auth.error",
     "delivery.raw-input",
     "delivery.raw-output",
@@ -19,9 +20,7 @@ pub const FORBIDDEN_EVENTS: [&str; 14] = [
     "http.response-body",
     "imap.raw-input",
     "imap.raw-output",
-    "milter.frame-invalid",
     "milter.read",
-    "milter.unexpected-response",
     "milter.write",
     "smtp.raw-input",
     "smtp.raw-output",
@@ -62,6 +61,13 @@ const IDENTIFIER_FIELDS: [&str; 2] = ["queueId", "spanId"];
 /// an operator needs (for example "DNS lookup failed: null MX"), and is truncated.
 const DETAIL_FIELDS: [&str; 2] = ["details", "reason"];
 const DETAIL_CATEGORIES: [&str; 5] = ["delivery", "queue", "milter", "mta-hook", "server"];
+/// Recorded for the fact alone that a milter answered what Stalwart could
+/// not read: their free text is the milter's frame, which may quote the
+/// message, and is never kept.
+const FRAME_EVENTS: [EventType; 2] = [
+    EventType::MilterFrameInvalid,
+    EventType::MilterUnexpectedResponse,
+];
 /// Where only the verdict itself is kept: why a sign-in was refused, an
 /// address banned or a TLS handshake ended.
 const REASON_CATEGORIES: [&str; 3] = ["auth", "security", "tls"];
@@ -164,7 +170,8 @@ pub(crate) fn select_fields(event_type: EventType, data: &Value) -> Map<String, 
     let Value::Object(data) = data else {
         return result;
     };
-    let details = DETAIL_CATEGORIES.contains(&event_type.category());
+    let details =
+        DETAIL_CATEGORIES.contains(&event_type.category()) && !FRAME_EVENTS.contains(&event_type);
     let reason = REASON_CATEGORIES.contains(&event_type.category());
     for (key, value) in data {
         let key = key.as_str();
