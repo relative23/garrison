@@ -246,7 +246,9 @@ settings, runs a maintenance action from the keyboard, follows one whose
 result is uncertain, which must be a warning to axe and the accessibility
 tree, and signs out. It makes requests fail and checks what the pages say: a start of an action
 that is refused and one whose answer is lost, a status refresh, a search,
-a refresh without an answer over the rows a list keeps, a theme the
+a refresh without an answer over the rows a list keeps, a coverage of the
+event history that cannot be read, whose notice must be a warning to axe
+and the accessibility tree above the events still listed, a theme the
 header's button could not save and a look at a job (with the page's clock
 moved on), and answers
 over HTTP/2, which carries no status text, through the proxy of

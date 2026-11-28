@@ -3,7 +3,7 @@
 // in Recent jobs shows it, never in the calm tile of a success.
 import AxeBuilder from "@axe-core/playwright";
 
-const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"];
+export const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"];
 
 /** `page` is the flows' signed-in tab; `index` the action's place in the catalog. */
 export async function uncertainResult(shared, page, index) {

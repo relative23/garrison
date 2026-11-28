@@ -1,9 +1,13 @@
 // What the pages say when a request fails, in the flows (flows.mjs): a status
 // refresh, a search, a refresh without an answer over the rows it keeps, a
-// theme the header's button could not save and a look at a job, with the
-// page's clock moved on, and answers over HTTP/2, which carries no status
-// text, through the proxy of `npm run measure`.
+// coverage of the event history that cannot be read, a theme the header's
+// button could not save and a look at a job, with the page's clock moved on,
+// and answers over HTTP/2, which carries no status text, through the proxy
+// of `npm run measure`.
+import AxeBuilder from "@axe-core/playwright";
+
 import { startHttp2 } from "./http2.mjs";
+import { AXE_TAGS } from "./jobs.mjs";
 
 /** Whether `wait` ends within its timeout. */
 const within = (wait) =>
@@ -81,6 +85,37 @@ export async function failingRequests(shared, catalog) {
     expect((await rows.count()) === listed, "the rows read before stay under the warning");
     await later.unroute("**/api/events?**");
     failing.clear();
+
+    at("a coverage that cannot be read");
+    // What the history covers is asked for with each of its pages. Without
+    // an answer the page cannot say whether events are missing, and says
+    // that above the events it still lists.
+    failing.add("503 /api/coverage");
+    await later.route("**/api/coverage", unavailable);
+    await later.goto(`${origin}/admin/logs`);
+    const unknown = later.getByRole("status").filter({ hasText: "Completeness unknown" });
+    await unknown.waitFor();
+    const read = await unknown.ariaSnapshot();
+    expect(
+      read.startsWith("- status") &&
+        read.includes(
+          "Completeness unknown: what the event history covers could not be read, so this page cannot say whether events are missing.",
+        ) &&
+        read.includes("Authorization is temporarily unavailable") &&
+        read.includes('button "Try again"'),
+      `the notice of a coverage that could not be read reads ${JSON.stringify(read)}`,
+    );
+    expect(/\bbg-warning-background\b/.test((await unknown.getAttribute("class")) ?? ""), "the notice is a warning");
+    await rows.first().waitFor();
+    expect((await rows.count()) > 0, "the events are listed under the notice");
+    const { violations } = await new AxeBuilder({ page: later }).withTags(AXE_TAGS).analyze();
+    for (const violation of violations) expect(false, `axe with a coverage that could not be read: ${violation.id}, ${violation.help}`);
+    // Asked again and answered, the notice gives way to what the history covers.
+    await later.unroute("**/api/coverage");
+    failing.clear();
+    await unknown.getByRole("button", { name: "Try again" }).click();
+    await later.getByText(/^Recording since /).waitFor();
+    expect((await unknown.count()) === 0, "an answered coverage takes the notice away");
 
     at("a theme that could not be saved");
     for (const [answer, said] of [
