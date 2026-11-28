@@ -361,6 +361,8 @@ mod history_tests;
 #[cfg(test)]
 mod many_tests;
 #[cfg(test)]
+mod milter_tests;
+#[cfg(test)]
 pub(super) mod tests;
 #[cfg(test)]
 mod work_tests;
