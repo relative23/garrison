@@ -185,7 +185,6 @@ impl Runner for SystemdRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::{Mutex, MutexGuard, PoisonError};
 
     use super::*;
@@ -212,9 +211,7 @@ mod tests {
                 "#!/bin/sh\necho \"$*\" >> '{}'\nif [ \"$1\" = show ]; then printf '{state}'; exit {show_code}; fi\nsleep {seconds}\nexit {code}\n",
                 log.display()
             );
-            let program = directory.path().join("systemctl");
-            std::fs::write(&program, script).unwrap();
-            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            garrison_testing::write_program(&directory.path().join("systemctl"), &script);
             FakeSystemctl { directory }
         }
 

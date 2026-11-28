@@ -1,7 +1,6 @@
 //! restic and borg as stand-ins that answer as the real ones do and note
 //! how they were called, and what the tests read of a report.
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -85,9 +84,7 @@ impl Tools {
     pub(super) fn new() -> Tools {
         let directory = tempfile::tempdir().unwrap();
         for name in ["restic", "borg"] {
-            let path = directory.path().join(name);
-            std::fs::write(&path, STAND_IN).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            garrison_testing::write_program(&directory.path().join(name), STAND_IN);
         }
         Tools { directory }
     }

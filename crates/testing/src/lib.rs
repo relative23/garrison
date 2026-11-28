@@ -110,6 +110,29 @@ pub fn write_private(path: &Path, data: &[u8]) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
 }
 
+/// A program at `path` for a test to run: the script `text`, mode 755.
+///
+/// A shell of its own writes the file, never the test: a child that another
+/// test thread starts while the test holds a file open for writing keeps a
+/// copy of that descriptor until it runs its program, and the kernel
+/// refuses to run a file that is open for writing ("Text file busy"). No
+/// descriptor of the test's own process ever writes the file.
+pub fn write_program(path: &Path, text: &str) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut writer = Command::new("/bin/sh")
+        .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
+        .arg(path)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = writer.stdin.take().unwrap();
+    input.write_all(text.as_bytes()).unwrap();
+    drop(input);
+    assert!(writer.wait().unwrap().success());
+}
+
 /// The test access policy: native role `v` grants the viewer
 /// profile (no actions), role `e` the administrator profile (both actions).
 pub fn policy_document() -> Value {
