@@ -97,8 +97,19 @@ fn without_journals(folder: &Path, database: Database) {
     }
 }
 
+/// The sessions end with a web database that goes: Stalwart is asked to
+/// revoke their tokens first (`sessions`), and how that went is said.
+fn end_sessions(config: &Config, database: Database) {
+    if database == Database::Web
+        && let Some(said) = super::sessions::end(config)
+    {
+        crate::say(&said.to_string());
+    }
+}
+
 /// Put the backup's copy of `database` in the place of the live file.
 fn put_back(config: &Config, database: Database, copy: &Path) -> Step {
+    end_sessions(config, database);
     let destination = config.database(database);
     let Some(folder) = destination.parent() else {
         return Ok(());
@@ -119,6 +130,7 @@ fn take_away(config: &Config, database: Database) -> Step {
     if fs::symlink_metadata(&destination).is_err() {
         return Ok(());
     }
+    end_sessions(config, database);
     if let Some(folder) = destination.parent() {
         without_journals(folder, database);
     }

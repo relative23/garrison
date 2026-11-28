@@ -25,6 +25,7 @@ mod restore;
 mod rollback;
 mod selinux;
 mod services;
+mod sessions;
 mod settle;
 #[cfg(test)]
 mod stand_in;

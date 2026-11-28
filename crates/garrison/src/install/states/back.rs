@@ -112,6 +112,9 @@ states! {
     pub(crate) fn policy_unknown(settings: &Path, error: impl Display) = "install-policy-unknown":
         "{} does not load, so an access policy it names outside {CONFIG} is not removed \
          ({error}); remove it yourself if there is one.", settings.display();
+    pub(crate) fn sessions_unread(database: &Path, why: &str) = "install-sessions-unread":
+        "The sessions in {} could not be read ({why}): their tokens are not revoked and serve \
+         until they expire at Stalwart.", database.display();
     pub(crate) fn needs_unshare(unshare: &str) = "install-needs-unshare":
         "{unshare} (util-linux) is needed to test nginx without Garrison's snippets; nothing \
          was changed";
@@ -151,4 +154,34 @@ pub(crate) fn policy_unreachable(target: &Path, error: impl Display) -> State {
         format_args!("broker.policy names {}", target.display()),
         error,
     )
+}
+
+/// Stalwart revoked the token of each of the `count` sessions that a
+/// restore, a rollback with the state or a purge ends.
+pub(crate) fn sessions_revoked(count: usize) -> State {
+    let text = if count == 1 {
+        "Stalwart revoked the token of the session that ends with this.".to_owned()
+    } else {
+        format!("Stalwart revoked the tokens of the {count} sessions that end with this.")
+    };
+    State::new("install-sessions-revoked", text)
+}
+
+/// Stalwart did not take the revocation of `left` of `all` such sessions'
+/// tokens; `why`: what it answered, or that it did not.
+pub(crate) fn sessions_unrevoked(left: usize, all: usize, why: impl Display) -> State {
+    let text = if all == 1 {
+        format!(
+            "Stalwart did not take the revocation of the token of the session that ends with \
+             this ({why}): it serves until it expires there, an hour after its sign-in by \
+             Stalwart's default."
+        )
+    } else {
+        format!(
+            "Stalwart did not take the revocation of the tokens of {left} of the {all} sessions \
+             that end with this ({why}): they serve until they expire there, an hour after \
+             their sign-in by Stalwart's default."
+        )
+    };
+    State::new("install-sessions-unrevoked", text)
 }

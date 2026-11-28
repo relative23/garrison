@@ -29,6 +29,9 @@ const NGINX: &str = "/usr/sbin/nginx";
 const UNSHARE: &str = "/usr/bin/unshare";
 /// The copy of nginx's snippets that its test runs over: root's; the
 /// installer's lock keeps a second run out.
+/// The web service's database as the installer's configuration places it:
+/// where a configuration that does not load cannot say.
+const WEB_DATABASE: &str = "/var/lib/garrison/web/web.sqlite";
 const NGINX_CHECK: &str = "/run/garrison-uninstall.check";
 
 /// Something the uninstallation removes.
@@ -128,6 +131,19 @@ fn policy_unknown(settings: &Path) -> Option<State> {
     }
     let error = garrison_core::config::load(settings).err()?;
     Some(states::policy_unknown(settings, error))
+}
+
+/// A purge removes the web service's database and with it every session:
+/// Stalwart is asked to revoke their tokens first (`sessions`). Where
+/// `settings` does not load, there is no telling where Stalwart is, which
+/// is said for a database that is there.
+fn sessions_ended(settings: &Path, database: &Path) -> Option<State> {
+    match garrison_core::config::load(settings) {
+        Ok(config) => super::sessions::end(&config),
+        Err(error) => database
+            .exists()
+            .then(|| states::sessions_unread(database, &error.to_string())),
+    }
 }
 
 /// The installer's own backups, told as housekeeping tells them, and the
@@ -257,9 +273,17 @@ fn uninstall(purge: bool, dry_run: bool) -> Step {
         }
         return Ok(());
     }
+    let settings = Path::new(CONFIG).join("garrison.toml");
     for item in &items {
         announce(&format!("Removing {}", item.describe()));
         remove(item)?;
+        // The services are stopped, and their state goes next.
+        if purge
+            && matches!(item, Item::Units)
+            && let Some(said) = sessions_ended(&settings, Path::new(WEB_DATABASE))
+        {
+            crate::say(&said.to_string());
+        }
     }
     if let Some(unknown) = &unknown {
         announce(&unknown.to_string());

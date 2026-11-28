@@ -113,6 +113,15 @@ impl std::fmt::Debug for Session {
     }
 }
 
+/// The token of every session in a web database, of an ended one that
+/// waits for its revocation too: for the installer, which has Stalwart
+/// revoke them before it replaces or removes the database, while the web
+/// service that revokes a session's token at its end is stopped.
+pub fn tokens(db: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut statement = db.prepare("SELECT token FROM sessions")?;
+    statement.query_map([], |row| row.get(0))?.collect()
+}
+
 /// What a new session records.
 pub struct NewSession<'a> {
     pub subject: &'a str,

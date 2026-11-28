@@ -104,6 +104,12 @@ Notable changes for operators and users. The format follows
   its rate limit, where both read "did not answer". What a revocation's
   answer cannot tell is in the
   [security model](docs/architecture/security.md#known-limits).
+- `garrison restore`, a rollback with `--restore-state` and `garrison
+  uninstall --purge` have Stalwart revoke the tokens of the sessions they
+  end. They replace or remove the web service's database, which ended every
+  session without a revocation, so each token served on until it expired.
+  The commands say how many were revoked, and which Stalwart did not take
+  ([backup and restore](docs/operator/operations.md#backup-and-restore)).
 
 ## [0.3.1] - 2026-11-27
 

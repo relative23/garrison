@@ -261,6 +261,15 @@ Access policy not usable: broker.policy is /home/admin/access.json, under /home.
 /etc/garrison/garrison.toml does not load, so an access policy it names outside /etc/garrison is not removed (unknown field `nonsense`); remove it yourself if there is one. [install-policy-unknown]
 ```
 ```text
+Stalwart revoked the tokens of the 3 sessions that end with this. [install-sessions-revoked]
+```
+```text
+Stalwart did not take the revocation of the tokens of 2 of the 3 sessions that end with this (Stalwart is unavailable): they serve until they expire there, an hour after their sign-in by Stalwart's default. [install-sessions-unrevoked]
+```
+```text
+The sessions in /var/lib/garrison/web/web.sqlite could not be read (file is not a database): their tokens are not revoked and serve until they expire at Stalwart. [install-sessions-unread]
+```
+```text
 /usr/bin/unshare (util-linux) is needed to test nginx without Garrison's snippets; nothing was changed [install-needs-unshare]
 ```
 ```text

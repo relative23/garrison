@@ -156,6 +156,46 @@ fn the_whole_state_goes_back_and_what_did_not_exist_is_removed() {
     assert_eq!(note(&config.database(Database::Jobs)), "kept");
 }
 
+/// The sessions end with the web database that a restore replaces: Stalwart
+/// is asked to revoke their tokens, and then the copy, which holds none as
+/// every backup's, takes its place.
+#[test]
+fn the_sessions_tokens_are_revoked_before_the_web_database_is_replaced() {
+    use garrison_testing::http::{answer, serve};
+    use garrison_web::store::{NewSession, WebStore};
+
+    let directory = tempfile::tempdir().unwrap();
+    let stalwart = serve(vec![answer(200, "")]);
+    let config = garrison_testing::config(&directory.path().join("state"), &stalwart.url);
+    let backup = directory.path().join("backup");
+    let copy = copy_of(&backup, Database::Web);
+    fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    drop(WebStore::open(&copy).unwrap());
+    let live = WebStore::open(&config.database(Database::Web)).unwrap();
+    let session = NewSession {
+        subject: "1",
+        email: "admin@example.test",
+        token: "token-0123456789abcdef",
+        client_ip: None,
+        lifetime: 1800,
+    };
+    live.create(&session).unwrap();
+    drop(live);
+    let mut restored = Returned::default();
+    restore_all(&backup, &config, own(), &mut restored).unwrap();
+    assert_eq!(restored.back, ["web"]);
+    let asked = stalwart.requests().remove(0);
+    assert!(
+        asked.starts_with("POST /auth/revoke ") && asked.contains("token=token-0123456789abcdef&"),
+        "{asked}"
+    );
+    let sessions: i64 = Connection::open(config.database(Database::Web))
+        .unwrap()
+        .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(sessions, 0);
+}
+
 /// The policy goes back only as a file of its own: a link that
 /// `broker.policy` names stays as it is, and so does what it points to.
 #[test]

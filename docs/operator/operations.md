@@ -111,7 +111,13 @@ copies the state as it finds it first; the copy its first run made keeps
 the state from before it.
 
 A backup holds neither sessions nor credentials. After a restore everyone
-signs in again. On a new host, restore `/etc/garrison` from your host backup
+signs in again: the sessions end with the database that is replaced, and
+the restore has Stalwart revoke their tokens first, as the web service does
+when a session ends. It says how that went (`install-sessions-revoked`);
+where Stalwart did not take a revocation (`install-sessions-unrevoked`), the
+token serves until it expires there, an hour after its sign-in by
+Stalwart's default. A rollback with `--restore-state` and
+`garrison uninstall --purge` do the same. On a new host, restore `/etc/garrison` from your host backup
 first; where `/etc/garrison/credentials` is lost, `garrison stalwart setup`
 makes new keys in Stalwart and here, before or after the restore. It also
 makes new ones where Stalwart no longer knows the keys of the files, as

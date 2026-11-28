@@ -179,3 +179,22 @@ fn a_purge_takes_only_the_files_of_a_policy_kept_elsewhere() {
     let gone = paths(&plan(root, true, false, Path::new("/srv/data")), root);
     assert!(!gone.iter().any(|path| path.starts_with("srv")), "{gone:?}");
 }
+
+#[test]
+fn a_purge_without_a_configuration_says_that_the_sessions_tokens_stay() {
+    let directory = tempfile::tempdir().unwrap();
+    let settings = directory.path().join("garrison.toml");
+    fs::write(&settings, "nonsense = [").unwrap();
+    let database = directory.path().join("web.sqlite");
+    // No database, no session.
+    assert_eq!(sessions_ended(&settings, &database), None);
+    fs::write(&database, "").unwrap();
+    let said = sessions_ended(&settings, &database).unwrap().to_string();
+    assert!(
+        said.starts_with(&format!(
+            "The sessions in {} could not be read (",
+            database.display()
+        )) && said.ends_with("[install-sessions-unread]"),
+        "{said}"
+    );
+}

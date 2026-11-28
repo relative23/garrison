@@ -69,6 +69,12 @@ pub(super) fn places() -> Rows {
             Path::new("/etc/garrison/garrison.toml"),
             "unknown field `nonsense`",
         ),
+        sessions_revoked(3),
+        sessions_unrevoked(2, 3, "Stalwart is unavailable"),
+        sessions_unread(
+            Path::new("/var/lib/garrison/web/web.sqlite"),
+            "file is not a database",
+        ),
         needs_unshare("/usr/bin/unshare"),
         nginx_invalid("nginx: [emerg] open() \"/etc/nginx/snippets/garrison.conf\" failed"),
     ]
