@@ -167,9 +167,15 @@ fn host_resources_come_from_proc_files() {
         .observations
         .remove(0);
     assert_eq!(without.state, State::Warning);
+    // What runs short, which makes the warning, comes before it.
+    let place = |text: &str| without.findings.iter().position(|finding| finding == text);
+    let short = place("Less than 10% of the memory is available.");
+    let unread = place("uptime could not be read: No such file or directory (os error 2).");
     assert_eq!(
-        without.findings[0],
-        "uptime could not be read: No such file or directory (os error 2)."
+        short.zip(unread).map(|(short, unread)| short < unread),
+        Some(true),
+        "{:?}",
+        without.findings
     );
     assert_eq!(value_of(&without, "Uptime"), &Value::Null);
     assert_eq!(

@@ -110,6 +110,12 @@ Notable changes for operators and users. The format follows
   session without a revocation, so each token served on until it expired.
   The commands say how many were revoked, and which Stalwart did not take
   ([backup and restore](docs/operator/operations.md#backup-and-restore)).
+- Three more cards say first what made them a warning or failed, which is
+  what a notification carries: the host's resources named a file that
+  could not be read before the memory or disk that ran short, and a job's
+  receipt and the backup repository named an age that alone is a warning
+  before the failed result or the failed integrity check. A test now holds
+  the rule over every card of the host checks, as over the others.
 
 ## [0.3.1] - 2026-11-27
 

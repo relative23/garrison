@@ -156,12 +156,14 @@ fn memory_short(total: Option<u64>, available: Option<u64>) -> Option<bool> {
     Some(ratio(available?, total?) < 0.1)
 }
 
-/// The card's state and findings: why a source could not be read, first,
-/// in the order of the sources, and then what runs short. A source that
-/// could not be read, or memory that is not judged, leaves the card Partial
-/// where it would be in order, and Unknown where no source could be read.
+/// The card's state and findings: what runs short, first, since that makes
+/// the card a warning and a notification carries the first finding, and
+/// then why a source could not be read, in the order of the sources. A
+/// source that could not be read, or memory that is not judged, leaves the
+/// card Partial where it would be in order, and Unknown where no source
+/// could be read.
 fn judged(reading: &Reading) -> (State, Vec<String>) {
-    let mut findings: Vec<String> = [
+    let unread: Vec<String> = [
         reading.memory.as_ref().err(),
         reading.load.as_ref().err(),
         reading.uptime.as_ref().err(),
@@ -171,16 +173,19 @@ fn judged(reading: &Reading) -> (State, Vec<String>) {
     .flatten()
     .cloned()
     .collect();
-    let none_read = findings.len() == 4;
+    let none_read = unread.len() == 4;
     let (total, available) = reading.memory.as_ref().map_or((None, None), memory);
     let short_disk = reading.disk.as_ref().is_ok_and(disk_short);
     let short_memory = memory_short(total, available);
+    let mut findings = Vec::new();
     if short_disk {
         findings.push("Less than 15% of the disk is free.".to_owned());
     }
     if short_memory == Some(true) {
         findings.push("Less than 10% of the memory is available.".to_owned());
-    } else if short_memory.is_none() && reading.memory.is_ok() {
+    }
+    findings.extend(unread);
+    if short_memory.is_none() && reading.memory.is_ok() {
         let missing = if total.is_none() {
             "MemTotal"
         } else {

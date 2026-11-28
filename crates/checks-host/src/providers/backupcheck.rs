@@ -197,18 +197,22 @@ impl BackupCheck {
             })
     }
 
+    /// `failed` counts the findings that make the card failed, which come
+    /// first, before one that alone would make it a warning: a notification
+    /// carries the first finding.
     fn judged(
         context: &Context<'_>,
         what: &str,
         run: Option<&Run>,
         days: i64,
-        state: &mut State,
+        (state, failed): (&mut State, &mut usize),
         findings: &mut Vec<String>,
     ) {
         match run {
             Some(run) if !run.ok => {
                 *state = State::Failed;
-                findings.push(format!("The last {what} failed: {}.", run.detail));
+                findings.insert(*failed, format!("The last {what} failed: {}.", run.detail));
+                *failed += 1;
             }
             Some(run) if days > 0 => {
                 let age = time::parse(&run.at).map(|at| context.now.as_second() - at.as_second());
@@ -358,9 +362,11 @@ impl Provider for BackupCheck {
         };
         let mut state = State::Ok;
         let mut findings = Vec::new();
+        let mut failed = 0;
         match (&report.snapshots, &report.problem) {
             (_, Some(problem)) => {
                 state = State::Failed;
+                failed = 1;
                 findings.push(format!(
                     "{} could not list the repository: {problem}.",
                     self.tool.name()
@@ -375,6 +381,7 @@ impl Provider for BackupCheck {
                 let newest = snapshots.newest.as_deref();
                 if let Some((by_time, finding)) = self.by_time(context, newest, listed, noun) {
                     state = by_time;
+                    failed = usize::from(by_time == State::Failed);
                     findings.push(finding);
                 }
             }
@@ -384,7 +391,7 @@ impl Provider for BackupCheck {
             "integrity check",
             report.verify.as_ref(),
             self.verify_days,
-            &mut state,
+            (&mut state, &mut failed),
             &mut findings,
         );
         Self::judged(
@@ -392,7 +399,7 @@ impl Provider for BackupCheck {
             "test restore",
             report.restore.as_ref(),
             self.restore_days,
-            &mut state,
+            (&mut state, &mut failed),
             &mut findings,
         );
         // A time the card would judge that does not read leaves its age, and

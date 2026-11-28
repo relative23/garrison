@@ -41,7 +41,7 @@ impl Runner for Missing {
 }
 
 /// Answers a command that begins with one of its prefixes with that output.
-struct Answers(Vec<(&'static str, &'static str)>);
+pub(super) struct Answers(pub(super) Vec<(&'static str, &'static str)>);
 
 impl Runner for Answers {
     fn run(&self, arguments: &[&str]) -> io::Result<Output> {

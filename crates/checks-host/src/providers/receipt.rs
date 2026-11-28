@@ -371,6 +371,9 @@ impl Receipt {
         let reported = self.reported(&document, items.as_deref());
         let mut findings = Vec::new();
         let mut state = State::Ok;
+        // What makes the card failed comes first, before an age that alone
+        // would make it a warning: a notification carries the first finding.
+        let mut failed = 0;
         let age = reported.map(|written| context.seconds_since(written.instant));
         if let Some((by_age, finding)) = self.by_age(age) {
             state = by_age;
@@ -382,7 +385,8 @@ impl Receipt {
             .is_some_and(|condition| !condition.holds(&document))
         {
             state = State::Failed;
-            findings.push("The recorded result is not a success.".to_owned());
+            findings.insert(failed, "The recorded result is not a success.".to_owned());
+            failed += 1;
         }
         let rows_fail = self
             .ok_rows
@@ -390,7 +394,8 @@ impl Receipt {
             .is_some_and(|condition| items.iter().flatten().any(|item| !condition.holds(item)));
         if rows_fail {
             state = State::Failed;
-            findings.push("At least one recorded result is not a success.".to_owned());
+            let rows = "At least one recorded result is not a success.";
+            findings.insert(failed, rows.to_owned());
         }
         // Rows that cannot be read are no rows in order.
         if let Some((at_most, finding)) = self.unread_rows(&document) {
