@@ -95,6 +95,7 @@ fn milter_webhook(lab: &mut Lab, host: &str, port: u16) {
         "milter.timeout",
         "milter.io-error",
         "milter.disconnected",
+        "milter.frame-too-large",
     ]
     .into_iter()
     .map(|name| (name.to_owned(), json!(true)))
@@ -209,6 +210,69 @@ fn stalwart_records_what_a_milter_answered() {
                 .contains(kind)
             }),
         "{types:?}"
+    );
+}
+
+/// A milter on `host` that answers Stalwart's first frame with one said to
+/// be 64 MiB long, of which nothing follows.
+fn oversized_milter(host: &str) -> u16 {
+    let listener = TcpListener::bind((host, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            std::thread::spawn(move || {
+                let _ = garrison_testing::milter::read(&mut stream);
+                let _ = stream.write_all(&[0x04, 0, 0, 0, b'O']);
+                // Held open: the answer's length alone is what Stalwart refuses.
+                std::thread::sleep(Duration::from_secs(8));
+            });
+        }
+    });
+    port
+}
+
+/// A milter whose answer is larger than Stalwart reads: Stalwart defers the
+/// message where the entry has `tempFailOnError` and records one event of a
+/// type of its own, with the size the answer announced as a number and
+/// nothing of the answer itself. No other milter event comes with it, so
+/// the card counts the type apart and warns of it.
+#[test]
+#[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
+fn stalwart_records_a_milter_answer_that_is_too_large_by_its_size_alone() {
+    let _one = one_at_a_time();
+    let mut lab = Lab::from_environment();
+    let smtp = std::env::var("GARRISON_LAB_SMTP").expect("GARRISON_LAB_SMTP");
+    let callback = std::env::var("GARRISON_LAB_CALLBACK_HOST").expect("GARRISON_LAB_CALLBACK_HOST");
+    let (hook, events) = webhook(&callback);
+    milter_webhook(&mut lab, &callback, hook);
+    let port = oversized_milter(&callback);
+    milter_entry(&mut lab, &callback, port);
+    let (said, arrived) = recorded(&smtp, &events, "an answer of 64 MiB");
+    let seen = Value::Array(arrived.clone());
+    assert!(said.starts_with("451"), "{said}; {seen}");
+    let types: Vec<&str> = arrived
+        .iter()
+        .filter_map(|event| event["type"].as_str())
+        .collect();
+    assert_eq!(types, ["milter.frame-too-large"], "{seen}");
+    let data = arrived[0]["data"].as_object().unwrap();
+    assert_eq!(data["details"], json!(67_108_864), "{seen}");
+    let mut fields: Vec<&str> = data.keys().map(String::as_str).collect();
+    fields.sort_unstable();
+    assert_eq!(
+        fields,
+        [
+            "details",
+            "elapsed",
+            "listenerId",
+            "localPort",
+            "name",
+            "remoteIp",
+            "remotePort",
+            "spanId"
+        ],
+        "{seen}"
     );
 }
 

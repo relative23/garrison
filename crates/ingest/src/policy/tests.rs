@@ -86,7 +86,7 @@ fn the_event_lists_are_disjoint_and_never_forbidden() {
     let mut unique = all.clone();
     unique.dedup();
     assert_eq!(unique.len(), all.len());
-    assert_eq!(all.len(), 127);
+    assert_eq!(all.len(), 128);
     assert!(FORBIDDEN_EVENTS.iter().all(|event| !is_recorded(event)));
     assert!(is_recorded("smtp.ehlo") && !is_recorded("smtp.raw-input"));
     // A name is recorded as a whole: no part of one, nothing longer.
@@ -107,7 +107,7 @@ fn the_event_lists_are_disjoint_and_never_forbidden() {
         assert!(kind.as_str().starts_with(kind.category()));
     }
     let names: std::collections::BTreeSet<&str> = event_types().into_iter().collect();
-    assert_eq!((names.len(), EventType::ALL.len()), (127, 127));
+    assert_eq!((names.len(), EventType::ALL.len()), (128, 128));
     assert_eq!(EventType::QueueRescheduled.as_str(), "queue.rescheduled");
     assert_eq!(EventType::MtaHookActionReject.category(), "mta-hook");
     assert_eq!(category("message-ingest.spam"), "message-ingest");
@@ -180,5 +180,26 @@ fn of_a_check_of_the_sender_the_outcome_is_kept_and_not_what_it_looked_at() {
     assert_eq!(
         Value::Object(select_fields(EventType::DeliveryConnect, &other)),
         json!({})
+    );
+}
+
+/// A milter's answer that is larger than Stalwart reads, as Stalwart 1.2.1
+/// sends it (measured): the size the answer announced is kept, which
+/// `details` holds as a number, and the milter's entry in Stalwart's own
+/// words is not.
+#[test]
+fn a_milter_answer_that_is_too_large_keeps_the_size_it_announced() {
+    let sent = json!({
+        "spanId": 342_984_699_454_438_912_u64, "name": "MtaMilter with id jqugym9llgaa",
+        "details": 67_108_864, "elapsed": 0, "listenerId": "smtp", "localPort": 25,
+        "remoteIp": "172.17.0.3", "remotePort": 43540,
+    });
+    assert_eq!(
+        Value::Object(select_fields(EventType::MilterFrameTooLarge, &sent)),
+        json!({
+            "spanId": "342984699454438912", "details": 67_108_864, "elapsed": 0,
+            "listenerId": "smtp", "localPort": 25, "remoteIp": "172.17.0.3",
+            "remotePort": 43540,
+        })
     );
 }

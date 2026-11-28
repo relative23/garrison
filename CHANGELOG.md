@@ -6,6 +6,14 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The card "Milter verdicts" counts and warns of a milter answer that is
+  larger than Stalwart reads.** Stalwart then defers the mail or lets it pass
+  unscanned, as the milter's entry says, and recorded nothing the card
+  counted: a scanner that answered so let the card stay in order. Stalwart
+  sends the event once `garrison stalwart setup` has run with this release.
+
 ### Fixed
 
 - A resolver that sends its answer over TCP an octet now and then no longer

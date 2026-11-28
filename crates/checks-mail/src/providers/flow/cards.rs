@@ -212,8 +212,12 @@ impl Flow {
         let unreached: Vec<u64> = (0..week.days.len())
             .map(|day| NOT_REACHED.iter().map(|kind| week.of(kind)[day]).sum())
             .collect();
+        // An answer larger than Stalwart reads (its `maxResponseSize`) is
+        // no verdict either, and no other event comes with it (measured
+        // with Stalwart 1.2.1).
+        let oversized = week.of("milter.frame-too-large");
         let all = [
-            &accepted, &rejected, &discarded, &deferred, &replied, &unreached,
+            &accepted, &rejected, &discarded, &deferred, &replied, &unreached, &oversized,
         ];
         if read.problem.is_none() && all.iter().all(|days| days.iter().all(|count| *count == 0)) {
             return Ok(());
@@ -227,6 +231,15 @@ impl Flow {
                 "The milter could not be reached {unreached_lately} times since yesterday. What \
                  Stalwart does with mail then, defer it or let it pass unscanned, is the milter's \
                  setting there."
+            ));
+        }
+        let oversized_lately = recent(&oversized);
+        if oversized_lately > 0 {
+            findings.push(format!(
+                "A milter answered {oversized_lately} times since yesterday with more than \
+                 Stalwart reads of an answer, so it gave no verdict for that mail. What Stalwart \
+                 does with mail then, defer it or let it pass unscanned, is the milter's setting \
+                 there."
             ));
         }
         // A deferral is no verdict: where a milter deferred every message,
@@ -260,6 +273,7 @@ impl Flow {
                     json!(deferred[day]),
                     json!(replied[day]),
                     json!(unreached[day]),
+                    json!(oversized[day]),
                 ]
             })
             .collect();
@@ -271,7 +285,7 @@ impl Flow {
                  Stalwart's event does not say which.",
             )
             .with_table(Table {
-                columns: ["Day", "Accepted", "Rejected", "Discarded", "Deferred", "Own reply", "Not reached"]
+                columns: ["Day", "Accepted", "Rejected", "Discarded", "Deferred", "Own reply", "Not reached", "Answer too large"]
                     .iter()
                     .enumerate()
                     .map(|(index, label)| column(label, if index == 0 { Format::Text } else { Format::Number }))

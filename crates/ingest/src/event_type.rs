@@ -158,6 +158,7 @@ event_types! {
     MilterActionShutdown => "milter.action-shutdown",
     MilterActionTempFail => "milter.action-temp-fail",
     MilterDisconnected => "milter.disconnected",
+    MilterFrameTooLarge => "milter.frame-too-large",
     MilterIoError => "milter.io-error",
     MilterTimeout => "milter.timeout",
     MilterTlsInvalidName => "milter.tls-invalid-name",

@@ -158,6 +158,9 @@
  "milter.disconnected": {
   "label": "Milter disconnected"
  },
+ "milter.frame-too-large": {
+  "label": "Milter frame too large"
+ },
  "milter.io-error": {
   "label": "Milter I/O error"
  },
