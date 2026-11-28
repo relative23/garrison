@@ -225,7 +225,7 @@ fn setup_is_idempotent_and_access_init_finds_the_administrators() {
     for line in [
         "- created API key 'garrison broker'",
         "- created API key 'garrison collector'",
-        "webhook -> http://127.0.0.1:9/webhook (127 event types)",
+        "webhook -> http://127.0.0.1:9/webhook (129 event types)",
         "- Stalwart accepts both API keys from this host",
     ] {
         assert!(output.contains(line), "{output}");
