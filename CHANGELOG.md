@@ -6,6 +6,8 @@ Notable changes for operators and users. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-28
+
 ### Upgrade notes
 
 - **Run `garrison stalwart setup` again after the upgrade.** The webhook then
@@ -803,7 +805,8 @@ The first release.
 - **Releases.** Reproducible static archives for x86_64 and aarch64, each
   with the third-party notices and a CycloneDX SBOM.
 
-[Unreleased]: https://github.com/relative23/garrison/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/relative23/garrison/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/relative23/garrison/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/relative23/garrison/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/relative23/garrison/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/relative23/garrison/compare/v0.2.0...v0.2.1
