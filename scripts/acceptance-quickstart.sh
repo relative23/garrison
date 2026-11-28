@@ -349,6 +349,36 @@ check "doctor: Stalwart takes both new keys, and nothing else is wrong" \
     'test "$(grep -c -F "[doctor-key-taken]" /root/doctor-rotated.log)" = 2 &&
         ! grep "^FAIL" /root/doctor-rotated.log | grep -vF "[doctor-origin-placeholder]" | grep -q .'
 
+step "A sign-in whose profiles grant no module this installation offers"
+# The installation offers the antivirus page beside the dashboard and the
+# services, which are always on, and every profile names the logs alone.
+# Stalwart signs the administrator in as before; Garrison refuses the
+# session, and its journals say why.
+inside "cp -p /etc/garrison/garrison.toml /root/garrison.toml.offered &&
+    cp -p /etc/garrison/access-policy.json /root/access-policy.offered &&
+    $garrison modules --set antivirus --yes > /root/modules.log 2>&1"
+inside_input 'python3 -' <<'POLICY'
+import json
+path = "/etc/garrison/access-policy.json"
+policy = json.load(open(path))
+for profile in policy["profiles"].values():
+    profile["modules"], profile["actions"] = ["logs"], []
+json.dump(policy, open(path, "w"))
+POLICY
+check "the configuration and the policy are accepted" "$garrison check-config"
+inside 'systemctl restart garrison-broker garrison-web'
+once "Stalwart signs the administrator in, and Garrison gives no session" \
+    'python3 /root/signed-in.py once 2>/dev/null | grep -qx "sign-in failed: 401 for /api/actions"'
+check "the web service's journal says that the authorization refused the sign-in, and the broker's why" \
+    'journalctl -u garrison-web -b --no-pager -o cat | grep -q "Sign-in rejected by authorization (HTTP 403" &&
+        journalctl -u garrison-broker -b --no-pager -o cat |
+            grep -q "Garrison access denied: This identity.s profiles grant no module this installation offers"'
+inside 'cat /root/garrison.toml.offered > /etc/garrison/garrison.toml &&
+    cat /root/access-policy.offered > /etc/garrison/access-policy.json &&
+    systemctl restart garrison-broker garrison-web'
+once "with the modules and the profiles as before, the administrator signs in again" \
+    'python3 /root/signed-in.py once | grep -qx "signed in"'
+
 clock_ahead_and_back
 
 step "Accepted: the quick start sets Garrison up against Stalwart and nothing is left to fix"
