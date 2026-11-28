@@ -52,6 +52,40 @@ fn a_key_stalwart_does_not_know_or_refuses_here_names_no_account() {
     }
 }
 
+/// A key that Stalwart does not know names no account. Where the
+/// administrator's own account holds no key of the description either, one
+/// that is still valid may be another administrator's, where no run as this
+/// one finds it: the line of the new key says so, and what to do. Where the
+/// administrator's own holds one, that one is replaced, and nothing is to
+/// say.
+#[test]
+fn a_key_stalwart_does_not_know_may_have_left_one_in_another_account() {
+    let said = |own: &[&str]| {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join(tests::COLLECTOR.file);
+        garrison_testing::write_private(&file, format!("{OLD}\n").as_bytes());
+        let server = serve(vec![listed("b", own), answer(401, "{}")]);
+        let admin = Admin {
+            url: format!("{}/jmap/", server.url),
+            authorization: "Bearer admin".to_owned(),
+        };
+        let found = find(&admin, directory.path(), &[&tests::COLLECTOR], false).unwrap();
+        server.requests();
+        found[0].made.replace(&file.display().to_string(), "FILE")
+    };
+    assert_eq!(
+        said(&[]),
+        "Stalwart did not know the API key in FILE; made a new one. Where another \
+         administrator's account holds a key 'garrison collector', as after this folder was \
+         put back from before a rotation, it is valid there still: run setup once as that \
+         administrator, or remove the key in the Stalwart WebUI"
+    );
+    assert_eq!(
+        said(&["k"]),
+        "Stalwart did not know the API key in FILE; made a new one"
+    );
+}
+
 /// A user without administrator rights is not shown the account that an
 /// administrator's key belongs to, which Stalwart answers accountNotFound
 /// (measured on Stalwart 1.2.0): setup says to run it as an administrator,
@@ -83,8 +117,9 @@ fn an_account_the_administrator_may_not_see_is_said_as_such() {
 /// The keys setup makes are the administrator's, and another administrator
 /// lists only its own account's. The account the file's key belongs to is
 /// asked as well: its key is kept and updated there, and a rotation, or a
-/// file that others may read, replaces it with one in the administrator's
-/// own account and removes it from the other one.
+/// file that others may read, replaces it with one made in that account and
+/// removes the old one from it. Garrison's keys stay in the account that
+/// got them first, whoever runs setup.
 #[test]
 fn the_keys_another_administrator_made_are_kept_or_replaced_in_its_account() {
     let directory = tempfile::tempdir().unwrap();
@@ -122,9 +157,13 @@ fn the_keys_another_administrator_made_are_kept_or_replaced_in_its_account() {
         let (outcome, requests) =
             settled(directory.path(), (&written, mode), replaced, rotate, &TAKEN);
         assert_eq!(outcome, Ok(true), "{mode:o}");
-        // The new key is the administrator's own; the old one goes from
-        // the account that holds it.
-        assert!(!requests[3].contains("accountId"), "{}", requests[3]);
+        // The new key is made in the account of the one it replaces,
+        // which goes from there once the new one is taken up.
+        assert!(
+            requests[3].contains(r#""accountId":"c""#) && requests[3].contains(r#""create":{"#),
+            "{mode:o}: {}",
+            requests[3]
+        );
         assert!(requests[4].contains(&format!("Bearer {NEW}")));
         assert!(
             requests[5].contains(r#""accountId":"c","destroy":["k"]"#),
@@ -205,4 +244,42 @@ fn a_key_left_in_an_account_another_file_names_is_found() {
     assert_eq!(found[0].keep, None);
     assert_eq!(found[1].existing, [at(Some("c"), "k")]);
     assert!(found[1].keep.is_some());
+}
+
+/// Where the account of the key to replace takes no more keys, it is that
+/// account setup names, with the keys it holds, and nothing changes.
+#[test]
+fn a_full_account_of_another_administrator_is_named_with_its_keys() {
+    let directory = tempfile::tempdir().unwrap();
+    let theirs = json(
+        &json!({"methodResponses": [["x:ApiKey/get", {"accountId": "c", "list": [
+        {"id": "k", "description": "garrison collector"},
+        {"id": "o1", "description": "backup"}]}, "0"]]}),
+    );
+    let full = json(
+        &json!({"methodResponses": [["x:ApiKey/set", {"notCreated": {"new": {
+        "type": "overQuota", "description": "You have exceeded your quota of 5 API keys."}}},
+        "0"]]}),
+    );
+    let written = format!("{OLD}\n");
+    let answers = vec![listed("b", &["own"]), session("c"), theirs, full];
+    let (outcome, requests) = settled(directory.path(), (&written, 0o600), answers, true, &TAKEN);
+    let whose = format!(
+        "the account of the key in {}",
+        tests::key_file(directory.path()).display()
+    );
+    assert_eq!(
+        outcome,
+        Err(states::account_full(
+            &whose,
+            "'garrison collector', 'backup'",
+            "garrison collector"
+        ))
+    );
+    assert!(
+        requests[3].contains(r#""accountId":"c""#),
+        "{}",
+        requests[3]
+    );
+    assert_eq!(requests.len(), 4);
 }

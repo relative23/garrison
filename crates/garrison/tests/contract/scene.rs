@@ -35,8 +35,8 @@ pub(super) enum Kind {
     /// the second one's too.
     Second,
     /// `--rotate` as a second administrator after the first one's setup,
-    /// where the second one's own account holds as many API keys as
-    /// Stalwart takes.
+    /// where the first one's account, in which the keys are and stay,
+    /// holds as many API keys as Stalwart takes.
     SecondFull,
 }
 
@@ -88,13 +88,10 @@ pub(super) fn holding(credentials: &Path) -> [String; 2] {
 pub(super) struct Scene {
     first: String,
     second: String,
-    /// The second administrator's user name and password.
-    second_user: String,
     /// The second administrator's account.
     pub(super) account: String,
-    /// The operators' own keys, each with its account: the first
-    /// administrator's where that is `None`.
-    own: Vec<(Option<String>, String)>,
+    /// The operators' own keys in the first administrator's account.
+    own: Vec<String>,
 }
 
 impl Scene {
@@ -117,7 +114,6 @@ impl Scene {
         Scene {
             first: json!({"username": user, "secret": secret}).to_string(),
             second: json!({"username": name, "secret": password}).to_string(),
-            second_user: format!("{name}:{password}"),
             account,
             own: Vec::new(),
         }
@@ -128,13 +124,19 @@ impl Scene {
         config_text(directory, url)
     }
 
-    /// The accounts that may hold setup's keys in `kind`.
-    pub(super) fn accounts(&self, kind: Kind) -> Vec<Option<&str>> {
-        if kind.second() {
-            vec![None, Some(&self.account)]
-        } else {
-            vec![None]
-        }
+    /// Setup's keys stay in the account that got them first, here the
+    /// first administrator's, whoever runs setup: the second one's account
+    /// holds none of them, also after a run of its own that stopped.
+    pub(super) fn assert_none_moved(&self, lab: &Lab, context: &str) {
+        let theirs = lab.call(
+            "x:ApiKey/get",
+            &json!({"accountId": self.account, "ids": null}),
+        );
+        let moved = garrisons(&theirs);
+        assert!(
+            moved.is_empty(),
+            "{context}: keys of Garrison's in the second administrator's account: {moved:?}"
+        );
     }
 
     fn act_as(&self, setup: &Setup, second: bool) {
@@ -193,34 +195,29 @@ impl Scene {
     }
 
     /// Before the stops of `kind`. The operators' own keys fill the account
-    /// the runs of a full kind make their keys in: Stalwart 1.1.0 and 1.2.0
-    /// take five API keys an account and refuse the sixth for its quota.
+    /// the runs of a full kind make their keys in, the first
+    /// administrator's, which holds the keys they replace: Stalwart 1.1.0
+    /// and 1.2.0 take five API keys an account and refuse the sixth for its
+    /// quota.
     pub(super) fn enter(&mut self, kind: Kind, setup: &Setup, lab: &mut Lab) {
         let credentials = setup.directory.join("credentials");
         self.forget(lab, &credentials);
-        match kind {
-            Kind::Full => {
-                Scene::configure(setup, &lab.url);
-                let ready = setup.run(&[]);
-                assert_eq!(ready.status.code(), Some(0), "{}", text(&ready));
-                let listed = lab.call("x:ApiKey/get", &json!({"ids": null}));
-                let before = listed["list"].as_array().unwrap().len();
-                let admin = std::env::var("GARRISON_LAB_ADMIN").unwrap();
-                let made = self.fill(lab, &admin, None);
-                assert_eq!(before + made, 5, "the keys the account took");
-            }
-            Kind::SecondFull => {
-                let (user, account) = (self.second_user.clone(), self.account.clone());
-                let made = self.fill(lab, &user, Some(&account));
-                assert_eq!(made, 5, "the keys the second administrator's account took");
-            }
-            _ => {}
+        if kind.full() {
+            self.act_as(setup, false);
+            Scene::configure(setup, &lab.url);
+            let ready = setup.run(&[]);
+            assert_eq!(ready.status.code(), Some(0), "{}", text(&ready));
+            let listed = lab.call("x:ApiKey/get", &json!({"ids": null}));
+            let before = listed["list"].as_array().unwrap().len();
+            let made = self.fill(lab);
+            assert_eq!(before + made, 5, "the keys the account took");
         }
     }
 
-    /// Keys of an operator's own in the account of `user`, `account`, until
-    /// Stalwart refuses one for its quota; how many it took.
-    fn fill(&mut self, lab: &mut Lab, user: &str, account: Option<&str>) -> usize {
+    /// Keys of an operator's own in the first administrator's account,
+    /// until Stalwart refuses one for its quota; how many it took.
+    fn fill(&mut self, lab: &mut Lab) -> usize {
+        let user = std::env::var("GARRISON_LAB_ADMIN").unwrap();
         let mut made = 0;
         let refusal = loop {
             let key = json!({
@@ -231,15 +228,13 @@ impl Scene {
             });
             let request = json!({"using": ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"],
                 "methodCalls": [["x:ApiKey/set", {"create": {"k": key}}, "0"]]});
-            let answer = lab.http("/jmap/", user, Some(&request));
+            let answer = lab.http("/jmap/", &user, Some(&request));
             let payload = &answer["methodResponses"][0][1];
             let Some(id) = payload["created"]["k"]["id"].as_str() else {
                 break payload["notCreated"]["k"].clone();
             };
-            if account.is_none() {
-                lab.created.push(("ApiKey".to_owned(), id.to_owned()));
-            }
-            self.own.push((account.map(str::to_owned), id.to_owned()));
+            lab.created.push(("ApiKey".to_owned(), id.to_owned()));
+            self.own.push(id.to_owned());
             made += 1;
             assert!(made <= 5, "Stalwart took more than five API keys");
         };
@@ -247,20 +242,18 @@ impl Scene {
         made
     }
 
-    /// Operators' own keys go, so that the full account of `kind` has room
-    /// for the keys a rotation makes there at once: one where the keys it
-    /// replaces are in the same account, both where they are in another.
-    pub(super) fn make_room(&mut self, lab: &mut Lab, kind: Kind) {
-        for _ in 0..if kind.second() { 2 } else { 1 } {
-            let (account, id) = self.own.pop().unwrap();
-            remove_own(lab, account.as_deref(), &id);
-        }
+    /// An operator's own key goes, so that the full account has room for
+    /// the one key a rotation makes there at a time: each new key is in the
+    /// account of the key it replaces, which goes before the next is made.
+    pub(super) fn make_room(&mut self, lab: &mut Lab) {
+        let id = self.own.pop().unwrap();
+        remove_own(lab, &id);
     }
 
     /// After the stops of `kind`: the operators' own keys go again.
     pub(super) fn leave(&mut self, lab: &mut Lab) {
-        for (account, id) in self.own.drain(..) {
-            remove_own(lab, account.as_deref(), &id);
+        for id in self.own.drain(..) {
+            remove_own(lab, &id);
         }
     }
 
@@ -281,14 +274,9 @@ impl Scene {
     }
 }
 
-/// An operator's own key out of `account`, the first administrator's where
-/// that is `None`.
-fn remove_own(lab: &mut Lab, account: Option<&str>, id: &str) {
-    let mut arguments = json!({"destroy": [id]});
-    if let Some(account) = account {
-        arguments["accountId"] = json!(account);
-    }
-    lab.call("x:ApiKey/set", &arguments);
+/// An operator's own key out of the first administrator's account.
+fn remove_own(lab: &mut Lab, id: &str) {
+    lab.call("x:ApiKey/set", &json!({"destroy": [id]}));
     lab.created.retain(|(_, known)| *known != id);
 }
 

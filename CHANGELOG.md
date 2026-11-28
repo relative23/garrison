@@ -116,6 +116,14 @@ Notable changes for operators and users. The format follows
   receipt and the backup repository named an age that alone is a warning
   before the failed result or the failed integrity check. A test now holds
   the rule over every card of the host checks, as over the others.
+- `garrison stalwart setup` makes a new API key in the account of the key
+  it replaces. Run by a second administrator, it made the new keys in that
+  one's own account and removed the first one's afterwards: a run that
+  stopped in between left a valid key in an account that no key file named
+  any more, where no later run found it. Garrison's keys now stay in the
+  account that got them first, whoever runs setup, and a full account is
+  named as the one it is
+  ([operations](docs/operator/operations.md#troubleshooting)).
 
 ## [0.3.1] - 2026-11-27
 

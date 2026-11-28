@@ -302,7 +302,8 @@ fn the_collector_queries_with_the_key_setup_makes_and_not_with_an_older_one() {
 /// The keys setup makes are the administrator's, and another administrator
 /// lists only its own account's. A plain run as a second administrator
 /// keeps the first one's keys, which the files hold, and its `--rotate`
-/// removes them, where both once left them valid for good.
+/// replaces them in the first one's account, where a new key is made in
+/// the account of the key it replaces: none moves to the second one's.
 #[test]
 #[ignore = "needs the Stalwart lab (cargo xtask lab start)"]
 fn a_second_administrator_finds_the_keys_the_first_made() {
@@ -341,30 +342,11 @@ fn a_second_administrator_finds_the_keys_the_first_made() {
     let rotated = setup.run(&["--rotate"]);
     let said = text(&rotated);
     assert_eq!(rotated.status.code(), Some(0), "{said}");
-    let first_keys = lab.call("x:ApiKey/get", &json!({"ids": null}));
-    let left = first_keys["list"].as_array().unwrap().iter().filter(|key| {
-        key["description"]
-            .as_str()
-            .is_some_and(|text| text.starts_with("garrison "))
-    });
-    assert_eq!(left.count(), 0, "{said}");
     let context = "a rotation as the second administrator";
-    assert_keys_held_in(
-        &lab,
-        &[Some(&second)],
-        &credentials,
-        &setup.gateway,
-        context,
-    );
+    assert_keys_held_in(&lab, &[None], &credentials, &setup.gateway, context);
+    let theirs = lab.call("x:ApiKey/get", &json!({"accountId": second, "ids": null}));
+    assert_eq!(theirs["list"], json!([]), "{said}");
     assert_webhook_held(&lab, &credentials, &capture, context);
     assert_exporter_held(&lab, &credentials, context);
-    // The second administrator's keys go before its account does.
-    let theirs = lab.call("x:ApiKey/get", &json!({"accountId": second, "ids": null}));
-    for key in theirs["list"].as_array().unwrap() {
-        lab.call(
-            "x:ApiKey/set",
-            &json!({"accountId": second, "destroy": [key["id"]]}),
-        );
-    }
     forget(&lab, &credentials);
 }

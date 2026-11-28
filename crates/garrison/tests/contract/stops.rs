@@ -7,7 +7,8 @@
 //! rotation, also one after which Stalwart reloads its settings on its own
 //! and one where the administrator's account holds as many API keys as
 //! Stalwart takes, a plain run after the key files were emptied, and runs
-//! as a second administrator, also one whose own account is full.
+//! as a second administrator, also one where the account that holds the
+//! keys, the first one's, is full. The keys stay in that account.
 //!
 //! The running services are the broker and the receiver (`held`). Right
 //! after each stop, with the restarts the stopped run named made at the
@@ -85,21 +86,14 @@ enum Outcome {
     Unready(String),
 }
 
-/// What is wrong after the run that was to mend a stop of `kind`: both
-/// places agree (`together`).
-fn agree(
-    scene: &Scene,
-    setup: &Setup,
-    lab: &Lab,
-    capture: &Capture,
-    kind: Kind,
-    context: &str,
-) -> Vec<String> {
+/// What is wrong after the run that was to mend a stop: both places agree
+/// (`together`), and the keys are where they were made first.
+fn agree(scene: &Scene, setup: &Setup, lab: &Lab, capture: &Capture, context: &str) -> Vec<String> {
     let credentials = setup.directory.join("credentials");
-    let accounts = scene.accounts(kind);
     // Each check on its own, so that every fault of a stop is named.
-    let checks: [&dyn Fn(); 3] = [
-        &|| assert_keys_held_in(lab, &accounts, &credentials, &setup.gateway, context),
+    let checks: [&dyn Fn(); 4] = [
+        &|| assert_keys_held_in(lab, &[None], &credentials, &setup.gateway, context),
+        &|| scene.assert_none_moved(lab, context),
         &|| assert_webhook_held(lab, &credentials, capture, context),
         &|| assert_exporter_held(lab, &credentials, context),
     ];
@@ -185,7 +179,7 @@ fn mended(
     if code == Some(0) {
         faults.extend(looked(lab, &credentials, capture, &mut held, &context));
     }
-    faults.extend(agree(scene, setup, lab, capture, kind, &context));
+    faults.extend(agree(scene, setup, lab, capture, &context));
     if !faults.is_empty() {
         return Outcome::Done(Err(format!("{context}: {}\n{shown}", faults.join("; "))));
     }
@@ -204,13 +198,13 @@ fn with_room(
     if let Err(why) = scene.start(kind, setup, lab) {
         return Some(format!("{kind:?} with room: {why}"));
     }
-    scene.make_room(lab, kind);
+    scene.make_room(lab);
     let rotated = setup.run(&["--rotate"]);
     let context = format!("{kind:?} with room for one more key, then --rotate");
     if rotated.status.code() != Some(0) {
         return Some(format!("{context}: {}", text(&rotated)));
     }
-    let faults = agree(scene, setup, lab, capture, kind, &context);
+    let faults = agree(scene, setup, lab, capture, &context);
     (!faults.is_empty()).then(|| format!("{context}: {}", faults.join("; ")))
 }
 

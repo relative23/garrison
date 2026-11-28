@@ -15,7 +15,7 @@ use garrison_stalwart::http::Request;
 
 use super::api::Failed;
 use super::objects::{
-    Created, Enabled, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, Stored,
+    Created, Enabled, In, KeyPermissions, KeyRights, Listed, NEW, NewKey, NewSecret, Set, Stored,
 };
 use super::{Admin, MAX_ANSWER, restart, say, states, write_secret};
 use crate::state::State;
@@ -107,12 +107,14 @@ fn unseen(failed: Failed, target: &Path) -> State {
 
 /// What Stalwart and its file hold of one key, read before anything
 /// changes: its keys of the description in the accounts concerned, the one
-/// to keep where its file holds it, as Stalwart shows it, what a new key is
+/// to keep where its file holds it, as Stalwart shows it, the account a new
+/// key is made in (the administrator's own where `None`), what a new key is
 /// said as, and what setup says where Stalwart's quota leaves a new one no
 /// room.
 pub(super) struct Found {
     existing: Vec<AccountKey>,
     keep: Option<(AccountKey, Stored)>,
+    account: Option<String>,
     made: String,
     full: State,
 }
@@ -121,9 +123,15 @@ pub(super) struct Found {
 /// administrator's own keys and those of every account a file's key opens a
 /// session in, each account listed once, so that a key that a run moved out
 /// of an account and could not remove there is found while any file names
-/// that account. The keys setup makes are the administrator's that made
-/// them, and an administrator lists only its own account's keys unless it
-/// names another (measured on Stalwart 1.1.0 and 1.2.0).
+/// that account. An administrator lists only its own account's keys unless
+/// it names another (measured on Stalwart 1.1.0 and 1.2.0).
+///
+/// A new key is made in the account of the key it replaces, as that key's
+/// session names it, and in the administrator's own where the file holds
+/// no key Stalwart knows. So Garrison's keys stay in the account that got
+/// them first, whoever runs setup later: a key made in the running
+/// administrator's account instead would leave, where the run stops before
+/// the old one goes, a valid key in an account that no file names any more.
 pub(super) fn find(
     admin: &Admin,
     directory: &Path,
@@ -131,13 +139,7 @@ pub(super) fn find(
     rotate: bool,
 ) -> Result<Vec<Found>, State> {
     let Listed { account_id, list } = admin.list_in::<Stored>("ApiKey", None)?;
-    let named: Vec<String> = list
-        .iter()
-        .map(|item| match item.text("description") {
-            Some(text) => format!("'{text}'"),
-            None => format!("one without a description ({})", item.id),
-        })
-        .collect();
+    let own = account_id.clone();
     let mut held: Vec<(Option<String>, Stored)> =
         list.into_iter().map(|item| (None, item)).collect();
     let (mut sessions, mut listed) = (Vec::new(), vec![account_id]);
@@ -159,6 +161,17 @@ pub(super) fn find(
         }
         sessions.push(session);
     }
+    // The keys an account holds, as setup names them where it is full.
+    let named = |account: &Option<String>| -> String {
+        let of_it = held.iter().filter(|(holder, _)| holder == account);
+        let names: Vec<String> = of_it
+            .map(|(_, item)| match item.text("description") {
+                Some(text) => format!("'{text}'"),
+                None => format!("one without a description ({})", item.id),
+            })
+            .collect();
+        names.join(", ")
+    };
     let mut found = Vec::new();
     for (key, session) in keys.iter().zip(sessions) {
         let target = directory.join(key.file);
@@ -186,6 +199,16 @@ pub(super) fn find(
         };
         let (path, description) = (target.display(), key.description);
         let made = match (existing.len(), rotate) {
+            // A key Stalwart does not know names no account, and of the
+            // others only the administrator's own was looked at: where that
+            // holds none of the description, a valid one may be another
+            // administrator's, which no run as this one finds.
+            _ if session == Some(Session::Unknown) && existing.is_empty() => format!(
+                "Stalwart did not know the API key in {path}; made a new one. Where another \
+                 administrator's account holds a key '{description}', as after this folder \
+                 was put back from before a rotation, it is valid there still: run setup \
+                 once as that administrator, or remove the key in the Stalwart WebUI"
+            ),
             _ if session == Some(Session::Unknown) => {
                 format!("Stalwart did not know the API key in {path}; made a new one")
             }
@@ -195,10 +218,19 @@ pub(super) fn find(
             }
             (_, true) => format!("replaced API key '{description}' -> {path}"),
         };
-        let full = states::account_full(&named.join(", "), description);
+        let account = match &session {
+            Some(Session::Of(account)) if *account != own => Some(account.clone()),
+            _ => None,
+        };
+        let whose = match &account {
+            Some(_) => format!("the account of the key in {path}"),
+            None => "the administrator's account".to_owned(),
+        };
+        let full = states::account_full(&whose, &named(&account), description);
         found.push(Found {
             existing,
             keep,
+            account,
             made,
             full,
         });
@@ -250,7 +282,8 @@ pub(super) fn settle(
         }
         return Ok(changed);
     }
-    if let Err(failed) = make(admin, &target, description, rights()) {
+    let account = found.account.as_deref();
+    if let Err(failed) = make(admin, account, &target, description, rights()) {
         return Err(if failed.is("overQuota") {
             found.full
         } else {
@@ -279,11 +312,12 @@ fn as_shown(networks: &Enabled) -> Enabled {
     }))
 }
 
-/// A new key, its secret written to `target`. A key whose secret is lost is
-/// of no use to anyone, so where the file cannot be written, the new key
-/// goes again.
+/// A new key in `account`, the administrator's own where `None`, its
+/// secret written to `target`. A key whose secret is lost is of no use to
+/// anyone, so where the file cannot be written, the new key goes again.
 fn make(
     admin: &Admin,
+    account: Option<&str>,
     target: &Path,
     description: &str,
     rights: KeyRights<'_>,
@@ -293,15 +327,20 @@ fn make(
         rights,
         expires_at: None,
     };
+    let create = In {
+        account,
+        arguments: Set::create(new_key),
+    };
     let created: Created<NewSecret> = admin
-        .call("x:ApiKey/set", &Set::create(new_key))
+        .call("x:ApiKey/set", &create)
         .map_err(|failed| refused(failed, description))?;
     let new = created.created.get(NEW);
     let new = new.ok_or_else(states::secret_missing)?;
     let Err(error) = write_secret(target, &new.secret) else {
         return Ok(());
     };
-    let undone = admin.set("x:ApiKey/set", &Set::<()>::Destroy([new.id.as_str()]));
+    let destroy = Set::<()>::Destroy([new.id.as_str()]);
+    let undone = admin.set_in("x:ApiKey/set", account, &destroy);
     Err(match undone {
         Ok(()) => states::taken_out(error),
         Err(_) => states::left_in(error),

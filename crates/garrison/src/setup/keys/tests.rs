@@ -322,7 +322,11 @@ fn a_full_quota_changes_nothing_and_names_the_keys() {
     let held = "'garrison collector', 'backup', one without a description (o2)";
     assert_eq!(
         outcome,
-        Err(states::account_full(held, "garrison collector"))
+        Err(states::account_full(
+            "the administrator's account",
+            held,
+            "garrison collector"
+        ))
     );
     assert_eq!(requests.len(), 3);
     let held = std::fs::read_to_string(key_file(directory.path())).unwrap();
@@ -355,7 +359,7 @@ fn a_new_key_whose_file_cannot_be_written_goes_again() {
         },
         allowed_ips: &networks,
     };
-    let error = make(&admin, &target, COLLECTOR.description, rights).unwrap_err();
+    let error = make(&admin, None, &target, COLLECTOR.description, rights).unwrap_err();
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
     let requests = server.requests();
     // The system's words name a file of a random name beside the target.

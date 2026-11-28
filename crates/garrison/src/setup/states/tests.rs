@@ -74,7 +74,11 @@ fn keys() -> Rows {
         owner_unknown(file, LIMITED),
         account_unseen(file, &missing),
         webhooks_unreadable(&stalwart_error("x:WebHook/get", "forbidden", "Forbidden")),
-        account_full("'garrison broker', 'backup'", "garrison broker"),
+        account_full(
+            "the administrator's account",
+            "'garrison broker', 'backup'",
+            "garrison broker",
+        ),
         key_not_granted("garrison broker", &forbidden),
         secret_missing(),
         key_untried("broker-native-key", "The endpoint did not answer"),

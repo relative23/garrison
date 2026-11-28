@@ -31,15 +31,15 @@ states! {
         "Stalwart does not let the administrator read its webhooks: run setup as an \
          administrator who holds the keys' permissions, as one with Stalwart's administrator \
          role ({error})";
-    /// Stalwart's quota leaves the administrator's account, which holds the
+    /// Stalwart's quota leaves the account `whose` names, which holds the
     /// keys `held` names, no room for a new key of `description`, which
-    /// setup makes before it removes the one it replaces: nothing of that key
-    /// changed.
-    pub(in crate::setup) fn account_full(held: &str, description: &str) = "setup-account-full":
-        "Stalwart takes no more API keys in the administrator's account, which holds {held}: \
-         setup makes a new key before it removes the one it replaces. Remove a key the \
-         account no longer needs in the Stalwart WebUI; setup made no new key \
-         '{description}' and removed none";
+    /// setup makes there before it removes the one it replaces: nothing of
+    /// that key changed.
+    pub(in crate::setup) fn account_full(whose: &str, held: &str, description: &str)
+        = "setup-account-full":
+        "Stalwart takes no more API keys in {whose}, which holds {held}: setup makes a new \
+         key before it removes the one it replaces. Remove a key the account no longer needs \
+         in the Stalwart WebUI; setup made no new key '{description}' and removed none";
     /// The administrator may not grant the key of `description` its
     /// permissions (`error`, JMAP's forbidden), as Stalwart answers a user
     /// without its administrator rights (measured on Stalwart 1.1.0 only).
