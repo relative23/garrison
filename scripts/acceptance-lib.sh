@@ -175,6 +175,35 @@ once() {
     fi
 }
 
+# A sign-in as a browser makes one, for which the stand-in exchanges any code
+# for the administrator's token: the web service then holds a session. The
+# cookies are for HTTPS only, so they go back by hand; `back` holds the
+# callback's answer with the session's cookie, which `cookie session` reads.
+sign_in='web=http://127.0.0.1:8091
+    cookie() { tr -d "\r" | sed -n "s/^[Ss]et-[Cc]ookie: \(__Host-garrison_$1=[^;]*\);.*/\1/p"; }
+    asked=$(curl -s -o /dev/null -D - $web/auth/login) &&
+    state=$(printf "%s\n" "$asked" | tr -d "\r" | sed -n "s/^[Ll]ocation: .*[?&]state=\([^&]*\).*/\1/p") &&
+    back=$(curl -s -o /dev/null -D - -H "Cookie: $(printf "%s\n" "$asked" | cookie login)" \
+        "$web/auth/callback?code=acceptance&state=$state&iss=https%3A%2F%2Fmail.example.test")'
+# `ends_sessions DESCRIPTION COMMAND`: an installer's command that takes the
+# web service's database away, run while an administrator is signed in. It
+# has Stalwart revoke the session's token before the database goes, and says
+# so.
+ends_sessions() {
+    inside 'rm -f /root/stand-in-revoked'
+    once "$1: an administrator is signed in" \
+        "$sign_in && test \"\$(sqlite3 /var/lib/garrison/web/web.sqlite 'SELECT count(*) FROM sessions')\" -ge 1"
+    if ! installer "$2 > /root/answer 2>&1"; then
+        inside 'cat /root/answer' || true
+        echo "FAIL  $1"
+        exit 1
+    fi
+    inside 'cat /root/answer'
+    check "$1: Stalwart was asked to revoke the session's token first, and the command says so" \
+        'acceptance-state /root/answer install-sessions-revoked &&
+            grep -q -x acceptance-token-0123456789abcdef /root/stand-in-revoked'
+}
+
 # UPDATE=1: every package the distribution has an update for, before anything
 # else is installed. A virtual machine restarts into what it got, a new
 # kernel among it; a container has the kernel of this host.

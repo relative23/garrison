@@ -107,7 +107,7 @@ step "A purge leaves nothing of Garrison behind"
 inside 'for name in latest pre-upgrade-before-migration; do
         mkdir -p /var/backups/garrison/$name && echo mine > /var/backups/garrison/$name/note || exit 1
     done'
-installer 'garrison uninstall --purge'
+ends_sessions "a purge" 'garrison uninstall --purge'
 none_active purged
 check "the command's link is gone again" 'test ! -L /usr/bin/garrison'
 check "program, configuration and data are gone" \

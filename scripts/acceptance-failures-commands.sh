@@ -167,15 +167,8 @@ scenario_access_folder() {
 }
 
 # What the web service offers a signed-in administrator: a session of its own
-# sign-in, as a browser makes one, for which the stand-in exchanges any code
-# for the administrator's token. The cookies are for HTTPS only, so they go
-# back by hand.
-offered='web=http://127.0.0.1:8091
-    cookie() { tr -d "\r" | sed -n "s/^[Ss]et-[Cc]ookie: \(__Host-garrison_$1=[^;]*\);.*/\1/p"; }
-    asked=$(curl -s -o /dev/null -D - $web/auth/login) &&
-    state=$(printf "%s\n" "$asked" | tr -d "\r" | sed -n "s/^[Ll]ocation: .*[?&]state=\([^&]*\).*/\1/p") &&
-    back=$(curl -s -o /dev/null -D - -H "Cookie: $(printf "%s\n" "$asked" | cookie login)" \
-        "$web/auth/callback?code=acceptance&state=$state&iss=https%3A%2F%2Fmail.example.test") &&
+# sign-in (`sign_in`, scripts/acceptance-lib.sh).
+offered="$sign_in"' &&
     curl -s -H "Cookie: $(printf "%s\n" "$back" | cookie session)" $web/api/actions'
 
 scenario_access_actions() {

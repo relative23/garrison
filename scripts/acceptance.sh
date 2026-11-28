@@ -446,7 +446,7 @@ if installer '/opt/garrison/current/bin/garrison restore --from /root/no-backup 
     exit 1
 fi
 echo "ok    a directory that is no backup is refused, and nothing changes"
-installer '/opt/garrison/current/bin/garrison restore --from /root/kept-state'
+ends_sessions "a restore" '/opt/garrison/current/bin/garrison restore --from /root/kept-state'
 check "the events are those of the backup" \
     "test \$(sqlite3 /var/lib/garrison/ingest/events.sqlite 'SELECT count(*) FROM events') -eq $kept"
 check "the state from before the restore was kept" 'ls -d /var/backups/garrison/pre-restore-* >/dev/null'
@@ -454,7 +454,7 @@ check "the databases belong to their services again" \
     'test "$(stat -c %U /var/lib/garrison/ingest/events.sqlite)" = garrison-ingest &&
         test "$(stat -c %U /var/lib/garrison/collector/status.sqlite)" = garrison-collector'
 services "after the restore"
-installer '/opt/garrison/current/bin/garrison install --rollback --restore-state'
+ends_sessions "a rollback with the state" '/opt/garrison/current/bin/garrison install --rollback --restore-state'
 names "current is the previous release" current "$old"
 names "previous is the release it rolled back from" previous "$new"
 # Every batch stored after that state must be gone again.

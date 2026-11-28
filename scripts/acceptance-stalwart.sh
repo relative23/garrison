@@ -6,7 +6,8 @@ stalwart_stand_in() {
     # account b, role e. Any other token is invalid, as in production. With it the
     # broker authorizes a request as usual, so an action runs through polkit and
     # systemctl for real, and a sign-in's code exchange is answered with it, so
-    # the web service makes a session. It also answers what `garrison stalwart setup` asks
+    # the web service makes a session, and notes each token whose revocation is
+    # asked for in /root/stand-in-revoked. It also answers what `garrison stalwart setup` asks
     # and shows what it wrote, without the secrets: the API keys it makes with
     # their permissions in /root/stand-in-keys, refused while
     # /root/stand-in-refuses exists, its other objects in /root/stand-in-objects.
@@ -49,6 +50,8 @@ case "$method $path" in
         fi ;;
     "POST /auth/token")
         answer='{"access_token": "acceptance-token-0123456789abcdef", "token_type": "Bearer", "expires_in": 600}' ;;
+    "POST /auth/revoke")
+        printf '%s\n' "$body" | sed -n 's/^token=\([^&]*\).*/\1/p' >> /root/stand-in-revoked ;;
     "GET /jmap/session")
         if [ -e /root/stand-in-refuses ]; then
             status="401 Unauthorized"
